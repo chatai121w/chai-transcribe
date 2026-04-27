@@ -901,12 +901,14 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   // ─── Initialize Web Audio API ────────────────────────────────
   const initAudioContext = useCallback(() => {
     if (audioContextRef.current || !audioRef.current) return;
+    console.warn('[SAP] initAudioContext: creating AudioContext + source. audioUrl=', audioRef.current?.currentSrc);
 
     const ctx = new AudioContext();
     audioContextRef.current = ctx;
 
     const source = ctx.createMediaElementSource(audioRef.current);
     sourceRef.current = source;
+    console.warn('[SAP] initAudioContext: createMediaElementSource OK');
 
     const gain = ctx.createGain();
     gainNodeRef.current = gain;
@@ -1080,6 +1082,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
     gain.connect(analyser);
     analyser.connect(ctx.destination);
+    console.warn('[SAP] initAudioContext: graph connected. doublerWet1=', doublerWet1Ref.current?.gain.value, 'doublerWet2=', doublerWet2Ref.current?.gain.value, 'overlayGain=', overlayGainRef.current?.gain.value);
   }, []);
 
   // ─── Apply preset or manual params ───────────────────────────
@@ -1929,11 +1932,22 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   }, [externalTime, isSyncEnabled]);
 
   // ─── Audio event handlers ────────────────────────────────────
+  const lastTimeUpdateRef = useRef<number>(-1);
+  const backwardJumpsRef = useRef<number>(0);
   const handleTimeUpdate = useCallback(() => {
     if (!audioRef.current) return;
     const t = audioRef.current.currentTime;
+    const prev = lastTimeUpdateRef.current;
+    if (prev >= 0 && t < prev - 0.05) {
+      backwardJumpsRef.current++;
+      console.warn('[SAP] BACKWARD JUMP detected! prev=', prev.toFixed(3), 'now=', t.toFixed(3), 'count=', backwardJumpsRef.current,
+        'focusEnabled=', focusEnabled, 'focusLoop=', focusLoop, 'canEnableFocusLoop=', canEnableFocusLoop, 'focusStart=', focusStart, 'focusEnd=', focusEnd,
+        'externalTime=', externalTime, 'isSyncEnabled-effect maybe');
+    }
+    lastTimeUpdateRef.current = t;
 
     if (focusEnabled && focusLoop && canEnableFocusLoop && t >= focusEnd - 0.01) {
+      console.warn('[SAP] FOCUS LOOP rewind: t=', t.toFixed(3), 'focusEnd=', focusEnd, '→ focusStart=', focusStart);
       audioRef.current.currentTime = focusStart;
       setCurrentTime(focusStart);
       onTimeUpdate?.(focusStart);
@@ -1942,7 +1956,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
     setCurrentTime(t);
     onTimeUpdate?.(t);
-  }, [onTimeUpdate, focusEnabled, focusLoop, canEnableFocusLoop, focusEnd, focusStart]);
+  }, [onTimeUpdate, focusEnabled, focusLoop, canEnableFocusLoop, focusEnd, focusStart, externalTime]);
 
   const handleLoadedMetadata = useCallback(() => {
     if (!audioRef.current) return;
@@ -1969,12 +1983,19 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   // ─── Playback controls ──────────────────────────────────────
   const togglePlay = useCallback(() => {
     if (!audioRef.current || !audioUrl) return;
+    console.warn('[SAP] togglePlay: isPlaying=', isPlaying, 'currentTime=', audioRef.current.currentTime, 'paused=', audioRef.current.paused, 'src=', audioRef.current.currentSrc);
     initAudioContext();
     if (audioContextRef.current?.state === 'suspended') {
       audioContextRef.current.resume();
     }
     if (isPlaying) audioRef.current.pause();
-    else audioRef.current.play();
+    else {
+      const p = audioRef.current.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => console.warn('[SAP] play() resolved at', audioRef.current?.currentTime))
+         .catch(err => console.error('[SAP] play() rejected', err));
+      }
+    }
     setIsPlaying(!isPlaying);
   }, [isPlaying, audioUrl, initAudioContext]);
 
@@ -2542,6 +2563,11 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           onLoadedMetadata={handleLoadedMetadata}
           onDurationChange={handleDurationChange}
           onEnded={handleEnded}
+          onPlay={() => console.warn('[SAP] <audio> onPlay event @', audioRef.current?.currentTime, 'src=', audioRef.current?.currentSrc)}
+          onPause={() => console.warn('[SAP] <audio> onPause event @', audioRef.current?.currentTime)}
+          onSeeked={() => console.warn('[SAP] <audio> onSeeked @', audioRef.current?.currentTime)}
+          onSeeking={() => console.warn('[SAP] <audio> onSeeking @', audioRef.current?.currentTime)}
+          onRateChange={() => console.warn('[SAP] <audio> onRateChange rate=', audioRef.current?.playbackRate)}
           preload="auto"
           crossOrigin="anonymous"
         />
