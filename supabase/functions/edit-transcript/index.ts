@@ -108,36 +108,64 @@ serve(async (req) => {
     console.log(`Processing ${action} action for text of length:`, text.length);
 
     const aiModel = model || 'google/gemini-2.5-flash';
-    
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: aiModel,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: text }
-        ],
-      }),
-    });
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        throw new Error('חרגת ממגבלת הבקשות. נסה שוב מאוחר יותר.');
+    // Helper: fallback to DB proxy that uses the user's own Google API key
+    const callDbProxy = async (): Promise<string> => {
+      console.log('Falling back to DB proxy (user API key)…');
+      const { data, error } = await userClient.rpc('edit_transcript_proxy', {
+        p_text: text,
+        p_action: action,
+        p_model: aiModel,
+        p_custom_prompt: customPrompt ?? null,
+        p_tone_style: toneStyle ?? null,
+        p_target_language: targetLanguage ?? null,
+      });
+      if (error) throw new Error(error.message);
+      const payload = data as { text?: string; error?: string } | null;
+      if (!payload || payload.error) {
+        throw new Error(payload?.error || 'DB proxy returned no result');
       }
-      if (response.status === 402) {
-        throw new Error('יש להוסיף קרדיט לחשבון Lovable שלך.');
+      if (!payload.text) throw new Error('DB proxy returned empty text');
+      return payload.text;
+    };
+
+    let editedText: string | undefined;
+
+    if (LOVABLE_API_KEY) {
+      try {
+        const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: aiModel,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: text }
+            ],
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          editedText = data.choices?.[0]?.message?.content;
+        } else if (response.status === 402 || response.status === 429) {
+          console.warn(`Lovable AI returned ${response.status}, falling back to user key`);
+          editedText = await callDbProxy();
+        } else {
+          const errorText = await response.text();
+          console.error('AI gateway error:', response.status, errorText);
+          editedText = await callDbProxy();
+        }
+      } catch (e) {
+        console.warn('Lovable AI failed, falling back:', e);
+        editedText = await callDbProxy();
       }
-      const errorText = await response.text();
-      console.error('AI gateway error:', response.status, errorText);
-      throw new Error('שגיאה בעיבוד AI');
+    } else {
+      editedText = await callDbProxy();
     }
-
-    const data = await response.json();
-    const editedText = data.choices?.[0]?.message?.content;
 
     if (!editedText) {
       throw new Error('No response from AI');
