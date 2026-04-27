@@ -82,22 +82,41 @@ function reconcileLayouts(stored: Layouts): Layouts {
       return { ...d, ...found, i: d.i, x, y, w, h };
     });
 
-    // Self-heal common broken case: two half-width widgets stacked with a large gap.
-    // In this case, snap back to sane top-row defaults so the canvas doesn't look empty.
+    // Self-heal common broken cases:
+    // 1) stacked-with-gap layout (looks like massive empty canvas)
+    // 2) overlapping/packed-left widgets (looks like one card is missing)
     const player = normalized.find((it) => it.i === 'player');
     const studio = normalized.find((it) => it.i === 'studio');
     if (player && studio) {
       const halfCols = Math.ceil(cols / 2);
       const bothHalfWidth = player.w <= halfCols && studio.w <= halfCols;
       const largeVerticalGap = Math.abs(player.y - studio.y) >= Math.max(player.h, 10);
-      if (bothHalfWidth && largeVerticalGap) {
+
+      const overlap =
+        player.x < studio.x + studio.w &&
+        studio.x < player.x + player.w &&
+        player.y < studio.y + studio.h &&
+        studio.y < player.y + player.h;
+
+      const packedLeftSameRow =
+        bothHalfWidth &&
+        Math.abs(player.y - studio.y) <= 2 &&
+        player.x < halfCols &&
+        studio.x < halfCols;
+
+      if ((bothHalfWidth && largeVerticalGap) || overlap || packedLeftSameRow) {
         const defaultPlayer = defaults.find((it) => it.i === 'player');
         const defaultStudio = defaults.find((it) => it.i === 'studio');
         if (defaultPlayer && defaultStudio) {
           player.x = defaultPlayer.x;
           player.y = defaultPlayer.y;
+          player.w = defaultPlayer.w;
+          player.h = defaultPlayer.h;
+
           studio.x = defaultStudio.x;
           studio.y = defaultStudio.y;
+          studio.w = defaultStudio.w;
+          studio.h = defaultStudio.h;
         }
       }
     }

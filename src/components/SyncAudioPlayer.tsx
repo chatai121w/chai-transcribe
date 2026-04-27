@@ -2559,6 +2559,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         )}
 
         {/* ─── Draggable Widget Grid ───────────────────────── */}
+        <div dir="ltr">
         <ResponsiveReactGridLayout
           className={`studio-grid ${layoutEditMode ? 'is-editing' : ''}`}
           layouts={studioLayouts}
@@ -2575,7 +2576,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           useCSSTransforms
         >
           {/* ═══ WIDGET 1: Player ═══ */}
-          <div key="player" className="studio-widget-body">
+          <div key="player" className="studio-widget-body" dir="rtl">
             <div className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground">
               <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
               <span>נגן סינכרוני</span>
@@ -3078,7 +3079,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           </div>{/* close studio-widget-body for player */}
 
           {/* ═══ WIDGET 2: Studio (Mixer & Processing) ═══ */}
-          <div key="studio" className="studio-widget-body">
+          <div key="studio" className="studio-widget-body" dir="rtl">
             <div className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground">
               <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
               <span>סטודיו (מיקסר ועיבוד)</span>
@@ -4340,6 +4341,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           })()}
           </div>{/* close studio-widget-body for studio */}
         </ResponsiveReactGridLayout>
+        </div>
 
         {/* ─── Keyboard shortcuts panel ──────────────────────── */}
         <div className="text-center">
