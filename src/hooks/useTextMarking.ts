@@ -145,11 +145,16 @@ export function useTextMarking(words: string[], onWordReplace?: (index: number, 
   }, [actualWords]);
 
   /* ── AI batch processor ── */
+  // Module-level latch: once the AI gateway returns 402 (Payment Required) we
+  // stop firing new requests for the rest of the session to avoid spamming
+  // the network with calls that will all fail. The user is notified once.
+  const aiCreditsExhaustedRef = useRef(false);
   const processAIBatch = useCallback(
     async (
       batch: { word: string; index: number }[],
       allActualWords: { word: string; index: number }[],
     ): Promise<Partial<WordValidation>[]> => {
+      if (aiCreditsExhaustedRef.current) return [];
       const wordsPayload = batch.map((r) => {
         const wordIdx = allActualWords.findIndex((aw) => aw.index === r.index);
         return {
@@ -162,6 +167,23 @@ export function useTextMarking(words: string[], onWordReplace?: (index: number, 
       const { data, error } = await supabase.functions.invoke("check-dictionary", {
         body: { words: wordsPayload },
       });
+      if (error) {
+        // FunctionsHttpError exposes context.status — also fall back to message scan
+        const status = (error as any)?.context?.status ?? (error as any)?.status;
+        const msg = String((error as any)?.message ?? "");
+        if (status === 402 || /402|payment required/i.test(msg)) {
+          if (!aiCreditsExhaustedRef.current) {
+            aiCreditsExhaustedRef.current = true;
+            cancelRef.current = true;
+            toast({
+              title: "אין קרדיט ל־AI",
+              description: "בדיקת דקדוק/הקשר הושבתה לסשן זה (Lovable AI Gateway החזיר 402). בדוק חיוב ונסה שוב.",
+              variant: "destructive",
+            });
+          }
+          return [];
+        }
+      }
       if (!error && data?.results) return data.results;
       return [];
     },
