@@ -1702,6 +1702,17 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     const gain = gainNodeRef.current;
     if (!ctx || !source || !gain) return;
 
+    // Critical: don't initialize optional modules unless the user enabled them.
+    // Creating all modules eagerly adds multiple parallel pass-through paths,
+    // which can sound like repeated/echoed words.
+    const anyAdvancedEnabled =
+      aiDenoiseEnabled ||
+      spectralGateEnabled ||
+      vadEnabled ||
+      deHumEnabled ||
+      lufsEnabled;
+    if (!anyAdvancedEnabled) return;
+
     // Lazy-import and initialize modules
     (async () => {
       const [rnnoiseModule, spectralModule, vadModule, deHumModule, lufsModule] = await Promise.all([
@@ -1712,25 +1723,29 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         import('@/lib/loudnessNorm'),
       ]);
 
-      // These modules connect input→processing→output internally
-      // We use the analyser as a tap point (non-destructive)
-      if (!aiDenoiseRef.current) {
+      // These modules connect input→processing→output internally.
+      // Initialize only what is actually enabled.
+      if (aiDenoiseEnabled && !aiDenoiseRef.current) {
         aiDenoiseRef.current = await rnnoiseModule.createNoiseSuppressionChain(ctx, gain, ctx.destination);
+        aiDenoiseRef.current.enable();
       }
-      if (!spectralGateRef.current) {
+      if (spectralGateEnabled && !spectralGateRef.current) {
         spectralGateRef.current = spectralModule.createSpectralGate(ctx, gain, ctx.destination);
+        spectralGateRef.current.enable();
       }
-      if (!vadRef.current) {
+      if (vadEnabled && !vadRef.current) {
         const vad = vadModule.createVAD(ctx, gain, ctx.destination);
         vad.onStateChange((state) => {
           setVadIsSpeech(state.isSpeech);
         });
         vadRef.current = vad;
+        vadRef.current.enable();
       }
-      if (!deHumRef.current) {
+      if (deHumEnabled && !deHumRef.current) {
         deHumRef.current = deHumModule.createDeHum(ctx, gain, ctx.destination);
+        deHumRef.current.enable();
       }
-      if (!lufsRef.current) {
+      if (lufsEnabled && !lufsRef.current) {
         const lufs = lufsModule.createLoudnessNorm(ctx, gain, ctx.destination);
         lufs.onUpdate((state) => {
           setLufsMomentary(state.momentary);
@@ -1738,9 +1753,10 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           setLufsIntegrated(state.integrated);
         });
         lufsRef.current = lufs;
+        lufsRef.current.start();
       }
     })();
-  }, [isPlaying]); // Re-check when playing starts (audio context gets created)
+  }, [isPlaying, aiDenoiseEnabled, spectralGateEnabled, vadEnabled, deHumEnabled, lufsEnabled]); // Re-check when playing starts or when module toggles change
 
   // ─── Cleanup AudioContext on unmount ─────────────────────────
   useEffect(() => {
