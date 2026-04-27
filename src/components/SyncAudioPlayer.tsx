@@ -648,9 +648,29 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   }, []);
 
   const hasValidFocusRange = focusEnd > focusStart;
+  const loopRangeSec = Math.max(0, focusEnd - focusStart);
+  const MIN_LOOP_RANGE_SEC = 1.2;
+  const canEnableFocusLoop = hasValidFocusRange && loopRangeSec >= MIN_LOOP_RANGE_SEC;
   const isWithinFocusedSegment = !focusEnabled || !hasValidFocusRange
     ? true
     : currentTime >= focusStart && currentTime <= focusEnd;
+
+  useEffect(() => {
+    if (focusLoop && !canEnableFocusLoop) {
+      setFocusLoop(false);
+    }
+  }, [focusLoop, canEnableFocusLoop]);
+
+  // Safety: if focus mode is off or source changes, never keep loop armed.
+  useEffect(() => {
+    if (!focusEnabled && focusLoop) {
+      setFocusLoop(false);
+    }
+  }, [focusEnabled, focusLoop]);
+
+  useEffect(() => {
+    setFocusLoop(false);
+  }, [audioUrl]);
 
   // Sync toggle (internal + external)
   const [internalSync, setInternalSync] = useState(true);
@@ -1897,7 +1917,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     if (!audioRef.current) return;
     const t = audioRef.current.currentTime;
 
-    if (focusEnabled && focusLoop && hasValidFocusRange && t >= focusEnd - 0.01) {
+    if (focusEnabled && focusLoop && canEnableFocusLoop && t >= focusEnd - 0.01) {
       audioRef.current.currentTime = focusStart;
       setCurrentTime(focusStart);
       onTimeUpdate?.(focusStart);
@@ -1906,7 +1926,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
     setCurrentTime(t);
     onTimeUpdate?.(t);
-  }, [onTimeUpdate, focusEnabled, focusLoop, hasValidFocusRange, focusEnd, focusStart]);
+  }, [onTimeUpdate, focusEnabled, focusLoop, canEnableFocusLoop, focusEnd, focusStart]);
 
   const handleLoadedMetadata = useCallback(() => {
     if (!audioRef.current) return;
@@ -2122,7 +2142,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         markFocusEndFromCurrent();
       } else if (e.code === 'KeyL' && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
-        setFocusLoop(prev => !prev);
+        setFocusLoop(prev => canEnableFocusLoop ? !prev : false);
       }
       // ── ? = toggle keyboard help ──
       else if (e.code === 'Slash' && e.shiftKey) {
@@ -2132,7 +2152,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [togglePlay, seek, seekTo, jumpToWord, restart, toggleMute, volumeUp, volumeDown, nudgeSpeed, setPlaybackSpeed, markFocusStartFromCurrent, markFocusEndFromCurrent, effectiveDuration, duration]);
+  }, [togglePlay, seek, seekTo, jumpToWord, restart, toggleMute, volumeUp, volumeDown, nudgeSpeed, setPlaybackSpeed, markFocusStartFromCurrent, markFocusEndFromCurrent, effectiveDuration, duration, canEnableFocusLoop]);
 
   const formatTime = (t: number) => {
     if (!isFinite(t)) return '00:00';
@@ -3031,7 +3051,10 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                         : <ChevronUp className="w-3.5 h-3.5 no-theme-icon" />}
                     </Button>
                     <Label className="text-[11px] text-muted-foreground">לופ</Label>
-                    <Switch checked={focusLoop} onCheckedChange={setFocusLoop} />
+                    <Switch
+                      checked={focusLoop && canEnableFocusLoop}
+                      onCheckedChange={(v) => setFocusLoop(v && canEnableFocusLoop)}
+                    />
                     <Label className="text-[11px] text-muted-foreground">מצב ממוקד</Label>
                     <Switch checked={focusEnabled} onCheckedChange={setFocusEnabled} />
                   </div>
@@ -3041,6 +3064,9 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                 )}
                 {!isFocusPanelCollapsed && (
                   <>
+                {!canEnableFocusLoop && hasValidFocusRange && (
+                  <p className="text-[11px] text-amber-600">לופ A-B זמין רק מטווח של לפחות {MIN_LOOP_RANGE_SEC.toFixed(1)} שניות.</p>
+                )}
                 <Slider
                   value={[focusStart, Math.max(focusStart + 0.1, focusEnd)]}
                   min={0}
