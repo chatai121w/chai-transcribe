@@ -45,6 +45,12 @@ export const DEFAULT_STUDIO_LAYOUTS: Layouts = {
   ],
 };
 
+const GRID_COLS_BY_BP: Record<string, number> = {
+  lg: 12,
+  md: 10,
+  sm: 6,
+};
+
 /** Make sure a stored layouts object still references all current widget keys
  *  AND that every item has sane dimensions (>= minW/minH). Items with degenerate
  *  width/height get reset to the default sizes. */
@@ -52,21 +58,51 @@ function reconcileLayouts(stored: Layouts): Layouts {
   const out: Layouts = {};
   for (const bp of Object.keys(DEFAULT_STUDIO_LAYOUTS)) {
     const defaults = DEFAULT_STUDIO_LAYOUTS[bp] || [];
+    const cols = GRID_COLS_BY_BP[bp] ?? 12;
     const incoming = stored[bp] || [];
     const byKey = new Map<string, Layout>();
     for (const item of incoming) byKey.set(item.i, item);
-    out[bp] = defaults.map((d) => {
+    const normalized = defaults.map((d) => {
       const found = byKey.get(d.i);
       if (!found) return d;
       // Validate: if width or height is below minimum, fall back to defaults
       const minW = d.minW ?? 4;
       const minH = d.minH ?? 8;
-      const w = typeof found.w === 'number' && found.w >= minW ? found.w : d.w;
-      const h = typeof found.h === 'number' && found.h >= minH ? found.h : d.h;
-      const x = typeof found.x === 'number' && found.x >= 0 ? found.x : d.x;
-      const y = typeof found.y === 'number' && found.y >= 0 ? found.y : d.y;
+      const maxW = Math.max(minW, cols);
+      const wRaw = typeof found.w === 'number' && Number.isFinite(found.w) ? Math.round(found.w) : d.w;
+      const hRaw = typeof found.h === 'number' && Number.isFinite(found.h) ? Math.round(found.h) : d.h;
+      const w = Math.min(maxW, Math.max(minW, wRaw));
+      const h = Math.max(minH, hRaw);
+
+      const maxX = Math.max(0, cols - w);
+      const xRaw = typeof found.x === 'number' && Number.isFinite(found.x) ? Math.round(found.x) : d.x;
+      const yRaw = typeof found.y === 'number' && Number.isFinite(found.y) ? Math.round(found.y) : d.y;
+      const x = Math.min(maxX, Math.max(0, xRaw));
+      const y = Math.max(0, yRaw);
       return { ...d, ...found, i: d.i, x, y, w, h };
     });
+
+    // Self-heal common broken case: two half-width widgets stacked with a large gap.
+    // In this case, snap back to sane top-row defaults so the canvas doesn't look empty.
+    const player = normalized.find((it) => it.i === 'player');
+    const studio = normalized.find((it) => it.i === 'studio');
+    if (player && studio) {
+      const halfCols = Math.ceil(cols / 2);
+      const bothHalfWidth = player.w <= halfCols && studio.w <= halfCols;
+      const largeVerticalGap = Math.abs(player.y - studio.y) >= Math.max(player.h, 10);
+      if (bothHalfWidth && largeVerticalGap) {
+        const defaultPlayer = defaults.find((it) => it.i === 'player');
+        const defaultStudio = defaults.find((it) => it.i === 'studio');
+        if (defaultPlayer && defaultStudio) {
+          player.x = defaultPlayer.x;
+          player.y = defaultPlayer.y;
+          studio.x = defaultStudio.x;
+          studio.y = defaultStudio.y;
+        }
+      }
+    }
+
+    out[bp] = normalized;
   }
   return out;
 }
@@ -77,7 +113,10 @@ export function loadStudioLayouts(): Layouts {
     if (!raw) return DEFAULT_STUDIO_LAYOUTS;
     const parsed = JSON.parse(raw) as Layouts;
     if (!parsed || typeof parsed !== 'object') return DEFAULT_STUDIO_LAYOUTS;
-    return reconcileLayouts(parsed);
+    const reconciled = reconcileLayouts(parsed);
+    // Persist the healed layout so broken data won't keep coming back on next load.
+    localStorage.setItem(STUDIO_LAYOUT_STORAGE_KEY, JSON.stringify(reconciled));
+    return reconciled;
   } catch {
     return DEFAULT_STUDIO_LAYOUTS;
   }
