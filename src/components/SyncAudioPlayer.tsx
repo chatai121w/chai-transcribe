@@ -1126,6 +1126,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       compressorRef.current.attack.value = enhancementSettings.cAttack;
       compressorRef.current.release.value = enhancementSettings.cRelease;
     }
+    console.warn('[SAP] APPLY enhancementSettings:', JSON.stringify(enhancementSettings), 'outGain=', outputGainRef.current?.gain.value, 'mainGain=', gainNodeRef.current?.gain.value, 'doublerMerge=', doublerMergeRef.current?.gain.value);
 
     // Multi-band toggles
     if (deSibilanceRef.current) {
@@ -2449,7 +2450,27 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       <div className="space-y-1.5 rounded-lg border bg-muted/20 p-2">
         <div className="flex items-center justify-between">
           <span className="text-xs">איכות מול בטיחות דיבור</span>
-          <span className="text-xs font-mono tabular-nums">{enhancementStrength}%</span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 px-1.5 text-[10px]"
+              onClick={() => {
+                console.warn('[SAP] PANIC RESET: returning to clean defaults');
+                setEnhancementStrength(0);
+                setIsBypassEnhancement(true);
+                setPresetId('off');
+                setOutputGain(1);
+                if (audioRef.current) {
+                  audioRef.current.volume = 1;
+                  setVolume(1);
+                  setIsMuted(false);
+                }
+              }}
+              title="אפס להקלטה נקיה לגמרי — מבטל הכל ומחזיר למקור"
+            >אפס</Button>
+            <span className="text-xs font-mono tabular-nums">{enhancementStrength}%</span>
+          </div>
         </div>
         <Slider value={[enhancementStrength]} min={0} max={100} step={1} onValueChange={([v]) => setEnhancementStrength(v)} />
         <div className="flex items-center justify-between text-[10px] text-muted-foreground">
