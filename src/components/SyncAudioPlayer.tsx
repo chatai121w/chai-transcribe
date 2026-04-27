@@ -1924,11 +1924,20 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   }, [drawStaticWaveform]);
 
   // ─── External time sync ──────────────────────────────────────
+  // Track the last time we emitted via onTimeUpdate so we can ignore it
+  // when it echoes back as externalTime (avoids a feedback loop that
+  // would constantly seek the audio backwards while playing).
+  const lastEmittedTimeRef = useRef<number>(-1);
   useEffect(() => {
-    if (isSyncEnabled && externalTime !== undefined && audioRef.current && Math.abs(audioRef.current.currentTime - externalTime) > 0.2) {
-      audioRef.current.currentTime = externalTime;
-      setCurrentTime(externalTime);
-    }
+    if (!isSyncEnabled || externalTime === undefined || !audioRef.current) return;
+    const cur = audioRef.current.currentTime;
+    const diff = Math.abs(cur - externalTime);
+    // Ignore echoes of our own recently emitted time
+    if (Math.abs(externalTime - lastEmittedTimeRef.current) < 0.5) return;
+    // Require a meaningful jump (e.g. user clicked a word) before seeking
+    if (diff < 0.5) return;
+    audioRef.current.currentTime = externalTime;
+    setCurrentTime(externalTime);
   }, [externalTime, isSyncEnabled]);
 
   // ─── Audio event handlers ────────────────────────────────────
