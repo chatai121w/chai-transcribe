@@ -9,6 +9,12 @@
   transition-duration: 100ms;
 }
 
+/* Keep a consistent visual padding around each widget, even after drag/resize */
+.studio-grid .react-grid-item {
+  box-sizing: border-box;
+  padding: 4px;
+}
+
 /* Subtle hover ring on items only when in edit mode */
 .studio-grid.is-editing .react-grid-item {
   outline: 1px dashed hsl(var(--primary) / 0.35);
@@ -64,4 +70,5 @@
   height: 100%;
   width: 100%;
   overflow: auto;
+  border-radius: 0.75rem;
 }

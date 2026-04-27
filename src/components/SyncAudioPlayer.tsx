@@ -26,6 +26,7 @@ import {
 import {
   loadStudioLayouts,
   saveStudioLayouts,
+  sanitizeStudioLayouts,
   resetStudioLayouts,
   isStudioEditModeEnabled,
   setStudioEditModeEnabled,
@@ -491,8 +492,9 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   const [studioLayouts, setStudioLayouts] = useState<Layouts>(() => loadStudioLayouts());
   const [layoutEditMode, setLayoutEditMode] = useState<boolean>(() => isStudioEditModeEnabled());
   const handleStudioLayoutChange = useCallback((_current: any, all: Layouts) => {
-    setStudioLayouts(all);
-    saveStudioLayouts(all);
+    const fitted = sanitizeStudioLayouts(all);
+    setStudioLayouts(fitted);
+    saveStudioLayouts(fitted);
   }, []);
   const handleResetStudioLayout = useCallback(() => {
     const fresh = resetStudioLayouts();
@@ -2566,10 +2568,12 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           breakpoints={{ lg: 996, md: 768, sm: 480 }}
           cols={{ lg: 12, md: 10, sm: 6 }}
           rowHeight={32}
-          margin={[12, 12]}
-          containerPadding={[0, 0]}
+          margin={[14, 14]}
+          containerPadding={[10, 10]}
           isDraggable={layoutEditMode}
           isResizable={layoutEditMode}
+          isBounded
+          preventCollision
           draggableHandle=".studio-widget-handle"
           onLayoutChange={handleStudioLayoutChange}
           compactType="vertical"

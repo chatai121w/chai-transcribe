@@ -51,6 +51,44 @@ const GRID_COLS_BY_BP: Record<string, number> = {
   sm: 6,
 };
 
+const ITEM_ROW_GAP = 1;
+
+function overlapsWithGap(a: Layout, b: Layout, rowGap: number): boolean {
+  return (
+    a.x < b.x + b.w &&
+    b.x < a.x + a.w &&
+    a.y < b.y + b.h + rowGap &&
+    b.y < a.y + a.h + rowGap
+  );
+}
+
+function autoPackNoOverlap(items: Layout[], cols: number): Layout[] {
+  const ordered = [...items].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  const placed: Layout[] = [];
+
+  for (const src of ordered) {
+    const maxX = Math.max(0, cols - src.w);
+    const next: Layout = {
+      ...src,
+      x: Math.min(maxX, Math.max(0, src.x)),
+      y: Math.max(0, src.y),
+    };
+
+    // Move down until this item no longer overlaps previously placed items.
+    let guard = 0;
+    while (placed.some((p) => overlapsWithGap(next, p, ITEM_ROW_GAP)) && guard < 200) {
+      const blockers = placed.filter((p) => overlapsWithGap(next, p, ITEM_ROW_GAP));
+      const nextY = Math.max(...blockers.map((p) => p.y + p.h + ITEM_ROW_GAP));
+      next.y = Math.max(next.y + ITEM_ROW_GAP, nextY);
+      guard += 1;
+    }
+
+    placed.push(next);
+  }
+
+  return placed;
+}
+
 /** Make sure a stored layouts object still references all current widget keys
  *  AND that every item has sane dimensions (>= minW/minH). Items with degenerate
  *  width/height get reset to the default sizes. */
@@ -121,9 +159,14 @@ function reconcileLayouts(stored: Layouts): Layouts {
       }
     }
 
-    out[bp] = normalized;
+    // Final safety net: make sure items do not overlap each other.
+    out[bp] = autoPackNoOverlap(normalized, cols);
   }
   return out;
+}
+
+export function sanitizeStudioLayouts(layouts: Layouts): Layouts {
+  return reconcileLayouts(layouts);
 }
 
 export function loadStudioLayouts(): Layouts {
@@ -143,7 +186,8 @@ export function loadStudioLayouts(): Layouts {
 
 export function saveStudioLayouts(layouts: Layouts): void {
   try {
-    localStorage.setItem(STUDIO_LAYOUT_STORAGE_KEY, JSON.stringify(layouts));
+    const sanitized = reconcileLayouts(layouts);
+    localStorage.setItem(STUDIO_LAYOUT_STORAGE_KEY, JSON.stringify(sanitized));
   } catch {
     /* ignore quota errors */
   }
