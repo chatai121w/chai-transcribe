@@ -244,7 +244,7 @@ export const useCloudPreferences = () => {
 
     // ── Realtime: react to theme changes from other devices ──
     const channel = supabase
-      .channel(`user_preferences:${user.id}`)
+      .channel(`user_preferences:${user.id}:${Math.random().toString(36).slice(2)}`)
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'user_preferences', filter: `user_id=eq.${user.id}` },

@@ -8,15 +8,8 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import AppSidebar from "./components/AppSidebar";
 import AppLayout from "./components/AppLayout";
 import { Loader2 } from "lucide-react";
-import CloudKeySync from "./components/CloudKeySync";
 import { ThemeShortcutListener } from "./components/ThemeShortcutListener";
-import { SmartConsole } from "./components/SmartConsole";
-import { TranscriptionAnalytics } from "./components/TranscriptionAnalytics";
-import { PWAInstallButton } from "./components/PWAInstallButton";
-import { BackgroundSync } from "./components/BackgroundSync";
-import { SWUpdateNotifier } from "./components/SWUpdateNotifier";
 import { DiarizationQueueProvider } from "./contexts/DiarizationQueueContext";
-import { DiarizationFloatingStatus } from "./components/DiarizationFloatingStatus";
 import { useTheme } from "./hooks/useTheme";
 import { debugLog } from "./lib/debugLogger";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -66,6 +59,34 @@ const VideoToMp3 = lazyWithLog('VideoToMp3', () => import("./pages/VideoToMp3"))
 const AudioCleanLab = lazyWithLog('AudioCleanLab', () => import("./pages/AudioCleanLab"));
 const Harmonika = lazyWithLog('Harmonika', () => import("./pages/Harmonika"));
 const MeetingRecorder = lazyWithLog('MeetingRecorder', () => import("./pages/MeetingRecorder"));
+
+// Lazy non-critical UI widgets — defer past first paint
+const SmartConsoleLazy = lazy(() => import("./components/SmartConsole").then(m => ({ default: m.SmartConsole })));
+const TranscriptionAnalyticsLazy = lazy(() => import("./components/TranscriptionAnalytics").then(m => ({ default: m.TranscriptionAnalytics })));
+const PWAInstallButtonLazy = lazy(() => import("./components/PWAInstallButton").then(m => ({ default: m.PWAInstallButton })));
+const BackgroundSyncLazy = lazy(() => import("./components/BackgroundSync").then(m => ({ default: m.BackgroundSync })));
+const SWUpdateNotifierLazy = lazy(() => import("./components/SWUpdateNotifier").then(m => ({ default: m.SWUpdateNotifier })));
+const CloudKeySyncLazy = lazy(() => import("./components/CloudKeySync"));
+const DiarizationFloatingStatusLazy = lazy(() => import("./components/DiarizationFloatingStatus").then(m => ({ default: m.DiarizationFloatingStatus })));
+
+/** Mounts children only after the browser is idle / a delay — keeps them off the critical path. */
+function DeferredMount({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const idle = (cb: () => void) => {
+      const w = window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number };
+      if (typeof w.requestIdleCallback === 'function') {
+        w.requestIdleCallback(cb, { timeout: 1500 });
+      } else {
+        setTimeout(cb, 200);
+      }
+    };
+    const t = setTimeout(() => idle(() => setShow(true)), delay);
+    return () => clearTimeout(t);
+  }, [delay]);
+  if (!show) return null;
+  return <Suspense fallback={null}>{children}</Suspense>;
+}
 
 /** Logs route changes */
 const RouteLogger = () => {
@@ -122,6 +143,21 @@ const App = () => {
     return () => debugLog.info('App', '📦 App component unmounted');
   }, []);
 
+  // Prefetch likely routes after idle to avoid spinner on first navigation
+  useEffect(() => {
+    const w = window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number };
+    const prefetch = () => {
+      import("./pages/Dashboard").catch(() => {});
+      import("./pages/Index").catch(() => {});
+      import("./pages/Settings").catch(() => {});
+    };
+    if (typeof w.requestIdleCallback === 'function') {
+      w.requestIdleCallback(prefetch, { timeout: 3000 });
+    } else {
+      setTimeout(prefetch, 1500);
+    }
+  }, []);
+
   useEffect(() => {
     const handleConfigEvent = (event: Event) => {
       const customEvent = event as CustomEvent<DevFloatingButtonsVisibility>;
@@ -157,13 +193,13 @@ const App = () => {
           <DiarizationQueueProvider>
           <RouteLogger />
           <ThemeShortcutListener />
-          <CloudKeySync />
-          <BackgroundSync />
-          <SWUpdateNotifier />
-          {devFloatingButtons.smartConsole && <SmartConsole />}
-          {devFloatingButtons.transcriptionAnalytics && <TranscriptionAnalytics />}
-          {devFloatingButtons.pwaInstall && <PWAInstallButton />}
-          {devFloatingButtons.diarizationStatus && <DiarizationFloatingStatus />}
+          <DeferredMount delay={0}><CloudKeySyncLazy /></DeferredMount>
+          <DeferredMount delay={500}><BackgroundSyncLazy /></DeferredMount>
+          <DeferredMount delay={1000}><SWUpdateNotifierLazy /></DeferredMount>
+          {devFloatingButtons.smartConsole && <DeferredMount delay={1500}><SmartConsoleLazy /></DeferredMount>}
+          {devFloatingButtons.transcriptionAnalytics && <DeferredMount delay={1500}><TranscriptionAnalyticsLazy /></DeferredMount>}
+          {devFloatingButtons.pwaInstall && <DeferredMount delay={2000}><PWAInstallButtonLazy /></DeferredMount>}
+          {devFloatingButtons.diarizationStatus && <DeferredMount delay={500}><DiarizationFloatingStatusLazy /></DeferredMount>}
           <AppSidebar />
           <AppLayout>
             <Suspense fallback={<PageLoader label="suspense" />}>
