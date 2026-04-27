@@ -45,7 +45,9 @@ export const DEFAULT_STUDIO_LAYOUTS: Layouts = {
   ],
 };
 
-/** Make sure a stored layouts object still references all current widget keys. */
+/** Make sure a stored layouts object still references all current widget keys
+ *  AND that every item has sane dimensions (>= minW/minH). Items with degenerate
+ *  width/height get reset to the default sizes. */
 function reconcileLayouts(stored: Layouts): Layouts {
   const out: Layouts = {};
   for (const bp of Object.keys(DEFAULT_STUDIO_LAYOUTS)) {
@@ -55,7 +57,15 @@ function reconcileLayouts(stored: Layouts): Layouts {
     for (const item of incoming) byKey.set(item.i, item);
     out[bp] = defaults.map((d) => {
       const found = byKey.get(d.i);
-      return found ? { ...d, ...found, i: d.i } : d;
+      if (!found) return d;
+      // Validate: if width or height is below minimum, fall back to defaults
+      const minW = d.minW ?? 4;
+      const minH = d.minH ?? 8;
+      const w = typeof found.w === 'number' && found.w >= minW ? found.w : d.w;
+      const h = typeof found.h === 'number' && found.h >= minH ? found.h : d.h;
+      const x = typeof found.x === 'number' && found.x >= 0 ? found.x : d.x;
+      const y = typeof found.y === 'number' && found.y >= 0 ? found.y : d.y;
+      return { ...d, ...found, i: d.i, x, y, w, h };
     });
   }
   return out;

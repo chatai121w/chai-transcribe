@@ -2540,6 +2540,21 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                 <TooltipContent side="bottom">החזר לפריסת ברירת המחדל</TooltipContent>
               </Tooltip>
             )}
+            {!layoutEditMode && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                    onClick={handleResetStudioLayout}
+                  >
+                    <RotateCw className="w-3.5 h-3.5 no-theme-icon" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">אפס פריסה לברירת מחדל</TooltipContent>
+              </Tooltip>
+            )}
           </div>
         )}
 
