@@ -1950,11 +1950,13 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       console.warn('[SAP] FOCUS LOOP rewind: t=', t.toFixed(3), 'focusEnd=', focusEnd, '→ focusStart=', focusStart);
       audioRef.current.currentTime = focusStart;
       setCurrentTime(focusStart);
+      lastEmittedTimeRef.current = focusStart;
       onTimeUpdate?.(focusStart);
       return;
     }
 
     setCurrentTime(t);
+    lastEmittedTimeRef.current = t;
     onTimeUpdate?.(t);
   }, [onTimeUpdate, focusEnabled, focusLoop, canEnableFocusLoop, focusEnd, focusStart, externalTime]);
 
