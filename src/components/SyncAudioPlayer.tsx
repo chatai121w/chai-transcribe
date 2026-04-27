@@ -500,6 +500,11 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     const fresh = resetStudioLayouts();
     setStudioLayouts(fresh);
   }, []);
+  const handleAutoArrangeStudioLayout = useCallback(() => {
+    const arranged = sanitizeStudioLayouts(studioLayouts);
+    setStudioLayouts(arranged);
+    saveStudioLayouts(arranged);
+  }, [studioLayouts]);
   useEffect(() => {
     setStudioEditModeEnabled(layoutEditMode);
   }, [layoutEditMode]);
@@ -2533,6 +2538,22 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                     variant="ghost"
                     size="sm"
                     className="h-7 gap-1.5 text-xs text-muted-foreground"
+                    onClick={handleAutoArrangeStudioLayout}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 no-theme-icon" />
+                    סידור אוטומטי
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">התאם אוטומטית ווידג'טים בלי חפיפה ועם ריווח קבוע</TooltipContent>
+              </Tooltip>
+            )}
+            {layoutEditMode && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1.5 text-xs text-muted-foreground"
                     onClick={handleResetStudioLayout}
                   >
                     <RotateCw className="w-3.5 h-3.5 no-theme-icon" />
@@ -2540,6 +2561,21 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">החזר לפריסת ברירת המחדל</TooltipContent>
+              </Tooltip>
+            )}
+            {!layoutEditMode && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                    onClick={handleAutoArrangeStudioLayout}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 no-theme-icon" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">סידור אוטומטי לווידג'טים</TooltipContent>
               </Tooltip>
             )}
             {!layoutEditMode && (
