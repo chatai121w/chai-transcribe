@@ -10,6 +10,8 @@ import { useTextMarking } from "@/hooks/useTextMarking";
 import { MarkingToolbar } from "@/components/MarkingToolbar";
 import { Edit3, Clock, Link, Unlink } from "lucide-react";
 import type { WordTiming } from "./SyncAudioPlayer";
+import { WordContextMenu } from "@/components/WordContextMenu";
+import { getWordHighlightStyle, isWordApproved } from "@/lib/personalPronunciationModel";
 
 interface SyncEditableViewProps {
   wordTimings: WordTiming[];
@@ -305,20 +307,24 @@ export const SyncEditableView = ({
                     : "";
                 const markingClass = marking.getWordMarkingStyle(wt.globalIndex);
                 const wordHasIssue = hasIssue(wt.globalIndex);
-                const suggestions = wordHasIssue ? getSuggestions(wt.globalIndex) : [];
+                const wordApproved = isWordApproved(wt.word);
+                const suggestions = wordHasIssue && !wordApproved ? getSuggestions(wt.globalIndex) : [];
+                const suggestionTexts = suggestions.map((s) => s.text);
+                const highlightStyle = getWordHighlightStyle(wt.word);
                 const isSearchMatch = searchMatchIndices.has(wt.globalIndex);
                 const isSearchActive = wt.globalIndex === activeSearchWordIndex;
-                return (
+                const wordSpan = (
                   <span
                     key={wt.globalIndex}
                     ref={isActive || isSearchActive ? activeWordRef : undefined}
                     contentEditable={isEditing}
                     suppressContentEditableWarning
                     spellCheck={false}
+                    style={highlightStyle}
                     className={cn(
                       "px-0.5 py-0.5 rounded transition-all duration-150 inline-block",
                       confidenceStyle,
-                      markingClass,
+                      wordApproved ? "" : markingClass,
                       isEditing ? "cursor-text" : "cursor-pointer",
                       isSearchActive
                         ? "bg-yellow-400 text-black font-bold ring-2 ring-yellow-500 shadow-md"
@@ -347,21 +353,24 @@ export const SyncEditableView = ({
                       }
                     }}
                     onContextMenu={(e) => {
-                      if (!wordHasIssue) return;
-                      e.preventDefault();
-                      setCustomCorrection(wt.word);
-                      setSpellMenu({
-                        x: e.clientX,
-                        y: e.clientY,
-                        wordIndex: wt.globalIndex,
-                        word: wt.word,
-                        suggestions,
-                      });
+                      // Let the WordContextMenu (Radix) take over.
+                      e.stopPropagation();
                     }}
-                    title={`${formatTime(wt.start)} → ${formatTime(wt.end)}${wordHasIssue ? " | קליק ימני להצעות תיקון" : ""}${isEditing ? " | מצב עריכה" : ""}`}
+                    title={`${formatTime(wt.start)} → ${formatTime(wt.end)} | קליק ימני לתפריט${isEditing ? " | מצב עריכה" : ""}`}
                   >
                     {wt.word}
                   </span>
+                );
+                return (
+                  <WordContextMenu
+                    key={wt.globalIndex}
+                    word={wt.word}
+                    suggestions={suggestionTexts}
+                    onReplace={(next) => applyCorrection(wt.globalIndex, next)}
+                    onApproveAsCorrect={() => setDictionaryVersion((v) => v + 1)}
+                  >
+                    {wordSpan}
+                  </WordContextMenu>
                 );
               })}
               {" "}

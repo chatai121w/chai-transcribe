@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { extractCorrections, learnFromCorrections, type CorrectionEntry } from "@/utils/correctionLearning";
+import { addProfileCorrection, getActiveProfileId, getProfile } from "@/lib/pronunciationProfiles";
 import { getSuspectWordsMap, type SpellSuggestion } from "@/utils/hebrewSpellCheck";
 import { Eye, EyeOff, Highlighter, Sparkles, BookPlus, SpellCheck, Check } from "lucide-react";
 
@@ -119,7 +120,13 @@ export const PlayerTranscriptEditor = ({ originalText, editedText, onEditedTextC
       note: learnNote.trim() || undefined,
     }));
     learnFromCorrections(withNotes);
-    toast({ title: "למידה נשמרה", description: `${withNotes.length} תיקונים נלמדו` });
+    const activeId = getActiveProfileId();
+    let profileMsg = '';
+    if (activeId) {
+      for (const c of withNotes) addProfileCorrection(activeId, c);
+      profileMsg = ` גם לפרופיל "${getProfile(activeId)?.name || ''}"`;
+    }
+    toast({ title: "למידה נשמרה", description: `${withNotes.length} תיקונים נלמדו${profileMsg}` });
   };
 
   const handleAddManualLearning = () => {

@@ -147,18 +147,27 @@ export const useCloudPreferences = () => {
         .maybeSingle();
 
       if (data) {
+        // ── Conflict resolution: prefer local theme if it changed AFTER cloud's updated_at
+        const localThemeMtime = Number(localStorage.getItem('app_theme_updated_at') || 0);
+        const cloudUpdatedAt = data.updated_at ? new Date(data.updated_at).getTime() : 0;
+        const localTheme = localStorage.getItem('app_theme_id');
+        const localCustomThemes = localStorage.getItem('app_custom_themes');
+        const localIsNewer = localThemeMtime > 0 && localThemeMtime > cloudUpdatedAt;
+
         const loaded: UserPreferences = {
           font_size: data.font_size ?? DEFAULT_PREFERENCES.font_size,
           font_family: data.font_family ?? DEFAULT_PREFERENCES.font_family,
           text_color: data.text_color ?? DEFAULT_PREFERENCES.text_color,
           line_height: Number(data.line_height) || DEFAULT_PREFERENCES.line_height,
           sidebar_pinned: data.sidebar_pinned ?? DEFAULT_PREFERENCES.sidebar_pinned,
-          theme: data.theme ?? DEFAULT_PREFERENCES.theme,
+          theme: localIsNewer && localTheme ? localTheme : (data.theme ?? DEFAULT_PREFERENCES.theme),
           engine: (data as any).engine ?? DEFAULT_PREFERENCES.engine,
           source_language: (data as any).source_language ?? DEFAULT_PREFERENCES.source_language,
-          custom_themes: typeof (data as any).custom_themes === 'string'
-            ? (data as any).custom_themes
-            : JSON.stringify((data as any).custom_themes ?? []),
+          custom_themes: localIsNewer && localCustomThemes
+            ? localCustomThemes
+            : (typeof (data as any).custom_themes === 'string'
+              ? (data as any).custom_themes
+              : JSON.stringify((data as any).custom_themes ?? [])),
           editor_columns: (data as any).editor_columns ?? DEFAULT_PREFERENCES.editor_columns,
           dashboard_view_mode: (data as any).dashboard_view_mode ?? DEFAULT_PREFERENCES.dashboard_view_mode,
           folder_view_mode: (data as any).folder_view_mode ?? DEFAULT_PREFERENCES.folder_view_mode,
@@ -198,6 +207,20 @@ export const useCloudPreferences = () => {
         localStorage.setItem('cuda_cloud_save', loaded.cuda_cloud_save);
         window.dispatchEvent(new CustomEvent('cloud-prefs-loaded'));
 
+        // If local theme is newer than cloud's stored theme, immediately push it back
+        if (localIsNewer && localTheme && (data.theme !== localTheme || (typeof (data as any).custom_themes === 'string' ? (data as any).custom_themes : JSON.stringify((data as any).custom_themes ?? [])) !== loaded.custom_themes)) {
+          let parsedCustom: unknown = [];
+          try { parsedCustom = JSON.parse(loaded.custom_themes); } catch { /* */ }
+          supabase.from('user_preferences').upsert({
+            user_id: user.id,
+            theme: loaded.theme,
+            custom_themes: parsedCustom,
+            updated_at: new Date().toISOString(),
+          } as any, { onConflict: 'user_id' }).then(() => {
+            localStorage.setItem('app_theme_updated_at', String(Date.now()));
+          });
+        }
+
         // Save to local DB for next time
         await savePreferencesLocally({
           id: 'current',
@@ -218,6 +241,39 @@ export const useCloudPreferences = () => {
     };
 
     load();
+
+    // ── Realtime: react to theme changes from other devices ──
+    const channel = supabase
+      .channel(`user_preferences:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'user_preferences', filter: `user_id=eq.${user.id}` },
+        (payload: any) => {
+          const row = payload?.new;
+          if (!row) return;
+          const cloudTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+          const localTime = Number(localStorage.getItem('app_theme_updated_at') || 0);
+          // Ignore echoes of our own writes
+          if (localTime >= cloudTime) return;
+          if (row.theme && row.theme !== localStorage.getItem('app_theme_id')) {
+            localStorage.setItem('app_theme_id', row.theme);
+            localStorage.setItem('app_theme_updated_at', String(cloudTime));
+            if (row.custom_themes != null) {
+              const cs = typeof row.custom_themes === 'string' ? row.custom_themes : JSON.stringify(row.custom_themes);
+              localStorage.setItem('app_custom_themes', cs);
+            }
+            window.dispatchEvent(new CustomEvent('cloud-prefs-loaded'));
+            window.dispatchEvent(new CustomEvent('cloud-theme-external-update', {
+              detail: { source: 'remote', themeId: row.theme }
+            }));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try { supabase.removeChannel(channel); } catch { /* */ }
+    };
   }, [user]);
 
   // Debounced save to cloud
@@ -233,6 +289,7 @@ export const useCloudPreferences = () => {
     localStorage.setItem('transcript_textColor', updated.text_color);
     localStorage.setItem('transcript_lineHeight', String(updated.line_height));
     localStorage.setItem('app_theme_id', updated.theme);
+    localStorage.setItem('app_theme_updated_at', String(Date.now()));
     localStorage.setItem('app_custom_themes', updated.custom_themes);
     localStorage.setItem('editor_columns', String(updated.editor_columns));
     // Mirror CUDA settings

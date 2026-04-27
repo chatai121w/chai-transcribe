@@ -1,0 +1,49 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Smart Hebrew Transcriber",
+  "version": "0.1.0",
+  "identifier": "ai.ivrit.smart-hebrew-transcriber",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:8080",
+    "beforeDevCommand": "npx vite --port 8080",
+    "beforeBuildCommand": "npx vite build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Smart Hebrew Transcriber",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 700,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "resources": {
+      "../server/transcribe_server.py": "resources/transcribe_server.py"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["Hebrew", "English"]
+      }
+    }
+  }
+}

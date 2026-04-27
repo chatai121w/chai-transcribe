@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo, forwardRef, useImperativeHandle } from "react";
 import { createPortal } from "react-dom";
+import { Responsive as ResponsiveGridLayout, WidthProvider, type Layouts } from "react-grid-layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -20,7 +21,17 @@ import {
   Save, Trash2, AlertTriangle, Scissors,
   Gauge, Activity, Power, Search, BarChart3, X,
   Upload, Square, Circle, MicOff, Layers,
+  GripVertical, LayoutGrid, RotateCw,
 } from "lucide-react";
+import {
+  loadStudioLayouts,
+  saveStudioLayouts,
+  resetStudioLayouts,
+  isStudioEditModeEnabled,
+  setStudioEditModeEnabled,
+} from "@/lib/studioLayout";
+
+const ResponsiveReactGridLayout = WidthProvider(ResponsiveGridLayout);
 
 export interface WordTiming {
   word: string;
@@ -466,6 +477,31 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   const [isFocusPanelCollapsed, setIsFocusPanelCollapsed] = useState(false);
   const [isMixerConsoleCollapsed, setIsMixerConsoleCollapsed] = useState(false);
   const [isMixerFullscreen, setIsMixerFullscreen] = useState(false);
+  // Master ON/OFF toggle for the entire mixer/EQ panel.
+  // When OFF: only a small "Power" button is shown (panel collapsed entirely).
+  // When ON: the panel expands to FULL horizontal width of the page.
+  const [isEqPanelOpen, setIsEqPanelOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('eq_panel_open') !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('eq_panel_open', isEqPanelOpen ? '1' : '0'); } catch { /* ignore */ }
+  }, [isEqPanelOpen]);
+
+  // ─── Draggable widget grid (Studio layout) ──────────────────
+  const [studioLayouts, setStudioLayouts] = useState<Layouts>(() => loadStudioLayouts());
+  const [layoutEditMode, setLayoutEditMode] = useState<boolean>(() => isStudioEditModeEnabled());
+  const handleStudioLayoutChange = useCallback((_current: any, all: Layouts) => {
+    setStudioLayouts(all);
+    saveStudioLayouts(all);
+  }, []);
+  const handleResetStudioLayout = useCallback(() => {
+    const fresh = resetStudioLayouts();
+    setStudioLayouts(fresh);
+  }, []);
+  useEffect(() => {
+    setStudioEditModeEnabled(layoutEditMode);
+  }, [layoutEditMode]);
+
   const [outputGain, setOutputGain] = useState(1.0); // 0.0 to 3.0 (multiply)
   const [showEqualizer, setShowEqualizer] = useState(true);
   // 31-band parametric EQ user controls (dB, -12 to +12)
@@ -2467,9 +2503,68 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           crossOrigin="anonymous"
         />
 
-        {/* ─── Two-Column Split Layout ───────────────────── */}
-        <div className={`grid gap-4 ${compact ? '' : eqWide ? '' : 'lg:grid-cols-2'}`}>
-          {/* ═══ RIGHT COLUMN: Player ═══ */}
+        {/* ─── Layout edit toolbar (drag/resize widgets) ───── */}
+        {!compact && (
+          <div className="flex items-center justify-end gap-2 mb-2 px-1" dir="rtl">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={layoutEditMode ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-7 gap-1.5 text-xs"
+                  onClick={() => setLayoutEditMode((v) => !v)}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5 no-theme-icon" />
+                  {layoutEditMode ? 'סיים עריכת פריסה' : 'ערוך פריסה'}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {layoutEditMode
+                  ? 'הוויג\'טים נעולים אחרי לחיצה'
+                  : 'הפעל גרירה ושינוי גודל של הוויג\'טים'}
+              </TooltipContent>
+            </Tooltip>
+            {layoutEditMode && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1.5 text-xs text-muted-foreground"
+                    onClick={handleResetStudioLayout}
+                  >
+                    <RotateCw className="w-3.5 h-3.5 no-theme-icon" />
+                    אפס פריסה
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">החזר לפריסת ברירת המחדל</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        )}
+
+        {/* ─── Draggable Widget Grid ───────────────────────── */}
+        <ResponsiveReactGridLayout
+          className={`studio-grid ${layoutEditMode ? 'is-editing' : ''}`}
+          layouts={studioLayouts}
+          breakpoints={{ lg: 996, md: 768, sm: 480 }}
+          cols={{ lg: 12, md: 10, sm: 6 }}
+          rowHeight={32}
+          margin={[12, 12]}
+          containerPadding={[0, 0]}
+          isDraggable={layoutEditMode}
+          isResizable={layoutEditMode}
+          draggableHandle=".studio-widget-handle"
+          onLayoutChange={handleStudioLayoutChange}
+          compactType="vertical"
+          useCSSTransforms
+        >
+          {/* ═══ WIDGET 1: Player ═══ */}
+          <div key="player" className="studio-widget-body">
+            <div className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
+              <span>נגן סינכרוני</span>
+            </div>
           <div className="space-y-3 order-1">
             {/* Header */}
             <div className="flex items-center justify-between">
@@ -2965,11 +3060,44 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
               ⌨️ Space=נגן/עצור · Ctrl+←→=±5s · Shift+←→=מילה · M=השתק · Alt+S=מהירות
             </p>
           </div>
+          </div>{/* close studio-widget-body for player */}
 
-          {/* ═══ LEFT COLUMN: Mixer & Processing ═══ */}
+          {/* ═══ WIDGET 2: Studio (Mixer & Processing) ═══ */}
+          <div key="studio" className="studio-widget-body">
+            <div className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
+              <span>סטודיו (מיקסר ועיבוד)</span>
+            </div>
           {!compact && (() => {
+            // When the user explicitly opens the EQ panel via the power toggle,
+            // force it to span the full horizontal width of the page (col-span-full)
+            // so it isn't squeezed into the narrow side column.
+            const fullWidth = (eqWide || isEqPanelOpen) && !eqFloating;
             const eqEl = (
-            <div className={`space-y-3 ${eqFloating ? '' : 'order-2'} ${eqWide && !eqFloating ? 'col-span-full' : ''}`}>
+            <div className={`space-y-3 ${eqFloating ? '' : 'order-2'} ${fullWidth ? 'col-span-full' : ''}`}>
+              {!isEqPanelOpen ? (
+                <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2">
+                  <p className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground">
+                    <AudioLines className="w-3.5 h-3.5 no-theme-icon" />
+                    מיקסר ואקולייזר — כבוי
+                  </p>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1.5"
+                        onClick={() => setIsEqPanelOpen(true)}
+                      >
+                        <Power className="w-3.5 h-3.5 no-theme-icon" />
+                        הפעל
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">הפעל מיקסר/אקולייזר — ייפתח לרוחב מלא</TooltipContent>
+                  </Tooltip>
+                </div>
+              ) : (
+                <>
               {mixerPanel}
 
               {/* ─── EQ + Processing Mixing Console ── */}
@@ -2983,6 +3111,20 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                     מיקסר מקצועי (אקולייזר + עיבוד)
                   </p>
                   <div className="flex items-center gap-2">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-destructive"
+                          onClick={() => setIsEqPanelOpen(false)}
+                          title="כבה מיקסר/אקולייזר"
+                        >
+                          <Power className="w-3.5 h-3.5 no-theme-icon" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">כבה מיקסר/אקולייזר</TooltipContent>
+                    </Tooltip>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -4175,11 +4317,14 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                   {overlayEnabled && overlayBuffer && <Badge variant="secondary" className="text-[10px] gap-1"><Layers className="w-3 h-3 no-theme-icon" />Overlay</Badge>}
                 </div>
               )}
+                </>
+              )}
             </div>
             );
             return eqFloating && eqPortalTarget ? createPortal(eqEl, eqPortalTarget) : eqEl;
           })()}
-        </div>
+          </div>{/* close studio-widget-body for studio */}
+        </ResponsiveReactGridLayout>
 
         {/* ─── Keyboard shortcuts panel ──────────────────────── */}
         <div className="text-center">

@@ -9,6 +9,7 @@ import AppSidebar from "./components/AppSidebar";
 import AppLayout from "./components/AppLayout";
 import { Loader2 } from "lucide-react";
 import CloudKeySync from "./components/CloudKeySync";
+import { ThemeShortcutListener } from "./components/ThemeShortcutListener";
 import { SmartConsole } from "./components/SmartConsole";
 import { TranscriptionAnalytics } from "./components/TranscriptionAnalytics";
 import { PWAInstallButton } from "./components/PWAInstallButton";
@@ -64,6 +65,7 @@ const ResetPassword = lazyWithLog('ResetPassword', () => import("./pages/ResetPa
 const VideoToMp3 = lazyWithLog('VideoToMp3', () => import("./pages/VideoToMp3"));
 const AudioCleanLab = lazyWithLog('AudioCleanLab', () => import("./pages/AudioCleanLab"));
 const Harmonika = lazyWithLog('Harmonika', () => import("./pages/Harmonika"));
+const MeetingRecorder = lazyWithLog('MeetingRecorder', () => import("./pages/MeetingRecorder"));
 
 /** Logs route changes */
 const RouteLogger = () => {
@@ -154,6 +156,7 @@ const App = () => {
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <DiarizationQueueProvider>
           <RouteLogger />
+          <ThemeShortcutListener />
           <CloudKeySync />
           <BackgroundSync />
           <SWUpdateNotifier />
@@ -181,6 +184,7 @@ const App = () => {
                 <Route path="/video-to-mp3" element={<ProtectedRoute><VideoToMp3 /></ProtectedRoute>} />
                 <Route path="/audio-clean" element={<ProtectedRoute><AudioCleanLab /></ProtectedRoute>} />
                 <Route path="/harmonika" element={<ProtectedRoute><Harmonika /></ProtectedRoute>} />
+                <Route path="/meeting-recorder" element={<ProtectedRoute><MeetingRecorder /></ProtectedRoute>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>

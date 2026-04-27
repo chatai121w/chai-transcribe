@@ -14,11 +14,20 @@ import { useLocalTranscriptionQueue } from "@/hooks/useLocalTranscriptionQueue";
 import { useKeyRotation } from "@/hooks/useKeyRotation";
 import type { CloudProvider } from "@/hooks/useKeyRotation";
 import { applyLearnedCorrections } from "@/utils/correctionLearning";
+import { isPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
+import {
+  applyProfileCorrections,
+  getActiveProfileId,
+  buildProfileHotwords,
+  getProfileInitialPrompt,
+  isProfileLoshonKodesh,
+} from "@/lib/pronunciationProfiles";
 import { getHotwordsString, applyVocabularyCorrections } from "@/utils/customVocabulary";
 import { addNotification } from "@/hooks/useNotifications";
 import { isVideoFile, extractAudioFromVideo, VIDEO_NEEDS_EXTRACTION, MAX_VIDEO_SIZE_MB, MAX_AUDIO_SIZE_MB } from "@/lib/videoUtils";
 import { compressAudio, needsCompression, formatFileSize, CLOUD_API_LIMIT } from "@/lib/audioCompression";
 import { db } from "@/lib/localDb";
+import { isLoshonKodeshEnabled } from "@/lib/loshonKodesh";
 
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
@@ -84,11 +93,14 @@ export function useTranscriptionEngines(
   // ── Helpers ─────────────────────────────────────────────────
 
   const saveToHistory = useCallback(async (text: string, engineUsed: string, skipCloud?: boolean, timings?: WordTiming[], audioFile?: File, folder?: string) => {
-    const correctionResult = applyLearnedCorrections(text, { engine: engineUsed });
-    const vocabResult = applyVocabularyCorrections(correctionResult.text);
+    const correctionResult = isPersonalPronunciationEnabled()
+      ? applyLearnedCorrections(text, { engine: engineUsed })
+      : { text, appliedCount: 0 };
+    const profileResult = applyProfileCorrections(correctionResult.text);
+    const vocabResult = applyVocabularyCorrections(profileResult.text);
     const finalText = vocabResult.text;
-    if (correctionResult.appliedCount > 0 || vocabResult.appliedCount > 0) {
-      debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${vocabResult.appliedCount} vocabulary corrections`);
+    if (correctionResult.appliedCount > 0 || vocabResult.appliedCount > 0 || profileResult.appliedCount > 0) {
+      debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile + ${vocabResult.appliedCount} vocabulary corrections${getActiveProfileId() ? ` (profile: ${getActiveProfileId()})` : ''}`);
     }
 
     if (skipCloud) {
@@ -484,7 +496,10 @@ export function useTranscriptionEngines(
 
       const vocabHotwords = getHotwordsString();
       const userHotwords = preferences.cuda_hotwords || '';
-      const mergedHotwords = [userHotwords, vocabHotwords].filter(Boolean).join(', ') || undefined;
+      const profileHotwords = buildProfileHotwords();
+      const mergedHotwords =
+        [userHotwords, vocabHotwords, profileHotwords].filter(Boolean).join(', ') || undefined;
+      const profilePrompt = getProfileInitialPrompt();
       const cudaOptions: CudaOptions = {
         preset: preferences.cuda_preset || 'balanced',
         fastMode: preferences.cuda_fast_mode,
@@ -494,6 +509,8 @@ export function useTranscriptionEngines(
         vadAggressive: preferences.cuda_vad_aggressive,
         hotwords: mergedHotwords,
         paragraphThreshold: preferences.cuda_paragraph_threshold || undefined,
+        loshonKodesh: isLoshonKodeshEnabled() || isProfileLoshonKodesh(),
+        initialPrompt: profilePrompt || undefined,
       };
 
       const useParallel = !serverModelReady;

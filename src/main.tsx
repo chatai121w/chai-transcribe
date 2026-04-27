@@ -2,7 +2,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { debugLog } from "./lib/debugLogger";
 import App from "./App.tsx";
+import { TauriSetupGate } from "./components/TauriSetupGate";
 import "./index.css";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
+import "./styles/studio-grid.css";
 
 // Clean up stale localStorage entries (word timings can be huge)
 try {
@@ -25,5 +29,11 @@ debugLog.info('Boot', `🚀 אתחול אפליקציה — ${new Date().toLocal
 });
 
 const stopBoot = debugLog.time('Boot', 'React mount');
-createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <TauriSetupGate>
+      <App />
+    </TauriSetupGate>
+  </StrictMode>
+);
 stopBoot();

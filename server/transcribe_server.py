@@ -196,6 +196,62 @@ _request_history: deque = deque(maxlen=MAX_REQUEST_HISTORY)
 # Server start time
 _server_start_time = time.time()
 
+# ─── Loshon Kodesh (Ashkenazi torani Hebrew) ────────────────────────
+# When the client passes `loshon_kodesh=1`, we override the default
+# Hebrew prompt with a torani context and merge a curated hotwords list.
+LOSHON_KODESH_PROMPT = (
+    'שיעור תורה בלשון הקודש בהגייה אשכנזית. הקדוש ברוך הוא, רבי, גמרא, '
+    'משנה, תוספות, רש"י, רמב"ם, הלכה, סוגיא, פסוק, פרשה, מסכת, דף, תורה, '
+    'מצוה, ברכה, שבת, יום טוב, מקום, אבות, בני ישראל, תפילה, עבודה, '
+    'גמילות חסדים, יראת שמים, אמונה, חסידות, מוסר, ישיבה.'
+)
+LOSHON_KODESH_HOTWORDS = (
+    'הקדוש ברוך הוא, הקב"ה, השם יתברך, תורה, משנה, גמרא, תלמוד, בבלי, '
+    'ירושלמי, תוספות, רש"י, רמב"ם, רמב"ן, שולחן ערוך, מסכת, פרק, דף, '
+    'הלכה, אגדה, סוגיא, מצוה, ברכה, תפילה, יראת שמים, אמונה, חסידות, '
+    'מוסר, תשובה, גמילות חסדים, קדושה, טהרה, בית מדרש, ישיבה, כולל, '
+    'שבת קודש, יום טוב, ראש השנה, יום כיפור, סוכות, חנוכה, פורים, פסח, '
+    'שבועות, רבי, רבנו, הרב, אדמו"ר, הגאון, בעל שם טוב, משה רבנו, '
+    'אברהם אבינו, יצחק אבינו, יעקב אבינו, בני ישראל, ארץ ישראל, '
+    'ירושלים, בית המקדש, מקום, מקומות, ענין, פירוש, אפשר, אסור, מותר, '
+    'חייב, פטור, כשר, פסול, דאורייתא, דרבנן, לכתחילה, בדיעבד, '
+    'הלכה למעשה, אמר, תנא, שמע מינה, רבא, אביי'
+)
+
+
+def _resolve_prompt_and_hotwords(language, user_initial_prompt, user_hotwords, loshon_kodesh):
+    """Decide which initial_prompt and hotwords to send to Whisper.
+
+    Priority for prompt:
+      1. explicit user_initial_prompt
+      2. Loshon Kodesh torani prompt (when loshon_kodesh=True)
+      3. default Hebrew prompt (only for he)
+    Hotwords: when Loshon Kodesh is on, merge user hotwords + torani list.
+    """
+    if user_initial_prompt:
+        prompt = user_initial_prompt
+    elif loshon_kodesh:
+        prompt = LOSHON_KODESH_PROMPT
+    elif language == "he":
+        prompt = "תמלול שיחה בעברית."
+    else:
+        prompt = None
+
+    if loshon_kodesh:
+        merged = []
+        seen = set()
+        for source in ((user_hotwords or ''), LOSHON_KODESH_HOTWORDS):
+            for w in source.split(','):
+                w = w.strip()
+                if w and w not in seen:
+                    seen.add(w)
+                    merged.append(w)
+        hotwords = ', '.join(merged) if merged else None
+    else:
+        hotwords = (user_hotwords or '').strip() or None
+    return prompt, hotwords
+
+
 # Concurrency control — only 1 GPU transcription at a time
 import threading
 _transcribe_lock = threading.Lock()
@@ -1308,6 +1364,17 @@ def transcribe_stream():
     paragraph_threshold = float(request.form.get("paragraph_threshold", "0"))
     resolved = MODEL_REGISTRY.get(model_id, model_id)
 
+    # —— Loshon Kodesh (Ashkenazi torani Hebrew) ——
+    loshon_kodesh = (request.form.get("loshon_kodesh", "0") or "0").strip().lower() in ("1", "true", "yes")
+    initial_prompt_raw = request.form.get("initial_prompt", "").strip() or None
+    hebrew_prompt, hotwords = _resolve_prompt_and_hotwords(
+        language, initial_prompt_raw, hotwords, loshon_kodesh,
+    )
+
+    # Capture request-scoped headers BEFORE entering the SSE generator
+    # (Flask `request` proxy is not valid once streaming starts under waitress).
+    share_mode = (request.headers.get("X-GPU-Share-Mode") or "serial").lower()
+
     suffix = _safe_suffix(audio_filename)
 
     _log.info(f"[{request_id}] NEW REQUEST: {audio_filename} ({file_size_mb:.1f} MB) model={resolved} lang={language}")
@@ -1375,7 +1442,6 @@ def transcribe_stream():
             # ── Proactively free VRAM: unload Ollama models so Whisper has room ──
             # On 8GB-class GPUs Ollama+Whisper together always OOM. Skip if
             # client explicitly opts in to parallel mode (header).
-            share_mode = (request.headers.get("X-GPU-Share-Mode") or "serial").lower()
             if share_mode != "parallel":
                 gpu_now = _get_gpu_mem()
                 if gpu_now and gpu_now.get("total_mb", 0) <= 10240:
@@ -1399,10 +1465,11 @@ def transcribe_stream():
             mode_label = "FAST (batched)" if fast_mode else "normal"
             preset_label = f", preset={preset_name}" if preset_name else ""
             hotwords_label = f", hotwords='{hotwords[:40]}'" if hotwords else ""
-            _log.info(f"[{request_id}] Transcribing: model={resolved}, lang={language}, start_from={start_from}s, mode={mode_label}, compute={ct_label}, beam={beam_size or 'default'}, batch={batch_size}, cond_prev={condition_on_prev}, vad_agg={vad_aggressive}{preset_label}{hotwords_label})")
+            lk_label = ", loshon_kodesh=ON" if loshon_kodesh else ""
+            _log.info(f"[{request_id}] Transcribing: model={resolved}, lang={language}, start_from={start_from}s, mode={mode_label}, compute={ct_label}, beam={beam_size or 'default'}, batch={batch_size}, cond_prev={condition_on_prev}, vad_agg={vad_aggressive}{preset_label}{hotwords_label}{lk_label})")
             start = time.time()
 
-            hebrew_prompt = "תמלול שיחה בעברית." if language == "he" else None
+            # hebrew_prompt was already resolved above (honors loshon_kodesh + initial_prompt)
 
             def _do_transcribe(mdl, override_batch=None):
                 bs = override_batch if override_batch is not None else batch_size

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +40,19 @@ const Settings = () => {
   const [huggingfaceKey, setHuggingfaceKey] = useState("");
   const [showHuggingface, setShowHuggingface] = useState(false);
   const [userIdentifier, setUserIdentifier] = useState("");
+  const [activeTab, setActiveTab] = useState<string>("api-keys");
+  const location = useLocation();
+
+  // Open Themes tab + scroll into view when navigated with hash #themes-section
+  useEffect(() => {
+    if (location.hash === '#themes-section') {
+      setActiveTab('themes');
+      // Wait for tab content to mount
+      setTimeout(() => {
+        document.getElementById('themes-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 120);
+    }
+  }, [location.hash, location.key]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -292,7 +305,7 @@ const Settings = () => {
           </Card>
         )}
 
-        <Tabs defaultValue="api-keys" dir="rtl" className="space-y-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} dir="rtl" className="space-y-4">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="api-keys" className="gap-2">
               <Key className="h-4 w-4" />
@@ -305,7 +318,7 @@ const Settings = () => {
           </TabsList>
 
           <TabsContent value="themes">
-            <Card>
+            <Card id="themes-section">
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <Palette className="w-6 h-6 text-primary" />

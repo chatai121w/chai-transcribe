@@ -39,6 +39,8 @@ export interface CudaOptions {
   vadAggressive?: boolean;
   hotwords?: string;            // comma-separated hotwords for improved recognition
   paragraphThreshold?: number;  // seconds of silence to trigger paragraph break (0=off)
+  initialPrompt?: string;       // free-form context prompt fed to Whisper decoder
+  loshonKodesh?: boolean;       // when true, server merges torani prompt + hotwords automatically
 }
 
 export interface PartialTranscript {
@@ -436,6 +438,12 @@ export const useLocalServer = () => {
     if (cudaOptions?.paragraphThreshold && cudaOptions.paragraphThreshold > 0) {
       form.append('paragraph_threshold', String(cudaOptions.paragraphThreshold));
     }
+    if (cudaOptions?.initialPrompt) {
+      form.append('initial_prompt', cudaOptions.initialPrompt);
+    }
+    if (cudaOptions?.loshonKodesh) {
+      form.append('loshon_kodesh', '1');
+    }
 
     const prefixText = resumeFrom?.existingText ? [resumeFrom.existingText] : [];
     const prefixWords = resumeFrom?.existingWords ? [...resumeFrom.existingWords] : [];
@@ -622,6 +630,12 @@ export const useLocalServer = () => {
     }
     if (cudaOptions?.paragraphThreshold && cudaOptions.paragraphThreshold > 0) {
       form.append('paragraph_threshold', String(cudaOptions.paragraphThreshold));
+    }
+    if (cudaOptions?.initialPrompt) {
+      form.append('initial_prompt', cudaOptions.initialPrompt);
+    }
+    if (cudaOptions?.loshonKodesh) {
+      form.append('loshon_kodesh', '1');
     }
 
     // Prepend existing text/words when resuming

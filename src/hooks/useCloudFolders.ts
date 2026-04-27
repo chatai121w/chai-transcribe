@@ -37,8 +37,13 @@ export const useCloudFolders = () => {
 
   useEffect(() => {
     if (!isAuthenticated) return;
+    // Unique channel name per hook instance — Supabase realtime errors out if
+    // multiple `.on('postgres_changes', ...)` handlers are registered against
+    // the same channel name after `.subscribe()`. Using a unique suffix lets
+    // multiple components subscribe simultaneously without collision.
+    const channelName = `folders-changes:${Math.random().toString(36).slice(2, 10)}`;
     const channel = supabase
-      .channel('folders-changes')
+      .channel(channelName)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'transcripts' },

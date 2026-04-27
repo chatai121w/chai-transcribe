@@ -111,7 +111,34 @@ All colors MUST be HSL.
   body {
     @apply bg-background text-foreground;
     direction: rtl;
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: var(--app-font-family, system-ui, -apple-system, sans-serif);
+    font-size: var(--app-font-size, 14px);
+    font-weight: var(--app-font-weight, 400);
+    color: var(--app-text-color, hsl(var(--foreground)));
+  }
+
+  /* Density scaling — affects spacing/padding via Tailwind utility multiplier */
+  :root[data-density="compact"] {
+    --density-scale: 0.85;
+  }
+  :root[data-density="comfortable"] {
+    --density-scale: 1;
+  }
+  :root[data-density="spacious"] {
+    --density-scale: 1.15;
+  }
+  :root[data-density="compact"] .p-3 { padding: calc(0.75rem * 0.85); }
+  :root[data-density="compact"] .p-4 { padding: calc(1rem * 0.85); }
+  :root[data-density="compact"] .gap-3 { gap: calc(0.75rem * 0.85); }
+  :root[data-density="compact"] .gap-4 { gap: calc(1rem * 0.85); }
+  :root[data-density="spacious"] .p-3 { padding: calc(0.75rem * 1.15); }
+  :root[data-density="spacious"] .p-4 { padding: calc(1rem * 1.15); }
+  :root[data-density="spacious"] .gap-3 { gap: calc(0.75rem * 1.15); }
+  :root[data-density="spacious"] .gap-4 { gap: calc(1rem * 1.15); }
+
+  /* Global shadow var */
+  :root {
+    --app-shadow: 0 1px 3px rgb(0 0 0 / 0.06);
   }
 
   /* Theme icon color override */

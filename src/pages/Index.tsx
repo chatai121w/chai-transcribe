@@ -30,6 +30,11 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
 import { getApiKey } from "@/lib/keyCrypto";
+import { isLoshonKodeshEnabled, setLoshonKodeshEnabled } from "@/lib/loshonKodesh";
+import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
+import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
+import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSuggestion";
+import { PronunciationProfileSelector } from "@/components/PronunciationProfileSelector";
 import { applyLearnedCorrections } from "@/utils/correctionLearning";
 import { addRecentFile } from "@/components/RecentFiles";
 
@@ -70,6 +75,9 @@ const Index = () => {
   const setFontFamily = (v: string) => updatePreference('font_family', v);
   const setTextColor = (v: string) => updatePreference('text_color', v);
   const setLineHeight = (v: number) => updatePreference('line_height', v);
+
+  const [loshonKodeshOn, setLoshonKodeshOn] = useState<boolean>(() => isLoshonKodeshEnabled());
+  const [personalModelOn, setPersonalModelOn] = useState<boolean>(() => isPersonalPronunciationEnabled());
 
   const [transcript, setTranscript] = useState('');
   const [originalTranscript, setOriginalTranscript] = useState('');
@@ -277,6 +285,7 @@ const Index = () => {
       }
 
       currentFileRef.current = file;
+      setCurrentAudioFilename(file.name);
       try {
         // Timeout protection: 10 minutes max per file
         const timeoutMs = 10 * 60 * 1000;
@@ -319,11 +328,18 @@ const Index = () => {
   // Save to cloud history (respects cloud save mode for CUDA engine)
   const saveToHistory = async (text: string, engineUsed: string, skipCloud?: boolean, timings?: Array<{word: string, start: number, end: number, probability?: number}>, audioFile?: File, folder?: string) => {
     // Apply learned corrections to improve transcription
-    const correctionResult = applyLearnedCorrections(text, { engine: engineUsed });
-    const finalText = correctionResult.text;
-    if (correctionResult.appliedCount > 0) {
-      debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned corrections`);
+    const correctionResult = isPersonalPronunciationEnabled()
+      ? applyLearnedCorrections(text, { engine: engineUsed })
+      : { text, appliedCount: 0 };
+    const profileResult = applyProfileCorrections(correctionResult.text);
+    const finalText = profileResult.text;
+    if (correctionResult.appliedCount > 0 || profileResult.appliedCount > 0) {
+      debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile corrections`);
     }
+    // Record that the active profile was used for this audio file (powers
+    // future filename-based profile suggestions).
+    const usedFilename = audioFile?.name || currentFileRef.current?.name;
+    if (usedFilename) recordProfileUsage(usedFilename);
 
     if (skipCloud) {
       // Save only to localStorage, skip cloud upload entirely
@@ -505,6 +521,7 @@ const Index = () => {
     debugLog.info('handleFileSelect', `🎬 ENTER: ${file.name} | size=${file.size} | type=${file.type} | engine=${engine} | bgTask.isRunning=${bgTask.isRunning}`);
     currentFileRef.current = file;
     lastFileRef.current = file;
+    setCurrentAudioFilename(file.name);
     pendingServerFileRef.current = null; // Clear pending queue when new file is selected
     setRecoveredPartialInfo(null); // Clear recovery banner on new transcription
     
@@ -1162,6 +1179,18 @@ const Index = () => {
       return 'queued';
     }
 
+    // Track this transcription in the visible status panel (queue)
+    let activeQueueId: string | null = null;
+    if (!opts?.fromQueue) {
+      try {
+        activeQueueId = await localQueue.addToQueue(file, fileAudioUrl || '');
+        await localQueue.updateItemStatus(activeQueueId, 'processing');
+      } catch (qErr) {
+        debugLog.warn('Queue', 'Failed to register file in status panel', qErr);
+        activeQueueId = null;
+      }
+    }
+
     try {
       const preferredModel = localStorage.getItem('preferred_local_model') || undefined;
       const lang = sourceLanguage === 'auto' ? 'auto' : sourceLanguage;
@@ -1171,6 +1200,11 @@ const Index = () => {
       toast({ title: "מתמלל עם GPU...", description: "מעבד את הקובץ בשרת המקומי עם CUDA — תראה תוצאות בזמן אמת" });
 
       // Build CUDA options from cloud preferences
+      const profileHotwordsStr = buildProfileHotwords();
+      const profileInitPrompt = getProfileInitialPrompt();
+      const profileForcesLk = isProfileLoshonKodesh();
+      const mergedCudaHotwords =
+        [preferences.cuda_hotwords || '', profileHotwordsStr].filter(Boolean).join(', ') || undefined;
       const cudaOptions: CudaOptions = {
         preset: preferences.cuda_preset || 'balanced',
         fastMode: preferences.cuda_fast_mode,
@@ -1178,8 +1212,10 @@ const Index = () => {
         beamSize: preferences.cuda_beam_size || undefined,
         noConditionOnPrevious: preferences.cuda_no_condition_prev,
         vadAggressive: preferences.cuda_vad_aggressive,
-        hotwords: preferences.cuda_hotwords || undefined,
+        hotwords: mergedCudaHotwords,
         paragraphThreshold: preferences.cuda_paragraph_threshold || undefined,
+        loshonKodesh: isLoshonKodeshEnabled() || profileForcesLk,
+        initialPrompt: profileInitPrompt || undefined,
       };
 
       // Use parallel mode (stage audio + preload model simultaneously) when model isn't ready
@@ -1284,10 +1320,16 @@ const Index = () => {
       setTimeout(() => {
         navigate('/text-editor', { state: { text: result.text, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
       }, 1000);
+      if (activeQueueId) {
+        await localQueue.updateItemStatus(activeQueueId, 'completed').catch(() => {});
+      }
       return 'done';
     } catch (error) {
       if (error instanceof Error && error.message === 'CANCELLED') {
         toast({ title: "תמלול הופסק", description: "התמלול בוטל על ידי המשתמש" });
+        if (activeQueueId) {
+          await localQueue.updateItemStatus(activeQueueId, 'failed', 'בוטל ידנית').catch(() => {});
+        }
         return 'done';
       }
       debugLog.error('CUDA Server', 'Transcription failed', error instanceof Error ? error.message : error);
@@ -1302,6 +1344,13 @@ const Index = () => {
         description: `${error instanceof Error ? error.message : 'שגיאה לא ידועה'} — מה שהצליח נשמר`,
         variant: "destructive",
       });
+      if (activeQueueId) {
+        await localQueue.updateItemStatus(
+          activeQueueId,
+          'failed',
+          error instanceof Error ? error.message : 'שגיאה'
+        ).catch(() => {});
+      }
       throw error;
     }
   };
@@ -1845,6 +1894,52 @@ const Index = () => {
           sourceLanguage={sourceLanguage}
           onSourceLanguageChange={setSourceLanguage}
         />
+
+        {engine === 'local-server' && (
+          <div
+            className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm"
+            dir="rtl"
+          >
+            <label className="flex items-center gap-2 cursor-pointer flex-1">
+              <input
+                type="checkbox"
+                checked={loshonKodeshOn}
+                onChange={(e) => {
+                  setLoshonKodeshEnabled(e.target.checked);
+                  setLoshonKodeshOn(e.target.checked);
+                }}
+                className="rounded border-amber-400"
+              />
+              <span className="font-medium">לשון הקודש (הגייה אשכנזית)</span>
+              <span className="text-xs text-muted-foreground">
+                — מטה את התמלול למינוח תורני וכתיב מסורתי (תורה / גמרא / רמב"ם וכו').
+              </span>
+            </label>
+          </div>
+        )}
+
+        <div
+          className="flex items-center justify-between gap-3 rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-sm"
+          dir="rtl"
+        >
+          <label className="flex items-center gap-2 cursor-pointer flex-1">
+            <input
+              type="checkbox"
+              checked={personalModelOn}
+              onChange={(e) => {
+                setPersonalPronunciationEnabled(e.target.checked);
+                setPersonalModelOn(e.target.checked);
+              }}
+              className="rounded border-purple-400"
+            />
+            <span className="font-medium">🧠 מודל הגייה אישי</span>
+            <span className="text-xs text-muted-foreground">
+              — תוספת למנוע: מחיל תיקונים שלמדתי בעבר ומילים שאימתתי כנכון.
+            </span>
+          </label>
+        </div>
+
+        <PronunciationProfileSelector />
 
         {(engine === 'assemblyai' || engine === 'deepgram') && (
           <div className="flex items-center gap-2 text-sm" dir="rtl">

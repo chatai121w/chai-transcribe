@@ -155,7 +155,7 @@ export default defineConfig(({ mode }) => {
     dedupe: ['react', 'react-dom'],
   },
   optimizeDeps: {
-    include: ['react', 'react-dom'],
+    include: ['react', 'react-dom', 'fix-webm-duration', 'dexie'],
     exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/core', '@ffmpeg/util', '@shiguredo/rnnoise-wasm'],
   },
   build: {

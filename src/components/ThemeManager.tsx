@@ -1,13 +1,35 @@
-import { useState } from "react";
-import { useTheme, BUILT_IN_THEMES, type AppTheme, type ThemeColors } from "@/hooks/useTheme";
+import { useState, useEffect, useRef } from "react";
+import { useTheme, BUILT_IN_THEMES, type AppTheme, type ThemeColors, type ThemeStyleOptions } from "@/hooks/useTheme";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Slider } from "@/components/ui/slider";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Check, Plus, Pencil, Trash2, Palette, Copy } from "lucide-react";
+import { Check, Plus, Pencil, Trash2, Palette, Download, Upload, Sparkles, RotateCcw } from "lucide-react";
+import {
+  contrastRatio,
+  contrastLevel,
+  contrastLabel,
+  exportThemeToJson,
+  importThemeFromJson,
+  downloadFile,
+  generateThemeFromDescription,
+} from "@/lib/themeUtils";
+
+const DEFAULT_STYLE: ThemeStyleOptions = {
+  radius: 8,
+  density: 'comfortable',
+  fontFamily: 'Assistant, sans-serif',
+  fontSize: 14,
+  fontWeight: 400,
+  shadow: 'soft',
+};
 
 const DEFAULT_COLORS: ThemeColors = { ...BUILT_IN_THEMES[0].colors };
 
@@ -134,6 +156,107 @@ function ThemePreview({ theme, isActive, onClick }: { theme: AppTheme; isActive:
   );
 }
 
+function ThemeLivePreview({ colors, style, name, variant }: {
+  colors: ThemeColors;
+  style: ThemeStyleOptions;
+  name: string;
+  variant: 'light' | 'dark';
+}) {
+  const shadowMap: Record<string, string> = {
+    none: 'none',
+    soft: '0 1px 3px rgb(0 0 0 / 0.06)',
+    medium: '0 4px 6px -1px rgb(0 0 0 / 0.10)',
+    strong: '0 20px 25px -5px rgb(0 0 0 / 0.18)',
+  };
+  return (
+    <div
+      className="rounded-xl p-5 space-y-3"
+      style={{
+        backgroundColor: `hsl(${colors.background})`,
+        border: `2px solid hsl(${colors.border})`,
+        borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : undefined,
+        fontFamily: style.fontFamily || undefined,
+        fontSize: typeof style.fontSize === 'number' ? `${style.fontSize}px` : undefined,
+        fontWeight: style.fontWeight || undefined,
+        boxShadow: shadowMap[style.shadow || 'soft'],
+      }}
+    >
+      <div className="font-bold flex items-center justify-between" style={{ color: `hsl(${colors.foreground})`, fontSize: '1.05em' }}>
+        <span>{name}</span>
+        {variant === 'dark' && <span className="text-[10px] opacity-60">🌙</span>}
+        {variant === 'light' && <span className="text-[10px] opacity-60">☀️</span>}
+      </div>
+      <div
+        className="p-3 space-y-2"
+        style={{
+          backgroundColor: `hsl(${colors.card})`,
+          border: `1px solid hsl(${colors.border})`,
+          borderRadius: typeof style.radius === 'number' ? `${Math.max(0, style.radius - 2)}px` : undefined,
+        }}
+      >
+        <div className="text-xs" style={{ color: `hsl(${colors.cardForeground})` }}>כרטיס לדוגמה — כך הטקסט שלך ייראה</div>
+        <div className="flex gap-2 flex-wrap">
+          <div className="text-xs px-3 py-1.5" style={{ backgroundColor: `hsl(${colors.primary})`, color: `hsl(${colors.primaryForeground})`, borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : '6px' }}>כפתור ראשי</div>
+          <div className="text-xs px-3 py-1.5" style={{ backgroundColor: `hsl(${colors.accent})`, color: `hsl(${colors.accentForeground})`, borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : '6px' }}>הדגשה</div>
+          <div className="text-xs px-3 py-1.5" style={{ backgroundColor: `hsl(${colors.secondary})`, color: `hsl(${colors.secondaryForeground})`, borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : '6px' }}>משני</div>
+          <div className="text-xs px-3 py-1.5" style={{ backgroundColor: `hsl(${colors.destructive})`, color: `hsl(${colors.destructiveForeground})`, borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : '6px' }}>שגיאה</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Build an approximated dark variant of given colors for side-by-side preview. */
+function invertColorsForPreview(colors: ThemeColors): ThemeColors {
+  const flip = (hsl: string): string => {
+    const parts = hsl.replace(/hsl\(|\)/g, '').trim().split(/\s+/);
+    if (parts.length < 3) return hsl;
+    const h = parts[0];
+    const s = parts[1];
+    const l = parseFloat(parts[2]);
+    if (isNaN(l)) return hsl;
+    return `${h} ${s} ${100 - l}%`;
+  };
+  return {
+    ...colors,
+    background: flip(colors.background),
+    foreground: flip(colors.foreground),
+    card: flip(colors.card),
+    cardForeground: flip(colors.cardForeground),
+    popover: flip(colors.popover),
+    popoverForeground: flip(colors.popoverForeground),
+    secondary: flip(colors.secondary),
+    secondaryForeground: flip(colors.secondaryForeground),
+    muted: flip(colors.muted),
+    mutedForeground: flip(colors.mutedForeground),
+    border: flip(colors.border),
+    input: flip(colors.input),
+    sidebarBackground: flip(colors.sidebarBackground),
+    sidebarForeground: flip(colors.sidebarForeground),
+    sidebarAccent: flip(colors.sidebarAccent),
+    sidebarAccentForeground: flip(colors.sidebarAccentForeground),
+    sidebarBorder: flip(colors.sidebarBorder),
+  };
+}
+
+/** Small WCAG contrast badge for a foreground/background pair. */
+function ContrastBadge({ fg, bg }: { fg: string; bg: string }) {
+  const ratio = contrastRatio(fg, bg);
+  const level = contrastLevel(ratio);
+  const color = level === 'aaa' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+    : level === 'aa' ? 'bg-blue-500/15 text-blue-700 dark:text-blue-400'
+    : level === 'aa-large' ? 'bg-amber-500/15 text-amber-700 dark:text-amber-500'
+    : 'bg-red-500/15 text-red-700 dark:text-red-400';
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums ${color}`}
+      title={contrastLabel(level)}
+    >
+      {ratio.toFixed(1)}:1
+    </span>
+  );
+}
+
 function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn }: {
   initial?: AppTheme;
   onSave: (theme: AppTheme) => void;
@@ -143,6 +266,13 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn }: {
 }) {
   const [name, setName] = useState(initial?.nameHe || '');
   const [colors, setColors] = useState<ThemeColors>(initial?.colors || { ...DEFAULT_COLORS });
+  const [style, setStyle] = useState<ThemeStyleOptions>(initial?.style || { ...DEFAULT_STYLE });
+  const [showDarkPreview, setShowDarkPreview] = useState(false);
+
+  const resetStyleField = <K extends keyof ThemeStyleOptions>(key: K) => {
+    setStyle(prev => ({ ...prev, [key]: DEFAULT_STYLE[key] }));
+  };
+  const resetAllStyle = () => setStyle({ ...DEFAULT_STYLE });
 
   const updateColor = (key: keyof ThemeColors, hex: string) => {
     if (key === 'iconColor') {
@@ -150,6 +280,10 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn }: {
     } else {
       setColors(prev => ({ ...prev, [key]: hexToHsl(hex) }));
     }
+  };
+
+  const updateStyle = <K extends keyof ThemeStyleOptions>(key: K, value: ThemeStyleOptions[K]) => {
+    setStyle(prev => ({ ...prev, [key]: value }));
   };
 
   const getHex = (key: keyof ThemeColors) => {
@@ -167,7 +301,7 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn }: {
       return;
     }
     const id = initial?.id || `custom-${Date.now()}`;
-    onSave({ id, name: name.trim(), nameHe: name.trim(), colors, isCustom: true });
+    onSave({ id, name: name.trim(), nameHe: name.trim(), colors, style, isCustom: true });
   };
 
   const handleDuplicate = () => {
@@ -180,57 +314,200 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn }: {
       name: name.trim(),
       nameHe: name.trim(),
       colors,
+      style,
       isCustom: true,
     };
     (onDuplicate || onSave)(newTheme);
   };
 
   return (
-    <div className="space-y-4 max-h-[70vh] overflow-y-auto" dir="rtl">
+    <div className="space-y-5 max-h-[75vh] overflow-y-auto pr-1" dir="rtl">
       <div className="space-y-2">
         <Label>שם ערכת הנושא</Label>
         <Input value={name} onChange={e => setName(e.target.value)} placeholder="שם הערכה..." />
       </div>
 
-      {/* Live preview */}
-      <div className="rounded-xl p-4 space-y-2" style={{ backgroundColor: `hsl(${colors.background})`, border: `2px solid hsl(${colors.border})` }}>
-        <div className="text-sm font-bold" style={{ color: `hsl(${colors.foreground})` }}>{name || 'תצוגה מקדימה'}</div>
-        <div className="rounded-lg p-3 space-y-1.5" style={{ backgroundColor: `hsl(${colors.card})`, border: `1px solid hsl(${colors.border})` }}>
-          <div className="text-xs" style={{ color: `hsl(${colors.cardForeground})` }}>כרטיס לדוגמה</div>
-          <div className="flex gap-2">
-            <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: `hsl(${colors.primary})`, color: `hsl(${colors.primaryForeground})` }}>ראשי</div>
-            <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: `hsl(${colors.accent})`, color: `hsl(${colors.accentForeground})` }}>הדגשה</div>
-            <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: `hsl(${colors.secondary})`, color: `hsl(${colors.secondaryForeground})` }}>משני</div>
+      {/* Live preview — single or dual */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-muted-foreground">תצוגה מקדימה חיה</Label>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground" htmlFor="dual-preview">השוואת בהיר/כהה</Label>
+            <Switch id="dual-preview" checked={showDarkPreview} onCheckedChange={setShowDarkPreview} />
           </div>
-          {colors.iconColor && (
-            <div className="flex gap-1 items-center">
-              <Palette className="h-3 w-3" style={{ color: colors.iconColor }} />
-              <span className="text-xs" style={{ color: `hsl(${colors.mutedForeground})` }}>אייקונים</span>
-            </div>
-          )}
+        </div>
+        <div className={showDarkPreview ? 'grid grid-cols-2 gap-3' : ''}>
+          <ThemeLivePreview colors={colors} style={style} name={name || 'תצוגה מקדימה חיה'} variant="light" />
+          {showDarkPreview && <ThemeLivePreview colors={invertColorsForPreview(colors)} style={style} name={`${name || 'תצוגה מקדימה'} (כהה)`} variant="dark" />}
         </div>
       </div>
 
-      {COLOR_GROUPS.map(group => (
-        <div key={group.label} className="space-y-2">
-          <h4 className="text-sm font-semibold text-muted-foreground">{group.label}</h4>
-          <div className="grid grid-cols-2 gap-2">
-            {group.keys.map(({ key, label }) => (
-              <div key={key} className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={getHex(key) || '#daa520'}
-                  onChange={e => updateColor(key, e.target.value)}
-                  className="w-8 h-8 rounded border cursor-pointer"
-                />
-                <span className="text-xs">{label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
+      <Tabs defaultValue="colors" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="colors">🎨 צבעים</TabsTrigger>
+          <TabsTrigger value="style">✨ עיצוב וסגנון</TabsTrigger>
+        </TabsList>
 
-      <div className="flex gap-2 pt-2">
+        <TabsContent value="colors" className="space-y-4 mt-4">
+          {/* WCAG contrast summary */}
+          <div className="rounded-lg border border-border/40 bg-muted/20 p-3 space-y-1.5">
+            <h4 className="text-xs font-semibold text-muted-foreground">בדיקת ניגוד WCAG</h4>
+            <div className="grid grid-cols-2 gap-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span>טקסט ראשי על רקע</span>
+                <ContrastBadge fg={colors.foreground} bg={colors.background} />
+              </div>
+              <div className="flex items-center justify-between">
+                <span>טקסט ראשי על כפתור</span>
+                <ContrastBadge fg={colors.primaryForeground} bg={colors.primary} />
+              </div>
+              <div className="flex items-center justify-between">
+                <span>טקסט הדגשה</span>
+                <ContrastBadge fg={colors.accentForeground} bg={colors.accent} />
+              </div>
+              <div className="flex items-center justify-between">
+                <span>טקסט בכרטיס</span>
+                <ContrastBadge fg={colors.cardForeground} bg={colors.card} />
+              </div>
+            </div>
+            <div className="text-[10px] text-muted-foreground">AA = 4.5:1 · AAA = 7:1 — ניגוד נמוך פוגע בנגישות</div>
+          </div>
+
+          {COLOR_GROUPS.map(group => (
+            <div key={group.label} className="space-y-2.5">
+              <h4 className="text-sm font-semibold text-muted-foreground">{group.label}</h4>
+              <div className="grid grid-cols-2 gap-3">
+                {group.keys.map(({ key, label }) => (
+                  <div key={key} className="flex items-center gap-2.5 rounded-md border border-border/40 p-2 bg-muted/20">
+                    <input
+                      type="color"
+                      value={getHex(key) || '#daa520'}
+                      onChange={e => updateColor(key, e.target.value)}
+                      className="w-9 h-9 rounded border cursor-pointer shrink-0"
+                    />
+                    <span className="text-xs flex-1">{label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </TabsContent>
+
+        <TabsContent value="style" className="space-y-5 mt-4">
+          {/* Reset all */}
+          <div className="flex justify-end">
+            <Button size="sm" variant="ghost" onClick={resetAllStyle} className="gap-1 text-xs h-7">
+              <RotateCcw className="h-3 w-3" />
+              אפס הכל לברירת מחדל
+            </Button>
+          </div>
+
+          {/* Border radius */}
+          <div className="space-y-2 rounded-lg border border-border/40 p-3 bg-muted/20">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm">עיגול פינות</Label>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground tabular-nums">{style.radius ?? 8}px</span>
+                <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => resetStyleField('radius')} title="אפס">
+                  <RotateCcw className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+            <Slider min={0} max={20} step={1} value={[style.radius ?? 8]} onValueChange={(v) => updateStyle('radius', v[0])} />
+            <div className="text-[10px] text-muted-foreground">0 = פינות חדות · 20 = עגול מאוד</div>
+          </div>
+
+          {/* Density */}
+          <div className="space-y-2 rounded-lg border border-border/40 p-3 bg-muted/20">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm">צפיפות הממשק</Label>
+              <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => resetStyleField('density')} title="אפס">
+                <RotateCcw className="h-3 w-3" />
+              </Button>
+            </div>
+            <Select value={style.density || 'comfortable'} onValueChange={(v) => updateStyle('density', v as ThemeStyleOptions['density'])}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="compact">צפוף — חוסך מקום</SelectItem>
+                <SelectItem value="comfortable">רגיל — מומלץ</SelectItem>
+                <SelectItem value="spacious">מרווח — נוח לעין</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Font family */}
+          <div className="space-y-2 rounded-lg border border-border/40 p-3 bg-muted/20">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm">גופן</Label>
+              <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => resetStyleField('fontFamily')} title="אפס">
+                <RotateCcw className="h-3 w-3" />
+              </Button>
+            </div>
+            <Select value={style.fontFamily || 'Assistant, sans-serif'} onValueChange={(v) => updateStyle('fontFamily', v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Assistant, sans-serif">Assistant (ברירת מחדל)</SelectItem>
+                <SelectItem value="'Heebo', sans-serif">Heebo</SelectItem>
+                <SelectItem value="'Rubik', sans-serif">Rubik</SelectItem>
+                <SelectItem value="'Frank Ruhl Libre', serif">Frank Ruhl Libre — מסורתי</SelectItem>
+                <SelectItem value="'David Libre', serif">David Libre — תורני</SelectItem>
+                <SelectItem value="'Noto Sans Hebrew', sans-serif">Noto Sans Hebrew</SelectItem>
+                <SelectItem value="'Open Sans Hebrew', sans-serif">Open Sans Hebrew</SelectItem>
+                <SelectItem value="system-ui, sans-serif">מערכת</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Font size + weight */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2 rounded-lg border border-border/40 p-3 bg-muted/20">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">גודל גופן</Label>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground tabular-nums">{style.fontSize ?? 14}px</span>
+                  <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => resetStyleField('fontSize')} title="אפס">
+                    <RotateCcw className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+              <Slider min={11} max={20} step={1} value={[style.fontSize ?? 14]} onValueChange={(v) => updateStyle('fontSize', v[0])} />
+            </div>
+            <div className="space-y-2 rounded-lg border border-border/40 p-3 bg-muted/20">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">עובי גופן</Label>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground tabular-nums">{style.fontWeight ?? 400}</span>
+                  <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => resetStyleField('fontWeight')} title="אפס">
+                    <RotateCcw className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+              <Slider min={300} max={800} step={100} value={[style.fontWeight ?? 400]} onValueChange={(v) => updateStyle('fontWeight', v[0])} />
+            </div>
+          </div>
+
+          {/* Shadow */}
+          <div className="space-y-2 rounded-lg border border-border/40 p-3 bg-muted/20">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm">צל וטשטוש</Label>
+              <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => resetStyleField('shadow')} title="אפס">
+                <RotateCcw className="h-3 w-3" />
+              </Button>
+            </div>
+            <Select value={style.shadow || 'soft'} onValueChange={(v) => updateStyle('shadow', v as ThemeStyleOptions['shadow'])}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">ללא צל — שטוח</SelectItem>
+                <SelectItem value="soft">עדין — מומלץ</SelectItem>
+                <SelectItem value="medium">בינוני</SelectItem>
+                <SelectItem value="strong">חזק — תלת-ממד</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      <div className="flex gap-2 sticky bottom-0 bg-background border-t border-border/40 -mx-1 px-1 pt-3">
         {/* For custom themes: overwrite + duplicate. For built-in: duplicate only */}
         {!isBuiltIn && (
           <Button onClick={handleOverwrite} className="flex-1">
@@ -247,16 +524,34 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn }: {
 }
 
 export function ThemeManager() {
-  const { activeThemeId, allThemes, setTheme, saveCustomTheme, deleteCustomTheme } = useTheme();
+  const { activeThemeId, allThemes, setTheme, saveCustomTheme, deleteCustomTheme, customThemes } = useTheme();
   const { updatePreferences } = useCloudPreferences();
   const [editingTheme, setEditingTheme] = useState<AppTheme | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [editingBuiltIn, setEditingBuiltIn] = useState<AppTheme | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiDescription, setAiDescription] = useState('');
+  const [aiName, setAiName] = useState('');
+  const [aiPreview, setAiPreview] = useState<AppTheme | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const syncThemeToCloud = (themeId: string) => {
     const customJson = localStorage.getItem('app_custom_themes') || '[]';
     updatePreferences({ theme: themeId, custom_themes: customJson });
   };
+
+  // Toast on cross-device theme update from realtime
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ source?: string; themeId?: string }>).detail;
+      if (detail?.source === 'remote') {
+        const t = allThemes.find(x => x.id === detail.themeId);
+        toast.info(`✨ הערכה עודכנה ממכשיר אחר${t ? `: ${t.nameHe}` : ''}`);
+      }
+    };
+    window.addEventListener('cloud-theme-external-update', handler);
+    return () => window.removeEventListener('cloud-theme-external-update', handler);
+  }, [allThemes]);
 
   const handleSave = (theme: AppTheme) => {
     saveCustomTheme(theme);
@@ -278,36 +573,183 @@ export function ThemeManager() {
     toast.success(`ערכת הנושא "${theme.nameHe}" שוכפלה ונשמרה!`);
   };
 
+  const handleExportActive = () => {
+    const active = allThemes.find(t => t.id === activeThemeId);
+    if (!active) { toast.error('לא נמצאה ערכת נושא פעילה'); return; }
+    const json = exportThemeToJson(active);
+    const safeName = (active.name || 'theme').replace(/[^\w-]+/g, '-');
+    downloadFile(`${safeName}.theme.json`, json);
+    toast.success(`ערכת הנושא "${active.nameHe}" יוצאה`);
+  };
+
+  const handleExportAllCustom = () => {
+    if (customThemes.length === 0) { toast.error('אין ערכות אישיות לייצוא'); return; }
+    const json = JSON.stringify({ __type: 'smart-hebrew-transcriber-themes-bundle', version: 1, themes: customThemes }, null, 2);
+    downloadFile(`themes-bundle-${Date.now()}.json`, json);
+    toast.success(`${customThemes.length} ערכות יוצאו`);
+  };
+
+  const handleImportFile = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      // Bundle?
+      if (Array.isArray(parsed.themes)) {
+        let count = 0;
+        for (const t of parsed.themes) {
+          const imported = importThemeFromJson(JSON.stringify({ theme: t }));
+          if (imported) { saveCustomTheme(imported); count++; }
+        }
+        if (count > 0) { setTimeout(() => syncThemeToCloud(activeThemeId), 100); toast.success(`יובאו ${count} ערכות נושא`); }
+        else toast.error('לא נמצאו ערכות תקינות בקובץ');
+      } else {
+        const imported = importThemeFromJson(text);
+        if (!imported) { toast.error('קובץ לא תקין'); return; }
+        saveCustomTheme(imported);
+        setTheme(imported.id);
+        setTimeout(() => syncThemeToCloud(imported.id), 100);
+        toast.success(`ערכת הנושא "${imported.nameHe}" יובאה והופעלה`);
+      }
+    } catch {
+      toast.error('שגיאה בקריאת הקובץ');
+    }
+  };
+
+  const handleAiGenerate = () => {
+    if (!aiDescription.trim()) { toast.error('הזן תיאור לערכת הנושא'); return; }
+    const generated = generateThemeFromDescription(aiDescription, aiName.trim() || undefined);
+    setAiPreview(generated);
+  };
+
+  const handleAiSave = () => {
+    if (!aiPreview) return;
+    saveCustomTheme(aiPreview);
+    setTheme(aiPreview.id);
+    setTimeout(() => syncThemeToCloud(aiPreview.id), 100);
+    toast.success(`ערכת AI "${aiPreview.nameHe}" נוצרה ונשמרה!`);
+    setAiOpen(false);
+    setAiDescription('');
+    setAiName('');
+    setAiPreview(null);
+  };
+
   return (
-    <div className="space-y-6" dir="rtl">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8" dir="rtl">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h3 className="text-lg font-semibold flex items-center gap-2">
             <Palette className="h-5 w-5" />
             ערכות נושא
           </h3>
-          <p className="text-sm text-muted-foreground">בחר ערכת נושא או צור אחת משלך</p>
+          <p className="text-sm text-muted-foreground">בחר ערכת נושא, ערוך צבעים וסגנון — הכל מסתנכרן אוטומטית בין מכשירים <kbd className="px-1.5 py-0.5 text-[10px] rounded bg-muted border ml-1">Ctrl+Shift+T</kbd></p>
         </div>
-        <Dialog open={isCreating} onOpenChange={setIsCreating}>
-          <DialogTrigger asChild>
-            <Button variant="outline" className="gap-2">
-              <Plus className="h-4 w-4" />
-              ערכה חדשה
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg" dir="rtl">
-            <DialogHeader>
-              <DialogTitle>יצירת ערכת נושא חדשה</DialogTitle>
-            </DialogHeader>
-            <ThemeEditor onSave={handleSave} onDuplicate={handleDuplicate} onCancel={() => setIsCreating(false)} />
-          </DialogContent>
-        </Dialog>
+        <div className="flex flex-wrap gap-2">
+          {/* AI Generator */}
+          <Dialog open={aiOpen} onOpenChange={(open) => { setAiOpen(open); if (!open) setAiPreview(null); }}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="gap-2">
+                <Sparkles className="h-4 w-4" />
+                יצירה עם AI
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-xl" dir="rtl">
+              <DialogHeader>
+                <DialogTitle>יצירת ערכת נושא עם AI</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label>תאר את הערכה</Label>
+                  <Textarea
+                    rows={3}
+                    placeholder="לדוגמה: ערכה חמה בסגנון תורני · ערכה כהה ומודרנית · פסטל רך · יוקרתי בזהב..."
+                    value={aiDescription}
+                    onChange={e => setAiDescription(e.target.value)}
+                  />
+                  <div className="text-[10px] text-muted-foreground">מילות מפתח שעובדות: כהה/לילה · חם/אדום · קר/כחול/ים · ירוק/טבע · סגול/מלכותי · זהב/יוקרה · תורני/חרדי · מינימליסט</div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>שם ערכה (לא חובה)</Label>
+                  <Input value={aiName} onChange={e => setAiName(e.target.value)} placeholder="הערכה שלי..." />
+                </div>
+                <Button onClick={handleAiGenerate} className="w-full gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  צור ערכה
+                </Button>
+                {aiPreview && (
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">תצוגה מקדימה</Label>
+                    <ThemeLivePreview colors={aiPreview.colors} style={aiPreview.style || DEFAULT_STYLE} name={aiPreview.nameHe} variant="light" />
+                    <Button onClick={handleAiSave} className="w-full">שמור והפעל ערכה זו</Button>
+                  </div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Import */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleImportFile(f);
+              if (e.target) e.target.value = '';
+            }}
+          />
+          <Button variant="outline" className="gap-2" onClick={() => fileInputRef.current?.click()}>
+            <Upload className="h-4 w-4" />
+            ייבוא
+          </Button>
+
+          {/* Export */}
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="gap-2">
+                <Download className="h-4 w-4" />
+                ייצוא
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md" dir="rtl">
+              <DialogHeader>
+                <DialogTitle>ייצוא ערכות נושא</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-2">
+                <Button variant="outline" className="w-full justify-start gap-2" onClick={handleExportActive}>
+                  <Download className="h-4 w-4" />
+                  ייצא את הערכה הפעילה
+                </Button>
+                <Button variant="outline" className="w-full justify-start gap-2" onClick={handleExportAllCustom} disabled={customThemes.length === 0}>
+                  <Download className="h-4 w-4" />
+                  ייצא חבילה: כל הערכות האישיות ({customThemes.length})
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Create new */}
+          <Dialog open={isCreating} onOpenChange={setIsCreating}>
+            <DialogTrigger asChild>
+              <Button className="gap-2">
+                <Plus className="h-4 w-4" />
+                ערכה חדשה
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl" dir="rtl">
+              <DialogHeader>
+                <DialogTitle>יצירת ערכת נושא חדשה</DialogTitle>
+              </DialogHeader>
+              <ThemeEditor onSave={handleSave} onDuplicate={handleDuplicate} onCancel={() => setIsCreating(false)} />
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Built-in themes */}
-      <div className="space-y-2">
+      <div className="space-y-3">
         <h4 className="text-sm font-semibold text-muted-foreground">ערכות מובנות</h4>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {BUILT_IN_THEMES.map(theme => (
             <div key={theme.id} className="relative group">
               <ThemePreview
@@ -322,7 +764,7 @@ export function ThemeManager() {
                       <Pencil className="h-3 w-3" />
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-lg" dir="rtl">
+                  <DialogContent className="max-w-2xl" dir="rtl">
                     <DialogHeader>
                       <DialogTitle>עריכת "{theme.nameHe}" — שכפול כערכה חדשה</DialogTitle>
                     </DialogHeader>
@@ -343,9 +785,9 @@ export function ThemeManager() {
 
       {/* Custom themes */}
       {allThemes.filter(t => t.isCustom).length > 0 && (
-        <div className="space-y-2">
+        <div className="space-y-3">
           <h4 className="text-sm font-semibold text-muted-foreground">ערכות אישיות</h4>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             {allThemes.filter(t => t.isCustom).map(theme => (
               <div key={theme.id} className="relative group">
                 <ThemePreview
@@ -360,7 +802,7 @@ export function ThemeManager() {
                         <Pencil className="h-3 w-3" />
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-lg" dir="rtl">
+                    <DialogContent className="max-w-2xl" dir="rtl">
                       <DialogHeader>
                         <DialogTitle>עריכת ערכת נושא</DialogTitle>
                       </DialogHeader>

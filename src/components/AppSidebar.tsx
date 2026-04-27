@@ -30,6 +30,7 @@ import {
   SlidersHorizontal,
   Wand2,
   AudioLines,
+  Video,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -51,6 +52,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: "דשבורד", icon: LayoutDashboard, path: "/" },
   { label: "תמלול", icon: Mic, path: "/transcribe" },
+  { label: "מקליט פגישות", icon: Video, path: "/meeting-recorder" },
   { label: "סטודיו קול", icon: Waves, path: "/voice-studio" },
   { label: "אודסיטי לאב", icon: SlidersHorizontal, path: "/audacity-lab" },
   { label: "ניקוי קול", icon: Wand2, path: "/audio-clean" },

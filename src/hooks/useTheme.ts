@@ -31,11 +31,30 @@ export interface ThemeColors {
   iconColor: string;
 }
 
+/** Non-color visual style options. All optional for backward-compat. */
+export interface ThemeStyleOptions {
+  /** Border radius in px (applied as --radius). 0 = sharp, 16 = very rounded. */
+  radius?: number;
+  /** UI density. compact = -2px padding, comfortable = default, spacious = +4px. */
+  density?: 'compact' | 'comfortable' | 'spacious';
+  /** App-wide font family (CSS font-family value). */
+  fontFamily?: string;
+  /** Default text color (CSS value, optional override). */
+  textColor?: string;
+  /** Shadow intensity. */
+  shadow?: 'none' | 'soft' | 'medium' | 'strong';
+  /** Base font size in px. */
+  fontSize?: number;
+  /** Default font weight (300–800). */
+  fontWeight?: number;
+}
+
 export interface AppTheme {
   id: string;
   name: string;
   nameHe: string;
   colors: ThemeColors;
+  style?: ThemeStyleOptions;
   isCustom?: boolean;
 }
 
@@ -251,6 +270,178 @@ export const BUILT_IN_THEMES: AppTheme[] = [
       iconColor: '',
     },
   },
+  {
+    id: 'haredi-classic',
+    name: 'Haredi Classic',
+    nameHe: 'חרדי קלאסי',
+    colors: {
+      background: '40 25% 97%',
+      foreground: '0 0% 8%',
+      card: '40 30% 99%',
+      cardForeground: '0 0% 8%',
+      popover: '40 30% 99%',
+      popoverForeground: '0 0% 8%',
+      primary: '0 0% 12%',
+      primaryForeground: '40 25% 98%',
+      secondary: '40 20% 92%',
+      secondaryForeground: '0 0% 8%',
+      muted: '40 18% 94%',
+      mutedForeground: '0 0% 35%',
+      accent: '15 60% 35%',
+      accentForeground: '40 25% 98%',
+      destructive: '0 70% 45%',
+      destructiveForeground: '40 25% 98%',
+      border: '40 25% 82%',
+      input: '40 22% 88%',
+      ring: '0 0% 12%',
+      sidebarBackground: '40 30% 99%',
+      sidebarForeground: '0 0% 8%',
+      sidebarPrimary: '0 0% 12%',
+      sidebarPrimaryForeground: '40 25% 98%',
+      sidebarAccent: '40 20% 94%',
+      sidebarAccentForeground: '0 0% 8%',
+      sidebarBorder: '40 25% 82%',
+      sidebarRing: '0 0% 12%',
+      iconColor: '',
+    },
+    style: {
+      radius: 4,
+      density: 'comfortable',
+      fontFamily: "'Frank Ruhl Libre', serif",
+      fontSize: 16,
+      fontWeight: 400,
+      shadow: 'none',
+    },
+  },
+  {
+    id: 'modern-tech',
+    name: 'Modern Tech',
+    nameHe: 'הייטק מודרני',
+    colors: {
+      background: '210 30% 98%',
+      foreground: '210 50% 12%',
+      card: '0 0% 100%',
+      cardForeground: '210 50% 12%',
+      popover: '0 0% 100%',
+      popoverForeground: '210 50% 12%',
+      primary: '195 95% 45%',
+      primaryForeground: '0 0% 100%',
+      secondary: '210 25% 93%',
+      secondaryForeground: '210 50% 12%',
+      muted: '210 20% 95%',
+      mutedForeground: '210 15% 45%',
+      accent: '270 80% 60%',
+      accentForeground: '0 0% 100%',
+      destructive: '0 75% 55%',
+      destructiveForeground: '0 0% 100%',
+      border: '210 25% 88%',
+      input: '210 25% 88%',
+      ring: '195 95% 45%',
+      sidebarBackground: '210 30% 98%',
+      sidebarForeground: '210 50% 12%',
+      sidebarPrimary: '195 95% 45%',
+      sidebarPrimaryForeground: '0 0% 100%',
+      sidebarAccent: '210 25% 95%',
+      sidebarAccentForeground: '210 50% 12%',
+      sidebarBorder: '210 25% 88%',
+      sidebarRing: '195 95% 45%',
+      iconColor: '',
+    },
+    style: {
+      radius: 12,
+      density: 'comfortable',
+      fontFamily: "'Heebo', sans-serif",
+      fontSize: 14,
+      fontWeight: 400,
+      shadow: 'medium',
+    },
+  },
+  {
+    id: 'soft-pastel',
+    name: 'Soft Pastel',
+    nameHe: 'פסטל רך',
+    colors: {
+      background: '340 30% 98%',
+      foreground: '340 40% 18%',
+      card: '0 0% 100%',
+      cardForeground: '340 40% 18%',
+      popover: '0 0% 100%',
+      popoverForeground: '340 40% 18%',
+      primary: '340 60% 55%',
+      primaryForeground: '0 0% 100%',
+      secondary: '340 25% 93%',
+      secondaryForeground: '340 40% 18%',
+      muted: '340 20% 95%',
+      mutedForeground: '340 15% 45%',
+      accent: '180 50% 55%',
+      accentForeground: '0 0% 100%',
+      destructive: '0 70% 60%',
+      destructiveForeground: '0 0% 100%',
+      border: '340 25% 88%',
+      input: '340 25% 88%',
+      ring: '340 60% 55%',
+      sidebarBackground: '340 30% 98%',
+      sidebarForeground: '340 40% 18%',
+      sidebarPrimary: '340 60% 55%',
+      sidebarPrimaryForeground: '0 0% 100%',
+      sidebarAccent: '340 25% 95%',
+      sidebarAccentForeground: '340 40% 18%',
+      sidebarBorder: '340 25% 88%',
+      sidebarRing: '340 60% 55%',
+      iconColor: '',
+    },
+    style: {
+      radius: 16,
+      density: 'spacious',
+      fontFamily: "'Rubik', sans-serif",
+      fontSize: 15,
+      fontWeight: 400,
+      shadow: 'soft',
+    },
+  },
+  {
+    id: 'earth-warm',
+    name: 'Earth Warm',
+    nameHe: 'אדמה חמה',
+    colors: {
+      background: '30 25% 95%',
+      foreground: '25 50% 15%',
+      card: '30 30% 98%',
+      cardForeground: '25 50% 15%',
+      popover: '30 30% 98%',
+      popoverForeground: '25 50% 15%',
+      primary: '25 70% 35%',
+      primaryForeground: '30 30% 98%',
+      secondary: '30 20% 88%',
+      secondaryForeground: '25 50% 15%',
+      muted: '30 15% 91%',
+      mutedForeground: '25 25% 35%',
+      accent: '15 65% 50%',
+      accentForeground: '30 30% 98%',
+      destructive: '0 70% 45%',
+      destructiveForeground: '30 30% 98%',
+      border: '30 22% 82%',
+      input: '30 22% 85%',
+      ring: '25 70% 35%',
+      sidebarBackground: '30 30% 98%',
+      sidebarForeground: '25 50% 15%',
+      sidebarPrimary: '25 70% 35%',
+      sidebarPrimaryForeground: '30 30% 98%',
+      sidebarAccent: '30 20% 92%',
+      sidebarAccentForeground: '25 50% 15%',
+      sidebarBorder: '30 22% 82%',
+      sidebarRing: '25 70% 35%',
+      iconColor: '',
+    },
+    style: {
+      radius: 6,
+      density: 'comfortable',
+      fontFamily: "'Noto Sans Hebrew', sans-serif",
+      fontSize: 14,
+      fontWeight: 500,
+      shadow: 'soft',
+    },
+  },
 ];
 
 const CSS_VAR_MAP: Record<keyof ThemeColors, string> = {
@@ -284,7 +475,7 @@ const CSS_VAR_MAP: Record<keyof ThemeColors, string> = {
   iconColor: '--icon-color',
 };
 
-function applyThemeToDOM(colors: ThemeColors) {
+function applyThemeToDOM(colors: ThemeColors, style?: ThemeStyleOptions) {
   const root = document.documentElement;
   for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) {
     const value = colors[key as keyof ThemeColors];
@@ -294,6 +485,36 @@ function applyThemeToDOM(colors: ThemeColors) {
       root.style.setProperty(cssVar, value);
     }
   }
+
+  // ── Apply style options ──
+  const s = style || {};
+  if (typeof s.radius === 'number') {
+    root.style.setProperty('--radius', `${s.radius}px`);
+  } else {
+    root.style.removeProperty('--radius');
+  }
+  // Density → base padding scale
+  const density = s.density || 'comfortable';
+  const densityScale = density === 'compact' ? '0.85' : density === 'spacious' ? '1.15' : '1';
+  root.style.setProperty('--density-scale', densityScale);
+  root.dataset.density = density;
+
+  if (s.fontFamily) root.style.setProperty('--app-font-family', s.fontFamily);
+  else root.style.removeProperty('--app-font-family');
+  if (typeof s.fontSize === 'number') root.style.setProperty('--app-font-size', `${s.fontSize}px`);
+  else root.style.removeProperty('--app-font-size');
+  if (typeof s.fontWeight === 'number') root.style.setProperty('--app-font-weight', String(s.fontWeight));
+  else root.style.removeProperty('--app-font-weight');
+  if (s.textColor) root.style.setProperty('--app-text-color', s.textColor);
+  else root.style.removeProperty('--app-text-color');
+
+  const shadowMap: Record<string, string> = {
+    none: 'none',
+    soft: '0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06)',
+    medium: '0 4px 6px -1px rgb(0 0 0 / 0.10), 0 2px 4px -2px rgb(0 0 0 / 0.10)',
+    strong: '0 20px 25px -5px rgb(0 0 0 / 0.18), 0 8px 10px -6px rgb(0 0 0 / 0.18)',
+  };
+  root.style.setProperty('--app-shadow', shadowMap[s.shadow || 'soft']);
 }
 
 export function useTheme() {
@@ -310,7 +531,7 @@ export function useTheme() {
       setActiveThemeId(savedId);
       const all = [...BUILT_IN_THEMES, ...customs];
       const theme = all.find(t => t.id === savedId) || BUILT_IN_THEMES[0];
-      applyThemeToDOM(theme.colors);
+      applyThemeToDOM(theme.colors, theme.style);
     };
     applyFromStorage();
     // Re-apply when cloud preferences load (may have different theme)
@@ -326,7 +547,8 @@ export function useTheme() {
     if (!theme) return;
     setActiveThemeId(themeId);
     localStorage.setItem('app_theme_id', themeId);
-    applyThemeToDOM(theme.colors);
+    localStorage.setItem('app_theme_updated_at', String(Date.now()));
+    applyThemeToDOM(theme.colors, theme.style);
   }, [customThemes]);
 
   const saveCustomTheme = useCallback((theme: AppTheme) => {
@@ -336,6 +558,7 @@ export function useTheme() {
         ? prev.map(t => t.id === theme.id ? { ...theme, isCustom: true } : t)
         : [...prev, { ...theme, isCustom: true }];
       localStorage.setItem('app_custom_themes', JSON.stringify(updated));
+      localStorage.setItem('app_theme_updated_at', String(Date.now()));
       return updated;
     });
   }, []);
@@ -344,6 +567,7 @@ export function useTheme() {
     setCustomThemes(prev => {
       const updated = prev.filter(t => t.id !== themeId);
       localStorage.setItem('app_custom_themes', JSON.stringify(updated));
+      localStorage.setItem('app_theme_updated_at', String(Date.now()));
       return updated;
     });
     if (activeThemeId === themeId) {

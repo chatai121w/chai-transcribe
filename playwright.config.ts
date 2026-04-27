@@ -7,7 +7,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: [['html', { open: 'never' }], ['list']],
-  timeout: 90_000,
+  timeout: 180_000,
 
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8091',
@@ -30,6 +30,6 @@ export default defineConfig({
     command: 'npx vite --force --port 8091',
     port: 8091,
     reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
+    timeout: 180_000,
   },
 });

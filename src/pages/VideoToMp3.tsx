@@ -81,6 +81,8 @@ import {
   History,
   Check,
   X,
+  Minus,
+  Maximize2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -326,6 +328,7 @@ export default function VideoToMp3() {
   const [isDragging, setIsDragging] = useState(false);
   const [ffmpegReady, setFfmpegReady] = useState(false);
   const [promptJob, setPromptJob] = useState<ConversionJob | null>(null);
+  const [promptMinimized, setPromptMinimized] = useState(false);
   const [enhanceTarget, setEnhanceTarget] = useState<ConversionJob | null>(null);
   const [enhanceQueueJobs, setEnhanceQueueJobs] = useState<EnhanceQueueJob[]>(() => getEnhanceQueueJobs());
   const [saveAndTranscribeBusyId, setSaveAndTranscribeBusyId] = useState<string | null>(null);
@@ -1324,62 +1327,112 @@ export default function VideoToMp3() {
         </TabsContent>
       </Tabs>
 
-      {/* Post-conversion prompt dialog */}
-      <Dialog open={!!promptJob} onOpenChange={(open) => !open && setPromptJob(null)}>
-        <DialogContent className="sm:max-w-lg" dir="rtl">
-          <DialogHeader className="text-center sm:text-right">
-            <DialogTitle className="flex items-center gap-2 justify-center sm:justify-start text-lg">
-              <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
-              ההמרה הושלמה!
-            </DialogTitle>
-            <DialogDescription className="text-center sm:text-right mt-1">
-              <span className="font-medium break-all">{promptJob ? getOutputFileName(promptJob.fileName, promptJob.outputFormat) : ""}</span>
-              {promptJob?.outputBlob && (
-                <span className="text-muted-foreground"> ({formatBytes(promptJob.outputBlob.size)})</span>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground text-center sm:text-right">
-            מה תרצה לעשות עם הקובץ?
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+      {/* Post-conversion prompt — non-blocking floating panel (minimizable) */}
+      {promptJob && (
+        promptMinimized ? (
+          <div className="fixed bottom-4 left-4 z-50">
             <Button
-              className="gap-2 w-full"
-              disabled={!promptJob || saveAndTranscribeBusyId === promptJob?.id}
-              onClick={() => {
-                if (promptJob) void handleSaveAndTranscribe(promptJob);
-              }}
-            >
-              {saveAndTranscribeBusyId === promptJob?.id ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Save className="w-4 h-4" />
-              )}
-              שמור + תמלל + ענן
-            </Button>
-            <Button
-              className="gap-2 w-full"
+              size="sm"
               variant="secondary"
-              onClick={() => {
-                if (promptJob) handleTranscribe(promptJob);
-              }}
+              className="gap-2 shadow-lg border"
+              onClick={() => setPromptMinimized(false)}
+              dir="rtl"
             >
-              <Mic className="w-4 h-4" />
-              תמלל את הקובץ
-            </Button>
-            <Button
-              variant="outline"
-              className="gap-2 w-full"
-              onClick={() => {
-                if (promptJob) handleSaveMp3(promptJob);
-              }}
-            >
-              <Save className="w-4 h-4" />
-              שמור קובץ
+              <Maximize2 className="w-4 h-4" />
+              <CheckCircle2 className="w-4 h-4 text-green-500" />
+              <span className="max-w-[180px] truncate">
+                {getOutputFileName(promptJob.fileName, promptJob.outputFormat)}
+              </span>
             </Button>
           </div>
-        </DialogContent>
-      </Dialog>
+        ) : (
+          <div
+            className="fixed bottom-4 left-4 z-50 w-[calc(100vw-2rem)] sm:w-[28rem] rounded-lg border bg-background shadow-2xl"
+            dir="rtl"
+            role="dialog"
+            aria-label="ההמרה הושלמה"
+          >
+            <div className="flex items-start justify-between gap-2 p-4 pb-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-semibold text-sm">ההמרה הושלמה!</div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    <span className="font-medium break-all">
+                      {getOutputFileName(promptJob.fileName, promptJob.outputFormat)}
+                    </span>
+                    {promptJob.outputBlob && (
+                      <span> ({formatBytes(promptJob.outputBlob.size)})</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => setPromptMinimized(true)}
+                  title="מזער"
+                  aria-label="מזער"
+                >
+                  <Minus className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => {
+                    setPromptJob(null);
+                    setPromptMinimized(false);
+                  }}
+                  title="סגור"
+                  aria-label="סגור"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="px-4 pb-4">
+              <p className="text-xs text-muted-foreground mb-2">
+                מה תרצה לעשות עם הקובץ? (הפעולות ימשיכו ברקע גם אם תסגור)
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <Button
+                  className="gap-2 w-full"
+                  disabled={saveAndTranscribeBusyId === promptJob.id}
+                  onClick={() => {
+                    void handleSaveAndTranscribe(promptJob);
+                  }}
+                >
+                  {saveAndTranscribeBusyId === promptJob.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  שמור + תמלל + ענן
+                </Button>
+                <Button
+                  className="gap-2 w-full"
+                  variant="secondary"
+                  onClick={() => handleTranscribe(promptJob)}
+                >
+                  <Mic className="w-4 h-4" />
+                  תמלל את הקובץ
+                </Button>
+                <Button
+                  variant="outline"
+                  className="gap-2 w-full"
+                  onClick={() => handleSaveMp3(promptJob)}
+                >
+                  <Save className="w-4 h-4" />
+                  שמור קובץ
+                </Button>
+              </div>
+            </div>
+          </div>
+        )
+      )}
 
       <AudioEnhanceDialog
         open={!!enhanceTarget}
