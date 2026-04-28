@@ -974,6 +974,7 @@ const TextEditor = () => {
               visibility={playerWidgetVisible}
               onMove={movePlayerWidget}
               onToggleVisible={togglePlayerWidget}
+              onApplyProfile={applyLayoutProfile}
             />
 
             {/* Floating EQ window */}
