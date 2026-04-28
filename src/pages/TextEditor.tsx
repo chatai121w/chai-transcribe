@@ -213,6 +213,50 @@ const TextEditor = () => {
   const toggleEqFloating = useCallback(() => setIsEqFloating(p => !p), []);
   const [eqPortalTarget, setEqPortalTarget] = useState<HTMLDivElement | null>(null);
 
+  // Player tab widget order + visibility (persisted in localStorage)
+  const PLAYER_WIDGETS = useMemo(() => ([
+    { id: 'player', label: 'נגן אודיו', emoji: '🎧' },
+    { id: 'transcript', label: 'תמלול מסונכרן', emoji: '📝' },
+    { id: 'editable', label: 'עריכה מסונכרנת', emoji: '✏️' },
+  ]), []);
+  const DEFAULT_WIDGET_ORDER = ['player', 'transcript', 'editable'];
+  const [playerWidgetOrder, setPlayerWidgetOrder] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('player_widget_order');
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed) && parsed.every(x => typeof x === 'string')) {
+        // ensure all default widgets present
+        const merged = [...parsed.filter(id => DEFAULT_WIDGET_ORDER.includes(id))];
+        DEFAULT_WIDGET_ORDER.forEach(id => { if (!merged.includes(id)) merged.push(id); });
+        return merged;
+      }
+    } catch {}
+    return DEFAULT_WIDGET_ORDER;
+  });
+  const [playerWidgetVisible, setPlayerWidgetVisible] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem('player_widget_visible');
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed === 'object') return { player: true, transcript: true, editable: true, ...parsed };
+    } catch {}
+    return { player: true, transcript: true, editable: true };
+  });
+  useEffect(() => { localStorage.setItem('player_widget_order', JSON.stringify(playerWidgetOrder)); }, [playerWidgetOrder]);
+  useEffect(() => { localStorage.setItem('player_widget_visible', JSON.stringify(playerWidgetVisible)); }, [playerWidgetVisible]);
+  const movePlayerWidget = useCallback((id: string, dir: -1 | 1) => {
+    setPlayerWidgetOrder(prev => {
+      const idx = prev.indexOf(id);
+      const newIdx = idx + dir;
+      if (idx < 0 || newIdx < 0 || newIdx >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
+      return next;
+    });
+  }, []);
+  const togglePlayerWidget = useCallback((id: string) => {
+    setPlayerWidgetVisible(prev => ({ ...prev, [id]: !(prev[id] !== false) }));
+  }, []);
+
   // Search in transcript
   const [transcriptSearchOpen, setTranscriptSearchOpen] = useState(false);
   const [transcriptSearchQuery, setTranscriptSearchQuery] = useState("");
