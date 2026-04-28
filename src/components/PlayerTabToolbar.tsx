@@ -355,7 +355,7 @@ export function PlayerTabToolbar({
                 עוד
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" dir="rtl" className="w-56 rounded-xl">
+            <DropdownMenuContent align="start" className="w-56 rounded-xl" style={{ direction: 'rtl' }}>
               <DropdownMenuLabel className="text-xs text-muted-foreground">חלונות צפים</DropdownMenuLabel>
               <DropdownMenuItem onClick={onTogglePlayerFloating} className="gap-2 text-sm">
                 <PictureInPicture2 className="w-4 h-4" />
