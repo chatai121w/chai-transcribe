@@ -3416,7 +3416,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                     return (
                       <button
                         key={preset.id}
-                        className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] transition-all
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all
                           ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}
                         `}
                         onClick={() => {
@@ -3487,7 +3487,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                       return (
                         <div key={up.id} className="flex items-center gap-0.5 group/upreset">
                           <button
-                            className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] transition-all
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all
                               ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}
                             `}
                             onClick={() => loadUserEqPreset(up)}
