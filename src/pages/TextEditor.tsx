@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
-import { PlayerTabToolbar } from "@/components/PlayerTabToolbar";
+import { PlayerTabToolbar, type LayoutProfile } from "@/components/PlayerTabToolbar";
 import { debugLog } from "@/lib/debugLogger";
 import type { TextVersion } from "@/components/TextEditHistory";
 import type { WordTiming } from "@/components/SyncAudioPlayer";
@@ -257,6 +257,15 @@ const TextEditor = () => {
   const togglePlayerWidget = useCallback((id: string) => {
     setPlayerWidgetVisible(prev => ({ ...prev, [id]: !(prev[id] !== false) }));
   }, []);
+
+  const applyLayoutProfile = useCallback((p: LayoutProfile) => {
+    setPlayerLayout(p.layout);
+    setFontSize(p.fontSize);
+    setPlayerWidgetOrder([...p.order]);
+    setPlayerWidgetVisible({ ...p.visibility });
+    if (typeof p.isPlayerFloating === 'boolean') setIsPlayerFloating(p.isPlayerFloating);
+    if (typeof p.isEqFloating === 'boolean') setIsEqFloating(p.isEqFloating);
+  }, [setPlayerLayout, setFontSize]);
 
   // Search in transcript
   const [transcriptSearchOpen, setTranscriptSearchOpen] = useState(false);
@@ -965,6 +974,7 @@ const TextEditor = () => {
               visibility={playerWidgetVisible}
               onMove={movePlayerWidget}
               onToggleVisible={togglePlayerWidget}
+              onApplyProfile={applyLayoutProfile}
             />
 
             {/* Floating EQ window */}
