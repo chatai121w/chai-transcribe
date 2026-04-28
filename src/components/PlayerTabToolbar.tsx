@@ -186,7 +186,7 @@ function WidgetsMenu({
           ווידג'טים
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" dir="rtl" className="w-72 rounded-xl p-2">
+      <DropdownMenuContent align="start" className="w-72 rounded-xl p-2" style={{ direction: 'rtl' }}>
         <DropdownMenuLabel className="text-xs text-muted-foreground">
           סדר ונראות הווידג'טים — גרור או השתמש בחיצים
         </DropdownMenuLabel>
