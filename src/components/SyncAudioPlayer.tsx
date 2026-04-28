@@ -3252,6 +3252,38 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                     <TooltipContent side="bottom">הפעל מיקסר/אקולייזר — ייפתח לרוחב מלא</TooltipContent>
                   </Tooltip>
                 </div>
+              ) : (!eqWide && !isMixerFullscreen && !eqFloating) ? (
+                /* Mixer is open but layout is too narrow — prompt to widen */
+                <div className="flex flex-col gap-3 rounded-2xl border border-yellow-500/40 bg-yellow-500/5 p-5 text-center">
+                  <div className="flex items-center justify-center gap-2 text-sm font-semibold">
+                    <AudioLines className="w-4 h-4 text-yellow-600 no-theme-icon" />
+                    המיקסר זמין רק בפריסה רחבה
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed max-w-md mx-auto">
+                    כדי להציג את כל הפונקציות באופן אוורירי, עבור לפריסה <strong>"רחבה"</strong> או <strong>"אקולייזר פרוס"</strong>,
+                    או לחץ על "מסך מלא".
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1.5 border-yellow-500/50 hover:bg-yellow-500/10"
+                      onClick={() => setIsMixerFullscreen(true)}
+                    >
+                      <Maximize2 className="w-3.5 h-3.5 no-theme-icon" />
+                      פתח במסך מלא
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 gap-1.5 text-muted-foreground"
+                      onClick={() => setIsEqPanelOpen(false)}
+                    >
+                      <Power className="w-3.5 h-3.5 no-theme-icon" />
+                      כבה מיקסר
+                    </Button>
+                  </div>
+                </div>
               ) : (
                 <>
               {mixerPanel}
