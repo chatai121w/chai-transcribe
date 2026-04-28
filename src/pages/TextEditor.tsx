@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
+import { PlayerTabToolbar } from "@/components/PlayerTabToolbar";
 import { debugLog } from "@/lib/debugLogger";
 import type { TextVersion } from "@/components/TextEditHistory";
 import type { WordTiming } from "@/components/SyncAudioPlayer";
