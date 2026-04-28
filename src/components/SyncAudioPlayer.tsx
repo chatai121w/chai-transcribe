@@ -3374,12 +3374,12 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
                 {/* EQ Slider Theme Selector */}
                 {!isMixerConsoleCollapsed && (
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[10px] text-muted-foreground font-medium">עיצוב:</span>
+                  <div className="flex items-center gap-2 flex-wrap pt-1">
+                    <span className="text-xs text-muted-foreground font-medium ml-1">עיצוב:</span>
                     {EQ_SLIDER_THEMES.map((t) => (
                       <button
                         key={t.id}
-                        className={`px-1.5 py-0.5 rounded text-[9px] transition-all ${
+                        className={`px-2.5 py-1 rounded-lg text-[11px] transition-all ${
                           eqSliderTheme === t.id ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-muted hover:bg-muted/80 text-muted-foreground'
                         }`}
                         onClick={() => setEqSliderTheme(t.id)}
@@ -3397,7 +3397,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                   <>
 
                 {/* EQ Presets */}
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-2 pt-1">
                   {[
                     { id: 'flat', label: 'שטוח', icon: '⚖️', values: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
                     { id: 'clear-speech', label: 'דיבור ברור', icon: '🎙️', values: [-3, -2, -1, 0, 2, 4, 6, 4, 2, 0] },
