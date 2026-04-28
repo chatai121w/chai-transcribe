@@ -5,7 +5,6 @@ import App from "./App.tsx";
 import { TauriSetupGate } from "./components/TauriSetupGate";
 import "./index.css";
 import "react-grid-layout/css/styles.css";
-import "react-resizable/css/styles.css";
 import "./styles/studio-grid.css";
 
 // Clean up stale localStorage entries (word timings can be huge)
