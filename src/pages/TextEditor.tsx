@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
+import { PlayerTabToolbar } from "@/components/PlayerTabToolbar";
 import { debugLog } from "@/lib/debugLogger";
 import type { TextVersion } from "@/components/TextEditHistory";
 import type { WordTiming } from "@/components/SyncAudioPlayer";
@@ -212,6 +213,50 @@ const TextEditor = () => {
   const [isEqFloating, setIsEqFloating] = useState(false);
   const toggleEqFloating = useCallback(() => setIsEqFloating(p => !p), []);
   const [eqPortalTarget, setEqPortalTarget] = useState<HTMLDivElement | null>(null);
+
+  // Player tab widget order + visibility (persisted in localStorage)
+  const PLAYER_WIDGETS = useMemo(() => ([
+    { id: 'player', label: 'נגן אודיו', emoji: '🎧' },
+    { id: 'transcript', label: 'תמלול מסונכרן', emoji: '📝' },
+    { id: 'editable', label: 'עריכה מסונכרנת', emoji: '✏️' },
+  ]), []);
+  const DEFAULT_WIDGET_ORDER = ['player', 'transcript', 'editable'];
+  const [playerWidgetOrder, setPlayerWidgetOrder] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('player_widget_order');
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed) && parsed.every(x => typeof x === 'string')) {
+        // ensure all default widgets present
+        const merged = [...parsed.filter(id => DEFAULT_WIDGET_ORDER.includes(id))];
+        DEFAULT_WIDGET_ORDER.forEach(id => { if (!merged.includes(id)) merged.push(id); });
+        return merged;
+      }
+    } catch {}
+    return DEFAULT_WIDGET_ORDER;
+  });
+  const [playerWidgetVisible, setPlayerWidgetVisible] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem('player_widget_visible');
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed === 'object') return { player: true, transcript: true, editable: true, ...parsed };
+    } catch {}
+    return { player: true, transcript: true, editable: true };
+  });
+  useEffect(() => { localStorage.setItem('player_widget_order', JSON.stringify(playerWidgetOrder)); }, [playerWidgetOrder]);
+  useEffect(() => { localStorage.setItem('player_widget_visible', JSON.stringify(playerWidgetVisible)); }, [playerWidgetVisible]);
+  const movePlayerWidget = useCallback((id: string, dir: -1 | 1) => {
+    setPlayerWidgetOrder(prev => {
+      const idx = prev.indexOf(id);
+      const newIdx = idx + dir;
+      if (idx < 0 || newIdx < 0 || newIdx >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
+      return next;
+    });
+  }, []);
+  const togglePlayerWidget = useCallback((id: string) => {
+    setPlayerWidgetVisible(prev => ({ ...prev, [id]: !(prev[id] !== false) }));
+  }, []);
 
   // Search in transcript
   const [transcriptSearchOpen, setTranscriptSearchOpen] = useState(false);
@@ -903,111 +948,24 @@ const TextEditor = () => {
             );
           })()}
 
-          <TabsContent value="player" className="space-y-6">
+          <TabsContent value="player" className="space-y-8">
             <LazyErrorBoundary label="נגן מסונכרן">
-            {/* Layout toggle */}
-            <div className="flex justify-end mb-2 gap-2" dir="rtl">
-              <Button
-                variant={isPlayerFloating ? 'default' : 'outline'}
-                size="sm"
-                className="h-7 px-2 text-xs gap-1"
-                onClick={togglePlayerFloating}
-                title="נגן צף (Ctrl+Shift+F)"
-              >
-                <PictureInPicture2 className="w-3.5 h-3.5" />
-                נגן צף
-              </Button>
-              <Button
-                variant={isEqFloating ? 'default' : 'outline'}
-                size="sm"
-                className="h-7 px-2 text-xs gap-1"
-                onClick={toggleEqFloating}
-                title="איקולייזר צף (Ctrl+Shift+E)"
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5" />
-                EQ צף
-              </Button>
-              <div className="flex items-center gap-1 bg-muted/40 rounded-xl p-1 border border-border/50 shadow-sm">
-                <Button
-                  variant={playerLayout === 'split' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="h-7 w-7 p-0 rounded-lg"
-                  onClick={() => setPlayerLayout('split')}
-                  title="פריסה מפוצלת"
-                >
-                  <LayoutPanelLeft className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  variant={playerLayout === 'stacked' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="h-7 w-7 p-0 rounded-lg"
-                  onClick={() => setPlayerLayout('stacked')}
-                  title="פריסה מוערמת"
-                >
-                  <LayoutPanelTop className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  variant={playerLayout === 'wide' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="h-7 w-7 p-0 rounded-lg"
-                  onClick={() => setPlayerLayout('wide')}
-                  title="פריסה רחבה — נגן+אקווילייזר רוחב מלא, תמלולים צד-בצד"
-                >
-                  <StretchHorizontal className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  variant={playerLayout === 'full' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="h-7 w-7 p-0 rounded-lg"
-                  onClick={() => setPlayerLayout('full')}
-                  title="נגן מלא"
-                >
-                  <Square className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  variant={playerLayout === 'eq-wide' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="h-7 w-7 p-0 rounded-lg"
-                  onClick={() => setPlayerLayout('eq-wide')}
-                  title="אקולייזר פרוס — מיקסר רוחב מלא מתחת לנגן"
-                >
-                  <SlidersHorizontal className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </div>
-
-            {/* Top section: Player + Audio Processing */}
-            {isPlayerFloating ? (
-              <Suspense fallback={null}>
-                <FloatingPlayerPortal onClose={togglePlayerFloating}>
-                  <SyncAudioPlayer
-                    audioUrl={audioUrl}
-                    wordTimings={wordTimings}
-                    currentTime={playerTime}
-                    onTimeUpdate={setPlayerTime}
-                    syncEnabled={syncEnabled}
-                    onSyncToggle={setSyncEnabled}
-                    compact={!isEqFloating}
-                    eqFloating={isEqFloating}
-                    eqPortalTarget={eqPortalTarget}
-                  />
-                </FloatingPlayerPortal>
-              </Suspense>
-            ) : (
-              <div className="rounded-2xl border border-border/40 bg-card/50 shadow-sm p-1">
-                <SyncAudioPlayer
-                  audioUrl={audioUrl}
-                  wordTimings={wordTimings}
-                  currentTime={playerTime}
-                  onTimeUpdate={setPlayerTime}
-                  syncEnabled={syncEnabled}
-                  onSyncToggle={setSyncEnabled}
-                  eqWide={playerLayout === 'eq-wide'}
-                  eqFloating={isEqFloating}
-                  eqPortalTarget={eqPortalTarget}
-                />
-              </div>
-            )}
+            {/* Airy toolbar */}
+            <PlayerTabToolbar
+              layout={playerLayout}
+              onLayoutChange={setPlayerLayout}
+              isPlayerFloating={isPlayerFloating}
+              onTogglePlayerFloating={togglePlayerFloating}
+              isEqFloating={isEqFloating}
+              onToggleEqFloating={toggleEqFloating}
+              fontSize={fontSize}
+              onFontSizeChange={setFontSize}
+              widgets={PLAYER_WIDGETS}
+              order={playerWidgetOrder}
+              visibility={playerWidgetVisible}
+              onMove={movePlayerWidget}
+              onToggleVisible={togglePlayerWidget}
+            />
 
             {/* Floating EQ window */}
             {isEqFloating && (
@@ -1025,7 +983,7 @@ const TextEditor = () => {
 
             {/* Search bar for transcript */}
             {transcriptSearchOpen && (
-              <div className="flex items-center gap-2 p-2 rounded-lg border border-primary/30 bg-muted/50 shadow-sm" dir="rtl">
+              <div className="flex items-center gap-2 p-3 rounded-xl border border-primary/30 bg-muted/40 shadow-sm" dir="rtl">
                 <Search className="w-4 h-4 text-muted-foreground shrink-0" />
                 <input
                   ref={searchInputRef}
@@ -1051,22 +1009,56 @@ const TextEditor = () => {
                 <span className="text-xs text-muted-foreground min-w-[60px] text-center">
                   {transcriptMatchCount > 0 ? `${transcriptSearchIdx + 1} / ${transcriptMatchCount}` : transcriptSearchQuery ? 'לא נמצא' : ''}
                 </span>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setTranscriptSearchIdx(i => (i - 1 + Math.max(1, transcriptMatchCount)) % Math.max(1, transcriptMatchCount))} title="הקודם (Shift+Enter)">
-                  <ChevronUp className="w-3.5 h-3.5" />
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setTranscriptSearchIdx(i => (i - 1 + Math.max(1, transcriptMatchCount)) % Math.max(1, transcriptMatchCount))} title="הקודם (Shift+Enter)">
+                  <ChevronUp className="w-4 h-4" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setTranscriptSearchIdx(i => (i + 1) % Math.max(1, transcriptMatchCount))} title="הבא (Enter)">
-                  <ChevronDown className="w-3.5 h-3.5" />
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setTranscriptSearchIdx(i => (i + 1) % Math.max(1, transcriptMatchCount))} title="הבא (Enter)">
+                  <ChevronDown className="w-4 h-4" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setTranscriptSearchOpen(false); setTranscriptSearchQuery(""); setTranscriptSearchIdx(0); }} title="סגור (Escape)">
-                  <X className="w-3.5 h-3.5" />
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setTranscriptSearchOpen(false); setTranscriptSearchQuery(""); setTranscriptSearchIdx(0); }} title="סגור (Escape)">
+                  <X className="w-4 h-4" />
                 </Button>
               </div>
             )}
 
-            {/* Bottom section: Two synced transcript views */}
-            {playerLayout !== 'full' && (
-              <div className={`grid gap-5 flex-1 ${playerLayout === 'stacked' || playerLayout === 'eq-wide' ? 'grid-cols-1' : playerLayout === 'wide' ? 'grid-cols-2' : 'grid-cols-1 lg:grid-cols-2'}`} style={{ minHeight: '60vh' }}>
-                <div className="rounded-2xl border border-border/40 bg-card/50 shadow-sm overflow-hidden flex flex-col" style={{ minHeight: '60vh' }}>
+            {/* Render widgets in user-defined order */}
+            {(() => {
+              const playerWidget = (
+                isPlayerFloating ? (
+                  <Suspense fallback={null}>
+                    <FloatingPlayerPortal onClose={togglePlayerFloating}>
+                      <SyncAudioPlayer
+                        audioUrl={audioUrl}
+                        wordTimings={wordTimings}
+                        currentTime={playerTime}
+                        onTimeUpdate={setPlayerTime}
+                        syncEnabled={syncEnabled}
+                        onSyncToggle={setSyncEnabled}
+                        compact={!isEqFloating}
+                        eqFloating={isEqFloating}
+                        eqPortalTarget={eqPortalTarget}
+                      />
+                    </FloatingPlayerPortal>
+                  </Suspense>
+                ) : (
+                  <div className="rounded-2xl border border-border/40 bg-card/40 shadow-sm p-2">
+                    <SyncAudioPlayer
+                      audioUrl={audioUrl}
+                      wordTimings={wordTimings}
+                      currentTime={playerTime}
+                      onTimeUpdate={setPlayerTime}
+                      syncEnabled={syncEnabled}
+                      onSyncToggle={setSyncEnabled}
+                      eqWide={playerLayout === 'eq-wide'}
+                      eqFloating={isEqFloating}
+                      eqPortalTarget={eqPortalTarget}
+                    />
+                  </div>
+                )
+              );
+
+              const transcriptWidget = (
+                <div className="rounded-2xl border border-border/40 bg-card/40 shadow-sm overflow-hidden flex flex-col" style={{ minHeight: '60vh' }}>
                   <SyncTranscriptView
                     wordTimings={wordTimings}
                     currentTime={playerTime}
@@ -1080,7 +1072,10 @@ const TextEditor = () => {
                     onSearchMatchCount={setTranscriptMatchCount}
                   />
                 </div>
-                <div className="rounded-2xl border border-border/40 bg-card/50 shadow-sm overflow-hidden flex flex-col" style={{ minHeight: '60vh' }}>
+              );
+
+              const editableWidget = (
+                <div className="rounded-2xl border border-border/40 bg-card/40 shadow-sm overflow-hidden flex flex-col" style={{ minHeight: '60vh' }}>
                   <SyncEditableView
                     wordTimings={wordTimings}
                     currentTime={playerTime}
@@ -1095,8 +1090,49 @@ const TextEditor = () => {
                     searchActiveIndex={transcriptSearchIdx}
                   />
                 </div>
-              </div>
-            )}
+              );
+
+              const widgetMap: Record<string, React.ReactNode> = {
+                player: playerWidget,
+                transcript: transcriptWidget,
+                editable: editableWidget,
+              };
+
+              const visiblePlayer = playerWidgetVisible.player !== false;
+              const visibleTranscript = playerWidgetVisible.transcript !== false && playerLayout !== 'full';
+              const visibleEditable = playerWidgetVisible.editable !== false && playerLayout !== 'full';
+
+              const renderable = playerWidgetOrder.filter((id) => {
+                if (id === 'player') return visiblePlayer;
+                if (id === 'transcript') return visibleTranscript;
+                if (id === 'editable') return visibleEditable;
+                return false;
+              });
+
+              // Group: player (full row), then transcript+editable as a grid based on layout
+              const transcripts = renderable.filter(id => id !== 'player');
+              const showPlayer = renderable.includes('player');
+              const playerIdx = renderable.indexOf('player');
+
+              const gridClass = playerLayout === 'stacked' || playerLayout === 'eq-wide'
+                ? 'grid-cols-1'
+                : playerLayout === 'wide'
+                ? 'grid-cols-1 md:grid-cols-2'
+                : 'grid-cols-1 lg:grid-cols-2';
+
+              const transcriptsBlock = transcripts.length > 0 ? (
+                <div className={`grid gap-6 flex-1 ${gridClass}`} style={{ minHeight: '60vh' }}>
+                  {transcripts.map(id => <div key={id}>{widgetMap[id]}</div>)}
+                </div>
+              ) : null;
+
+              // If player appears first or alone, render it before transcripts; if last, after
+              if (!showPlayer) return transcriptsBlock;
+              if (playerIdx === 0 || transcripts.length === 0) {
+                return <div className="space-y-8">{widgetMap.player}{transcriptsBlock}</div>;
+              }
+              return <div className="space-y-8">{transcriptsBlock}{widgetMap.player}</div>;
+            })()}
 
             </LazyErrorBoundary>
           </TabsContent>
