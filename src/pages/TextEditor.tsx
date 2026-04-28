@@ -258,6 +258,15 @@ const TextEditor = () => {
     setPlayerWidgetVisible(prev => ({ ...prev, [id]: !(prev[id] !== false) }));
   }, []);
 
+  const applyLayoutProfile = useCallback((p: LayoutProfile) => {
+    setPlayerLayout(p.layout);
+    setFontSize(p.fontSize);
+    setPlayerWidgetOrder([...p.order]);
+    setPlayerWidgetVisible({ ...p.visibility });
+    if (typeof p.isPlayerFloating === 'boolean') setIsPlayerFloating(p.isPlayerFloating);
+    if (typeof p.isEqFloating === 'boolean') setIsEqFloating(p.isEqFloating);
+  }, [setPlayerLayout, setFontSize]);
+
   // Search in transcript
   const [transcriptSearchOpen, setTranscriptSearchOpen] = useState(false);
   const [transcriptSearchQuery, setTranscriptSearchQuery] = useState("");
