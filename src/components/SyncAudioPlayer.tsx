@@ -3289,10 +3289,10 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
               {mixerPanel}
 
               {/* ─── EQ + Processing Mixing Console ── */}
-              <div className={`space-y-2 rounded-lg border bg-muted/20 p-3 group/panel-mixer transition-all ${isMixerFullscreen ? 'fixed inset-0 z-50 flex flex-col bg-background p-6' : ''}`}>
+              <div className={`rounded-2xl border bg-muted/20 group/panel-mixer transition-all ${isMixerFullscreen ? 'fixed inset-0 z-50 flex flex-col bg-background p-8 space-y-5' : 'p-5 space-y-4'}`}>
                 {isMixerFullscreen && <div className="fixed inset-0 -z-10 bg-background" />}
                 {/* When fullscreen, wrap everything above the player bar in a scrollable area */}
-                <div className={isMixerFullscreen ? 'flex-1 overflow-auto space-y-2 min-h-0' : 'contents'}>
+                <div className={isMixerFullscreen ? 'flex-1 overflow-auto space-y-5 min-h-0' : 'contents'}>
                 <div className="flex items-center justify-between">
                   <p className={`font-semibold flex items-center gap-1.5 ${isMixerFullscreen ? 'text-sm' : 'text-xs'}`}>
                     <AudioLines className="w-3.5 h-3.5 text-primary no-theme-icon" />
