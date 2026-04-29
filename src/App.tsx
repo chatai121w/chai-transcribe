@@ -59,6 +59,7 @@ const VideoToMp3 = lazyWithLog('VideoToMp3', () => import("./pages/VideoToMp3"))
 const AudioCleanLab = lazyWithLog('AudioCleanLab', () => import("./pages/AudioCleanLab"));
 const Harmonika = lazyWithLog('Harmonika', () => import("./pages/Harmonika"));
 const MeetingRecorder = lazyWithLog('MeetingRecorder', () => import("./pages/MeetingRecorder"));
+const VoiceCommandAdmin = lazyWithLog('VoiceCommandAdmin', () => import("./pages/VoiceCommandAdmin"));
 
 // Lazy non-critical UI widgets — defer past first paint
 const SmartConsoleLazy = lazy(() => import("./components/SmartConsole").then(m => ({ default: m.SmartConsole })));
@@ -68,6 +69,7 @@ const BackgroundSyncLazy = lazy(() => import("./components/BackgroundSync").then
 const SWUpdateNotifierLazy = lazy(() => import("./components/SWUpdateNotifier").then(m => ({ default: m.SWUpdateNotifier })));
 const CloudKeySyncLazy = lazy(() => import("./components/CloudKeySync"));
 const DiarizationFloatingStatusLazy = lazy(() => import("./components/DiarizationFloatingStatus").then(m => ({ default: m.DiarizationFloatingStatus })));
+const VoiceInputFABLazy = lazy(() => import("./components/VoiceInputFAB").then(m => ({ default: m.VoiceInputFAB })));
 
 /** Mounts children only after the browser is idle / a delay — keeps them off the critical path. */
 function DeferredMount({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
@@ -143,18 +145,40 @@ const App = () => {
     return () => debugLog.info('App', '📦 App component unmounted');
   }, []);
 
-  // Prefetch likely routes after idle to avoid spinner on first navigation
+  // Prefetch likely routes after idle — eliminates spinner on first navigation
   useEffect(() => {
     const w = window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number };
-    const prefetch = () => {
+    const prefetchAll = () => {
+      // High-priority: most visited pages
       import("./pages/Dashboard").catch(() => {});
       import("./pages/Index").catch(() => {});
       import("./pages/Settings").catch(() => {});
     };
+    const prefetchSecondary = () => {
+      // Lower-priority: prefetch after the primary ones land
+      import("./pages/TextEditor").catch(() => {});
+      import("./pages/Folders").catch(() => {});
+      import("./pages/Diarization").catch(() => {});
+      import("./pages/VoiceStudio").catch(() => {});
+      import("./pages/MeetingRecorder").catch(() => {});
+      import("./pages/AudioCleanLab").catch(() => {});
+    };
+    const prefetchRare = () => {
+      import("./pages/Benchmark").catch(() => {});
+      import("./pages/VideoToMp3").catch(() => {});
+      import("./pages/AudacityLab").catch(() => {});
+      import("./pages/Harmonika").catch(() => {});
+      import("./pages/DiarizationComparePage").catch(() => {});
+    };
+
     if (typeof w.requestIdleCallback === 'function') {
-      w.requestIdleCallback(prefetch, { timeout: 3000 });
+      w.requestIdleCallback(prefetchAll, { timeout: 3000 });
+      w.requestIdleCallback(prefetchSecondary, { timeout: 6000 });
+      w.requestIdleCallback(prefetchRare, { timeout: 12000 });
     } else {
-      setTimeout(prefetch, 1500);
+      setTimeout(prefetchAll, 1500);
+      setTimeout(prefetchSecondary, 4000);
+      setTimeout(prefetchRare, 8000);
     }
   }, []);
 
@@ -200,6 +224,7 @@ const App = () => {
           {devFloatingButtons.transcriptionAnalytics && <DeferredMount delay={1500}><TranscriptionAnalyticsLazy /></DeferredMount>}
           {devFloatingButtons.pwaInstall && <DeferredMount delay={2000}><PWAInstallButtonLazy /></DeferredMount>}
           {devFloatingButtons.diarizationStatus && <DeferredMount delay={500}><DiarizationFloatingStatusLazy /></DeferredMount>}
+          <DeferredMount delay={800}><VoiceInputFABLazy /></DeferredMount>
           <AppSidebar />
           <AppLayout>
             <Suspense fallback={<PageLoader label="suspense" />}>
@@ -221,6 +246,7 @@ const App = () => {
                 <Route path="/audio-clean" element={<ProtectedRoute><AudioCleanLab /></ProtectedRoute>} />
                 <Route path="/harmonika" element={<ProtectedRoute><Harmonika /></ProtectedRoute>} />
                 <Route path="/meeting-recorder" element={<ProtectedRoute><MeetingRecorder /></ProtectedRoute>} />
+                <Route path="/voice-command-admin" element={<ProtectedRoute><VoiceCommandAdmin /></ProtectedRoute>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>

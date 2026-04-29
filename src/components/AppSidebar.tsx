@@ -31,6 +31,7 @@ import {
   Wand2,
   AudioLines,
   Video,
+  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -82,7 +83,7 @@ const saveLocalFolders = (folders: string[]) => {
 };
 
 const AppSidebar = () => {
-  const { isAuthenticated, user, logout, isLoading } = useAuth();
+  const { isAuthenticated, user, logout, isLoading, isAdmin } = useAuth();
   const { folders: cloudFolders } = useCloudFolders();
   const navigate = useNavigate();
   const location = useLocation();
@@ -301,6 +302,25 @@ const AppSidebar = () => {
                 <span className="flex-1 text-right">{item.label}</span>
               </button>
             ))}
+            {/* Admin-only: Voice Command */}
+            {isAdmin && (
+              <button
+                onClick={() => {
+                  navigate("/voice-command-admin");
+                  if (!isPinned) setIsOpen(false);
+                }}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors w-full border",
+                  isActive("/voice-command-admin")
+                    ? "bg-purple-700 text-white border-purple-600 shadow-sm"
+                    : "text-purple-400 border-purple-900 hover:bg-purple-950 hover:text-purple-200"
+                )}
+              >
+                <Bot className="w-5 h-5 shrink-0" />
+                <span className="flex-1 text-right">פקודות קוליות</span>
+                <span className="text-[0.58rem] px-1.5 py-0.5 rounded bg-purple-900 text-purple-300 border border-purple-700">ADMIN</span>
+              </button>
+            )}
           </nav>
 
           {/* Folders section - always visible */}
