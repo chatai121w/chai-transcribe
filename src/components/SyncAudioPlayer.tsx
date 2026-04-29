@@ -3252,47 +3252,15 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                     <TooltipContent side="bottom">הפעל מיקסר/אקולייזר — ייפתח לרוחב מלא</TooltipContent>
                   </Tooltip>
                 </div>
-              ) : (!eqWide && !isMixerFullscreen && !eqFloating) ? (
-                /* Mixer is open but layout is too narrow — prompt to widen */
-                <div className="flex flex-col gap-3 rounded-2xl border border-yellow-500/40 bg-yellow-500/5 p-5 text-center">
-                  <div className="flex items-center justify-center gap-2 text-sm font-semibold">
-                    <AudioLines className="w-4 h-4 text-yellow-600 no-theme-icon" />
-                    המיקסר זמין רק בפריסה רחבה
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed max-w-md mx-auto">
-                    כדי להציג את כל הפונקציות באופן אוורירי, עבור לפריסה <strong>"רחבה"</strong> או <strong>"אקולייזר פרוס"</strong>,
-                    או לחץ על "מסך מלא".
-                  </p>
-                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 gap-1.5 border-yellow-500/50 hover:bg-yellow-500/10"
-                      onClick={() => setIsMixerFullscreen(true)}
-                    >
-                      <Maximize2 className="w-3.5 h-3.5 no-theme-icon" />
-                      פתח במסך מלא
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 gap-1.5 text-muted-foreground"
-                      onClick={() => setIsEqPanelOpen(false)}
-                    >
-                      <Power className="w-3.5 h-3.5 no-theme-icon" />
-                      כבה מיקסר
-                    </Button>
-                  </div>
-                </div>
               ) : (
                 <>
               {mixerPanel}
 
               {/* ─── EQ + Processing Mixing Console ── */}
-              <div className={`rounded-2xl border bg-muted/20 group/panel-mixer transition-all ${isMixerFullscreen ? 'fixed inset-0 z-50 flex flex-col bg-background p-8 space-y-5' : 'p-5 space-y-4'}`}>
+              <div className={`space-y-2 rounded-lg border bg-muted/20 p-3 group/panel-mixer transition-all ${isMixerFullscreen ? 'fixed inset-0 z-50 flex flex-col bg-background p-6' : ''}`}>
                 {isMixerFullscreen && <div className="fixed inset-0 -z-10 bg-background" />}
                 {/* When fullscreen, wrap everything above the player bar in a scrollable area */}
-                <div className={isMixerFullscreen ? 'flex-1 overflow-auto space-y-5 min-h-0' : 'contents'}>
+                <div className={isMixerFullscreen ? 'flex-1 overflow-auto space-y-2 min-h-0' : 'contents'}>
                 <div className="flex items-center justify-between">
                   <p className={`font-semibold flex items-center gap-1.5 ${isMixerFullscreen ? 'text-sm' : 'text-xs'}`}>
                     <AudioLines className="w-3.5 h-3.5 text-primary no-theme-icon" />
@@ -3374,12 +3342,12 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
                 {/* EQ Slider Theme Selector */}
                 {!isMixerConsoleCollapsed && (
-                  <div className="flex items-center gap-2 flex-wrap pt-1">
-                    <span className="text-xs text-muted-foreground font-medium ml-1">עיצוב:</span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] text-muted-foreground font-medium">עיצוב:</span>
                     {EQ_SLIDER_THEMES.map((t) => (
                       <button
                         key={t.id}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] transition-all ${
+                        className={`px-1.5 py-0.5 rounded text-[9px] transition-all ${
                           eqSliderTheme === t.id ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-muted hover:bg-muted/80 text-muted-foreground'
                         }`}
                         onClick={() => setEqSliderTheme(t.id)}
@@ -3397,7 +3365,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                   <>
 
                 {/* EQ Presets */}
-                <div className="flex flex-wrap gap-2 pt-1">
+                <div className="flex flex-wrap gap-1.5">
                   {[
                     { id: 'flat', label: 'שטוח', icon: '⚖️', values: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
                     { id: 'clear-speech', label: 'דיבור ברור', icon: '🎙️', values: [-3, -2, -1, 0, 2, 4, 6, 4, 2, 0] },
@@ -3416,7 +3384,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                     return (
                       <button
                         key={preset.id}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all
+                        className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] transition-all
                           ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}
                         `}
                         onClick={() => {
@@ -3487,7 +3455,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                       return (
                         <div key={up.id} className="flex items-center gap-0.5 group/upreset">
                           <button
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all
+                            className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] transition-all
                               ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}
                             `}
                             onClick={() => loadUserEqPreset(up)}
