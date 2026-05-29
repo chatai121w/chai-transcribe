@@ -121,7 +121,7 @@ export async function pullFromCloud(): Promise<SyncResult> {
   const local: Record<string, PronunciationProfile> = {};
   for (const p of listProfiles()) local[p.id] = p;
 
-  for (const row of data as Array<{ id: string; name: string; payload: any; updated_at: string }>) {
+  for (const row of (data as unknown) as Array<{ id: string; name: string; payload: any; updated_at: string }>) {
     const cloudUpdated = new Date(row.updated_at).getTime();
     const localProfile = local[row.id];
     if (localProfile && localProfile.updatedAt >= cloudUpdated) continue;
