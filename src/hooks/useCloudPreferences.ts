@@ -477,7 +477,7 @@ export const useCloudPreferences = () => {
           cuda_cloud_save: updated.cuda_cloud_save,
           personal_pronunciation_enabled: updated.personal_pronunciation_enabled,
           loshon_kodesh_enabled: updated.loshon_kodesh_enabled,
-          active_pronunciation_profile: updated.active_pronunciation_profile || null,
+          active_pronunciation_profile: updated.active_pronunciation_profile || '',
           diarize_enabled: updated.diarize_enabled,
           updated_at: new Date().toISOString(),
         } as any, { onConflict: 'user_id' });
