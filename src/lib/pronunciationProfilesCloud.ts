@@ -82,7 +82,7 @@ export async function pushToCloud(): Promise<SyncResult> {
   // Upsert in chunks of 25 to avoid request size limits.
   for (let i = 0; i < rows.length; i += 25) {
     const chunk = rows.slice(i, i + 25);
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('pronunciation_profiles_cloud')
       .upsert(chunk as any, { onConflict: 'id' });
     if (error) {
@@ -107,7 +107,7 @@ export async function pullFromCloud(): Promise<SyncResult> {
     return result;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from('pronunciation_profiles_cloud')
     .select('id, name, payload, updated_at')
     .eq('user_id', userId);
@@ -121,7 +121,7 @@ export async function pullFromCloud(): Promise<SyncResult> {
   const local: Record<string, PronunciationProfile> = {};
   for (const p of listProfiles()) local[p.id] = p;
 
-  for (const row of data as Array<{ id: string; name: string; payload: any; updated_at: string }>) {
+  for (const row of (data as unknown) as Array<{ id: string; name: string; payload: any; updated_at: string }>) {
     const cloudUpdated = new Date(row.updated_at).getTime();
     const localProfile = local[row.id];
     if (localProfile && localProfile.updatedAt >= cloudUpdated) continue;
@@ -191,7 +191,7 @@ export async function deleteFromCloud(profileId: string): Promise<void> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session?.session?.user?.id;
   if (!userId) return;
-  await supabase
+  await (supabase as any)
     .from('pronunciation_profiles_cloud')
     .delete()
     .eq('user_id', userId)

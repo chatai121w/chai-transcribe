@@ -137,7 +137,7 @@ export const WordContextMenu = ({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent className="w-64" dir="rtl">
+      <ContextMenuContent className="w-64">
         <ContextMenuLabel className="text-xs flex items-center justify-between gap-2">
           <span className="truncate">{word}</span>
           {isCorrectionVerified(word, word) && (
@@ -153,7 +153,7 @@ export const WordContextMenu = ({
               <Wand2 className="w-3.5 h-3.5 text-primary" />
               הצעות תיקון ({suggestions.length})
             </ContextMenuSubTrigger>
-            <ContextMenuSubContent className="w-56" dir="rtl">
+            <ContextMenuSubContent className="w-56">
               {suggestions.map((s, i) => (
                 <ContextMenuItem
                   key={`${s}-${i}`}
@@ -173,7 +173,7 @@ export const WordContextMenu = ({
             <Languages className="w-3.5 h-3.5 text-blue-500" />
             מילים דומות
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-56" dir="rtl">
+          <ContextMenuSubContent className="w-56">
             {similar.length === 0 ? (
               <ContextMenuItem disabled className="text-xs text-muted-foreground">
                 אין הצעות
@@ -202,7 +202,7 @@ export const WordContextMenu = ({
             <Brain className="w-3.5 h-3.5 text-purple-500" />
             הטמע ללמידת AI
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-64 p-2" dir="rtl">
+          <ContextMenuSubContent className="w-64 p-2">
             <p className="text-[10px] text-muted-foreground mb-1.5">
               הקלד את ההגייה/האיות הנכון. המערכת תזכור ש-"{word}" צריך להיכתב כך:
             </p>
@@ -212,7 +212,7 @@ export const WordContextMenu = ({
                 onChange={(e) => setVerifyInput(e.target.value)}
                 placeholder="ההגייה הנכונה"
                 className="h-7 text-xs"
-                dir="rtl"
+               
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && verifyInput.trim()) {
@@ -269,7 +269,7 @@ export const WordContextMenu = ({
               />
             )}
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-48" dir="rtl">
+          <ContextMenuSubContent className="w-48">
             <div className="grid grid-cols-4 gap-1 p-1.5">
               {WORD_HIGHLIGHT_PALETTE.map((p) => (
                 <button
@@ -308,7 +308,7 @@ export const WordContextMenu = ({
               onChange={(e) => setCustomInput(e.target.value)}
               placeholder={word}
               className="h-7 text-xs"
-              dir="rtl"
+             
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && customInput.trim()) {
                   handleReplace(customInput);
