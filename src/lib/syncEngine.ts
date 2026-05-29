@@ -187,6 +187,7 @@ export async function syncPreferencesDown(userId: string): Promise<void> {
     cuda_paragraph_threshold: (data as Record<string, unknown>).cuda_paragraph_threshold as number ?? 0,
     cuda_preload_mode: (data as Record<string, unknown>).cuda_preload_mode as string ?? 'preload',
     cuda_cloud_save: (data as Record<string, unknown>).cuda_cloud_save as string ?? 'immediate',
+    personal_pronunciation_enabled: (data as Record<string, unknown>).personal_pronunciation_enabled as boolean ?? true,
     updated_at: data.updated_at,
     _dirty: false,
   });
@@ -226,6 +227,7 @@ async function pushDirtyPreferences(userId: string): Promise<void> {
       cuda_paragraph_threshold: prefs.cuda_paragraph_threshold,
       cuda_preload_mode: prefs.cuda_preload_mode,
       cuda_cloud_save: prefs.cuda_cloud_save,
+      personal_pronunciation_enabled: prefs.personal_pronunciation_enabled,
       updated_at: new Date().toISOString(),
     } as any, { onConflict: 'user_id' });
 

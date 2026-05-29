@@ -79,6 +79,16 @@ const Index = () => {
   const [loshonKodeshOn, setLoshonKodeshOn] = useState<boolean>(() => isLoshonKodeshEnabled());
   const [personalModelOn, setPersonalModelOn] = useState<boolean>(() => isPersonalPronunciationEnabled());
 
+  useEffect(() => {
+    setPersonalModelOn(preferences.personal_pronunciation_enabled);
+    setPersonalPronunciationEnabled(preferences.personal_pronunciation_enabled);
+    debugLog.info('Index', 'Personal pronunciation toggle synced from preferences', {
+      enabled: preferences.personal_pronunciation_enabled,
+      prefsLoaded,
+      isAuthenticated,
+    });
+  }, [preferences.personal_pronunciation_enabled, prefsLoaded, isAuthenticated]);
+
   const [transcript, setTranscript] = useState('');
   const [originalTranscript, setOriginalTranscript] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -1929,6 +1939,11 @@ const Index = () => {
               onChange={(e) => {
                 setPersonalPronunciationEnabled(e.target.checked);
                 setPersonalModelOn(e.target.checked);
+                  updatePreference('personal_pronunciation_enabled', e.target.checked);
+                  debugLog.info('Index', 'Personal pronunciation toggle changed', {
+                    enabled: e.target.checked,
+                    isAuthenticated,
+                  });
               }}
               className="rounded border-purple-400"
             />

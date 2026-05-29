@@ -50,6 +50,7 @@ export interface LocalPreferences {
   cuda_paragraph_threshold: number;
   cuda_preload_mode: string;
   cuda_cloud_save: string;
+  personal_pronunciation_enabled: boolean;
   updated_at: string;
   _dirty?: boolean;
 }
