@@ -575,6 +575,7 @@ export type Database = {
           font_size: number | null
           id: string
           line_height: number | null
+          personal_pronunciation_enabled: boolean
           player_layout: string | null
           sidebar_pinned: boolean | null
           source_language: string | null
@@ -610,6 +611,7 @@ export type Database = {
           font_size?: number | null
           id?: string
           line_height?: number | null
+          personal_pronunciation_enabled?: boolean
           player_layout?: string | null
           sidebar_pinned?: boolean | null
           source_language?: string | null
@@ -645,6 +647,7 @@ export type Database = {
           font_size?: number | null
           id?: string
           line_height?: number | null
+          personal_pronunciation_enabled?: boolean
           player_layout?: string | null
           sidebar_pinned?: boolean | null
           source_language?: string | null
