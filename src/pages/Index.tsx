@@ -77,7 +77,11 @@ const Index = () => {
   const setTextColor = (v: string) => updatePreference('text_color', v);
   const setLineHeight = (v: number) => updatePreference('line_height', v);
 
-  const [loshonKodeshOn, setLoshonKodeshOn] = useState<boolean>(() => isLoshonKodeshEnabled());
+  const loshonKodeshOn = preferences.loshon_kodesh_enabled;
+  const setLoshonKodeshOn = (v: boolean) => {
+    setLoshonKodeshEnabled(v);
+    updatePreference('loshon_kodesh_enabled', v);
+  };
   const [personalModelOn, setPersonalModelOn] = useState<boolean>(() => isPersonalPronunciationEnabled());
 
   useEffect(() => {
@@ -90,6 +94,11 @@ const Index = () => {
     });
   }, [preferences.personal_pronunciation_enabled, prefsLoaded, isAuthenticated]);
 
+  // Sync loshon kodesh in-memory state whenever cloud preferences load
+  useEffect(() => {
+    setLoshonKodeshEnabled(preferences.loshon_kodesh_enabled);
+  }, [preferences.loshon_kodesh_enabled, prefsLoaded]);
+
   const [transcript, setTranscript] = useState('');
   const [originalTranscript, setOriginalTranscript] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -101,7 +110,8 @@ const Index = () => {
   const [recoveredPartialInfo, setRecoveredPartialInfo] = useState<{progress: number, wordCount: number, lastSegEnd?: number} | null>(null);
   const [lastStats, setLastStats] = useState<TranscriptionStats | null>(null);
   const [copied, setCopied] = useState(false);
-  const [diarize, setDiarize] = useState(false);
+  const diarize = preferences.diarize_enabled;
+  const setDiarize = (v: boolean) => updatePreference('diarize_enabled', v);
   const [rangeEnabled, setRangeEnabled] = useState(false);
   const [rangeStartSec, setRangeStartSec] = useState("0");
   const [rangeEndSec, setRangeEndSec] = useState("");
@@ -1957,7 +1967,6 @@ const Index = () => {
                   type="checkbox"
                   checked={loshonKodeshOn}
                   onChange={(e) => {
-                    setLoshonKodeshEnabled(e.target.checked);
                     setLoshonKodeshOn(e.target.checked);
                   }}
                   className="rounded border-amber-400"
@@ -1997,7 +2006,7 @@ const Index = () => {
           </label>
         </div>
 
-        <PronunciationProfileSelector />
+        <PronunciationProfileSelector onProfileChange={(id) => updatePreference('active_pronunciation_profile', id)} />
 
         {(engine === 'assemblyai' || engine === 'deepgram') && (
           <div className="flex items-center gap-2 text-sm" dir="rtl">

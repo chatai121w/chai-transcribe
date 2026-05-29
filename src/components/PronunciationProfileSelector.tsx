@@ -83,7 +83,11 @@ import { toast } from '@/hooks/use-toast';
 
 const ACTIVE_EVENT = 'pp-active-profile-changed';
 
-export const PronunciationProfileSelector = () => {
+interface PronunciationProfileSelectorProps {
+  onProfileChange?: (id: string) => void;
+}
+
+export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationProfileSelectorProps = {}) => {
   const [profiles, setProfiles] = useState<PronunciationProfile[]>(() => listProfiles());
   const [activeId, setActiveId] = useState<string>(() => getActiveProfileId());
   const [manageOpen, setManageOpen] = useState(false);
@@ -131,6 +135,13 @@ export const PronunciationProfileSelector = () => {
 
   const refresh = () => setProfiles(listProfiles());
 
+  /** Central helper: set active profile in localStorage, component state, and notify parent */
+  const applyActiveProfile = (id: string) => {
+    setActiveProfileId(id);
+    setActiveId(id);
+    onProfileChange?.(id);
+  };
+
   useEffect(() => {
     const onActive = () => setActiveId(getActiveProfileId());
     const onStorage = () => {
@@ -176,13 +187,11 @@ export const PronunciationProfileSelector = () => {
       // Cycle: none → first → second → ... → last → none
       const nextIdx = idx === -1 ? 0 : idx + 1;
       if (nextIdx >= list.length) {
-        setActiveProfileId('');
-        setActiveId('');
+        applyActiveProfile('');
         toast({ title: 'בוטל פרופיל', description: 'משתמש רק במודל הכללי' });
       } else {
         const np = list[nextIdx];
-        setActiveProfileId(np.id);
-        setActiveId(np.id);
+        applyActiveProfile(np.id);
         toast({ title: 'הופעל פרופיל', description: `${np.name} (Ctrl+Shift+P)` });
       }
     };
@@ -192,8 +201,7 @@ export const PronunciationProfileSelector = () => {
 
   const handleSelect = (value: string) => {
     const next = value === '__none__' ? '' : value;
-    setActiveProfileId(next);
-    setActiveId(next);
+    applyActiveProfile(next);
     if (next) {
       const p = profiles.find((x) => x.id === next);
       toast({ title: 'הופעל פרופיל', description: p?.name });
@@ -209,8 +217,7 @@ export const PronunciationProfileSelector = () => {
       setNewName('');
       setNewDesc('');
       refresh();
-      setActiveProfileId(p.id);
-      setActiveId(p.id);
+      applyActiveProfile(p.id);
       toast({ title: 'נוצר פרופיל', description: p.name });
     } catch (e: any) {
       toast({ title: 'שגיאה', description: e?.message || 'יצירת פרופיל נכשלה', variant: 'destructive' });
@@ -467,8 +474,7 @@ export const PronunciationProfileSelector = () => {
             variant="outline"
             className="h-7 text-xs border-amber-500/50"
             onClick={() => {
-              setActiveProfileId(suggestion.profileId);
-              setActiveId(suggestion.profileId);
+              applyActiveProfile(suggestion.profileId);
               setSuggestion(null);
               toast({ title: 'הופעל פרופיל', description: suggestion.profileName });
             }}

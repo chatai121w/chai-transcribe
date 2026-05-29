@@ -36,6 +36,9 @@ export interface UserPreferences {
   cuda_preload_mode: string;   // 'preload' | 'direct'
   cuda_cloud_save: string;     // 'immediate' | 'text-only' | 'skip'
   personal_pronunciation_enabled: boolean;
+  loshon_kodesh_enabled: boolean;         // Loshon Kodesh transcription mode
+  active_pronunciation_profile: string;   // active pronunciation profile ID ('' = none)
+  diarize_enabled: boolean;              // speaker diarization toggle
 }
 
 const DEFAULT_PREFERENCES: UserPreferences = {
@@ -67,6 +70,9 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   cuda_preload_mode: 'preload',
   cuda_cloud_save: 'immediate',
   personal_pronunciation_enabled: true,
+  loshon_kodesh_enabled: false,
+  active_pronunciation_profile: '',
+  diarize_enabled: false,
 };
 
 export const useCloudPreferences = () => {
@@ -84,12 +90,18 @@ export const useCloudPreferences = () => {
         if (saved) {
           const parsed = JSON.parse(saved);
           const personalPronunciation = localStorage.getItem('personal_pronunciation_enabled');
+          const loshonKodesh = localStorage.getItem('loshon_kodesh_mode');
+          const activeProfile = localStorage.getItem('pp_active_profile');
+          const diarize = localStorage.getItem('diarize_enabled');
           setPreferences({
             ...DEFAULT_PREFERENCES,
             ...parsed,
             ...(personalPronunciation !== null
               ? { personal_pronunciation_enabled: personalPronunciation === '1' }
               : {}),
+            ...(loshonKodesh !== null ? { loshon_kodesh_enabled: loshonKodesh === '1' } : {}),
+            ...(activeProfile !== null ? { active_pronunciation_profile: activeProfile } : {}),
+            ...(diarize !== null ? { diarize_enabled: diarize === '1' } : {}),
           });
         } else {
           // Try individual keys for backward compat
@@ -135,6 +147,12 @@ export const useCloudPreferences = () => {
           if (cPreload) prefs.cuda_preload_mode = cPreload;
           if (cCloudSave) prefs.cuda_cloud_save = cCloudSave;
           if (personalPronunciation !== null) prefs.personal_pronunciation_enabled = personalPronunciation === '1';
+          const loshonKodesh = localStorage.getItem('loshon_kodesh_mode');
+          const activeProfile = localStorage.getItem('pp_active_profile');
+          const diarize = localStorage.getItem('diarize_enabled');
+          if (loshonKodesh !== null) prefs.loshon_kodesh_enabled = loshonKodesh === '1';
+          if (activeProfile !== null) prefs.active_pronunciation_profile = activeProfile;
+          if (diarize !== null) prefs.diarize_enabled = diarize === '1';
           setPreferences(prefs);
         }
       } catch {}
@@ -175,6 +193,9 @@ export const useCloudPreferences = () => {
         const localPersonalPronunciationUpdatedAt = Number(localStorage.getItem('personal_pronunciation_updated_at') || 0);
         const localPersonalPronunciation = localStorage.getItem('personal_pronunciation_enabled');
         const localPersonalIsNewer = localPersonalPronunciation !== null && localPersonalPronunciationUpdatedAt > cloudUpdatedAt;
+        const localLoshonKodesh = localStorage.getItem('loshon_kodesh_mode');
+        const localActiveProfile = localStorage.getItem('pp_active_profile');
+        const localDiarize = localStorage.getItem('diarize_enabled');
 
         const loaded: UserPreferences = {
           font_size: data.font_size ?? DEFAULT_PREFERENCES.font_size,
@@ -213,6 +234,15 @@ export const useCloudPreferences = () => {
           personal_pronunciation_enabled: localPersonalIsNewer
             ? localPersonalPronunciation === '1'
             : ((data as any).personal_pronunciation_enabled ?? DEFAULT_PREFERENCES.personal_pronunciation_enabled),
+          loshon_kodesh_enabled: localLoshonKodesh !== null
+            ? localLoshonKodesh === '1'
+            : ((data as any).loshon_kodesh_enabled ?? DEFAULT_PREFERENCES.loshon_kodesh_enabled),
+          active_pronunciation_profile: localActiveProfile !== null
+            ? localActiveProfile
+            : ((data as any).active_pronunciation_profile ?? DEFAULT_PREFERENCES.active_pronunciation_profile),
+          diarize_enabled: localDiarize !== null
+            ? localDiarize === '1'
+            : ((data as any).diarize_enabled ?? DEFAULT_PREFERENCES.diarize_enabled),
         };
         setPreferences(loaded);
         // Mirror to localStorage so useTheme picks up cloud values
@@ -232,6 +262,13 @@ export const useCloudPreferences = () => {
         localStorage.setItem('cuda_cloud_save', loaded.cuda_cloud_save);
         localStorage.setItem('personal_pronunciation_enabled', loaded.personal_pronunciation_enabled ? '1' : '0');
         localStorage.setItem('personal_pronunciation_updated_at', String(cloudUpdatedAt || Date.now()));
+        localStorage.setItem('loshon_kodesh_mode', loaded.loshon_kodesh_enabled ? '1' : '0');
+        if (loaded.active_pronunciation_profile) {
+          localStorage.setItem('pp_active_profile', loaded.active_pronunciation_profile);
+        } else {
+          localStorage.removeItem('pp_active_profile');
+        }
+        localStorage.setItem('diarize_enabled', loaded.diarize_enabled ? '1' : '0');
         debugLog.info('CloudPreferences', 'Loaded personal pronunciation preference', {
           enabled: loaded.personal_pronunciation_enabled,
           source: 'cloud',
@@ -319,6 +356,24 @@ export const useCloudPreferences = () => {
             });
             window.dispatchEvent(new CustomEvent('cloud-prefs-loaded'));
           }
+          if (typeof row.loshon_kodesh_enabled === 'boolean') {
+            localStorage.setItem('loshon_kodesh_mode', row.loshon_kodesh_enabled ? '1' : '0');
+            setPreferences(prev => ({ ...prev, loshon_kodesh_enabled: row.loshon_kodesh_enabled }));
+            window.dispatchEvent(new CustomEvent('cloud-prefs-loaded'));
+          }
+          if (typeof row.active_pronunciation_profile === 'string') {
+            if (row.active_pronunciation_profile) {
+              localStorage.setItem('pp_active_profile', row.active_pronunciation_profile);
+            } else {
+              localStorage.removeItem('pp_active_profile');
+            }
+            setPreferences(prev => ({ ...prev, active_pronunciation_profile: row.active_pronunciation_profile }));
+            window.dispatchEvent(new CustomEvent('pp-active-profile-changed'));
+          }
+          if (typeof row.diarize_enabled === 'boolean') {
+            localStorage.setItem('diarize_enabled', row.diarize_enabled ? '1' : '0');
+            setPreferences(prev => ({ ...prev, diarize_enabled: row.diarize_enabled }));
+          }
         }
       )
       .subscribe();
@@ -357,6 +412,13 @@ export const useCloudPreferences = () => {
     localStorage.setItem('cuda_cloud_save', updated.cuda_cloud_save);
     localStorage.setItem('personal_pronunciation_enabled', updated.personal_pronunciation_enabled ? '1' : '0');
     localStorage.setItem('personal_pronunciation_updated_at', String(Date.now()));
+    localStorage.setItem('loshon_kodesh_mode', updated.loshon_kodesh_enabled ? '1' : '0');
+    if (updated.active_pronunciation_profile) {
+      localStorage.setItem('pp_active_profile', updated.active_pronunciation_profile);
+    } else {
+      localStorage.removeItem('pp_active_profile');
+    }
+    localStorage.setItem('diarize_enabled', updated.diarize_enabled ? '1' : '0');
     debugLog.info('CloudPreferences', 'Saving personal pronunciation preference', {
       enabled: updated.personal_pronunciation_enabled,
       hasUser: Boolean(user),
@@ -414,6 +476,9 @@ export const useCloudPreferences = () => {
           cuda_preload_mode: updated.cuda_preload_mode,
           cuda_cloud_save: updated.cuda_cloud_save,
           personal_pronunciation_enabled: updated.personal_pronunciation_enabled,
+          loshon_kodesh_enabled: updated.loshon_kodesh_enabled,
+          active_pronunciation_profile: updated.active_pronunciation_profile || null,
+          diarize_enabled: updated.diarize_enabled,
           updated_at: new Date().toISOString(),
         } as any, { onConflict: 'user_id' });
 
