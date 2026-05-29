@@ -36,9 +36,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  // Optimistic: if localStorage has a valid-looking token, skip spinner immediately.
-  // onAuthStateChange will correct any mismatch within ~50ms.
-  const [isLoading, setIsLoading] = useState(!_hasStoredSession());
+  // Always start loading=true so ProtectedRoute waits for the first auth event.
+  // Without this, session=null + isLoading=false causes / → /login → / flash.
+  const [isLoading, setIsLoading] = useState(true);
 
   const checkAdmin = async (userId: string) => {
     const { data } = await supabase
