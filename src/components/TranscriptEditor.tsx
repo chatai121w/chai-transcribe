@@ -3,7 +3,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Wand2, BookOpen, FileText, Copy, Download, Loader2, Upload, Settings2, CheckCheck, AlignJustify, Quote, Users, Search, ChevronUp, ChevronDown, X, Highlighter, SpellCheck } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { Wand2, BookOpen, FileText, Copy, Download, Loader2, Upload, Settings2, CheckCheck, AlignJustify, Quote, Users, Search, ChevronUp, ChevronDown, X, Highlighter, SpellCheck, BarChart3, Headphones } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
 import { ExportButton } from "@/components/ExportButton";
@@ -18,16 +19,63 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
+// Hebrew stop words to filter from frequency chart
+const HE_STOP = new Set([
+  'של','את','הם','הן','זה','זאת','כי','אם','לא','כן','על','עם','אל','לו','לה','להם',
+  'אני','אתה','היא','הוא','אנחנו','אתם','הם','הן','ב','ל','מ','ו','ה','כ','ש',
+  'מי','מה','איך','אבל','גם','כבר','עוד','רק','כל','יש','אין','היה','הייתה','יהיה',
+  'היו','הייתי','היית','יש','כך','כן','לא','הכל','הרבה','קצת','מאוד','מאד','עכשיו',
+  'כאן','שם','אז','כשם','כאשר','כדי','עד','מן','בין','כבר','עדיין','כמו',
+]);
+
+function WordFrequencyChart({ transcript }: { transcript: string }) {
+  const data = useMemo(() => {
+    const words = transcript.split(/[\s\n,\.\-–—:;!?()[\]{}"\'״׳]+/).filter(Boolean);
+    const freq = new Map<string, number>();
+    for (const w of words) {
+      const clean = w.replace(/[^\u05d0-\u05ea\u05b0-\u05c7a-zA-Z]/g, '').trim();
+      if (!clean || clean.length < 2 || HE_STOP.has(clean)) continue;
+      freq.set(clean, (freq.get(clean) || 0) + 1);
+    }
+    return [...freq.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([word, count]) => ({ word, count }));
+  }, [transcript]);
+
+  if (data.length === 0) return <p className="text-sm text-muted-foreground text-center py-4">אין מספיק מילים לניתוח</p>;
+
+  const COLORS = ['#3b82f6','#6366f1','#8b5cf6','#a855f7','#ec4899','#f43f5e'];
+
+  return (
+    <div dir="rtl">
+      <p className="text-xs text-muted-foreground mb-2">20 המילים הנפוצות ביותר (ללא מילות קישור)</p>
+      <ResponsiveContainer width="100%" height={260}>
+        <BarChart data={data} layout="vertical" margin={{ right: 8, left: 60 }}>
+          <XAxis type="number" tick={{ fontSize: 11 }} />
+          <YAxis type="category" dataKey="word" tick={{ fontSize: 12, fontFamily: 'inherit' }} width={58} />
+          <Tooltip formatter={(v: number) => [`${v} פעמים`, 'תדירות']} />
+          <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+            {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 interface TranscriptEditorProps {
   transcript: string;
   originalTranscript?: string;
   onTranscriptChange: (text: string) => void;
   wordTimings?: Array<{word: string, start: number, end: number, probability?: number}>;
+  onWordClick?: (word: {word: string, start: number, end: number}) => void;
+  activeWordIdx?: number;
   searchOpen?: boolean;
   onSearchOpenChange?: (open: boolean) => void;
 }
 
-const TranscriptEditorInner = ({ transcript, originalTranscript, onTranscriptChange, wordTimings, searchOpen, onSearchOpenChange }: TranscriptEditorProps) => {
+const TranscriptEditorInner = ({ transcript, originalTranscript, onTranscriptChange, wordTimings, onWordClick, activeWordIdx, searchOpen, onSearchOpenChange }: TranscriptEditorProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [showConfidence, setShowConfidence] = useState(false);
   const [showDiffHighlight, setShowDiffHighlight] = useState(false);
@@ -274,6 +322,24 @@ const TranscriptEditorInner = ({ transcript, originalTranscript, onTranscriptCha
             העתק
           </Button>
           <ExportButton text={transcript} disabled={isEditing} wordTimings={wordTimings} />
+          {/* Word frequency chart */}
+          {transcript.trim().length > 30 && (
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" title="תדירות מילים">
+                  <BarChart3 className="w-4 h-4 ml-2" />
+                  תדירות
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>תדירות מילים</DialogTitle>
+                  <DialogDescription>ניתוח המילים הנפוצות ביותר בתמלול</DialogDescription>
+                </DialogHeader>
+                <WordFrequencyChart transcript={transcript} />
+              </DialogContent>
+            </Dialog>
+          )}
           {wordTimings && wordTimings.some(w => w.probability != null) && (
             <Button
               variant={showConfidence ? "default" : "outline"}
@@ -381,11 +447,14 @@ const TranscriptEditorInner = ({ transcript, originalTranscript, onTranscriptCha
             {wordTimings.map((w, i) => {
               const p = w.probability ?? 1;
               const bg = p >= 0.9 ? '' : p >= 0.7 ? 'bg-yellow-200 dark:bg-yellow-900/40' : 'bg-red-200 dark:bg-red-900/40';
+              const clickable = onWordClick && w.start != null;
+              const isActive = activeWordIdx === i;
               return (
                 <span
                   key={i}
-                  className={`inline-block px-0.5 rounded ${bg}`}
-                  title={`ביטחון: ${Math.round(p * 100)}%`}
+                  className={`inline-block px-0.5 rounded transition-all ${bg} ${clickable ? 'cursor-pointer hover:ring-1 hover:ring-primary hover:opacity-80 transition-opacity' : ''} ${isActive ? 'ring-2 ring-primary bg-primary/25 dark:bg-primary/30 scale-105 shadow-sm' : ''}`}
+                  title={`ביטחון: ${Math.round(p * 100)}%${clickable ? ` | ${w.start.toFixed(1)}s — לחץ לנגן` : ''}`}
+                  onClick={() => clickable && onWordClick(w)}
                 >
                   {w.word}
                 </span>

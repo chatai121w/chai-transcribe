@@ -1,13 +1,13 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowRightLeft, Copy, ArrowUp, ArrowDown, Layers } from "lucide-react";
+import { ArrowRightLeft, Copy, ArrowUp, ArrowDown, Layers, Loader2 } from "lucide-react";
 import { TextVersion } from "@/components/TextEditHistory";
-import DiffMatchPatch from "diff-match-patch";
+import { useDiffWorker, type DiffOp } from "@/hooks/useDiffWorker";
 import { toast } from "@/hooks/use-toast";
 
 interface AdvancedDiffViewProps {
@@ -42,6 +42,59 @@ const sourceLabels: Record<TextVersion['source'], string> = {
   'ai-tone': 'AI - טון',
 };
 
+// ── Aligned-row helpers (pure, run in component after worker responds) ─────────
+
+type AlignedRow = {
+  leftLine: string | null;
+  rightLine: string | null;
+  rowType: 'equal' | 'change' | 'delete' | 'insert';
+};
+
+function splitLines(t: string): string[] {
+  const parts = t.split('\n');
+  if (parts.length && parts[parts.length - 1] === '') parts.pop();
+  return parts;
+}
+
+function buildAlignedRows(lineDiffs: [number, string][]): AlignedRow[] {
+  const rows: AlignedRow[] = [];
+  let i = 0;
+  while (i < lineDiffs.length) {
+    const [op, text] = lineDiffs[i];
+    const lines = splitLines(text);
+
+    if (op === 0) {
+      for (const line of lines)
+        rows.push({ leftLine: line, rightLine: line, rowType: 'equal' });
+      i++;
+    } else if (op === -1) {
+      const delLines = lines;
+      let addLines: string[] = [];
+      if (i + 1 < lineDiffs.length && lineDiffs[i + 1][0] === 1) {
+        addLines = splitLines(lineDiffs[i + 1][1]);
+        i += 2;
+      } else {
+        i++;
+      }
+      const maxLen = Math.max(delLines.length, addLines.length);
+      for (let j = 0; j < maxLen; j++) {
+        const hasL = j < delLines.length;
+        const hasR = j < addLines.length;
+        rows.push({
+          leftLine: hasL ? delLines[j] : null,
+          rightLine: hasR ? addLines[j] : null,
+          rowType: hasL && hasR ? 'change' : hasL ? 'delete' : 'insert',
+        });
+      }
+    } else {
+      for (const line of lines)
+        rows.push({ leftLine: null, rightLine: line, rowType: 'insert' });
+      i++;
+    }
+  }
+  return rows;
+}
+
 export const AdvancedDiffView = ({
   versions,
   fontSize = 16,
@@ -54,6 +107,13 @@ export const AdvancedDiffView = ({
   const [rightId, setRightId] = useState(versions[versions.length - 1]?.id || '');
   const [viewMode, setViewMode] = useState<'side-by-side' | 'unified' | 'stats'>('side-by-side');
   const [versionFilter, setVersionFilter] = useState<VersionFilter>("all");
+
+  // Worker-computed diffs (async, off main thread)
+  const { runDiff } = useDiffWorker();
+  const [diffs, setDiffs] = useState<DiffOp[]>([]);
+  const [alignedRows, setAlignedRows] = useState<AlignedRow[]>([]);
+  const [diffPending, setDiffPending] = useState(false);
+  const diffReqRef = useRef(0); // cancel stale responses
 
   const selectableVersions = useMemo(() => {
     const isCloudVersion = (v: TextVersion) => v.id.includes("-") && v.id.length >= 30;
@@ -93,14 +153,33 @@ export const AdvancedDiffView = ({
   const leftVersion = versions.find(v => v.id === leftId);
   const rightVersion = versions.find(v => v.id === rightId);
 
-  const dmp = useMemo(() => new DiffMatchPatch(), []);
+  // Kick off both char-diff and line-diff in the worker whenever versions change
+  useEffect(() => {
+    if (!leftVersion || !rightVersion) {
+      setDiffs([]);
+      setAlignedRows([]);
+      return;
+    }
+    const reqId = ++diffReqRef.current;
+    setDiffPending(true);
 
-  const diffs = useMemo(() => {
-    if (!leftVersion || !rightVersion) return [];
-    const d = dmp.diff_main(leftVersion.text, rightVersion.text);
-    dmp.diff_cleanupSemantic(d);
-    return d;
-  }, [leftVersion, rightVersion, dmp]);
+    const left = leftVersion.text;
+    const right = rightVersion.text;
+
+    Promise.all([
+      runDiff('char', left, right),
+      runDiff('line', left, right),
+    ]).then(([charDiffs, lineDiffs]) => {
+      if (diffReqRef.current !== reqId) return; // stale — newer request in flight
+      setDiffs(charDiffs);
+      setAlignedRows(buildAlignedRows(lineDiffs));
+      setDiffPending(false);
+    }).catch(() => {
+      if (diffReqRef.current !== reqId) return;
+      setDiffPending(false);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leftVersion?.id, rightVersion?.id]);
 
   const stats = useMemo(() => {
     let added = 0, removed = 0, unchanged = 0;
@@ -122,20 +201,8 @@ export const AdvancedDiffView = ({
     return { added, removed, unchanged, addedWords, removedWords, similarity, lWords, rWords, lChars, rChars };
   }, [diffs, leftVersion, rightVersion]);
 
-  const renderSideBySide = (side: 'left' | 'right') => {
-    return diffs.map((diff, i) => {
-      const [op, text] = diff;
-      if (side === 'left') {
-        if (op === -1) return <span key={i} className="bg-destructive/20 text-destructive-foreground line-through decoration-destructive/60">{text}</span>;
-        if (op === 0) return <span key={i}>{text}</span>;
-        return null;
-      } else {
-        if (op === 1) return <span key={i} className="bg-green-500/20 font-medium">{text}</span>;
-        if (op === 0) return <span key={i}>{text}</span>;
-        return null;
-      }
-    });
-  };
+  // Build line-level aligned rows so both sides have the same number of visual lines.
+  // (now computed in the worker — handled by the useEffect above)
 
   const renderUnified = () => {
     return diffs.map((diff, i) => {
@@ -222,6 +289,11 @@ export const AdvancedDiffView = ({
 
         {/* Quick stats bar */}
         <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t text-xs">
+          {diffPending && (
+            <span className="flex items-center gap-1 text-muted-foreground">
+              <Loader2 className="w-3 h-3 animate-spin" /> מחשב...
+            </span>
+          )}
           <span className="text-muted-foreground">דמיון:</span>
           <div className="flex items-center gap-1.5">
             <div className="w-24 h-2 rounded-full bg-muted overflow-hidden">
@@ -250,32 +322,73 @@ export const AdvancedDiffView = ({
         </div>
       </Card>
 
-      {/* Side by side view */}
+      {/* Side by side view — aligned line rows so both columns have equal words per line */}
       {viewMode === 'side-by-side' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Card className="overflow-hidden">
-            <div className="px-4 py-2 border-b bg-destructive/5 flex items-center justify-between">
+        <Card className="overflow-hidden">
+          {/* Column headers */}
+          <div className="grid grid-cols-2 border-b">
+            <div className="px-4 py-2 border-l bg-destructive/5 flex items-center justify-between">
               <span className="text-sm font-medium">גרסת בסיס</span>
               <span className="text-xs text-muted-foreground">{stats.lChars} תווים · {stats.lWords} מילים</span>
             </div>
-            <ScrollArea className="h-[500px] p-4">
-              <pre className="whitespace-pre-wrap text-right" dir="rtl" style={textStyle}>
-                {renderSideBySide('left')}
-              </pre>
-            </ScrollArea>
-          </Card>
-          <Card className="overflow-hidden">
-            <div className="px-4 py-2 border-b bg-green-500/5 flex items-center justify-between">
+            <div className="px-4 py-2 bg-green-500/5 flex items-center justify-between">
               <span className="text-sm font-medium">גרסה חדשה</span>
               <span className="text-xs text-muted-foreground">{stats.rChars} תווים · {stats.rWords} מילים</span>
             </div>
-            <ScrollArea className="h-[500px] p-4">
-              <pre className="whitespace-pre-wrap text-right" dir="rtl" style={textStyle}>
-                {renderSideBySide('right')}
-              </pre>
-            </ScrollArea>
-          </Card>
-        </div>
+          </div>
+          {/* Single scroll area — rows shared between both columns guarantee equal visual lines */}
+          <ScrollArea className="h-[500px]">
+            <div dir="rtl" style={textStyle}>
+              {alignedRows.map((row, idx) => (
+                <div
+                  key={idx}
+                  className="flex border-b border-muted/20 last:border-0 min-h-[1.5em]"
+                >
+                  {/* Left column */}
+                  <div
+                    className={cn(
+                      "flex-1 px-3 py-0.5 text-right whitespace-pre-wrap break-words border-l border-muted/20",
+                      row.rowType === 'delete' && "bg-destructive/15",
+                      row.rowType === 'change' && "bg-destructive/10",
+                      row.rowType === 'insert' && "bg-muted/10",
+                    )}
+                  >
+                    {row.leftLine !== null ? (
+                      <span
+                        className={cn(
+                          (row.rowType === 'delete' || row.rowType === 'change')
+                            && "line-through decoration-destructive/60 text-destructive/90"
+                        )}
+                      >
+                        {row.leftLine || '\u00A0'}
+                      </span>
+                    ) : <span>&nbsp;</span>}
+                  </div>
+                  {/* Right column */}
+                  <div
+                    className={cn(
+                      "flex-1 px-3 py-0.5 text-right whitespace-pre-wrap break-words",
+                      row.rowType === 'insert' && "bg-green-500/15",
+                      row.rowType === 'change' && "bg-green-500/10",
+                      row.rowType === 'delete' && "bg-muted/10",
+                    )}
+                  >
+                    {row.rightLine !== null ? (
+                      <span
+                        className={cn(
+                          (row.rowType === 'insert' || row.rowType === 'change')
+                            && "font-medium"
+                        )}
+                      >
+                        {row.rightLine || '\u00A0'}
+                      </span>
+                    ) : <span>&nbsp;</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </Card>
       )}
 
       {/* Unified view */}

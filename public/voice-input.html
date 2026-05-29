@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🎙️ קלט קולי לעברית — Copilot</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      gap: 20px;
+    }
+
+    h1 { font-size: 1.1rem; color: #8b949e; font-weight: 500; }
+
+    /* Big record button */
+    #btn-record {
+      width: 120px; height: 120px; border-radius: 50%;
+      background: #21262d; border: 3px solid #30363d;
+      font-size: 3rem; cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+    }
+    #btn-record:hover { border-color: #58a6ff; transform: scale(1.05); }
+    #btn-record.recording {
+      background: #3d1f1f; border-color: #f85149;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(248,81,73,0.4); }
+      50%       { box-shadow: 0 0 0 18px rgba(248,81,73,0); }
+    }
+
+    #status {
+      font-size: 0.85rem; color: #8b949e; height: 1.2em; text-align: center;
+    }
+    #status.recording { color: #f85149; }
+    #status.loading   { color: #58a6ff; }
+    #status.done      { color: #3fb950; }
+    #status.error     { color: #f85149; }
+
+    /* Result box */
+    #result-box {
+      width: 100%; max-width: 480px;
+      background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      padding: 14px 16px;
+      font-size: 1rem; line-height: 1.6; min-height: 80px;
+      direction: rtl; text-align: right;
+      color: #e6edf3; word-break: break-word;
+      white-space: pre-wrap;
+      cursor: text;
+    }
+    #result-box.empty { color: #484f58; }
+
+    /* Action buttons */
+    .actions { display: flex; gap: 10px; }
+    .btn {
+      padding: 8px 18px; border-radius: 6px; border: none;
+      font-size: 0.85rem; cursor: pointer; font-family: inherit;
+      transition: opacity 0.15s;
+    }
+    .btn:disabled { opacity: 0.4; cursor: default; }
+    .btn-copy   { background: #238636; color: #fff; }
+    .btn-copy:not(:disabled):hover { background: #2ea043; }
+    .btn-clear  { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+    .btn-clear:not(:disabled):hover { background: #30363d; color: #e6edf3; }
+
+    /* Settings */
+    details { width: 100%; max-width: 480px; }
+    summary { font-size: 0.78rem; color: #484f58; cursor: pointer; user-select: none; }
+    summary:hover { color: #8b949e; }
+    .settings-inner {
+      margin-top: 8px; padding: 12px; background: #161b22;
+      border: 1px solid #30363d; border-radius: 6px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .setting-row label { font-size: 0.8rem; color: #8b949e; }
+    .setting-row select, .setting-row input[type=number] {
+      background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+      color: #e6edf3; padding: 4px 8px; font-size: 0.8rem;
+      font-family: inherit; direction: ltr;
+    }
+
+    /* Tip */
+    .tip {
+      font-size: 0.72rem; color: #484f58; text-align: center; max-width: 380px;
+      line-height: 1.5;
+    }
+    kbd {
+      background: #21262d; border: 1px solid #30363d; border-radius: 3px;
+      padding: 1px 5px; font-size: 0.7rem;
+    }
+
+    /* History */
+    #history {
+      width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 6px;
+    }
+    .hist-item {
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      padding: 8px 12px; font-size: 0.85rem; color: #8b949e;
+      display: flex; gap: 8px; align-items: flex-start; cursor: pointer;
+      direction: rtl; text-align: right;
+    }
+    .hist-item:hover { border-color: #58a6ff; color: #e6edf3; }
+    .hist-time { font-size: 0.7rem; color: #484f58; white-space: nowrap; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+
+  <h1>🎙️ קלט קולי עברית → Copilot</h1>
+
+  <button id="btn-record" title="לחץ להקלטה">🎤</button>
+
+  <div id="status">לחץ כדי להתחיל הקלטה</div>
+
+  <div id="result-box" class="empty">הטקסט המתומלל יופיע כאן...</div>
+
+  <div class="actions">
+    <button class="btn btn-copy" id="btn-copy" disabled>📋 העתק</button>
+    <button class="btn btn-clear" id="btn-clear" disabled>🗑️ נקה</button>
+  </div>
+
+  <details>
+    <summary>⚙️ הגדרות</summary>
+    <div class="settings-inner">
+      <div class="setting-row">
+        <label>שרת Whisper (port)</label>
+        <input type="number" id="cfg-port" value="3000" min="1000" max="65535" style="width:80px" />
+      </div>
+      <div class="setting-row">
+        <label>שפה</label>
+        <select id="cfg-lang">
+          <option value="he" selected>עברית</option>
+          <option value="auto">אוטומטי</option>
+          <option value="en">אנגלית</option>
+          <option value="ar">ערבית</option>
+          <option value="ru">רוסית</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <label>איכות (beam size)</label>
+        <select id="cfg-beam">
+          <option value="1">מהיר (1)</option>
+          <option value="3" selected>סטנדרטי (3)</option>
+          <option value="5">מדויק (5)</option>
+        </select>
+      </div>
+    </div>
+  </details>
+
+  <div id="history"></div>
+
+  <div class="tip">
+    לחץ 🎤 להקלטה → שחרר → הטקסט מועתק אוטומטית לקליפבורד<br />
+    אז עבור ל-VS Code והדבק <kbd>Ctrl+V</kbd> בצ'אט של Copilot
+  </div>
+
+  <script>
+    const btnRecord = document.getElementById('btn-record');
+    const statusEl  = document.getElementById('status');
+    const resultBox = document.getElementById('result-box');
+    const btnCopy   = document.getElementById('btn-copy');
+    const btnClear  = document.getElementById('btn-clear');
+    const historyEl = document.getElementById('history');
+
+    let mediaRecorder = null;
+    let audioChunks   = [];
+    let isRecording   = false;
+    let historyItems  = [];
+
+    // ── Config helpers ───────────────────────────────────────────────────────
+    const port = () => document.getElementById('cfg-port').value || '3000';
+    const lang = () => document.getElementById('cfg-lang').value;
+    const beam = () => document.getElementById('cfg-beam').value;
+
+    // ── Status helper ────────────────────────────────────────────────────────
+    function setStatus(text, cls = '') {
+      statusEl.textContent = text;
+      statusEl.className = cls;
+    }
+
+    // ── Result helper ────────────────────────────────────────────────────────
+    function setResult(text) {
+      resultBox.textContent = text;
+      resultBox.className = text ? '' : 'empty';
+      btnCopy.disabled  = !text;
+      btnClear.disabled = !text;
+    }
+
+    // ── Copy ─────────────────────────────────────────────────────────────────
+    btnCopy.addEventListener('click', () => copyText(resultBox.textContent));
+    function copyText(text) {
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        setStatus('✅ הועתק לקליפבורד! עבור ל-VS Code והדבק Ctrl+V', 'done');
+        setTimeout(() => setStatus('מוכן להקלטה הבאה'), 3000);
+      }).catch(() => {
+        // Fallback for non-secure context
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        setStatus('✅ הועתק! עבור ל-VS Code והדבק Ctrl+V', 'done');
+        setTimeout(() => setStatus('מוכן להקלטה הבאה'), 3000);
+      });
+    }
+
+    // ── Clear ────────────────────────────────────────────────────────────────
+    btnClear.addEventListener('click', () => {
+      setResult('');
+      setStatus('נקה — מוכן להקלטה');
+    });
+
+    // ── Record ───────────────────────────────────────────────────────────────
+    btnRecord.addEventListener('click', () => {
+      if (isRecording) stopRecording();
+      else startRecording();
+    });
+
+    async function startRecording() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        // Pick best supported format
+        const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg', 'audio/mp4']
+          .find(m => MediaRecorder.isTypeSupported(m)) || '';
+
+        mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = e => {
+          if (e.data.size > 0) audioChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          stream.getTracks().forEach(t => t.stop());
+          await sendToWhisper();
+        };
+
+        mediaRecorder.start(100); // collect every 100ms
+        isRecording = true;
+        btnRecord.classList.add('recording');
+        btnRecord.textContent = '⏹️';
+        setStatus('🔴 מקליט… לחץ שוב לעצירה', 'recording');
+      } catch (err) {
+        setStatus('❌ אין גישה למיקרופון — אשר הרשאה בדפדפן', 'error');
+        console.error(err);
+      }
+    }
+
+    function stopRecording() {
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+      mediaRecorder.stop();
+      isRecording = false;
+      btnRecord.classList.remove('recording');
+      btnRecord.textContent = '🎤';
+      setStatus('⏳ מעבד עם Whisper…', 'loading');
+    }
+
+    async function sendToWhisper() {
+      const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+      const ext  = (mediaRecorder.mimeType || '').includes('ogg') ? 'ogg'
+                 : (mediaRecorder.mimeType || '').includes('mp4') ? 'mp4'
+                 : 'webm';
+
+      const form = new FormData();
+      form.append('file', blob, `voice.${ext}`);
+      form.append('language', lang());
+      form.append('beam_size', beam());
+      form.append('normalize', '1');
+
+      const url = `http://localhost:${port()}/transcribe`;
+
+      try {
+        const res = await fetch(url, { method: 'POST', body: form });
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`שרת: ${res.status} — ${errText.slice(0, 120)}`);
+        }
+        const data = await res.json();
+        const text = (data.text || '').trim();
+
+        if (!text) {
+          setStatus('⚠️ לא זוהה טקסט — נסה שוב', 'error');
+          return;
+        }
+
+        setResult(text);
+        setStatus('✅ תמלול הושלם — מועתק לקליפבורד!', 'done');
+        copyText(text);
+
+        // Add to history
+        addHistory(text);
+
+        setTimeout(() => setStatus('מוכן להקלטה הבאה'), 4000);
+      } catch (err) {
+        console.error(err);
+        if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+          setStatus(`❌ שרת Whisper לא נמצא על port ${port()} — בדוק שהוא רץ`, 'error');
+        } else {
+          setStatus(`❌ שגיאה: ${err.message}`, 'error');
+        }
+      }
+    }
+
+    // ── History ───────────────────────────────────────────────────────────────
+    function addHistory(text) {
+      historyItems.unshift({ text, time: new Date().toLocaleTimeString('he-IL') });
+      if (historyItems.length > 5) historyItems.pop();
+      renderHistory();
+    }
+
+    function renderHistory() {
+      historyEl.innerHTML = '';
+      if (historyItems.length === 0) return;
+
+      const label = document.createElement('div');
+      label.style.cssText = 'font-size:0.72rem;color:#484f58;width:100%;max-width:480px;margin-top:4px;';
+      label.textContent = '📋 הקלטות אחרונות (לחץ להעתקה):';
+      historyEl.appendChild(label);
+
+      historyItems.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'hist-item';
+        div.innerHTML = `<span style="flex:1">${item.text}</span><span class="hist-time">${item.time}</span>`;
+        div.addEventListener('click', () => {
+          setResult(item.text);
+          copyText(item.text);
+        });
+        historyEl.appendChild(div);
+      });
+    }
+
+    // ── Keyboard shortcut: Space to toggle recording ─────────────────────────
+    document.addEventListener('keydown', e => {
+      if (e.code === 'Space' && e.target === document.body) {
+        e.preventDefault();
+        if (isRecording) stopRecording();
+        else startRecording();
+      }
+    });
+
+    // ── Check if server is running ───────────────────────────────────────────
+    fetch(`http://localhost:3000/health`)
+      .then(r => r.ok ? setStatus('✅ שרת Whisper פעיל — מוכן') : setStatus('⚠️ שרת Whisper לא מגיב', 'error'))
+      .catch(() => setStatus('⚠️ שרת Whisper לא פעיל — הפעל אותו', 'error'));
+  </script>
+</body>
+</html>

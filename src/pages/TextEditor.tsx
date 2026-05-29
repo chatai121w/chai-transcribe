@@ -22,6 +22,7 @@ const CorrectionLearningPanel = lazy(() => import("@/components/CorrectionLearni
 const SyncAudioPlayer = lazy(() => import("@/components/SyncAudioPlayer").then(m => ({ default: m.SyncAudioPlayer })));
 const SyncEditableView = lazy(() => import("@/components/SyncEditableView").then(m => ({ default: m.SyncEditableView })));
 const SyncTranscriptView = lazy(() => import("@/components/SyncTranscriptView").then(m => ({ default: m.SyncTranscriptView })));
+const SyncMirrorLayout = lazy(() => import("@/components/SyncMirrorLayout").then(m => ({ default: m.SyncMirrorLayout })));
 const VocabularyPanel = lazy(() => import("@/components/VocabularyPanel").then(m => ({ default: m.VocabularyPanel })));
 const DictionaryValidator = lazy(() => import("@/components/DictionaryValidator").then(m => ({ default: m.DictionaryValidator })));
 const TextMarkingOverlay = lazy(() => import("@/components/TextMarkingOverlay").then(m => ({ default: m.TextMarkingOverlay })));
@@ -32,7 +33,7 @@ const AnalyticsDashboard = lazy(() => import("@/components/AnalyticsDashboard").
 const SpeakerDiarization = lazy(() => import("@/components/SpeakerDiarization").then(m => ({ default: m.SpeakerDiarization })));
 const FloatingPlayerPortal = lazy(() => import("@/components/FloatingPlayerPortal").then(m => ({ default: m.FloatingPlayerPortal })));
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })));
-import { ArrowRight, Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard } from "lucide-react";
+import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard } from "lucide-react";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
 import { supabase } from "@/integrations/supabase/client";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
@@ -105,6 +106,8 @@ const TextEditor = () => {
   const [audioFileName, setAudioFileName] = useState<string>("");
   const [wordTimings, setWordTimings] = useState<WordTiming[]>([]);
   const [playerTime, setPlayerTime] = useState(0);
+  const lastWordIdxRef = useRef(-2); // -2 = uninitialised
+  const playerTimeRef = useRef(0);
   const transcriptIdRef = useRef<string | null>(null);
   const manualVersionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { updateTranscript, getAudioUrl } = useCloudTranscripts();
@@ -602,9 +605,29 @@ const TextEditor = () => {
     }, 2000);
   }, [learnCorrections]);
 
+  // Throttle playerTime updates – only re-render when active word index changes.
+  // This prevents hundreds of re-renders per second while audio plays.
+  const handlePlayerTimeUpdate = useCallback((t: number) => {
+    playerTimeRef.current = t;
+    if (!wordTimings.length) {
+      setPlayerTime(t);
+      return;
+    }
+    let idx = -1;
+    for (let i = wordTimings.length - 1; i >= 0; i--) {
+      if (t >= wordTimings[i].start) { idx = i; break; }
+    }
+    if (idx !== lastWordIdxRef.current) {
+      lastWordIdxRef.current = idx;
+      setPlayerTime(t);
+    }
+  }, [wordTimings]);
+
   const handlePlayerEditorChange = useCallback((newText: string) => {
     handleEditorChange(newText);
   }, [handleEditorChange]);
+
+
 
   const handleSyncedWordReplace = useCallback((wordIndex: number, replacement: string) => {
     const fixed = replacement.trim();
@@ -687,6 +710,7 @@ const TextEditor = () => {
     source: string,
     engineLabel: string,
     actionLabel: string,
+    customTitle?: string,
   ) => {
     const id = transcriptIdRef.current;
     if (!id) {
@@ -706,7 +730,7 @@ const TextEditor = () => {
     }
 
     const syncedTimings = buildSyncedTimings(editedText);
-    const duplicateTitle = `${current.title || 'תמלול'} (עותק)`;
+    const duplicateTitle = customTitle?.trim() || `${current.title || 'תמלול'} (עותק)`;
     const { data: inserted, error: insertError } = await supabase
       .from('transcripts')
       .insert([{
@@ -743,10 +767,10 @@ const TextEditor = () => {
 
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>}>
-    <div className="min-h-screen bg-background p-4 md:p-8 lg:p-10" dir="rtl">
-      <div className="max-w-full mx-auto space-y-6">
+    <div className="min-h-screen bg-background p-2 md:p-4" dir="rtl">
+      <div className="max-w-full mx-auto space-y-3">
         {/* Compact Header */}
-        <div className="flex items-center justify-between pb-2">
+        <div className="flex items-center justify-between py-1 border-b border-border/30">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight">עריכת טקסט</h1>
             <span className="text-xs text-muted-foreground hidden sm:inline">ערוך · שפר · השווה</span>
@@ -809,12 +833,21 @@ const TextEditor = () => {
             >
               <Home className="h-3.5 w-3.5" />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setShortcutsOpen(true)}
+              title="קיצורי מקלדת"
+            >
+              <Keyboard className="h-3.5 w-3.5" />
+            </Button>
           </div>
         </div>
 
         {/* Unified action bar — AI quick actions + save, single compact row */}
         {text.trim() && (
-          <div className="flex items-center gap-2 flex-wrap py-3 px-4 rounded-xl border bg-muted/20">
+          <div className="flex items-center gap-2 flex-wrap py-2 px-3 rounded-xl border bg-muted/20">
             <Button
               variant="default"
               size="sm"
@@ -891,7 +924,7 @@ const TextEditor = () => {
                   </TabsList>
                 )}
                 {orderedSecondary.length > 0 && (
-                  <TabsList className="flex w-full flex-wrap h-auto gap-1 p-1.5 bg-muted/40 mb-6 rounded-lg">
+                  <TabsList className="flex w-full flex-wrap h-auto gap-1 p-1.5 bg-muted/40 mb-2 rounded-lg">
                     {orderedSecondary.map((tab) => (
                       <TabsTrigger key={tab.id} value={tab.id} className="flex-1 min-w-[4.5rem] text-xs py-1.5 px-2 rounded-md">
                         {tab.emoji && <span className="ml-1">{tab.emoji}</span>}{tab.label}
@@ -903,80 +936,60 @@ const TextEditor = () => {
             );
           })()}
 
-          <TabsContent value="player" className="space-y-6">
+          <TabsContent value="player" className="space-y-4">
             <LazyErrorBoundary label="נגן מסונכרן">
-            {/* Layout toggle */}
-            <div className="flex justify-end mb-2 gap-2" dir="rtl">
-              <Button
-                variant={isPlayerFloating ? 'default' : 'outline'}
-                size="sm"
-                className="h-7 px-2 text-xs gap-1"
-                onClick={togglePlayerFloating}
-                title="נגן צף (Ctrl+Shift+F)"
-              >
-                <PictureInPicture2 className="w-3.5 h-3.5" />
-                נגן צף
-              </Button>
-              <Button
-                variant={isEqFloating ? 'default' : 'outline'}
-                size="sm"
-                className="h-7 px-2 text-xs gap-1"
-                onClick={toggleEqFloating}
-                title="איקולייזר צף (Ctrl+Shift+E)"
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5" />
-                EQ צף
-              </Button>
-              <div className="flex items-center gap-1 bg-muted/40 rounded-xl p-1 border border-border/50 shadow-sm">
+
+            {/* ── Toolbar: layout controls ── */}
+            <div className="flex items-center justify-between gap-3" dir="rtl">
+
+              {/* Left: floating toggles */}
+              <div className="flex items-center gap-2">
                 <Button
-                  variant={playerLayout === 'split' ? 'default' : 'ghost'}
+                  variant={isPlayerFloating ? 'default' : 'outline'}
                   size="sm"
-                  className="h-7 w-7 p-0 rounded-lg"
-                  onClick={() => setPlayerLayout('split')}
-                  title="פריסה מפוצלת"
+                  className="h-8 px-3 text-xs gap-1.5"
+                  onClick={togglePlayerFloating}
+                  title="נגן צף (Ctrl+Shift+F)"
                 >
-                  <LayoutPanelLeft className="w-3.5 h-3.5" />
+                  <PictureInPicture2 className="w-3.5 h-3.5" />
+                  נגן צף
                 </Button>
                 <Button
-                  variant={playerLayout === 'stacked' ? 'default' : 'ghost'}
+                  variant={isEqFloating ? 'default' : 'outline'}
                   size="sm"
-                  className="h-7 w-7 p-0 rounded-lg"
-                  onClick={() => setPlayerLayout('stacked')}
-                  title="פריסה מוערמת"
-                >
-                  <LayoutPanelTop className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  variant={playerLayout === 'wide' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="h-7 w-7 p-0 rounded-lg"
-                  onClick={() => setPlayerLayout('wide')}
-                  title="פריסה רחבה — נגן+אקווילייזר רוחב מלא, תמלולים צד-בצד"
-                >
-                  <StretchHorizontal className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  variant={playerLayout === 'full' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="h-7 w-7 p-0 rounded-lg"
-                  onClick={() => setPlayerLayout('full')}
-                  title="נגן מלא"
-                >
-                  <Square className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  variant={playerLayout === 'eq-wide' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="h-7 w-7 p-0 rounded-lg"
-                  onClick={() => setPlayerLayout('eq-wide')}
-                  title="אקולייזר פרוס — מיקסר רוחב מלא מתחת לנגן"
+                  className="h-8 px-3 text-xs gap-1.5"
+                  onClick={toggleEqFloating}
+                  title="איקולייזר צף (Ctrl+Shift+E)"
                 >
                   <SlidersHorizontal className="w-3.5 h-3.5" />
+                  EQ צף
                 </Button>
+              </div>
+
+              {/* Right: layout presets */}
+              <div className="flex items-center gap-1.5 bg-muted/50 rounded-xl p-1 border border-border/40">
+                {([
+                  { id: 'split',   icon: LayoutPanelLeft,   title: 'פריסה מפוצלת' },
+                  { id: 'stacked', icon: LayoutPanelTop,    title: 'פריסה מוערמת' },
+                  { id: 'wide',    icon: StretchHorizontal, title: 'רחבה — נגן+EQ מלא' },
+                  { id: 'full',    icon: Square,            title: 'נגן בלבד (ללא תמלול)' },
+                  { id: 'eq-wide', icon: SlidersHorizontal, title: 'EQ פרוס — מיקסר מלא' },
+                ] as const).map(({ id, icon: Icon, title }) => (
+                  <Button
+                    key={id}
+                    variant={playerLayout === id ? 'default' : 'ghost'}
+                    size="sm"
+                    className="h-7 w-7 p-0 rounded-lg"
+                    onClick={() => setPlayerLayout(id)}
+                    title={title}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                  </Button>
+                ))}
               </div>
             </div>
 
-            {/* Top section: Player + Audio Processing */}
+            {/* ── Player card ── */}
             {isPlayerFloating ? (
               <Suspense fallback={null}>
                 <FloatingPlayerPortal onClose={togglePlayerFloating}>
@@ -984,7 +997,7 @@ const TextEditor = () => {
                     audioUrl={audioUrl}
                     wordTimings={wordTimings}
                     currentTime={playerTime}
-                    onTimeUpdate={setPlayerTime}
+                    onTimeUpdate={handlePlayerTimeUpdate}
                     syncEnabled={syncEnabled}
                     onSyncToggle={setSyncEnabled}
                     compact={!isEqFloating}
@@ -994,12 +1007,12 @@ const TextEditor = () => {
                 </FloatingPlayerPortal>
               </Suspense>
             ) : (
-              <div className="rounded-2xl border border-border/40 bg-card/50 shadow-sm p-1">
+              <div className="rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden">
                 <SyncAudioPlayer
                   audioUrl={audioUrl}
                   wordTimings={wordTimings}
                   currentTime={playerTime}
-                  onTimeUpdate={setPlayerTime}
+                  onTimeUpdate={handlePlayerTimeUpdate}
                   syncEnabled={syncEnabled}
                   onSyncToggle={setSyncEnabled}
                   eqWide={playerLayout === 'eq-wide'}
@@ -1023,9 +1036,9 @@ const TextEditor = () => {
               </Suspense>
             )}
 
-            {/* Search bar for transcript */}
+            {/* ── Search bar ── */}
             {transcriptSearchOpen && (
-              <div className="flex items-center gap-2 p-2 rounded-lg border border-primary/30 bg-muted/50 shadow-sm" dir="rtl">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-primary/30 bg-primary/5 shadow-sm" dir="rtl">
                 <Search className="w-4 h-4 text-muted-foreground shrink-0" />
                 <input
                   ref={searchInputRef}
@@ -1048,60 +1061,41 @@ const TextEditor = () => {
                   }}
                   autoFocus
                 />
-                <span className="text-xs text-muted-foreground min-w-[60px] text-center">
+                <span className="text-xs text-muted-foreground min-w-[60px] text-center tabular-nums">
                   {transcriptMatchCount > 0 ? `${transcriptSearchIdx + 1} / ${transcriptMatchCount}` : transcriptSearchQuery ? 'לא נמצא' : ''}
                 </span>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setTranscriptSearchIdx(i => (i - 1 + Math.max(1, transcriptMatchCount)) % Math.max(1, transcriptMatchCount))} title="הקודם (Shift+Enter)">
-                  <ChevronUp className="w-3.5 h-3.5" />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setTranscriptSearchIdx(i => (i + 1) % Math.max(1, transcriptMatchCount))} title="הבא (Enter)">
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setTranscriptSearchOpen(false); setTranscriptSearchQuery(""); setTranscriptSearchIdx(0); }} title="סגור (Escape)">
-                  <X className="w-3.5 h-3.5" />
-                </Button>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setTranscriptSearchIdx(i => (i - 1 + Math.max(1, transcriptMatchCount)) % Math.max(1, transcriptMatchCount))} title="הקודם (Shift+Enter)"><ChevronUp className="w-3.5 h-3.5" /></Button>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setTranscriptSearchIdx(i => (i + 1) % Math.max(1, transcriptMatchCount))} title="הבא (Enter)"><ChevronDown className="w-3.5 h-3.5" /></Button>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setTranscriptSearchOpen(false); setTranscriptSearchQuery(""); setTranscriptSearchIdx(0); }} title="סגור (Escape)"><X className="w-3.5 h-3.5" /></Button>
               </div>
             )}
 
-            {/* Bottom section: Two synced transcript views */}
+            {/* ── Sync transcript mirror ── */}
             {playerLayout !== 'full' && (
-              <div className={`grid gap-5 flex-1 ${playerLayout === 'stacked' || playerLayout === 'eq-wide' ? 'grid-cols-1' : playerLayout === 'wide' ? 'grid-cols-2' : 'grid-cols-1 lg:grid-cols-2'}`} style={{ minHeight: '60vh' }}>
-                <div className="rounded-2xl border border-border/40 bg-card/50 shadow-sm overflow-hidden flex flex-col" style={{ minHeight: '60vh' }}>
-                  <SyncTranscriptView
-                    wordTimings={wordTimings}
-                    currentTime={playerTime}
-                    onWordClick={(time) => setPlayerTime(time)}
-                    onWordReplace={handleSyncedWordReplace}
-                    fontSize={fontSize}
-                    fontFamily={fontFamily}
-                    syncEnabled={syncEnabled}
-                    searchQuery={transcriptSearchOpen ? transcriptSearchQuery : undefined}
-                    searchActiveIndex={transcriptSearchIdx}
-                    onSearchMatchCount={setTranscriptMatchCount}
-                  />
-                </div>
-                <div className="rounded-2xl border border-border/40 bg-card/50 shadow-sm overflow-hidden flex flex-col" style={{ minHeight: '60vh' }}>
-                  <SyncEditableView
-                    wordTimings={wordTimings}
-                    currentTime={playerTime}
-                    text={text}
-                    onTextChange={handlePlayerEditorChange}
-                    onWordClick={(time) => setPlayerTime(time)}
-                    onWordReplace={handleSyncedWordReplace}
-                    fontSize={fontSize}
-                    fontFamily={fontFamily}
-                    syncEnabled={syncEnabled}
-                    searchQuery={transcriptSearchOpen ? transcriptSearchQuery : undefined}
-                    searchActiveIndex={transcriptSearchIdx}
-                  />
-                </div>
+              <div className="rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden" style={{ minHeight: '55vh' }}>
+                <SyncMirrorLayout
+                  wordTimings={wordTimings}
+                  currentTime={playerTime}
+                  text={text}
+                  onTextChange={handlePlayerEditorChange}
+                  onWordReplace={handleSyncedWordReplace}
+                  onWordClick={(time) => setPlayerTime(time)}
+                  fontSize={fontSize}
+                  fontFamily={fontFamily}
+                  syncEnabled={syncEnabled}
+                  searchQuery={transcriptSearchOpen ? transcriptSearchQuery : undefined}
+                  searchActiveIndex={transcriptSearchIdx}
+                  onSearchMatchCount={setTranscriptMatchCount}
+                  onSaveReplace={() => handleSaveAndReplaceOriginal(text, 'manual', 'נגן מסונכרן', 'שמירה מהנגן')}
+                  onDuplicateSave={(newName) => handleDuplicateAndSave(text, 'manual', 'נגן מסונכרן', 'שכפול מהנגן', newName)}
+                />
               </div>
             )}
 
             </LazyErrorBoundary>
           </TabsContent>
 
-          <TabsContent value="edit" className="space-y-5">
+          <TabsContent value="edit" className="space-y-4">
             {/* Marking toolbar — always visible, text display only when active */}
             <LazyErrorBoundary label="סימון ויזואלי">
               <TextMarkingOverlay
@@ -1138,13 +1132,13 @@ const TextEditor = () => {
             )}
           </TabsContent>
 
-          <TabsContent value="speakers" className="space-y-5">
+          <TabsContent value="speakers" className="space-y-4">
             <LazyErrorBoundary label="זיהוי דוברים">
               <SpeakerDiarization serverUrl="/whisper" initialAudioBlob={audioBlob} initialAudioName={audioFileName} initialText={text} />
             </LazyErrorBoundary>
           </TabsContent>
 
-          <TabsContent value="templates" className="space-y-5">
+          <TabsContent value="templates" className="space-y-4">
             <LazyErrorBoundary label="תבניות עריכה"><EditingTemplates
               text={text}
               onApply={(newText, templateName) => {
@@ -1153,7 +1147,7 @@ const TextEditor = () => {
             /></LazyErrorBoundary>
           </TabsContent>
 
-          <TabsContent value="ai" className="space-y-5">
+          <TabsContent value="ai" className="space-y-4">
             <div
               style={{
                 fontSize: `${fontSize}px`,
@@ -1177,7 +1171,7 @@ const TextEditor = () => {
             </div>
           </TabsContent>
 
-          <TabsContent value="compare" className="space-y-5">
+          <TabsContent value="compare" className="space-y-4">
             <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
               <p className="text-xs text-muted-foreground">
                 במסך הזה אפשר גם להשוות בין כל הגרסאות (מקומי + ענן) וגם להריץ עריכת AI ישירות.
@@ -1204,7 +1198,7 @@ const TextEditor = () => {
                 }}
               /></LazyErrorBoundary>
             ) : (
-              <div className="text-center py-12 text-muted-foreground">
+              <div className="text-center py-6 text-muted-foreground text-sm">
                 יש צורך בלפחות שתי גרסאות כדי להשוות
               </div>
             )}
@@ -1233,7 +1227,7 @@ const TextEditor = () => {
             )}
           </TabsContent>
 
-          <TabsContent value="pipeline" className="space-y-5">
+          <TabsContent value="pipeline" className="space-y-4">
             <LazyErrorBoundary label="צינור עריכה"><EditPipeline
               text={text}
               onTextChange={(newText, source, customPrompt) => {
@@ -1243,7 +1237,7 @@ const TextEditor = () => {
             /></LazyErrorBoundary>
           </TabsContent>
 
-          <TabsContent value="prompts" className="space-y-5">
+          <TabsContent value="prompts" className="space-y-4">
             <LazyErrorBoundary label="ספריית פרומפטים"><PromptLibrary
               text={text}
               onTextChange={(newText, source, customPrompt) => {
@@ -1253,14 +1247,14 @@ const TextEditor = () => {
             /></LazyErrorBoundary>
           </TabsContent>
 
-          <TabsContent value="ollama" className="space-y-5">
+          <TabsContent value="ollama" className="space-y-4">
             <LazyErrorBoundary label="Ollama"><OllamaManager /></LazyErrorBoundary>
           </TabsContent>
 
-          <TabsContent value="learning" className="space-y-5">
+          <TabsContent value="learning" className="space-y-4">
             <LazyErrorBoundary label="למידת תיקונים"><CorrectionLearningPanel /></LazyErrorBoundary>
           </TabsContent>
-          <TabsContent value="vocab" className="space-y-5">
+          <TabsContent value="vocab" className="space-y-4">
             <LazyErrorBoundary label="בדיקת מילון">
               <DictionaryValidator text={text} onApplyFix={(original, fixed) => {
                 const newText = text.replace(new RegExp(`\\b${original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`), fixed);
@@ -1273,19 +1267,19 @@ const TextEditor = () => {
             <LazyErrorBoundary label="אוצר מילים"><VocabularyPanel /></LazyErrorBoundary>
           </TabsContent>
 
-          <TabsContent value="summary" className="space-y-5">
+          <TabsContent value="summary" className="space-y-4">
             <LazyErrorBoundary label="סיכום"><AutoSummaryCard text={text} /></LazyErrorBoundary>
             <LazyErrorBoundary label="סיכום AI"><TranscriptSummary transcript={text} /></LazyErrorBoundary>
           </TabsContent>
 
-          <TabsContent value="ab" className="space-y-5">
+          <TabsContent value="ab" className="space-y-4">
             <LazyErrorBoundary label="השוואת מנועים"><EngineCompare text={text} /></LazyErrorBoundary>
           </TabsContent>
 
-          <TabsContent value="analytics" className="space-y-5">
+          <TabsContent value="analytics" className="space-y-4">
             <LazyErrorBoundary label="אנליטיקס"><AnalyticsDashboard /></LazyErrorBoundary>
           </TabsContent>
-          <TabsContent value="history" className="space-y-5">
+          <TabsContent value="history" className="space-y-4">
             <LazyErrorBoundary label="היסטוריית עריכה"><TextEditHistory 
               versions={versions}
               onSelectVersion={handleVersionSelect}
@@ -1297,30 +1291,9 @@ const TextEditor = () => {
           </TabsContent>
         </Tabs>
 
-        {/* Back Button */}
-        <div className="flex justify-center pt-4 mt-2 border-t">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate("/")}
-            className="gap-1.5 text-muted-foreground hover:text-foreground"
-          >
-            <ArrowRight className="w-3.5 h-3.5" />
-            חזרה לעמוד הראשי
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShortcutsOpen(true)}
-            className="gap-1.5 text-muted-foreground hover:text-foreground"
-            title="קיצורי מקלדת"
-          >
-            <Keyboard className="w-3.5 h-3.5" />
-          </Button>
-        </div>
+        <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       </div>
     </div>
-    <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </Suspense>
   );
 };

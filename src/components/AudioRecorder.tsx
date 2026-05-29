@@ -84,14 +84,26 @@ export const AudioRecorder = ({ onRecordingComplete, isTranscribing, engine }: A
 
   const startRecording = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Request mono channel + browser-side noise/echo suppression for better transcription.
+      // channelCount:1 → mono reduces upload size by 50% (server converts stereo→mono anyway).
+      // noiseSuppression + echoCancellation handled by browser hardware/OS before encoding.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          noiseSuppression: true,
+          echoCancellation: true,
+          autoGainControl: true,
+        },
+      });
       streamRef.current = stream;
 
+      // 128kbps opus gives much cleaner audio than 32kbps for Hebrew phonemes.
+      // The server re-encodes to 16kHz/16-bit PCM anyway, so 128k is the sweet spot.
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
           ? 'audio/webm;codecs=opus'
           : 'audio/webm',
-        audioBitsPerSecond: 32000,
+        audioBitsPerSecond: 128000,
       });
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];

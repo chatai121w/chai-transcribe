@@ -1,11 +1,20 @@
 import { useState, useRef } from 'react';
-import { pipeline, env } from '@huggingface/transformers';
 import { toast } from '@/hooks/use-toast';
 import { debugLog } from '@/lib/debugLogger';
 
-// Configure transformers to use browser cache
-env.allowLocalModels = false;
-env.useBrowserCache = true;
+// Lazy-load @huggingface/transformers — 879 kB, only when local browser transcription is actually used.
+// Module-level cache so it's only imported once.
+let _transformersPromise: Promise<typeof import('@huggingface/transformers')> | null = null;
+async function getTransformers() {
+  if (!_transformersPromise) {
+    _transformersPromise = import('@huggingface/transformers').then(mod => {
+      mod.env.allowLocalModels = false;
+      mod.env.useBrowserCache = true;
+      return mod;
+    });
+  }
+  return _transformersPromise;
+}
 
 // Check if WebGPU is available
 const isWebGPUAvailable = async (): Promise<boolean> => {
@@ -77,6 +86,7 @@ export const useLocalTranscription = () => {
 
         setProgress(10);
 
+        const { pipeline } = await getTransformers();
         transcriber = await pipeline(
           'automatic-speech-recognition',
           modelId,

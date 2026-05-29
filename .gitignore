@@ -52,3 +52,9 @@ test-results/
 # Local repository backups
 backups/
 *.mp3
+
+# Local DBs and benchmark assets (do not commit)
+server/lk_data.db
+tools/transcription_feedback.db
+tools/*.wav
+tools/voice-command/__pycache__/

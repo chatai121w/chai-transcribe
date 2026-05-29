@@ -1,1128 +1,952 @@
-import { useState, useCallback, useRef } from "react";
-import { Card } from "@/components/ui/card";
+import { useState, useCallback, useRef, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import {
-  Rabbit, Turtle, Scale, Play, Loader2, Trophy, Zap, Target,
-  Timer, BarChart3, ArrowUpDown, CheckCircle2, XCircle, Clock, Download,
+  Play, Loader2, Trophy, Zap,
+  Target, BarChart3,
+  CheckCircle2, XCircle, Upload, Mic, StopCircle,
+  Columns2, LayoutList, GitCompare,
+  PenLine, GraduationCap, LibraryBig, Lightbulb, RotateCcw, ExternalLink, Star, BookOpen,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-import { enhanceAudioOnServer, type EnhancementOutputFormat, type EnhancementPreset } from "@/lib/audioEnhancement";
+import { enhanceAudioOnServer, type EnhancementPreset } from "@/lib/audioEnhancement";
 import { extractAudioSegment, probeAudioDurationSec } from "@/lib/audioSegment";
+import { getServerUrl } from "@/lib/serverConfig";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+const SERVER = getServerUrl();
+const VERDICTS_KEY = "benchmark_verdicts_v1";
+const LEARNED_KEY  = "benchmark_learned_v1";
+const CONCEPTS_KEY = "benchmark_concepts_v1";
 
-interface BenchmarkResult {
-  preset: string;
-  presetLabel: string;
-  api: string;
-  audioDuration: number;
-  processingTime: number;
-  wallTime: number;
-  rtf: number;
-  speedX: number;
-  text: string;
-  wordCount: number;
-  model: string;
-  fastMode: boolean;
-  status: "success" | "error";
-  error?: string;
-}
+// --- Types ---
 
-interface PresetInfo {
-  key: string;
-  label: string;
-  icon: React.ReactNode;
-  color: string;
-  badgeClass: string;
-  description: string;
-}
-
-interface QualityCompareResult {
+interface SystemResult {
   id: string;
-  preset?: EnhancementPreset;
   label: string;
   isBaseline: boolean;
   status: "success" | "error";
   text: string;
   wordCount: number;
   avgProbability: number;
-  duration: number;
   processingTime: number;
   error?: string;
+  score?: number;
 }
 
-import { getServerUrl } from "@/lib/serverConfig";
-
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const SERVER = getServerUrl();
-
-const PRESETS: PresetInfo[] = [
-  {
-    key: "fast",
-    label: "⚡ מהיר",
-    icon: <Rabbit className="w-4 h-4" />,
-    color: "text-amber-600 dark:text-amber-400",
-    badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
-    description: "beam=1, batch=24, int8_float16, VAD אגרסיבי",
-  },
-  {
-    key: "balanced",
-    label: "⚖️ מאוזן",
-    icon: <Scale className="w-4 h-4" />,
-    color: "text-blue-600 dark:text-blue-400",
-    badgeClass: "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30",
-    description: "beam=1, batch=16, int8_float16",
-  },
-  {
-    key: "accurate",
-    label: "🎯 מדויק",
-    icon: <Turtle className="w-4 h-4" />,
-    color: "text-emerald-600 dark:text-emerald-400",
-    badgeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
-    description: "beam=5, batch=8, float16, הקשר מלא",
-  },
-];
-
-const ENHANCE_PRESETS: Array<{ id: EnhancementPreset; label: string; description: string }> = [
-  { id: "clean", label: "נקי", description: "שיפור עדין ללא AI" },
-  { id: "podcast", label: "פודקאסט", description: "EQ לדיבור טבעי" },
-  { id: "broadcast", label: "שידור", description: "צליל מודגש וצפוף" },
-  { id: "ai_voice", label: "AI Voice", description: "ניקוי קולי אגרסיבי" },
-];
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/** Create a WAV buffer with mixed tones (speech-like) */
-function createTestWav(durationSec = 5, sampleRate = 16000): Blob {
-  const numSamples = sampleRate * durationSec;
-  const dataSize = numSamples * 2;
-  const fileSize = 44 + dataSize;
-  const buffer = new ArrayBuffer(fileSize);
-  const view = new DataView(buffer);
-
-  // WAV header
-  const writeStr = (offset: number, s: string) => {
-    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
-  };
-  writeStr(0, "RIFF");
-  view.setUint32(4, fileSize - 8, true);
-  writeStr(8, "WAVE");
-  writeStr(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeStr(36, "data");
-  view.setUint32(40, dataSize, true);
-
-  const freqs = [150, 200, 250, 180, 220];
-  for (let i = 0; i < numSamples; i++) {
-    const t = i / sampleRate;
-    const fIdx = Math.floor(t * 2) % freqs.length;
-    const amp = (i % (sampleRate / 4) < sampleRate / 8) ? 12000 : 4000;
-    const sample = Math.round(amp * Math.sin(2 * Math.PI * freqs[fIdx] * t));
-    view.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, sample)), true);
-  }
-
-  return new Blob([buffer], { type: "audio/wav" });
+interface DiffToken {
+  word: string;
+  type: "equal" | "added" | "removed";
 }
 
-function fmtTime(s: number) {
-  if (s < 0.01) return "—";
+interface WordDialogState {
+  word: string;
+  resultId: string;
+  wordIdx: number;
+  text: string;
+}
+
+interface Variant {
+  label: string;
+  word: string;
+  resultId: string;
+}
+
+interface SavedVerdict {
+  timestamp: string;
+  fileName: string;
+  systemWinner: string;
+  userVerdict: string;
+}
+
+// --- Systems ---
+
+const SYSTEMS: { id: string; label: string; preset?: EnhancementPreset; isBaseline?: boolean }[] = [
+  { id: "baseline",  label: "מקור (ללא שיפור)", isBaseline: true },
+  { id: "clean",     label: "שיפור — נקי",        preset: "clean" },
+  { id: "podcast",   label: "שיפור — פודקאסט",   preset: "podcast" },
+  { id: "broadcast", label: "שיפור — שידור",      preset: "broadcast" },
+  { id: "ai_voice",  label: "שיפור — AI Voice",   preset: "ai_voice" },
+];
+
+// --- Helpers ---
+
+function fmtSec(s: number) {
   return s < 10 ? `${s.toFixed(2)}s` : `${s.toFixed(1)}s`;
 }
 
-function fmtSpeed(x: number) {
-  return x >= 10 ? `${x.toFixed(0)}x` : `${x.toFixed(1)}x`;
+function computeScore(r: SystemResult, baseline: SystemResult | null): number {
+  if (!baseline || r.isBaseline || r.status !== "success" || baseline.status !== "success") return 0;
+  const wordDelta  = ((r.wordCount - baseline.wordCount) / Math.max(1, baseline.wordCount)) * 100;
+  const confDelta  = (r.avgProbability - baseline.avgProbability) * 100;
+  const speedDelta = ((baseline.processingTime - r.processingTime) / Math.max(0.001, baseline.processingTime)) * 100;
+  return wordDelta * 0.35 + confDelta * 0.50 + speedDelta * 0.15;
 }
 
-function speedColor(x: number) {
-  if (x >= 20) return "text-green-600 dark:text-green-400";
-  if (x >= 10) return "text-yellow-600 dark:text-yellow-400";
-  return "text-red-600 dark:text-red-400";
+function diffWords(baseText: string, compareText: string): DiffToken[] {
+  const a = baseText.split(/\s+/).filter(Boolean).slice(0, 300);
+  const b = compareText.split(/\s+/).filter(Boolean).slice(0, 300);
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
+  const tokens: DiffToken[] = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i-1] === b[j-1]) {
+      tokens.unshift({ word: b[j-1], type: "equal" }); i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
+      tokens.unshift({ word: b[j-1], type: "added" }); j--;
+    } else {
+      tokens.unshift({ word: a[i-1], type: "removed" }); i--;
+    }
+  }
+  return tokens;
 }
 
-function speedBadgeClass(x: number) {
-  if (x >= 20) return "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30";
-  if (x >= 10) return "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-500/30";
-  return "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30";
+// --- ClickableText ---
+
+function ClickableText({
+  text, resultId, onWordClick, tokens, className = "",
+}: {
+  text: string;
+  resultId: string;
+  onWordClick: (s: WordDialogState) => void;
+  tokens?: DiffToken[] | null;
+  className?: string;
+}) {
+  const cls = "cursor-pointer rounded px-0.5 hover:ring-1 hover:ring-primary/50 hover:bg-primary/10 transition-colors select-none";
+
+  if (tokens) {
+    let idx = 0;
+    return (
+      <span className={className}>
+        {tokens.map((tok, i) => {
+          if (tok.type === "removed") {
+            return <del key={i} className="text-red-400 dark:text-red-500 opacity-60">{tok.word} </del>;
+          }
+          const wi = idx++;
+          if (tok.type === "added") {
+            return (
+              <mark
+                key={i}
+                className={`bg-green-200 dark:bg-green-900/50 text-green-900 dark:text-green-100 rounded px-0.5 ${cls}`}
+                onClick={() => onWordClick({ word: tok.word, resultId, wordIdx: wi, text })}
+              >{tok.word} </mark>
+            );
+          }
+          return (
+            <span key={i} className={cls} onClick={() => onWordClick({ word: tok.word, resultId, wordIdx: wi, text })}>{tok.word} </span>
+          );
+        })}
+      </span>
+    );
+  }
+
+  const words = text.split(/\s+/).filter(Boolean);
+  return (
+    <span className={className}>
+      {words.map((word, wi) => (
+        <span key={wi} className={cls} onClick={() => onWordClick({ word, resultId, wordIdx: wi, text })}>{word} </span>
+      ))}
+    </span>
+  );
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// ============================================================
+//  Main Component
+// ============================================================
 
 export default function Benchmark() {
-  const [results, setResults] = useState<BenchmarkResult[]>([]);
-  const [running, setRunning] = useState(false);
-  const [currentPreset, setCurrentPreset] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [serverStatus, setServerStatus] = useState<{
-    gpu: string; model: string; vram: string; ready: boolean;
-  } | null>(null);
-  const [activeTab, setActiveTab] = useState("all");
-  const [userAudio, setUserAudio] = useState<File | null>(null);
-  const [qualityRunning, setQualityRunning] = useState(false);
-  const [qualityProgress, setQualityProgress] = useState(0);
-  const [sampleStartSec, setSampleStartSec] = useState("0");
-  const [sampleDurationSec, setSampleDurationSec] = useState("120");
-  const [qualityLanguage, setQualityLanguage] = useState("he");
-  const [qualityOutputFormat, setQualityOutputFormat] = useState<EnhancementOutputFormat>("mp3");
-  const [qualitySelectedPresets, setQualitySelectedPresets] = useState<EnhancementPreset[]>(["ai_voice", "clean"]);
-  const [qualityResults, setQualityResults] = useState<QualityCompareResult[]>([]);
-  const [qualityWordWeight, setQualityWordWeight] = useState("30");
-  const [qualityConfidenceWeight, setQualityConfidenceWeight] = useState("55");
-  const [qualitySpeedWeight, setQualitySpeedWeight] = useState("15");
-  const [winnerBusy, setWinnerBusy] = useState(false);
-  const [sampleInfo, setSampleInfo] = useState<{ sourceDuration: number; usedStart: number; usedEnd: number } | null>(null);
-  const abortRef = useRef(false);
+  const navigate = useNavigate();
 
-  // ─── Server check ──────────────────────────────────────────────────────────
+  // File / mic
+  const [audioFile, setAudioFile]     = useState<File | null>(null);
+  const fileRef                        = useRef<HTMLInputElement>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRef                       = useRef<MediaRecorder | null>(null);
+  const chunksRef                      = useRef<Blob[]>([]);
 
-  const checkServer = useCallback(async () => {
-    try {
-      const r = await fetch(`${SERVER}/health`);
-      if (!r.ok) return false;
-      const d = await r.json();
-      setServerStatus({
-        gpu: d.gpu || "N/A",
-        model: d.current_model || "N/A",
-        vram: d.gpu_memory ? `${d.gpu_memory.allocated_mb}/${d.gpu_memory.total_mb} MB` : "N/A",
-        ready: d.model_ready === true,
+  // Run state
+  const [running, setRunning]         = useState(false);
+  const [progress, setProgress]       = useState(0);
+  const [currentStep, setCurrentStep] = useState("");
+  const abortRef                       = useRef(false);
+  const [results, setResults]         = useState<SystemResult[]>([]);
+
+  // Verdict
+  const [userVerdict, setUserVerdict]   = useState("");
+  const [verdictSaved, setVerdictSaved] = useState(false);
+  const [savedVerdicts, setSavedVerdicts] = useState<SavedVerdict[]>(() => {
+    try { return JSON.parse(localStorage.getItem(VERDICTS_KEY) || "[]"); } catch { return []; }
+  });
+
+  // View
+  const [viewMode, setViewMode] = useState<"list" | "side">("list");
+  const [showDiff, setShowDiff] = useState(false);
+
+  // Word dialog
+  const [wordDialog, setWordDialog]     = useState<WordDialogState | null>(null);
+  const [dialogTab, setDialogTab]       = useState("edit");
+  const [editedWord, setEditedWord]     = useState("");
+  const [learnMode, setLearnMode]       = useState<"card" | "quiz">("card");
+  const [cardFlipped, setCardFlipped]   = useState(false);
+  const [quizChoice, setQuizChoice]     = useState("");
+  const [dictForm, setDictForm]         = useState({ spokenForm: "", correctForm: "", note: "" });
+  const [dictSaved, setDictSaved]       = useState(false);
+  const [conceptText, setConceptText]   = useState("");
+  const [conceptSaved, setConceptSaved] = useState(false);
+  const [learnedWords, setLearnedWords] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(LEARNED_KEY) || "[]")); } catch { return new Set(); }
+  });
+  const [conceptNotes, setConceptNotes] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem(CONCEPTS_KEY) || "{}"); } catch { return {}; }
+  });
+
+  // Derived: variants at same relative position across all results
+  const variants = useMemo<Variant[]>(() => {
+    if (!wordDialog) return [];
+    const thisResult = results.find(r => r.id === wordDialog.resultId);
+    if (!thisResult) return [];
+    const thisWords = thisResult.text.split(/\s+/).filter(Boolean);
+    const relPos = wordDialog.wordIdx / Math.max(1, thisWords.length - 1);
+    return results
+      .filter(r => r.status === "success" && r.text)
+      .map(r => {
+        const ws = r.text.split(/\s+/).filter(Boolean);
+        const vi = Math.min(Math.round(relPos * (ws.length - 1)), ws.length - 1);
+        return { label: r.label, word: ws[vi] || "", resultId: r.id };
       });
-      return d.model_ready === true;
-    } catch {
-      setServerStatus(null);
-      return false;
-    }
-  }, []);
+  }, [wordDialog, results]);
 
-  // ─── Run single preset benchmark ──────────────────────────────────────────
+  const uniqueVariants = useMemo(
+    () => [...new Map(variants.map(v => [v.word, v])).values()],
+    [variants]
+  );
 
-  const runSinglePreset = useCallback(async (presetKey: string, audioBlob: Blob): Promise<BenchmarkResult | null> => {
-    const presetInfo = PRESETS.find(p => p.key === presetKey)!;
-    setCurrentPreset(presetKey);
-
-    const form = new FormData();
-    form.append("file", audioBlob, "benchmark.wav");
-    form.append("language", "he");
-    form.append("preset", presetKey);
-
-    const wallStart = performance.now();
-    try {
-      const resp = await fetch(`${SERVER}/transcribe`, { method: "POST", body: form });
-      const wallTime = (performance.now() - wallStart) / 1000;
-
-      if (!resp.ok) {
-        return {
-          preset: presetKey, presetLabel: presetInfo.label, api: "/transcribe",
-          audioDuration: 0, processingTime: 0, wallTime, rtf: 0, speedX: 0,
-          text: "", wordCount: 0, model: "", fastMode: false,
-          status: "error", error: `HTTP ${resp.status}`,
-        };
-      }
-
-      const data = await resp.json();
-      const pt = data.processing_time || 0;
-      const dur = data.duration || 1;
-      const rtf = pt / dur;
-      const speedX = rtf > 0 ? 1 / rtf : 0;
-      const text = data.text || "";
-
-      return {
-        preset: presetKey,
-        presetLabel: presetInfo.label,
-        api: "/transcribe",
-        audioDuration: dur,
-        processingTime: pt,
-        wallTime,
-        rtf,
-        speedX,
-        text,
-        wordCount: text.split(/\s+/).filter(Boolean).length,
-        model: data.model || "",
-        fastMode: presetKey !== "accurate",
-        status: "success",
-      };
-    } catch (err) {
-      return {
-        preset: presetKey, presetLabel: presetInfo.label, api: "/transcribe",
-        audioDuration: 0, processingTime: 0, wallTime: (performance.now() - wallStart) / 1000,
-        rtf: 0, speedX: 0, text: "", wordCount: 0, model: "", fastMode: false,
-        status: "error", error: String(err),
-      };
-    }
-  }, []);
-
-  // ─── Run full benchmark ────────────────────────────────────────────────────
-
-  const runBenchmark = useCallback(async () => {
-    abortRef.current = false;
-    setRunning(true);
-    setResults([]);
-    setProgress(0);
-
-    const ready = await checkServer();
-    if (!ready) {
-      toast({ title: "❌ שרת CUDA לא זמין", description: "הפעל את שרת התמלול לפני הרצת הבנצ'מארק", variant: "destructive" });
-      setRunning(false);
-      return;
-    }
-
-    const audioBlob = userAudio || createTestWav(5);
-    const presetKeys = ["fast", "balanced", "accurate"];
-    const newResults: BenchmarkResult[] = [];
-
-    for (let i = 0; i < presetKeys.length; i++) {
-      if (abortRef.current) break;
-
-      setProgress(((i) / presetKeys.length) * 100);
-      const result = await runSinglePreset(presetKeys[i], audioBlob);
-      if (result) {
-        newResults.push(result);
-        setResults([...newResults]);
-      }
-    }
-
-    setProgress(100);
-    setCurrentPreset(null);
-    setRunning(false);
-
-    if (newResults.length > 0) {
-      toast({ title: "✅ בנצ'מארק הושלם", description: `${newResults.filter(r => r.status === "success").length}/${presetKeys.length} ערכות הושלמו בהצלחה` });
-    }
-  }, [checkServer, runSinglePreset, userAudio]);
-
-  const stopBenchmark = useCallback(() => {
-    abortRef.current = true;
-  }, []);
-
-  const transcribeOnce = useCallback(async (file: File, language: string): Promise<QualityCompareResult> => {
-    const form = new FormData();
-    form.append("file", file, file.name);
-    form.append("language", language);
-    form.append("preset", "balanced");
-
-    const started = performance.now();
-    const resp = await fetch(`${SERVER}/transcribe`, { method: "POST", body: form });
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}`);
-    }
-    const data = await resp.json();
-    const wordTimings = Array.isArray(data.wordTimings) ? data.wordTimings : [];
-    const avgProbability = wordTimings.length > 0
-      ? wordTimings.reduce((sum: number, w: any) => sum + (Number(w?.probability) || 0), 0) / wordTimings.length
-      : 0;
-    const text = String(data.text || "");
-
+  const wordContext = useMemo(() => {
+    if (!wordDialog) return { before: "", word: "", after: "" };
+    const ws = wordDialog.text.split(/\s+/).filter(Boolean);
+    const i  = wordDialog.wordIdx;
     return {
-      id: `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      preset: undefined,
-      label: "",
-      isBaseline: false,
-      status: "success",
-      text,
-      wordCount: text.split(/\s+/).filter(Boolean).length,
-      avgProbability,
-      duration: Number(data.duration) || 0,
-      processingTime: Number(data.processing_time) || (performance.now() - started) / 1000,
+      before: ws.slice(Math.max(0, i - 4), i).join(" "),
+      word:   ws[i] || wordDialog.word,
+      after:  ws.slice(i + 1, i + 5).join(" "),
     };
+  }, [wordDialog]);
+
+  // File
+  const handleFile = useCallback((file: File) => {
+    setAudioFile(file);
+    setResults([]);
+    setUserVerdict("");
+    setVerdictSaved(false);
   }, []);
 
-  const runQualityComparison = useCallback(async () => {
-    if (!userAudio) {
-      toast({ title: "בחר קובץ אודיו לבדיקה", variant: "destructive" });
-      return;
-    }
-    if (qualitySelectedPresets.length === 0) {
-      toast({ title: "בחר לפחות פריסט שיפור אחד", variant: "destructive" });
-      return;
-    }
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const f = e.dataTransfer.files?.[0];
+    if (f) handleFile(f);
+  };
 
-    const ready = await checkServer();
-    if (!ready) {
-      toast({ title: "שרת לא זמין", description: "לא ניתן להריץ בדיקת השפעת שיפור", variant: "destructive" });
-      return;
-    }
-
-    setQualityRunning(true);
-    setQualityProgress(0);
-    setQualityResults([]);
-    abortRef.current = false;
-
+  // Mic
+  const startRecord = async () => {
     try {
-      const sourceDuration = await probeAudioDurationSec(userAudio);
-      const start = Math.min(Math.max(0, Number(sampleStartSec) || 0), Math.max(0, sourceDuration - 5));
-      const requestedDuration = Math.max(5, Number(sampleDurationSec) || 120);
-      const end = Math.min(sourceDuration, start + requestedDuration);
-      const sampleFile = await extractAudioSegment(userAudio, start, end);
-      setSampleInfo({ sourceDuration, usedStart: start, usedEnd: end });
-
-      const totalSteps = 1 + qualitySelectedPresets.length;
-      let completed = 0;
-
-      const baseline = await transcribeOnce(sampleFile, qualityLanguage);
-      const baselineResult: QualityCompareResult = {
-        ...baseline,
-        id: "baseline",
-        preset: undefined,
-        label: "מקור (ללא שיפור)",
-        isBaseline: true,
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => chunksRef.current.push(e.data);
+      rec.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        handleFile(new File([blob], `recording_${Date.now()}.webm`, { type: "audio/webm" }));
+        toast({ title: "הקלטה הושלמה", description: `${(blob.size / 1024).toFixed(0)} KB` });
       };
-      setQualityResults([baselineResult]);
-      completed += 1;
-      setQualityProgress((completed / totalSteps) * 100);
-
-      const nextResults: QualityCompareResult[] = [baselineResult];
-
-      for (const preset of qualitySelectedPresets) {
-        if (abortRef.current) break;
-        try {
-          const enhanced = await enhanceAudioOnServer(sampleFile, {
-            preset,
-            outputFormat: qualityOutputFormat,
-          });
-          const enhancedFile = new File([enhanced.blob], enhanced.fileName, { type: enhanced.mimeType });
-          const transcribed = await transcribeOnce(enhancedFile, qualityLanguage);
-          nextResults.push({
-            ...transcribed,
-            id: `${preset}_${Date.now()}`,
-            preset,
-            label: `משופר: ${ENHANCE_PRESETS.find((p) => p.id === preset)?.label || preset}`,
-            isBaseline: false,
-          });
-        } catch (err: any) {
-          nextResults.push({
-            id: `${preset}_${Date.now()}`,
-            preset,
-            label: `משופר: ${ENHANCE_PRESETS.find((p) => p.id === preset)?.label || preset}`,
-            isBaseline: false,
-            status: "error",
-            text: "",
-            wordCount: 0,
-            avgProbability: 0,
-            duration: 0,
-            processingTime: 0,
-            error: err?.message || "שגיאה לא ידועה",
-          });
-        }
-        completed += 1;
-        setQualityProgress((completed / totalSteps) * 100);
-        setQualityResults([...nextResults]);
-      }
-
-      const successful = nextResults.filter((r) => r.status === "success");
-      if (successful.length > 1) {
-        const baselineOk = successful.find((r) => r.isBaseline) || null;
-        const winner = baselineOk
-          ? successful
-              .filter((r) => !r.isBaseline)
-              .sort((a, b) => {
-                const wa = Number(qualityWordWeight) || 0;
-                const ca = Number(qualityConfidenceWeight) || 0;
-                const sa = Number(qualitySpeedWeight) || 0;
-                const total = Math.max(1, wa + ca + sa);
-
-                const calcScore = (r: QualityCompareResult) => {
-                  const wordDeltaPct = ((r.wordCount - baselineOk.wordCount) / Math.max(1, baselineOk.wordCount)) * 100;
-                  const confDeltaPct = (r.avgProbability - baselineOk.avgProbability) * 100;
-                  const speedDeltaPct = ((baselineOk.processingTime - r.processingTime) / Math.max(0.001, baselineOk.processingTime)) * 100;
-                  return ((wa * wordDeltaPct) + (ca * confDeltaPct) + (sa * speedDeltaPct)) / total;
-                };
-
-                return calcScore(b) - calcScore(a);
-              })[0]
-          : undefined;
-        if (winner) {
-          toast({
-            title: "בדיקת איכות הושלמה",
-            description: `הטוב ביותר: ${winner.label}`,
-          });
-        }
-      } else {
-        toast({ title: "הבדיקה הסתיימה", description: "לא היו מספיק תוצאות להשוואה" });
-      }
-    } catch (err: any) {
-      toast({
-        title: "בדיקת איכות נכשלה",
-        description: err?.message || "תקלה לא ידועה",
-        variant: "destructive",
-      });
-    } finally {
-      setQualityRunning(false);
+      rec.start();
+      mediaRef.current = rec;
+      setIsRecording(true);
+    } catch {
+      toast({ title: "לא ניתן לגשת למיקרופון", variant: "destructive" });
     }
-  }, [
-    userAudio,
-    qualitySelectedPresets,
-    checkServer,
-    sampleStartSec,
-    sampleDurationSec,
-    qualityLanguage,
-    qualityOutputFormat,
-    transcribeOnce,
-    qualityWordWeight,
-    qualityConfidenceWeight,
-    qualitySpeedWeight,
-  ]);
+  };
 
-  const computeQualityScore = useCallback((row: QualityCompareResult, baseline: QualityCompareResult | null) => {
-    if (!baseline || row.status !== "success" || row.isBaseline) return 0;
-    const wordW = Number(qualityWordWeight) || 0;
-    const confW = Number(qualityConfidenceWeight) || 0;
-    const speedW = Number(qualitySpeedWeight) || 0;
-    const total = Math.max(1, wordW + confW + speedW);
+  const stopRecord = () => {
+    mediaRef.current?.stop();
+    mediaRef.current = null;
+    setIsRecording(false);
+  };
 
-    const wordDeltaPct = ((row.wordCount - baseline.wordCount) / Math.max(1, baseline.wordCount)) * 100;
-    const confDeltaPct = (row.avgProbability - baseline.avgProbability) * 100;
-    const speedDeltaPct = ((baseline.processingTime - row.processingTime) / Math.max(0.001, baseline.processingTime)) * 100;
-
-    return ((wordW * wordDeltaPct) + (confW * confDeltaPct) + (speedW * speedDeltaPct)) / total;
-  }, [qualityWordWeight, qualityConfidenceWeight, qualitySpeedWeight]);
-
-  const qualityBaseline = qualityResults.find((r) => r.isBaseline && r.status === "success") || null;
-  const qualityWinner = qualityResults
-    .filter((r) => !r.isBaseline && r.status === "success" && !!r.preset)
-    .sort((a, b) => computeQualityScore(b, qualityBaseline) - computeQualityScore(a, qualityBaseline))[0] || null;
-
-  const applyWinnerToFullFile = useCallback(async () => {
-    if (!userAudio || !qualityWinner?.preset) {
-      toast({ title: "אין זוכה ישים כרגע", description: "הרץ קודם בדיקת איכות עם לפחות פריסט אחד" });
-      return;
-    }
-    setWinnerBusy(true);
+  // Main run
+  const runAll = useCallback(async () => {
+    if (!audioFile) { toast({ title: "בחר קובץ אודיו תחילה", variant: "destructive" }); return; }
+    abortRef.current = false;
+    setRunning(true); setProgress(0); setResults([]); setUserVerdict(""); setVerdictSaved(false);
     try {
-      const enhanced = await enhanceAudioOnServer(userAudio, {
-        preset: qualityWinner.preset,
-        outputFormat: qualityOutputFormat,
-      });
-      const file = new File([enhanced.blob], enhanced.fileName, { type: enhanced.mimeType });
-      const url = URL.createObjectURL(file);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = file.name;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast({
-        title: "הזוכה הוחל על הקובץ המלא",
-        description: `${qualityWinner.label} • ${file.name}`,
-      });
-    } catch (err: any) {
-      toast({
-        title: "החלת הזוכה נכשלה",
-        description: err?.message || "תקלה לא ידועה",
-        variant: "destructive",
-      });
-    } finally {
-      setWinnerBusy(false);
+      const dur = await probeAudioDurationSec(audioFile);
+      const sample = await extractAudioSegment(audioFile, 0, Math.min(dur, 120));
+      const allResults: SystemResult[] = [];
+      for (let i = 0; i < SYSTEMS.length; i++) {
+        if (abortRef.current) break;
+        const sys = SYSTEMS[i];
+        setCurrentStep(sys.label);
+        setProgress((i / SYSTEMS.length) * 100);
+        try {
+          let fileToTx: File | Blob = sample;
+          if (sys.preset) {
+            const enh = await enhanceAudioOnServer(sample, { preset: sys.preset, outputFormat: "mp3" });
+            fileToTx = enh.blob;
+          }
+          const fd = new FormData();
+          fd.append("file", fileToTx, `${sys.id}.${sys.preset ? "mp3" : "wav"}`);
+          fd.append("language", "he");
+          fd.append("preset", "balanced");
+          const t0 = performance.now();
+          const resp = await fetch(`${SERVER}/transcribe`, { method: "POST", body: fd });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+          const timings: { probability?: number }[] = Array.isArray(data.wordTimings) ? data.wordTimings : [];
+          const avgProbability = timings.length
+            ? timings.reduce((s, w) => s + (Number(w.probability) || 0), 0) / timings.length : 0;
+          const text = String(data.text || "");
+          allResults.push({
+            id: sys.id, label: sys.label, isBaseline: !!sys.isBaseline, status: "success",
+            text, wordCount: text.split(/\s+/).filter(Boolean).length,
+            avgProbability, processingTime: Number(data.processing_time) || (performance.now() - t0) / 1000,
+          });
+        } catch (err: unknown) {
+          allResults.push({
+            id: sys.id, label: sys.label, isBaseline: !!sys.isBaseline,
+            status: "error", text: "", wordCount: 0, avgProbability: 0, processingTime: 0,
+            error: err instanceof Error ? err.message : "שגיאה",
+          });
+        }
+        const bl = allResults.find(r => r.isBaseline && r.status === "success") || null;
+        setResults(allResults.map(r => ({ ...r, score: computeScore(r, bl) })));
+        setProgress(((i + 1) / SYSTEMS.length) * 100);
+      }
+      setCurrentStep(""); setRunning(false);
+      toast({ title: "ההשוואה הושלמה!", description: `${allResults.filter(r => r.status === "success").length}/${SYSTEMS.length} מערכות` });
+    } catch (err: unknown) {
+      setRunning(false);
+      toast({ title: "שגיאה", description: err instanceof Error ? err.message : "שגיאה", variant: "destructive" });
     }
-  }, [qualityOutputFormat, qualityWinner, userAudio]);
+  }, [audioFile]);
 
-  // ─── Derived data ──────────────────────────────────────────────────────────
+  // Word dialog handlers
+  const openWordDialog = (state: WordDialogState) => {
+    setWordDialog(state);
+    setDialogTab("edit");
+    setEditedWord(state.word);
+    setCardFlipped(false);
+    setLearnMode("card");
+    setQuizChoice("");
+    setDictForm({ spokenForm: state.word, correctForm: "", note: "" });
+    setDictSaved(false);
+    setConceptText(conceptNotes[state.word] || "");
+    setConceptSaved(false);
+  };
 
-  const successResults = results.filter(r => r.status === "success");
-  const fastest = successResults.length > 0
-    ? successResults.reduce((a, b) => a.processingTime < b.processingTime ? a : b)
-    : null;
-  const bestQuality = successResults.length > 0
-    ? successResults.reduce((a, b) => a.wordCount > b.wordCount ? a : b)
-    : null;
+  const handleSaveEdit = () => {
+    if (!wordDialog || !editedWord.trim()) return;
+    setResults(prev => prev.map(r => {
+      if (r.id !== wordDialog.resultId) return r;
+      const ws = r.text.split(/\s+/).filter(Boolean);
+      ws[wordDialog.wordIdx] = editedWord.trim();
+      return { ...r, text: ws.join(" "), wordCount: ws.length };
+    }));
+    setWordDialog(prev => prev ? { ...prev, word: editedWord.trim() } : null);
+    toast({ title: "המילה תוקנה" });
+  };
 
-  const filteredResults = activeTab === "all"
-    ? results
-    : results.filter(r => r.preset === activeTab);
+  const handleMarkLearned = () => {
+    if (!wordDialog) return;
+    const word = editedWord || wordDialog.word;
+    const updated = new Set(learnedWords); updated.add(word);
+    setLearnedWords(updated);
+    localStorage.setItem(LEARNED_KEY, JSON.stringify([...updated]));
+    toast({ title: `"${word}" סומנה כנלמדה`, description: `סה"כ ${updated.size} מילים` });
+  };
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  const handleSaveToDict = async () => {
+    if (!dictForm.spokenForm || !dictForm.correctForm) {
+      toast({ title: "יש למלא שני השדות", variant: "destructive" }); return;
+    }
+    try {
+      const res = await fetch(`${SERVER}/lk/dictionary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spoken_form: dictForm.spokenForm, correct_form: dictForm.correctForm, note: dictForm.note || undefined, source: "benchmark" }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setDictSaved(true);
+      toast({ title: `"${dictForm.spokenForm}" נשמר למילון` });
+    } catch (err) {
+      toast({ title: "שגיאה", description: err instanceof Error ? err.message : "שגיאה", variant: "destructive" });
+    }
+  };
 
+  const handleSaveConcept = () => {
+    if (!wordDialog || !conceptText.trim()) return;
+    const updated = { ...conceptNotes, [wordDialog.word]: conceptText.trim() };
+    setConceptNotes(updated);
+    localStorage.setItem(CONCEPTS_KEY, JSON.stringify(updated));
+    setConceptSaved(true);
+    toast({ title: `ההסבר נשמר` });
+  };
+
+  const saveVerdict = () => {
+    if (!userVerdict.trim()) return;
+    const entry: SavedVerdict = {
+      timestamp: new Date().toLocaleString("he-IL"),
+      fileName: audioFile?.name ?? "—",
+      systemWinner: systemWinner?.label ?? "—",
+      userVerdict: userVerdict.trim(),
+    };
+    const updated = [entry, ...savedVerdicts].slice(0, 20);
+    setSavedVerdicts(updated);
+    localStorage.setItem(VERDICTS_KEY, JSON.stringify(updated));
+    setVerdictSaved(true);
+    toast({ title: "דעתך נשמרה" });
+  };
+
+  // Derived
+  const baseline     = results.find(r => r.isBaseline && r.status === "success") || null;
+  const nonBaseline  = results.filter(r => !r.isBaseline && r.status === "success");
+  const systemWinner = nonBaseline.length > 0 ? nonBaseline.reduce((a, b) => (a.score ?? 0) > (b.score ?? 0) ? a : b) : null;
+  const sorted       = [...results].sort((a, b) => {
+    if (a.isBaseline) return 1;
+    if (b.isBaseline) return -1;
+    return (b.score ?? 0) - (a.score ?? 0);
+  });
+  const displayList  = running ? results : sorted;
+
+  // Helper for short label in dialog
+  const shortLabel = (label: string) =>
+    label.replace("שיפור — ", "").replace(" (ללא שיפור)", "מקור");
+
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="max-w-5xl mx-auto p-4 space-y-4" dir="rtl">
+    <div className="w-full py-6 px-4 md:px-8 space-y-6" dir="rtl">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <BarChart3 className="w-6 h-6 text-primary" />
-            בנצ'מארק תמלול
+            בנצ&#39;מארק תמלול
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            השוואת מהירות ואיכות בין כל ערכות התמלול
+            השוואת איכות. לחץ על כל מילה לעריכה, למידה ושמירה.
           </p>
         </div>
-        <div className="flex gap-2">
-          {running ? (
-            <Button variant="destructive" size="sm" onClick={stopBenchmark}>
-              <XCircle className="w-4 h-4 ml-1" /> עצור
-            </Button>
-          ) : (
-            <Button onClick={runBenchmark} size="sm" className="gap-1">
-              <Play className="w-4 h-4 ml-1" /> הרץ בנצ'מארק
-            </Button>
-          )}
-        </div>
+        <Button
+          onClick={running ? () => { abortRef.current = true; } : runAll}
+          size="lg" variant={running ? "destructive" : "default"}
+          className="gap-2 text-base px-6"
+          disabled={!audioFile && !running}
+        >
+          {running ? <><XCircle className="w-5 h-5" /> עצור</> : <><Play className="w-5 h-5" /> הרץ בנצ&#39;מארק</>}
+        </Button>
       </div>
 
-      {/* Server Status */}
-      {serverStatus && (
-        <Card className="p-3 border-primary/20 bg-primary/5">
-          <div className="flex items-center gap-4 text-sm flex-wrap">
-            <Badge variant="outline" className="gap-1">
-              {serverStatus.ready ? <CheckCircle2 className="w-3 h-3 text-green-500" /> : <XCircle className="w-3 h-3 text-red-500" />}
-              {serverStatus.ready ? "מוכן" : "לא מוכן"}
-            </Badge>
-            <span>🖥️ {serverStatus.gpu}</span>
-            <span>📦 {serverStatus.model}</span>
-            <span>💾 {serverStatus.vram}</span>
-          </div>
-        </Card>
-      )}
-
-      {/* Upload custom audio */}
-      <Card className="p-3">
-        <div className="flex items-center gap-3 text-sm">
-          <span className="font-medium">קובץ בדיקה:</span>
-          <input
-            type="file"
-            accept="audio/*"
-            className="text-xs"
-            onChange={(e) => setUserAudio(e.target.files?.[0] ?? null)}
-          />
-          {userAudio ? (
-            <Badge variant="outline" className="gap-1">
-              {userAudio.name} ({(userAudio.size / 1024).toFixed(0)} KB)
-            </Badge>
-          ) : (
-            <span className="text-muted-foreground">אודיו סינטטי (5 שניות)</span>
-          )}
-        </div>
-      </Card>
-
-      {/* Enhancement impact quality test */}
-      <Card className="p-4 space-y-3 border-primary/25">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div>
-            <h3 className="font-bold flex items-center gap-2">
-              <Target className="w-4 h-4 text-primary" />
-              בדיקת השפעת שיפור על הצלחת התמלול
-            </h3>
-            <p className="text-xs text-muted-foreground mt-1">
-              מריץ תמלול על המקור מול קבצים משופרים, על דגימה שתבחר (למשל 120 שניות)
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {qualityRunning ? (
-              <Button variant="destructive" size="sm" onClick={() => { abortRef.current = true; }}>
-                <XCircle className="w-4 h-4 ml-1" /> עצור בדיקת איכות
-              </Button>
+      {/* File Input */}
+      <Card>
+        <CardContent className="pt-4 space-y-3">
+          <div
+            onDrop={handleDrop} onDragOver={e => e.preventDefault()}
+            onClick={() => fileRef.current?.click()}
+            className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer hover:border-primary/60 hover:bg-primary/5 transition-colors"
+          >
+            <input ref={fileRef} type="file" accept="audio/*,video/*" className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); if (fileRef.current) fileRef.current.value = ""; }} />
+            <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+            {audioFile ? (
+              <div>
+                <p className="font-medium text-primary">{audioFile.name}</p>
+                <p className="text-xs text-muted-foreground mt-1">{(audioFile.size / 1024).toFixed(0)} KB</p>
+              </div>
             ) : (
-              <Button size="sm" className="gap-1" onClick={runQualityComparison}>
-                <Play className="w-4 h-4 ml-1" /> הרץ בדיקת איכות
-              </Button>
+              <>
+                <p className="font-medium">גרור קובץ אודיו לכאן / לחץ לבחירה</p>
+                <p className="text-xs text-muted-foreground mt-1">MP3, WAV, M4A, OPUS, WEBM, MP4</p>
+              </>
             )}
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-          <div className="space-y-1">
-            <Label className="text-xs">התחלת דגימה (שניות)</Label>
-            <Input type="number" min="0" value={sampleStartSec} onChange={(e) => setSampleStartSec(e.target.value)} />
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground">או:</span>
+            {isRecording
+              ? <Button variant="destructive" onClick={stopRecord} className="gap-2"><StopCircle className="w-4 h-4" />עצור הקלטה</Button>
+              : <Button variant="outline" onClick={startRecord} className="gap-2"><Mic className="w-4 h-4" />הקלט מהמיקרופון</Button>}
+            {isRecording && (
+              <span className="text-red-500 text-sm animate-pulse flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />מקליט…
+              </span>
+            )}
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs">אורך דגימה (שניות)</Label>
-            <Input type="number" min="5" value={sampleDurationSec} onChange={(e) => setSampleDurationSec(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">שפת תמלול</Label>
-            <Input value={qualityLanguage} onChange={(e) => setQualityLanguage(e.target.value || "he")} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">פורמט פלט משופר</Label>
-            <div className="flex gap-1">
-              {(["mp3", "opus", "aac"] as EnhancementOutputFormat[]).map((fmt) => (
-                <Button
-                  key={fmt}
-                  size="sm"
-                  variant={qualityOutputFormat === fmt ? "default" : "outline"}
-                  onClick={() => setQualityOutputFormat(fmt)}
-                  className="flex-1"
-                >
-                  {fmt.toUpperCase()}
-                </Button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-1">
-          <Label className="text-xs">פריסטים להשוואה</Label>
-          <div className="flex flex-wrap gap-1.5">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setQualitySelectedPresets(ENHANCE_PRESETS.map((p) => p.id))}
-            >
-              בחר הכל
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setQualitySelectedPresets([])}
-            >
-              נקה בחירה
-            </Button>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {ENHANCE_PRESETS.map((preset) => {
-              const selected = qualitySelectedPresets.includes(preset.id);
-              return (
-                <Button
-                  key={preset.id}
-                  size="sm"
-                  variant={selected ? "default" : "outline"}
-                  onClick={() => {
-                    setQualitySelectedPresets((prev) => (
-                      prev.includes(preset.id)
-                        ? prev.filter((p) => p !== preset.id)
-                        : [...prev, preset.id]
-                    ));
-                  }}
-                >
-                  {preset.label}
-                </Button>
-              );
-            })}
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            {ENHANCE_PRESETS.filter((p) => qualitySelectedPresets.includes(p.id)).map((p) => p.description).join(" • ") || "לא נבחרו פריסטים"}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <div className="space-y-1">
-            <Label className="text-xs">משקל מילים (%)</Label>
-            <Input type="number" min="0" max="100" value={qualityWordWeight} onChange={(e) => setQualityWordWeight(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">משקל ביטחון (%)</Label>
-            <Input type="number" min="0" max="100" value={qualityConfidenceWeight} onChange={(e) => setQualityConfidenceWeight(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">משקל מהירות (%)</Label>
-            <Input type="number" min="0" max="100" value={qualitySpeedWeight} onChange={(e) => setQualitySpeedWeight(e.target.value)} />
-          </div>
-        </div>
-
-        {qualityWinner && (
-          <div className="border rounded-lg p-2 bg-primary/5">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-2">
-                <Trophy className="w-4 h-4 text-primary" />
-                <span className="text-sm font-semibold">זוכה מומלץ: {qualityWinner.label}</span>
-                <Badge variant="secondary" className="text-[10px]">
-                  ציון {computeQualityScore(qualityWinner, qualityBaseline).toFixed(2)}
-                </Badge>
-              </div>
-              <Button
-                size="sm"
-                className="gap-1"
-                onClick={() => void applyWinnerToFullFile()}
-                disabled={winnerBusy || !userAudio}
-              >
-                {winnerBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                החל זוכה על קובץ מלא והורד
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {qualityRunning && <Progress value={qualityProgress} className="h-2" />}
-
-        {sampleInfo && (
-          <div className="text-xs text-muted-foreground">
-            אורך מקור: {sampleInfo.sourceDuration.toFixed(1)}s • נבדק טווח: {sampleInfo.usedStart.toFixed(1)}s → {sampleInfo.usedEnd.toFixed(1)}s
-          </div>
-        )}
-
-        {qualityResults.length > 0 && (() => {
-          const baseline = qualityResults.find((r) => r.isBaseline && r.status === "success") || null;
-          return (
-            <div className="space-y-2">
-              {qualityResults.map((r) => {
-                const deltaWords = baseline ? r.wordCount - baseline.wordCount : 0;
-                const deltaProb = baseline ? r.avgProbability - baseline.avgProbability : 0;
-                const isImproved = !r.isBaseline && r.status === "success" && baseline && (deltaWords > 0 || deltaProb > 0);
-                const weightedScore = computeQualityScore(r, baseline);
-                return (
-                  <div key={r.id} className="border rounded-lg p-2 space-y-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-medium">{r.label}</span>
-                        {r.status === "success" ? (
-                          <Badge variant="outline" className="text-[10px]">OK</Badge>
-                        ) : (
-                          <Badge variant="destructive" className="text-[10px]">שגיאה</Badge>
-                        )}
-                        {isImproved && <Badge className="text-[10px]">שיפור</Badge>}
-                      </div>
-                      {r.status === "success" && (
-                        <div className="text-xs text-muted-foreground">
-                          {r.processingTime.toFixed(2)}s
-                        </div>
-                      )}
-                    </div>
-
-                    {r.status === "success" ? (
-                      <div className="flex flex-wrap gap-2 text-xs">
-                        <Badge variant="secondary">מילים: {r.wordCount}</Badge>
-                        <Badge variant="secondary">ביטחון ממוצע: {(r.avgProbability * 100).toFixed(1)}%</Badge>
-                        {!r.isBaseline && baseline && (
-                          <>
-                            <Badge variant="outline">Δ מילים: {deltaWords >= 0 ? "+" : ""}{deltaWords}</Badge>
-                            <Badge variant="outline">Δ ביטחון: {deltaProb >= 0 ? "+" : ""}{(deltaProb * 100).toFixed(1)}%</Badge>
-                            <Badge variant="outline">ציון משוקלל: {weightedScore.toFixed(2)}</Badge>
-                          </>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-destructive">{r.error}</p>
-                    )}
-
-                    {r.text && (
-                      <p className="text-xs text-muted-foreground line-clamp-2">
-                        {r.text}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })()}
+          {audioFile && <p className="text-xs text-muted-foreground">יושוו {SYSTEMS.length} מערכות (עד 120 שניות)</p>}
+        </CardContent>
       </Card>
 
       {/* Progress */}
       {running && (
-        <Card className="p-3 space-y-2">
-          <div className="flex items-center gap-2 text-sm">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <span>
-              מריץ ערכה: <strong>{PRESETS.find(p => p.key === currentPreset)?.label || "..."}</strong>
-            </span>
-          </div>
-          <Progress value={progress} className="h-2" />
+        <Card>
+          <CardContent className="pt-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>מעבד: <strong>{currentStep}</strong></span>
+            </div>
+            <Progress value={progress} className="h-2" />
+          </CardContent>
         </Card>
       )}
 
-      {/* Winners Cards */}
-      {successResults.length >= 2 && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* Fastest */}
-          {fastest && (
-            <Card className="p-4 border-amber-500/30 bg-amber-500/5">
-              <div className="flex items-center gap-2 mb-2">
-                <Zap className="w-5 h-5 text-amber-500" />
-                <span className="font-bold text-amber-700 dark:text-amber-400">הכי מהיר</span>
-                <Trophy className="w-4 h-4 text-amber-500" />
-              </div>
-              <div className="text-2xl font-bold">{fmtSpeed(fastest.speedX)}</div>
-              <div className="text-sm text-muted-foreground">
-                {PRESETS.find(p => p.key === fastest.preset)?.label} — {fmtTime(fastest.processingTime)}
-              </div>
+      {/* Results */}
+      {results.length > 0 && (
+        <div className="space-y-4">
+          {systemWinner && !running && (
+            <Card className="border-primary/40 bg-gradient-to-l from-primary/10 to-transparent">
+              <CardContent className="pt-4 flex items-start gap-4 flex-wrap">
+                <Trophy className="w-8 h-8 text-amber-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm text-muted-foreground">המלצת המערכת:</p>
+                  <p className="text-xl font-bold">{systemWinner.label}</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {systemWinner.wordCount} מילים · {(systemWinner.avgProbability * 100).toFixed(1)}% ביטחון ·
+                    ציון: {(systemWinner.score ?? 0) > 0 ? "+" : ""}{(systemWinner.score ?? 0).toFixed(1)}
+                    {baseline ? ` (לעומת מקור: ${baseline.wordCount} מילים, ${(baseline.avgProbability * 100).toFixed(1)}%)` : ""}
+                  </p>
+                </div>
+              </CardContent>
             </Card>
           )}
 
-          {/* Best Quality */}
-          {bestQuality && (
-            <Card className="p-4 border-emerald-500/30 bg-emerald-500/5">
-              <div className="flex items-center gap-2 mb-2">
-                <Target className="w-5 h-5 text-emerald-500" />
-                <span className="font-bold text-emerald-700 dark:text-emerald-400">הכי איכותי</span>
-                <Trophy className="w-4 h-4 text-emerald-500" />
-              </div>
-              <div className="text-2xl font-bold">{bestQuality.wordCount} מילים</div>
-              <div className="text-sm text-muted-foreground">
-                {PRESETS.find(p => p.key === bestQuality.preset)?.label} — {fmtTime(bestQuality.processingTime)}
-              </div>
-            </Card>
-          )}
-
-          {/* Best Balance (speed × words) */}
-          {(() => {
-            const scored = successResults.map(r => ({ ...r, score: r.speedX * (r.wordCount || 1) }));
-            const best = scored.reduce((a, b) => a.score > b.score ? a : b);
-            return (
-              <Card className="p-4 border-blue-500/30 bg-blue-500/5">
-                <div className="flex items-center gap-2 mb-2">
-                  <Scale className="w-5 h-5 text-blue-500" />
-                  <span className="font-bold text-blue-700 dark:text-blue-400">האיזון הטוב ביותר</span>
-                  <Trophy className="w-4 h-4 text-blue-500" />
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-base">
+                  תוצאות השוואה
+                  <span className="text-xs font-normal text-muted-foreground mr-2">— לחץ על מילה לעריכה / למידה</span>
+                </CardTitle>
+                <div className="flex items-center gap-1">
+                  <Button size="icon" variant={showDiff ? "default" : "ghost"} className="h-7 w-7" title="הדגש שינויים" onClick={() => setShowDiff(v => !v)}>
+                    <GitCompare className="w-4 h-4" />
+                  </Button>
+                  <div className="w-px h-4 bg-border mx-0.5" />
+                  <Button size="icon" variant={viewMode === "list" ? "default" : "ghost"} className="h-7 w-7" title="רשימה" onClick={() => setViewMode("list")}>
+                    <LayoutList className="w-4 h-4" />
+                  </Button>
+                  <Button size="icon" variant={viewMode === "side" ? "default" : "ghost"} className="h-7 w-7" title="אופקי" onClick={() => setViewMode("side")}>
+                    <Columns2 className="w-4 h-4" />
+                  </Button>
                 </div>
-                <div className="text-2xl font-bold">{fmtSpeed(best.speedX)} · {best.wordCount} מילים</div>
-                <div className="text-sm text-muted-foreground">
-                  {PRESETS.find(p => p.key === best.preset)?.label}
-                </div>
-              </Card>
-            );
-          })()}
-        </div>
-      )}
+              </div>
+              {showDiff && (
+                <p className="text-xs text-muted-foreground flex items-center gap-3 mt-1">
+                  <mark className="bg-green-200 dark:bg-green-900/50 rounded px-1">נוסף</mark>
+                  <del className="text-red-400 opacity-75">נמחק</del>
+                </p>
+              )}
+            </CardHeader>
+            <CardContent className="p-0">
 
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} dir="rtl">
-        <TabsList className="w-full justify-start">
-          <TabsTrigger value="all" className="gap-1">
-            <BarChart3 className="w-3.5 h-3.5" /> הכל
-          </TabsTrigger>
-          {PRESETS.map(p => (
-            <TabsTrigger key={p.key} value={p.key} className="gap-1">
-              {p.icon} {p.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        {/* Results Table */}
-        <TabsContent value={activeTab} className="mt-3">
-          {filteredResults.length === 0 ? (
-            <Card className="p-8 text-center text-muted-foreground">
-              <BarChart3 className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p className="font-medium">אין תוצאות עדיין</p>
-              <p className="text-sm mt-1">לחץ "הרץ בנצ'מארק" כדי להשוות בין הערכות</p>
-            </Card>
-          ) : (
-            <Card className="overflow-hidden">
-              <ScrollArea className="max-h-[600px]">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="text-right w-24">ערכה</TableHead>
-                      <TableHead className="text-right">אודיו</TableHead>
-                      <TableHead className="text-right">
-                        <div className="flex items-center gap-1">
-                          <Timer className="w-3 h-3" /> עיבוד GPU
-                        </div>
-                      </TableHead>
-                      <TableHead className="text-right">
-                        <div className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" /> זמן כולל
-                        </div>
-                      </TableHead>
-                      <TableHead className="text-right">
-                        <div className="flex items-center gap-1">
-                          <Zap className="w-3 h-3" /> מהירות
-                        </div>
-                      </TableHead>
-                      <TableHead className="text-right">מילים</TableHead>
-                      <TableHead className="text-right">fast_mode</TableHead>
-                      <TableHead className="text-right">סטטוס</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredResults.map((r, i) => {
-                      const isFastest = fastest?.preset === r.preset && r.status === "success";
-                      const isBestQ = bestQuality?.preset === r.preset && r.status === "success";
-                      return (
-                        <TableRow key={i} className={isFastest ? "bg-amber-500/5" : isBestQ ? "bg-emerald-500/5" : ""}>
-                          <TableCell>
-                            <div className="flex items-center gap-1.5">
-                              {PRESETS.find(p => p.key === r.preset)?.icon}
-                              <span className="font-medium text-sm">{r.presetLabel}</span>
-                              {isFastest && <Zap className="w-3 h-3 text-amber-500" />}
-                              {isBestQ && <Target className="w-3 h-3 text-emerald-500" />}
+              {/* List view */}
+              {viewMode === "list" && (
+                <div className="divide-y">
+                  {displayList.map((r, i) => {
+                    const isWinner  = r.id === systemWinner?.id;
+                    const dw = baseline && !r.isBaseline && r.status === "success" ? r.wordCount - baseline.wordCount : null;
+                    const dc = baseline && !r.isBaseline && r.status === "success" ? (r.avgProbability - baseline.avgProbability) * 100 : null;
+                    const tokens = showDiff && baseline && !r.isBaseline && r.status === "success" ? diffWords(baseline.text, r.text) : null;
+                    return (
+                      <div key={r.id} className={`p-4 ${isWinner ? "bg-primary/5" : ""}`}>
+                        <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+                          <div className="flex items-center gap-2">
+                            {running && i === results.length - 1 && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+                            <span className="font-semibold text-sm">{r.label}</span>
+                            {isWinner && !running && <Trophy className="w-4 h-4 text-amber-500" />}
+                            {r.isBaseline && <Badge variant="outline" className="text-xs">בסיס</Badge>}
+                            {r.status === "error" && <Badge variant="destructive" className="text-xs">שגיאה</Badge>}
+                          </div>
+                          {r.status === "success" && (
+                            <div className="flex gap-1.5 flex-wrap">
+                              <Badge variant="secondary">{r.wordCount} מילים</Badge>
+                              <Badge variant="secondary">{(r.avgProbability * 100).toFixed(1)}% ביטחון</Badge>
+                              <Badge variant="outline">{fmtSec(r.processingTime)}</Badge>
+                              {dw !== null && <Badge className={dw > 0 ? "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300" : "bg-muted text-muted-foreground"}>{dw >= 0 ? "+" : ""}{dw} מילים</Badge>}
+                              {dc !== null && <Badge className={dc > 0 ? "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300" : "bg-muted text-muted-foreground"}>{dc >= 0 ? "+" : ""}{dc.toFixed(1)}%</Badge>}
+                              {!r.isBaseline && r.score !== undefined && <Badge variant="outline" className="font-mono text-xs">{r.score > 0 ? "+" : ""}{r.score.toFixed(1)}</Badge>}
                             </div>
-                          </TableCell>
-                          <TableCell className="text-sm">{r.audioDuration.toFixed(1)}s</TableCell>
-                          <TableCell>
-                            <span className="font-mono text-sm font-medium">
-                              {fmtTime(r.processingTime)}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <span className="font-mono text-sm text-muted-foreground">
-                              {fmtTime(r.wallTime)}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={speedBadgeClass(r.speedX)}>
-                              {fmtSpeed(r.speedX)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-sm">{r.wordCount}</TableCell>
-                          <TableCell>
-                            {r.fastMode ? (
-                              <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/30 text-xs">✅</Badge>
-                            ) : (
-                              <Badge variant="outline" className="bg-gray-500/10 text-gray-500 border-gray-500/30 text-xs">❌</Badge>
+                          )}
+                        </div>
+                        {r.status === "success" && r.text && (
+                          <div className="text-sm leading-relaxed bg-muted/30 rounded p-2" dir="rtl">
+                            <ClickableText text={r.text} resultId={r.id} onWordClick={openWordDialog} tokens={tokens} />
+                          </div>
+                        )}
+                        {r.status === "error" && <p className="text-xs text-destructive">{r.error}</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Side-by-side view */}
+              {viewMode === "side" && (
+                <div className="overflow-x-auto">
+                  <div className="flex divide-x divide-x-reverse" style={{ minWidth: `${displayList.length * 256}px` }}>
+                    {displayList.map((r, i) => {
+                      const isWinner = r.id === systemWinner?.id;
+                      const tokens = showDiff && baseline && !r.isBaseline && r.status === "success" ? diffWords(baseline.text, r.text) : null;
+                      return (
+                        <div key={r.id} className={`flex-1 min-w-[240px] p-3 space-y-2 ${isWinner ? "bg-primary/5" : ""}`}>
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {running && i === results.length - 1 && <Loader2 className="w-3 h-3 animate-spin" />}
+                              <span className="font-semibold text-xs">{r.label}</span>
+                              {isWinner && !running && <Trophy className="w-3.5 h-3.5 text-amber-500" />}
+                              {r.isBaseline && <Badge variant="outline" className="text-[10px] py-0 px-1">בסיס</Badge>}
+                              {r.status === "error" && <Badge variant="destructive" className="text-[10px] py-0 px-1">שגיאה</Badge>}
+                            </div>
+                            {r.status === "success" && (
+                              <div className="flex flex-wrap gap-1">
+                                <Badge variant="secondary" className="text-[10px] py-0 px-1.5">{r.wordCount} מילים</Badge>
+                                <Badge variant="secondary" className="text-[10px] py-0 px-1.5">{(r.avgProbability * 100).toFixed(1)}%</Badge>
+                                <Badge variant="outline" className="text-[10px] py-0 px-1.5">{fmtSec(r.processingTime)}</Badge>
+                                {!r.isBaseline && r.score !== undefined && <Badge variant="outline" className="font-mono text-[10px] py-0 px-1.5">{r.score > 0 ? "+" : ""}{r.score.toFixed(1)}</Badge>}
+                              </div>
                             )}
-                          </TableCell>
-                          <TableCell>
-                            {r.status === "success" ? (
-                              <CheckCircle2 className="w-4 h-4 text-green-500" />
-                            ) : (
-                              <XCircle className="w-4 h-4 text-red-500" />
-                            )}
-                          </TableCell>
-                        </TableRow>
+                          </div>
+                          {r.status === "success" && r.text && (
+                            <div className="text-xs leading-relaxed bg-muted/30 rounded p-2 max-h-52 overflow-y-auto" dir="rtl">
+                              <ClickableText text={r.text} resultId={r.id} onWordClick={openWordDialog} tokens={tokens} />
+                            </div>
+                          )}
+                          {r.status === "error" && <p className="text-[10px] text-destructive">{r.error}</p>}
+                        </div>
                       );
                     })}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* User verdict */}
+          {!running && systemWinner && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Target className="w-4 h-4" />מה אתה רואה? כתוב את הערכתך
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Textarea dir="rtl" placeholder="לדוגמה: AI Voice נשמע הרבה יותר ברור, אבל פודקאסט שמר על הניואנסים..." rows={3}
+                  value={userVerdict} onChange={e => { setUserVerdict(e.target.value); setVerdictSaved(false); }} disabled={verdictSaved} />
+                <Button onClick={saveVerdict} disabled={!userVerdict.trim() || verdictSaved} className="gap-2">
+                  <CheckCircle2 className="w-4 h-4" />{verdictSaved ? "נשמר" : "שמור הערכה"}
+                </Button>
+              </CardContent>
             </Card>
           )}
-        </TabsContent>
-      </Tabs>
-
-      {/* Speed Comparison Bars */}
-      {successResults.length >= 2 && (
-        <Card className="p-4 space-y-3">
-          <h3 className="font-bold flex items-center gap-2">
-            <ArrowUpDown className="w-4 h-4" /> השוואת מהירות
-          </h3>
-          {(() => {
-            const maxSpeed = Math.max(...successResults.map(r => r.speedX));
-            return successResults.map((r, i) => {
-              const pct = maxSpeed > 0 ? (r.speedX / maxSpeed) * 100 : 0;
-              const preset = PRESETS.find(p => p.key === r.preset);
-              return (
-                <div key={i} className="space-y-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-1.5">
-                      {preset?.icon}
-                      <span className="font-medium">{preset?.label}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`font-mono font-bold ${speedColor(r.speedX)}`}>
-                        {fmtSpeed(r.speedX)}
-                      </span>
-                      <span className="text-muted-foreground text-xs">
-                        ({fmtTime(r.processingTime)})
-                      </span>
-                    </div>
-                  </div>
-                  <div className="h-5 bg-muted/50 rounded-md overflow-hidden relative">
-                    <div
-                      className={`h-full rounded-md transition-all duration-700 ${
-                        r.preset === "fast" ? "bg-amber-500/70" :
-                        r.preset === "balanced" ? "bg-blue-500/70" :
-                        "bg-emerald-500/70"
-                      }`}
-                      style={{ width: `${pct}%` }}
-                    />
-                    {fastest?.preset === r.preset && (
-                      <span className="absolute right-2 top-0.5 text-xs font-bold">🏆</span>
-                    )}
-                  </div>
-                </div>
-              );
-            });
-          })()}
-        </Card>
-      )}
-
-      {/* Timing Comparison */}
-      {successResults.length >= 2 && (
-        <Card className="p-4 space-y-3">
-          <h3 className="font-bold flex items-center gap-2">
-            <Timer className="w-4 h-4" /> השוואת זמנים (שניות)
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {successResults.map((r, i) => {
-              const preset = PRESETS.find(p => p.key === r.preset);
-              const speedDiffVsFastest = fastest && r !== fastest
-                ? ((r.processingTime - fastest.processingTime) / fastest.processingTime * 100)
-                : 0;
-              return (
-                <Card key={i} className={`p-3 ${preset?.key === "fast" ? "border-amber-500/30" : preset?.key === "balanced" ? "border-blue-500/30" : "border-emerald-500/30"}`}>
-                  <div className="flex items-center gap-1.5 mb-2">
-                    {preset?.icon}
-                    <span className="font-bold text-sm">{preset?.label}</span>
-                  </div>
-                  <div className="space-y-1.5 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">עיבוד GPU:</span>
-                      <span className="font-mono font-bold">{fmtTime(r.processingTime)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">זמן כולל:</span>
-                      <span className="font-mono">{fmtTime(r.wallTime)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">אודיו:</span>
-                      <span className="font-mono">{r.audioDuration.toFixed(1)}s</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">מהירות:</span>
-                      <Badge variant="outline" className={speedBadgeClass(r.speedX)}>
-                        {fmtSpeed(r.speedX)}
-                      </Badge>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">RTF:</span>
-                      <span className="font-mono text-xs">{r.rtf.toFixed(4)}</span>
-                    </div>
-                    {speedDiffVsFastest > 0 && (
-                      <div className="text-xs text-red-500 text-left">
-                        +{speedDiffVsFastest.toFixed(0)}% לעומת המהיר ביותר
-                      </div>
-                    )}
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        </Card>
-      )}
-
-      {/* Transcribed Text Comparison */}
-      {successResults.length >= 2 && (
-        <Card className="p-4 space-y-3">
-          <h3 className="font-bold flex items-center gap-2">
-            <Target className="w-4 h-4" /> השוואת טקסט מתומלל
-          </h3>
-          <div className="space-y-3">
-            {successResults.map((r, i) => {
-              const preset = PRESETS.find(p => p.key === r.preset);
-              return (
-                <div key={i} className="space-y-1">
-                  <div className="flex items-center gap-1.5 text-sm">
-                    {preset?.icon}
-                    <span className="font-medium">{preset?.label}</span>
-                    <Badge variant="outline" className="text-xs">{r.wordCount} מילים</Badge>
-                  </div>
-                  <div className="p-2 rounded bg-muted/30 text-sm leading-relaxed font-serif min-h-[2.5rem]" dir="rtl">
-                    {r.text || <span className="text-muted-foreground italic">(ריק — אין דיבור באודיו)</span>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      )}
-
-      {/* Preset Info Cards */}
-      <Card className="p-4 space-y-3">
-        <h3 className="font-bold">📋 פירוט ערכות</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {PRESETS.map(p => (
-            <Card key={p.key} className="p-3">
-              <div className="flex items-center gap-1.5 mb-1">
-                {p.icon}
-                <span className={`font-bold ${p.color}`}>{p.label}</span>
-              </div>
-              <p className="text-xs text-muted-foreground">{p.description}</p>
-            </Card>
-          ))}
         </div>
+      )}
+
+      {/* Empty state */}
+      {results.length === 0 && !running && (
+        <Card className="border-dashed">
+          <CardContent className="py-12 text-center space-y-3">
+            <BarChart3 className="w-12 h-12 mx-auto text-muted-foreground/40" />
+            <p className="font-medium text-muted-foreground">אין תוצאות עדיין</p>
+            <p className="text-sm text-muted-foreground">העלה קובץ אודיו ולחץ <strong>הרץ בנצ&#39;מארק</strong></p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Systems legend */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm text-muted-foreground">מערכות מושוות</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {SYSTEMS.map(s => (
+              <div key={s.id} className="flex items-center gap-2 text-sm">
+                {s.isBaseline ? <Zap className="w-3.5 h-3.5 text-muted-foreground" /> : <CheckCircle2 className="w-3.5 h-3.5 text-primary/60" />}
+                <span>{s.label}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground mt-3">ציון: 35% מילים + 50% ביטחון + 15% מהירות</p>
+        </CardContent>
       </Card>
+
+      {/* Saved verdicts */}
+      {savedVerdicts.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">הערכות קודמות</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {savedVerdicts.slice(0, 5).map((v, vi) => (
+              <div key={vi} className="border rounded-lg p-3 text-sm space-y-1">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>{v.timestamp}</span><span>{v.fileName}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <Trophy className="w-3.5 h-3.5 text-amber-500" /><span>מומלץ: {v.systemWinner}</span>
+                </div>
+                <p dir="rtl" className="text-muted-foreground">{v.userVerdict}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ══════════════════ Word Click Dialog ══════════════════ */}
+      <Dialog open={!!wordDialog} onOpenChange={open => { if (!open) setWordDialog(null); }}>
+        <DialogContent className="max-w-2xl w-full" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 flex-wrap">
+              <span className="text-2xl font-bold text-primary">{wordDialog?.word}</span>
+              {learnedWords.has(wordDialog?.word ?? "") && (
+                <Badge className="bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300 text-xs">
+                  <Star className="w-3 h-3 fill-current ml-1" />נלמד
+                </Badge>
+              )}
+              {conceptNotes[wordDialog?.word ?? ""] && (
+                <Badge variant="outline" className="text-xs">
+                  <Lightbulb className="w-3 h-3 ml-1" />יש הסבר
+                </Badge>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          {wordDialog && (
+            <div className="space-y-4">
+              {/* Context */}
+              <div className="bg-muted/40 rounded-lg p-3 text-sm leading-loose" dir="rtl">
+                <span className="text-muted-foreground">{wordContext.before} </span>
+                <span className="font-bold text-primary bg-primary/15 rounded px-1 py-0.5">{wordContext.word}</span>
+                <span className="text-muted-foreground"> {wordContext.after}</span>
+              </div>
+
+              {/* Variants strip */}
+              {variants.length > 1 && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-muted-foreground shrink-0">גרסאות:</span>
+                  {variants.map(v => (
+                    <Badge
+                      key={v.resultId}
+                      variant={v.resultId === wordDialog.resultId ? "default" : "outline"}
+                      className="text-xs cursor-pointer hover:opacity-80"
+                      onClick={() => setEditedWord(v.word)}
+                      title={`לחץ לבחור "${v.word}"`}
+                    >
+                      {shortLabel(v.label)}: {v.word}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
+              {/* 4 Tabs */}
+              <Tabs value={dialogTab} onValueChange={setDialogTab}>
+                <TabsList className="w-full grid grid-cols-4">
+                  <TabsTrigger value="edit" className="gap-1 text-xs"><PenLine className="w-3.5 h-3.5" />שנה</TabsTrigger>
+                  <TabsTrigger value="learn" className="gap-1 text-xs"><GraduationCap className="w-3.5 h-3.5" />למד</TabsTrigger>
+                  <TabsTrigger value="dict" className="gap-1 text-xs"><LibraryBig className="w-3.5 h-3.5" />מילון</TabsTrigger>
+                  <TabsTrigger value="concept" className="gap-1 text-xs"><Lightbulb className="w-3.5 h-3.5" />רעיון</TabsTrigger>
+                </TabsList>
+
+                {/* ── Tab: שנה ──────────────────────────────────── */}
+                <TabsContent value="edit" className="space-y-3 pt-3">
+                  <div className="space-y-1.5">
+                    <Label>תיקון המילה</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        dir="rtl" value={editedWord}
+                        onChange={e => setEditedWord(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") handleSaveEdit(); }}
+                        placeholder="הזן את המילה הנכונה…"
+                        className="text-base" autoFocus
+                      />
+                      <Button onClick={handleSaveEdit} disabled={!editedWord.trim()}>
+                        <CheckCircle2 className="w-4 h-4 ml-1" />שמור
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Enter לשמירה. מעדכן את התמלול בדף.</p>
+                  </div>
+                  {uniqueVariants.length > 1 && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">בחר מגרסאות קיימות</Label>
+                      <div className="flex gap-2 flex-wrap">
+                        {uniqueVariants.map(v => (
+                          <Button key={v.resultId} size="sm" variant={editedWord === v.word ? "default" : "outline"}
+                            className="h-7 text-sm" onClick={() => setEditedWord(v.word)}>
+                            {v.word}
+                            <span className="opacity-50 mr-1.5 text-[10px]">({shortLabel(v.label)})</span>
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
+
+                {/* ── Tab: למד ──────────────────────────────────── */}
+                <TabsContent value="learn" className="space-y-3 pt-3">
+                  <div className="flex gap-1">
+                    <Button size="sm" variant={learnMode === "card" ? "default" : "ghost"} className="gap-1"
+                      onClick={() => { setLearnMode("card"); setCardFlipped(false); }}>
+                      <BookOpen className="w-3.5 h-3.5" />כרטיס
+                    </Button>
+                    <Button size="sm" variant={learnMode === "quiz" ? "default" : "ghost"} className="gap-1"
+                      onClick={() => { setLearnMode("quiz"); setQuizChoice(""); }}>
+                      <GraduationCap className="w-3.5 h-3.5" />חידון
+                    </Button>
+                  </div>
+
+                  {/* Flashcard */}
+                  {learnMode === "card" && (
+                    <div
+                      className="border rounded-xl p-6 text-center cursor-pointer hover:bg-muted/20 transition-colors min-h-[140px] flex flex-col items-center justify-center gap-3"
+                      onClick={() => setCardFlipped(v => !v)}
+                    >
+                      {!cardFlipped ? (
+                        <>
+                          <p className="text-4xl font-bold text-primary" dir="rtl">{wordDialog.word}</p>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1">
+                            <RotateCcw className="w-3 h-3" />לחץ להפוך ולראות גרסאות
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-xs text-muted-foreground mb-1">גרסאות ממערכות שונות:</p>
+                          <div className="space-y-1.5 w-full max-w-xs">
+                            {variants.map(v => (
+                              <div key={v.resultId} className="flex justify-between items-center px-3 py-1.5 rounded-lg bg-muted/50">
+                                <span className="text-xs text-muted-foreground">{shortLabel(v.label)}</span>
+                                <span className={`font-semibold text-sm ${v.resultId === wordDialog.resultId ? "text-primary" : ""}`}>{v.word}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Quiz */}
+                  {learnMode === "quiz" && (
+                    <div className="space-y-3">
+                      <p className="text-sm font-medium">איזו גרסה נכונה יותר לדעתך?</p>
+                      <div className="space-y-2">
+                        {uniqueVariants.map(v => (
+                          <button
+                            key={v.word} dir="rtl"
+                            className={`w-full text-right px-4 py-3 rounded-lg border text-sm transition-colors ${
+                              quizChoice === v.word
+                                ? "border-primary bg-primary/10 font-semibold"
+                                : "border-border hover:border-primary/50 hover:bg-muted/50"
+                            }`}
+                            onClick={() => { setQuizChoice(v.word); setDictForm(prev => ({ ...prev, correctForm: v.word })); }}
+                          >
+                            {v.word}
+                            <span className="text-[10px] text-muted-foreground mr-2">({shortLabel(v.label)})</span>
+                          </button>
+                        ))}
+                      </div>
+                      {quizChoice && (
+                        <Button size="sm" variant="outline" className="gap-1 w-full" onClick={() => setDialogTab("dict")}>
+                          <LibraryBig className="w-3.5 h-3.5" />שמור "{quizChoice}" כצורה הנכונה במילון
+                        </Button>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-2 border-t flex-wrap">
+                    <Button
+                      size="sm" variant={learnedWords.has(wordDialog.word) ? "default" : "outline"}
+                      className="gap-1" onClick={handleMarkLearned}
+                    >
+                      <Star className={`w-3.5 h-3.5 ${learnedWords.has(wordDialog.word) ? "fill-current" : ""}`} />
+                      {learnedWords.has(wordDialog.word) ? "נלמד" : "סמן כנלמד"}
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-1" onClick={() => navigate("/lk?tab=training")}>
+                      <ExternalLink className="w-3.5 h-3.5" />שלח לאימון לשון הקודש
+                    </Button>
+                  </div>
+                  {learnedWords.size > 0 && <p className="text-xs text-muted-foreground">סה"כ {learnedWords.size} מילים נלמדו</p>}
+                </TabsContent>
+
+                {/* ── Tab: מילון ────────────────────────────────── */}
+                <TabsContent value="dict" className="space-y-3 pt-3">
+                  <div className="space-y-2.5">
+                    <div className="space-y-1.5">
+                      <Label>צורה מדוברת — כפי שתומלל</Label>
+                      <Input dir="rtl" value={dictForm.spokenForm}
+                        onChange={e => setDictForm(prev => ({ ...prev, spokenForm: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>צורה נכונה — כפי שצריך להיות</Label>
+                      <Input dir="rtl" value={dictForm.correctForm} placeholder="הזן את הצורה הנכונה…"
+                        onChange={e => setDictForm(prev => ({ ...prev, correctForm: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>הערה (אופציונלי)</Label>
+                      <Input dir="rtl" value={dictForm.note} placeholder="הסבר, הקשר, מקור…"
+                        onChange={e => setDictForm(prev => ({ ...prev, note: e.target.value }))} />
+                    </div>
+                    <Button onClick={handleSaveToDict}
+                      disabled={!dictForm.spokenForm || !dictForm.correctForm || dictSaved}
+                      className="w-full gap-2">
+                      <LibraryBig className="w-4 h-4" />
+                      {dictSaved ? "נשמר במילון לשון הקודש" : "שמור למילון"}
+                    </Button>
+                    {dictSaved && (
+                      <p className="text-xs text-center text-muted-foreground">
+                        המילה זמינה לתיקון אוטומטי בתמלולים עתידיים
+                      </p>
+                    )}
+                  </div>
+                </TabsContent>
+
+                {/* ── Tab: רעיון ────────────────────────────────── */}
+                <TabsContent value="concept" className="space-y-3 pt-3">
+                  <div className="space-y-2">
+                    <Label>הסבר את הרעיון מאחורי המילה</Label>
+                    <p className="text-xs text-muted-foreground">
+                      למה המילה הזו חשובה? מה הדקדוק / ההלכה / המושג שמאחוריה?
+                    </p>
+                    <Textarea
+                      dir="rtl" rows={5}
+                      placeholder="לדוגמה: המילה תפילין מגיעה מהשורש פ.ל.ל — להתפלל. הצורה הנכונה ב..."
+                      value={conceptText}
+                      onChange={e => { setConceptText(e.target.value); setConceptSaved(false); }}
+                    />
+                    <Button onClick={handleSaveConcept} disabled={!conceptText.trim() || conceptSaved} className="w-full gap-2">
+                      <Lightbulb className="w-4 h-4" />
+                      {conceptSaved ? "ההסבר נשמר" : "שמור הסבר"}
+                    </Button>
+                  </div>
+                  {conceptNotes[wordDialog.word] && !conceptSaved && (
+                    <div className="bg-muted/40 rounded p-3">
+                      <p className="text-xs text-muted-foreground mb-1">הסבר קיים:</p>
+                      <p className="text-sm" dir="rtl">{conceptNotes[wordDialog.word]}</p>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

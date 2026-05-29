@@ -14,11 +14,31 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Detect if supabase has a stored session in localStorage (optimistic auth).
+// Key format: sb-<projectRef>-auth-token
+const _hasStoredSession = (): boolean => {
+  try {
+    const key = Object.keys(localStorage).find(
+      k => k.startsWith('sb-') && k.endsWith('-auth-token')
+    );
+    if (!key) return false;
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    // Valid if access_token exists and not expired
+    const exp = parsed?.expires_at ?? parsed?.session?.expires_at;
+    if (!exp) return !!parsed?.access_token || !!parsed?.session?.access_token;
+    return Date.now() / 1000 < exp;
+  } catch { return false; }
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  // Optimistic: if localStorage has a valid-looking token, skip spinner immediately.
+  // onAuthStateChange will correct any mismatch within ~50ms.
+  const [isLoading, setIsLoading] = useState(!_hasStoredSession());
 
   const checkAdmin = async (userId: string) => {
     const { data } = await supabase

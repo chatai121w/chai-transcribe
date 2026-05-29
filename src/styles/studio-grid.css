@@ -1,4 +1,59 @@
-/* Studio draggable widget grid — overrides on top of react-grid-layout */
+/* ─── Studio Widget — breathing room ─────────────────────────────────── */
+
+/* Widget card padding */
+.studio-widget-body {
+  padding: 16px 18px 18px;
+}
+
+/* Mixer / noise panel inner cards */
+.studio-widget-body .space-y-2 > .rounded-lg.border {
+  margin-top: 0;
+}
+
+/* EQ preset buttons — slightly taller with more padding */
+.studio-widget-body button[class*="px-2 py-1 rounded-md border text-[11px]"] {
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+  gap: 5px;
+}
+
+/* EQ section header row */
+.studio-widget-body .space-y-2 > .flex.items-center.justify-between {
+  padding: 4px 0 8px;
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+  margin-bottom: 8px;
+}
+
+/* EQ preset row — more breathing */
+.studio-widget-body .flex.flex-wrap.gap-1\.5 {
+  gap: 8px;
+  padding: 6px 0;
+}
+
+/* EQ slider theme buttons */
+.studio-widget-body .flex.items-center.gap-1\.5.flex-wrap {
+  gap: 6px;
+  padding: 4px 0;
+}
+
+/* Inner rounded panels — more padding */
+.studio-widget-body .rounded-lg.border.bg-muted\/20.p-3 {
+  padding: 14px 16px;
+}
+.studio-widget-body .rounded-lg.border.bg-background\/40.p-2 {
+  padding: 14px 16px;
+}
+
+/* Space between EQ section children */
+.studio-widget-body .space-y-2 {
+  row-gap: 10px;
+}
+.studio-widget-body .space-y-3 {
+  row-gap: 14px;
+}
+
+/* ─── Studio draggable widget grid ────────────────────────────────────── */
 
 /* Smooth transitions when items snap into place */
 .studio-grid .react-grid-item.react-grid-placeholder {
@@ -39,9 +94,23 @@
   background: hsl(var(--primary) / 0.15);
 }
 
-/* When not editing, hide the handle bar entirely (frame stays clean) */
+/* Always show the handle bar — visible always, more prominent in edit mode */
 .studio-grid:not(.is-editing) .studio-widget-handle {
-  display: none;
+  cursor: grab;
+  opacity: 0.5;
+  padding: 3px 8px;
+  margin: -2px -2px 6px -2px;
+  border-radius: 0.5rem 0.5rem 0 0;
+  user-select: none;
+  transition: opacity 0.15s, background 0.15s;
+  border-bottom: 1px solid hsl(var(--border) / 0.4);
+}
+.studio-grid:not(.is-editing) .studio-widget-handle:hover {
+  opacity: 1;
+  background: hsl(var(--primary) / 0.06);
+}
+.studio-grid:not(.is-editing) .studio-widget-handle:active {
+  cursor: grabbing;
 }
 
 /* RGL resize handle — re-color so it matches our theme */
@@ -67,8 +136,9 @@
 
 /* Each widget needs to fill its grid cell */
 .studio-grid .react-grid-item > .studio-widget-body {
-  height: 100%;
   width: 100%;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   border-radius: 0.75rem;
+  /* height is controlled by RGL — do NOT set height:100% so scrollHeight reflects content */
 }

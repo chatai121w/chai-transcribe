@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Volume1,
   Rewind, FastForward, RotateCcw, Maximize2, Minimize2,
@@ -31,6 +32,7 @@ import {
   isStudioEditModeEnabled,
   setStudioEditModeEnabled,
 } from "@/lib/studioLayout";
+import { usePlayerShortcuts } from "@/hooks/usePlayerShortcuts";
 
 const ResponsiveReactGridLayout = WidthProvider(ResponsiveGridLayout);
 
@@ -334,6 +336,14 @@ interface UserNoisePreset {
 
 const USER_PRESETS_KEY = 'sync_audio_user_presets_v1';
 const USER_EQ_PRESETS_KEY = 'sync_audio_user_eq_presets_v1';
+const SAP_PREFS_KEY = 'sap_audio_prefs_v1';
+
+function loadSapPrefs(): Record<string, unknown> {
+  try {
+    const raw = localStorage.getItem(SAP_PREFS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
 
 interface UserEqPreset {
   id: string;
@@ -463,20 +473,23 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   const eqCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const eqAnimFrameRef = useRef<number>(0);
 
+  // ─── Load saved preferences once ───────────────────────────────────────
+  const _p = useRef(loadSapPrefs()).current;
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(1);
+  const [volume, setVolume] = useState(() => (_p.volume as number) ?? 1);
   const [isMuted, setIsMuted] = useState(false);
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useState(() => (_p.speed as number) ?? 1);
   const [showSpeedControl, setShowSpeedControl] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showEnhance, setShowEnhance] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showAdvancedDialog, setShowAdvancedDialog] = useState(false);
-  const [isNoisePanelCollapsed, setIsNoisePanelCollapsed] = useState(false);
-  const [isFocusPanelCollapsed, setIsFocusPanelCollapsed] = useState(false);
-  const [isMixerConsoleCollapsed, setIsMixerConsoleCollapsed] = useState(false);
+  const [isNoisePanelCollapsed, setIsNoisePanelCollapsed] = useState(() => (_p.isNoisePanelCollapsed as boolean) ?? false);
+  const [isFocusPanelCollapsed, setIsFocusPanelCollapsed] = useState(() => (_p.isFocusPanelCollapsed as boolean) ?? false);
+  const [isMixerConsoleCollapsed, setIsMixerConsoleCollapsed] = useState(() => (_p.isMixerConsoleCollapsed as boolean) ?? false);
   const [isMixerFullscreen, setIsMixerFullscreen] = useState(false);
   // Master ON/OFF toggle for the entire mixer/EQ panel.
   // When OFF: only a small "Power" button is shown (panel collapsed entirely).
@@ -491,6 +504,146 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   // ─── Draggable widget grid (Studio layout) ──────────────────
   const [studioLayouts, setStudioLayouts] = useState<Layouts>(() => loadStudioLayouts());
   const [layoutEditMode, setLayoutEditMode] = useState<boolean>(() => isStudioEditModeEnabled());
+
+  // ── Widget visibility (player / studio) ───────────────────────────────
+  const [hiddenWidgets, setHiddenWidgets] = useState<Set<string>>(() => {
+    try {
+      const s = localStorage.getItem('studio_hidden_widgets_v1');
+      return s ? new Set(JSON.parse(s)) : new Set();
+    } catch { return new Set(); }
+  });
+  const toggleWidgetVisible = (id: string) => {
+    setHiddenWidgets(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      localStorage.setItem('studio_hidden_widgets_v1', JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  // ── Widget order in RGL (player / studio) — swap via ↑↓ ─────────────
+  const [widgetOrder, setWidgetOrder] = useState<['player', 'studio'] | ['studio', 'player']>(() => {
+    try {
+      const s = localStorage.getItem('studio_widget_order_v1');
+      return s === 'studio-first' ? ['studio', 'player'] : ['player', 'studio'];
+    } catch { return ['player', 'studio']; }
+  });
+  const swapWidgetOrder = () => {
+    setWidgetOrder(prev => {
+      const next: ['player', 'studio'] | ['studio', 'player'] =
+        prev[0] === 'player' ? ['studio', 'player'] : ['player', 'studio'];
+      localStorage.setItem('studio_widget_order_v1', next[0] === 'studio' ? 'studio-first' : 'player-first');
+      // Recompute studioLayouts y positions
+      setStudioLayouts(current => {
+        const updated: Layouts = {};
+        for (const [bp, items] of Object.entries(current)) {
+          const first = items.find(i => i.i === next[0]);
+          const second = items.find(i => i.i === next[1]);
+          if (!first || !second) { updated[bp] = items; continue; }
+          const firstH = first.h;
+          const secondH = second.h;
+          updated[bp] = [
+            { ...first,  y: 0 },
+            { ...second, y: firstH + 1 },
+          ];
+          updated[bp] = updated[bp].map((it, idx) => idx === 0
+            ? { ...it, h: firstH }
+            : { ...it, h: secondH }
+          );
+        }
+        saveStudioLayouts(updated);
+        return updated;
+      });
+      return next;
+    });
+  };
+
+  // ── Feature order (drag-and-drop in popover) ──────────────────────────
+  const ALL_FEATURE_IDS = ['noise', 'eq', 'doubler', 'waveform', 'focus', 'noise-details', 'mixer-details'] as const;
+  type FeatureId = typeof ALL_FEATURE_IDS[number];
+  const [featureOrder, setFeatureOrder] = useState<FeatureId[]>(() => {
+    try {
+      const saved = localStorage.getItem('studio_feature_order_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved) as FeatureId[];
+        if (Array.isArray(parsed) && parsed.length === ALL_FEATURE_IDS.length) return parsed;
+      }
+    } catch { /* ignore */ }
+    return [...ALL_FEATURE_IDS];
+  });
+  const featureDragRef = useRef<FeatureId | null>(null);
+  const [featureDragOver, setFeatureDragOver] = useState<FeatureId | null>(null);
+
+  const handleFeatureDragStart = (id: FeatureId) => { featureDragRef.current = id; };
+  const handleFeatureDragOver = (e: React.DragEvent, id: FeatureId) => {
+    e.preventDefault();
+    if (featureDragRef.current !== id) setFeatureDragOver(id);
+  };
+  const handleFeatureDrop = (targetId: FeatureId) => {
+    const dragId = featureDragRef.current;
+    if (!dragId || dragId === targetId) { setFeatureDragOver(null); return; }
+    const next = [...featureOrder];
+    const fromIdx = next.indexOf(dragId);
+    const toIdx = next.indexOf(targetId);
+    next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, dragId);
+    setFeatureOrder(next);
+    localStorage.setItem('studio_feature_order_v1', JSON.stringify(next));
+    setFeatureDragOver(null);
+    featureDragRef.current = null;
+  };
+  const handleFeatureDragEnd = () => { setFeatureDragOver(null); featureDragRef.current = null; };
+
+  // Auto-size widgets to content — not persisted to localStorage
+  const [autoHeights, setAutoHeights] = useState<Record<string, number>>({});
+  const playerBodyRef = useRef<HTMLDivElement>(null);
+  const studioBodyRef = useRef<HTMLDivElement>(null);
+
+  // RGL formula: item height = h * (rowHeight + marginY) - marginY
+  // rowHeight=32, marginY=6 → itemHeight = 38h - 6 → h = ceil((itemHeight+6)/38)
+  const RGL_ROW = 32;
+  const RGL_MARGIN_Y = 6;
+
+  useEffect(() => {
+    const entries: Array<{ key: string; ref: React.RefObject<HTMLDivElement> }> = [
+      { key: 'player', ref: playerBodyRef },
+      { key: 'studio', ref: studioBodyRef },
+    ];
+    const observers: ResizeObserver[] = [];
+    for (const { key, ref } of entries) {
+      if (!ref.current) continue;
+      const update = () => {
+        if (!ref.current) return;
+        const contentH = ref.current.scrollHeight;
+        // add widget-body padding (16+18=34) + small buffer (10)
+        const newH = Math.max(6, Math.ceil((contentH + 44 + RGL_MARGIN_Y) / (RGL_ROW + RGL_MARGIN_Y)));
+        setAutoHeights(prev => prev[key] === newH ? prev : { ...prev, [key]: newH });
+      };
+      const obs = new ResizeObserver(update);
+      obs.observe(ref.current);
+      update();
+      observers.push(obs);
+    }
+    return () => observers.forEach(o => o.disconnect());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Merge auto heights into layouts for display (not persisted)
+  // Also hides widgets that are toggled off
+  const effectiveLayouts = useMemo(() => {
+    const result: Layouts = {};
+    for (const [bp, items] of Object.entries(studioLayouts)) {
+      result[bp] = items
+        .filter(item => !hiddenWidgets.has(item.i))
+        .map(item =>
+          autoHeights[item.i] !== undefined
+            ? { ...item, h: autoHeights[item.i] }
+            : item
+        );
+    }
+    return result;
+  }, [studioLayouts, autoHeights, hiddenWidgets]);
+
   const handleStudioLayoutChange = useCallback((_current: any, all: Layouts) => {
     const fitted = sanitizeStudioLayouts(all);
     setStudioLayouts(fitted);
@@ -509,34 +662,40 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     setStudioEditModeEnabled(layoutEditMode);
   }, [layoutEditMode]);
 
-  const [outputGain, setOutputGain] = useState(1.0); // 0.0 to 3.0 (multiply)
+  const [outputGain, setOutputGain] = useState(() => (_p.outputGain as number) ?? 1.0); // 0.0 to 3.0 (multiply)
   const [showEqualizer, setShowEqualizer] = useState(true);
   // 31-band parametric EQ user controls (dB, -12 to +12)
-  const [eqGains, setEqGains] = useState<number[]>(() => new Array(31).fill(0));
-  const [eqQValues, setEqQValues] = useState<number[]>(() => EQ_BANDS_31.map(b => b.q));
-  const [eqBandCount, setEqBandCount] = useState<EqBandCount>(31);
-  const [eqViewMode, setEqViewMode] = useState<'vertical' | 'horizontal' | 'circular' | 'parametric'>('vertical');
+  const [eqGains, setEqGains] = useState<number[]>(() => {
+    const saved = _p.eqGains as number[] | undefined;
+    return Array.isArray(saved) && saved.length === 31 ? saved : new Array(31).fill(0);
+  });
+  const [eqQValues, setEqQValues] = useState<number[]>(() => {
+    const saved = _p.eqQValues as number[] | undefined;
+    return Array.isArray(saved) && saved.length === 31 ? saved : EQ_BANDS_31.map(b => b.q);
+  });
+  const [eqBandCount, setEqBandCount] = useState<EqBandCount>(() => (_p.eqBandCount as EqBandCount) ?? 31);
+  const [eqViewMode, setEqViewMode] = useState<'vertical' | 'horizontal' | 'circular' | 'parametric'>(() => (_p.eqViewMode as 'vertical' | 'horizontal' | 'circular' | 'parametric') ?? 'vertical');
   const [selectedParamBand, setSelectedParamBand] = useState<number | null>(null);
-  const [advVerticalView, setAdvVerticalView] = useState(false);
-  const [eqVizStyle, setEqVizStyle] = useState<'bars' | 'mirror' | 'wave' | 'circle' | 'spectrum' | 'flame' | 'radar' | 'dots'>('bars');
-  const [eqSliderTheme, setEqSliderTheme] = useState<EqSliderTheme>('default');
+  const [advVerticalView, setAdvVerticalView] = useState(() => (_p.advVerticalView as boolean) ?? false);
+  const [eqVizStyle, setEqVizStyle] = useState<'bars' | 'mirror' | 'wave' | 'circle' | 'spectrum' | 'flame' | 'radar' | 'dots'>(() => (_p.eqVizStyle as 'bars' | 'mirror' | 'wave' | 'circle' | 'spectrum' | 'flame' | 'radar' | 'dots') ?? 'bars');
+  const [eqSliderTheme, setEqSliderTheme] = useState<EqSliderTheme>(() => (_p.eqSliderTheme as EqSliderTheme) ?? 'default');
   const [userEqPresets, setUserEqPresets] = useState<UserEqPreset[]>(() => {
     try { const raw = localStorage.getItem(USER_EQ_PRESETS_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
   });
   const [userEqPresetName, setUserEqPresetName] = useState('');
   const [showSaveEqPreset, setShowSaveEqPreset] = useState(false);
-  const [eqStyleBarCollapsed, setEqStyleBarCollapsed] = useState(false);
-  const [eqCanvasCollapsed, setEqCanvasCollapsed] = useState(false);
+  const [eqStyleBarCollapsed, setEqStyleBarCollapsed] = useState(() => (_p.eqStyleBarCollapsed as boolean) ?? false);
+  const [eqCanvasCollapsed, setEqCanvasCollapsed] = useState(() => (_p.eqCanvasCollapsed as boolean) ?? false);
   // Vocal Doubler state
-  const [doublerEnabled, setDoublerEnabled] = useState(false);
-  const [doublerMix, setDoublerMix] = useState(0.4); // 0=dry only, 1=wet only
-  const [doublerDetune1, setDoublerDetune1] = useState(7); // cents for voice 1
-  const [doublerDetune2, setDoublerDetune2] = useState(-5); // cents for voice 2
-  const [doublerDelay1Ms, setDoublerDelay1Ms] = useState(18); // ms
-  const [doublerDelay2Ms, setDoublerDelay2Ms] = useState(25); // ms
-  const [doublerDepth, setDoublerDepth] = useState(0.002); // LFO depth (seconds)
-  const [doublerRate, setDoublerRate] = useState(0.8); // LFO rate Hz
-  const [doublerMode, setDoublerMode] = useState<'chorus' | 'harmony' | 'octave'>('chorus');
+  const [doublerEnabled, setDoublerEnabled] = useState(() => (_p.doublerEnabled as boolean) ?? false);
+  const [doublerMix, setDoublerMix] = useState(() => (_p.doublerMix as number) ?? 0.4); // 0=dry only, 1=wet only
+  const [doublerDetune1, setDoublerDetune1] = useState(() => (_p.doublerDetune1 as number) ?? 7); // cents for voice 1
+  const [doublerDetune2, setDoublerDetune2] = useState(() => (_p.doublerDetune2 as number) ?? -5); // cents for voice 2
+  const [doublerDelay1Ms, setDoublerDelay1Ms] = useState(() => (_p.doublerDelay1Ms as number) ?? 18); // ms
+  const [doublerDelay2Ms, setDoublerDelay2Ms] = useState(() => (_p.doublerDelay2Ms as number) ?? 25); // ms
+  const [doublerDepth, setDoublerDepth] = useState(() => (_p.doublerDepth as number) ?? 0.002); // LFO depth (seconds)
+  const [doublerRate, setDoublerRate] = useState(() => (_p.doublerRate as number) ?? 0.8); // LFO rate Hz
+  const [doublerMode, setDoublerMode] = useState<'chorus' | 'harmony' | 'octave'>(() => (_p.doublerMode as 'chorus' | 'harmony' | 'octave') ?? 'chorus');
   // Vocal Overlay (personal sync) state
   const [overlayBuffer, setOverlayBuffer] = useState<AudioBuffer | null>(null);
   const [overlayFileName, setOverlayFileName] = useState<string>('');
@@ -553,9 +712,9 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   const overlayFileInputRef = useRef<HTMLInputElement | null>(null);
   const [eqStyleBarHover, setEqStyleBarHover] = useState(false);
   const [eqCanvasHover, setEqCanvasHover] = useState(false);
-  const [staticWaveCollapsed, setStaticWaveCollapsed] = useState(false);
+  const [staticWaveCollapsed, setStaticWaveCollapsed] = useState(() => (_p.staticWaveCollapsed as boolean) ?? false);
   const [staticWaveHover, setStaticWaveHover] = useState(false);
-  const [seekBarCollapsed, setSeekBarCollapsed] = useState(false);
+  const [seekBarCollapsed, setSeekBarCollapsed] = useState(() => (_p.seekBarCollapsed as boolean) ?? false);
   const [seekBarHover, setSeekBarHover] = useState(false);
   const eqBandsRef = useRef<BiquadFilterNode[]>([]);
   // Helper: get/set individual band gain
@@ -710,41 +869,41 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   useEffect(() => { onPlayStateChange?.(isPlaying); }, [isPlaying, onPlayStateChange]);
 
   // Noise reduction state
-  const [presetId, setPresetId] = useState('off');
+  const [presetId, setPresetId] = useState(() => (_p.presetId as string) ?? 'off');
   const currentPreset = NOISE_PRESETS.find(p => p.id === presetId) || NOISE_PRESETS[0];
 
   // Advanced manual overrides
-  const [manualHighpass, setManualHighpass] = useState(80);
-  const [manualLowpass, setManualLowpass] = useState(16000);
-  const [manualVoiceBoost, setManualVoiceBoost] = useState(0);
-  const [manualGate, setManualGate] = useState(0);
-  const [manualCompRatio, setManualCompRatio] = useState(1);
-  const [humNotchEnabled, setHumNotchEnabled] = useState(false);
-  const [humNotchFreq, setHumNotchFreq] = useState<'50' | '60' | '100' | '120'>('50');
+  const [manualHighpass, setManualHighpass] = useState(() => (_p.manualHighpass as number) ?? 80);
+  const [manualLowpass, setManualLowpass] = useState(() => (_p.manualLowpass as number) ?? 16000);
+  const [manualVoiceBoost, setManualVoiceBoost] = useState(() => (_p.manualVoiceBoost as number) ?? 0);
+  const [manualGate, setManualGate] = useState(() => (_p.manualGate as number) ?? 0);
+  const [manualCompRatio, setManualCompRatio] = useState(() => (_p.manualCompRatio as number) ?? 1);
+  const [humNotchEnabled, setHumNotchEnabled] = useState(() => (_p.humNotchEnabled as boolean) ?? false);
+  const [humNotchFreq, setHumNotchFreq] = useState<'50' | '60' | '100' | '120'>(() => (_p.humNotchFreq as '50' | '60' | '100' | '120') ?? '50');
   const isManualMode = presetId === 'manual';
-  const [enhancementStrength, setEnhancementStrength] = useState(55);
-  const [isBypassEnhancement, setIsBypassEnhancement] = useState(false);
+  const [enhancementStrength, setEnhancementStrength] = useState(() => (_p.enhancementStrength as number) ?? 55);
+  const [isBypassEnhancement, setIsBypassEnhancement] = useState(() => (_p.isBypassEnhancement as boolean) ?? false);
   const [problemSegments, setProblemSegments] = useState<ProblemSegment[]>([]);
   const [userPresets, setUserPresets] = useState<UserNoisePreset[]>([]);
   const [userPresetName, setUserPresetName] = useState('');
 
   // ─── Advanced Audio Processing State ─────────────────────────
-  const [aiDenoiseEnabled, setAiDenoiseEnabled] = useState(false);
-  const [aiDenoiseStrength, setAiDenoiseStrength] = useState(70);
-  const [spectralGateEnabled, setSpectralGateEnabled] = useState(false);
-  const [spectralGateReduction, setSpectralGateReduction] = useState(-12);
+  const [aiDenoiseEnabled, setAiDenoiseEnabled] = useState(() => (_p.aiDenoiseEnabled as boolean) ?? false);
+  const [aiDenoiseStrength, setAiDenoiseStrength] = useState(() => (_p.aiDenoiseStrength as number) ?? 70);
+  const [spectralGateEnabled, setSpectralGateEnabled] = useState(() => (_p.spectralGateEnabled as boolean) ?? false);
+  const [spectralGateReduction, setSpectralGateReduction] = useState(() => (_p.spectralGateReduction as number) ?? -12);
   const [isLearningNoise, setIsLearningNoise] = useState(false);
   const [hasNoiseProfile, setHasNoiseProfile] = useState(false);
-  const [vadEnabled, setVadEnabled] = useState(false);
+  const [vadEnabled, setVadEnabled] = useState(() => (_p.vadEnabled as boolean) ?? false);
   const [vadAutoMute, setVadAutoMute] = useState(false);
   const [vadIsSpeech, setVadIsSpeech] = useState(false);
-  const [vadThreshold, setVadThreshold] = useState(0.015);
-  const [deHumEnabled, setDeHumEnabled] = useState(false);
+  const [vadThreshold, setVadThreshold] = useState(() => (_p.vadThreshold as number) ?? 0.015);
+  const [deHumEnabled, setDeHumEnabled] = useState(() => (_p.deHumEnabled as boolean) ?? false);
   const [deHumDetectedFreq, setDeHumDetectedFreq] = useState<50 | 60 | null>(null);
-  const [deHumHarmonics, setDeHumHarmonics] = useState(4);
-  const [lufsEnabled, setLufsEnabled] = useState(false);
-  const [lufsNormalize, setLufsNormalize] = useState(false);
-  const [lufsTarget, setLufsTarget] = useState(-16);
+  const [deHumHarmonics, setDeHumHarmonics] = useState(() => (_p.deHumHarmonics as number) ?? 4);
+  const [lufsEnabled, setLufsEnabled] = useState(() => (_p.lufsEnabled as boolean) ?? false);
+  const [lufsNormalize, setLufsNormalize] = useState(() => (_p.lufsNormalize as boolean) ?? false);
+  const [lufsTarget, setLufsTarget] = useState(() => (_p.lufsTarget as number) ?? -16);
   const [lufsMomentary, setLufsMomentary] = useState(-Infinity);
   const [lufsShortTerm, setLufsShortTerm] = useState(-Infinity);
   const [lufsIntegrated, setLufsIntegrated] = useState(-Infinity);
@@ -785,6 +944,49 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       // localStorage quota/availability issues are non-fatal
     }
   }, [userPresets]);
+
+  // ─── Persist all audio preferences to localStorage ────────────────────────
+  useEffect(() => {
+    try {
+      localStorage.setItem(SAP_PREFS_KEY, JSON.stringify({
+        // Noise / enhancement
+        presetId, enhancementStrength, isBypassEnhancement, outputGain,
+        manualHighpass, manualLowpass, manualVoiceBoost, manualGate, manualCompRatio,
+        humNotchEnabled, humNotchFreq,
+        // Advanced processing
+        aiDenoiseEnabled, aiDenoiseStrength,
+        spectralGateEnabled, spectralGateReduction,
+        vadEnabled, vadThreshold,
+        deHumEnabled, deHumHarmonics,
+        lufsEnabled, lufsNormalize, lufsTarget,
+        // EQ / mixer
+        eqGains, eqQValues, eqBandCount, eqViewMode, eqSliderTheme, eqVizStyle, advVerticalView,
+        // Doubler
+        doublerEnabled, doublerMix, doublerDetune1, doublerDetune2,
+        doublerDelay1Ms, doublerDelay2Ms, doublerDepth, doublerRate, doublerMode,
+        // Playback
+        volume, speed,
+        // Panel collapse states
+        isNoisePanelCollapsed, isFocusPanelCollapsed, isMixerConsoleCollapsed,
+        eqStyleBarCollapsed, eqCanvasCollapsed, staticWaveCollapsed, seekBarCollapsed,
+      }));
+    } catch { /* non-fatal */ }
+  }, [
+    presetId, enhancementStrength, isBypassEnhancement, outputGain,
+    manualHighpass, manualLowpass, manualVoiceBoost, manualGate, manualCompRatio,
+    humNotchEnabled, humNotchFreq,
+    aiDenoiseEnabled, aiDenoiseStrength,
+    spectralGateEnabled, spectralGateReduction,
+    vadEnabled, vadThreshold,
+    deHumEnabled, deHumHarmonics,
+    lufsEnabled, lufsNormalize, lufsTarget,
+    eqGains, eqQValues, eqBandCount, eqViewMode, eqSliderTheme, eqVizStyle, advVerticalView,
+    doublerEnabled, doublerMix, doublerDetune1, doublerDetune2,
+    doublerDelay1Ms, doublerDelay2Ms, doublerDepth, doublerRate, doublerMode,
+    volume, speed,
+    isNoisePanelCollapsed, isFocusPanelCollapsed, isMixerConsoleCollapsed,
+    eqStyleBarCollapsed, eqCanvasCollapsed, staticWaveCollapsed, seekBarCollapsed,
+  ]);
 
   const saveCurrentAsUserPreset = useCallback(() => {
     const name = userPresetName.trim();
@@ -2091,7 +2293,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   }, [wordTimings, currentWordIndex, seekTo]);
 
   // ─── Keyboard Shortcuts ──────────────────────────────────────
-  const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
+  const { matches: shortcutMatches } = usePlayerShortcuts();
 
   const volumeUp = useCallback(() => {
     const v = Math.min(1, volume + 0.05);
@@ -2113,100 +2315,31 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
 
-      // ── Play / Pause ──
-      if (e.code === 'Space') {
-        e.preventDefault();
-        togglePlay();
-      }
-      // ── Seek: arrows without modifiers = ±5s ──
-      else if (e.code === 'ArrowLeft' && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        seek(5); // RTL: left = forward in time
-      } else if (e.code === 'ArrowRight' && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        seek(-5); // RTL: right = backward in time
-      }
-      // ── Seek: Ctrl+arrows = ±15s (large jump) ──
-      else if (e.code === 'ArrowLeft' && e.ctrlKey && !e.shiftKey) {
-        e.preventDefault();
-        seek(15); // RTL
-      } else if (e.code === 'ArrowRight' && e.ctrlKey && !e.shiftKey) {
-        e.preventDefault();
-        seek(-15); // RTL
-      }
-      // ── Word navigation: Shift+arrows ──
-      else if (e.code === 'ArrowLeft' && e.shiftKey && !e.ctrlKey) {
-        e.preventDefault();
-        jumpToWord('next'); // RTL: left = forward
-      } else if (e.code === 'ArrowRight' && e.shiftKey && !e.ctrlKey) {
-        e.preventDefault();
-        jumpToWord('prev'); // RTL: right = backward
-      }
-      // ── Fine seek: , and . = ±0.5s (frame-by-frame) ──
-      else if (e.code === 'Comma') {
-        e.preventDefault();
-        seek(0.5); // RTL-aware: , = forward
-      } else if (e.code === 'Period') {
-        e.preventDefault();
-        seek(-0.5); // RTL-aware: . = backward
-      }
-      // ── Volume: Up / Down arrows ──
-      else if (e.code === 'ArrowUp') {
-        e.preventDefault();
-        volumeUp();
-      } else if (e.code === 'ArrowDown') {
-        e.preventDefault();
-        volumeDown();
-      }
-      // ── Mute toggle ──
-      else if (e.code === 'KeyM' && !e.ctrlKey && !e.altKey) {
-        e.preventDefault();
-        toggleMute();
-      }
-      // ── Speed: [ = slower, ] = faster, \ = reset to 1x ──
-      else if (e.code === 'BracketLeft' && !e.ctrlKey) {
-        e.preventDefault();
-        nudgeSpeed(-0.25);
-      } else if (e.code === 'BracketRight' && !e.ctrlKey) {
-        e.preventDefault();
-        nudgeSpeed(0.25);
-      } else if (e.code === 'Backslash' && !e.ctrlKey) {
-        e.preventDefault();
-        setPlaybackSpeed(1);
-      }
-      // ── Home = restart, End = jump to end ──
-      else if (e.code === 'Home') {
-        e.preventDefault();
-        seekTo(0);
-      } else if (e.code === 'End') {
-        e.preventDefault();
-        seekTo(Math.max(0, (effectiveDuration || duration) - 0.5));
-      }
-      // ── Ctrl+R = restart and play ──
-      else if (e.code === 'KeyR' && e.ctrlKey && !e.shiftKey) {
-        e.preventDefault();
-        restart();
-      }
-      // ── A/B focus marks ──
-      else if (e.code === 'KeyA' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-        e.preventDefault();
-        markFocusStartFromCurrent();
-      } else if (e.code === 'KeyB' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-        e.preventDefault();
-        markFocusEndFromCurrent();
-      } else if (e.code === 'KeyL' && !e.ctrlKey && !e.altKey) {
-        e.preventDefault();
-        setFocusLoop(prev => canEnableFocusLoop ? !prev : false);
-      }
-      // ── ? = toggle keyboard help ──
-      else if (e.code === 'Slash' && e.shiftKey) {
-        e.preventDefault();
-        setShowKeyboardHelp(prev => !prev);
-      }
+      if (shortcutMatches('play-pause', e))   { e.preventDefault(); togglePlay(); }
+      else if (shortcutMatches('seek-fwd-15', e))  { e.preventDefault(); seek(15); }
+      else if (shortcutMatches('seek-back-15', e)) { e.preventDefault(); seek(-15); }
+      else if (shortcutMatches('word-next', e))    { e.preventDefault(); jumpToWord('next'); }
+      else if (shortcutMatches('word-prev', e))    { e.preventDefault(); jumpToWord('prev'); }
+      else if (shortcutMatches('seek-fwd-5', e))   { e.preventDefault(); seek(5); }
+      else if (shortcutMatches('seek-back-5', e))  { e.preventDefault(); seek(-5); }
+      else if (shortcutMatches('fine-fwd', e))     { e.preventDefault(); seek(0.5); }
+      else if (shortcutMatches('fine-back', e))    { e.preventDefault(); seek(-0.5); }
+      else if (shortcutMatches('vol-up', e))       { e.preventDefault(); volumeUp(); }
+      else if (shortcutMatches('vol-down', e))     { e.preventDefault(); volumeDown(); }
+      else if (shortcutMatches('mute', e))         { e.preventDefault(); toggleMute(); }
+      else if (shortcutMatches('speed-down', e))   { e.preventDefault(); nudgeSpeed(-0.25); }
+      else if (shortcutMatches('speed-up', e))     { e.preventDefault(); nudgeSpeed(0.25); }
+      else if (shortcutMatches('speed-reset', e))  { e.preventDefault(); setPlaybackSpeed(1); }
+      else if (shortcutMatches('go-start', e))     { e.preventDefault(); seekTo(0); }
+      else if (shortcutMatches('go-end', e))       { e.preventDefault(); seekTo(Math.max(0, (effectiveDuration || duration) - 0.5)); }
+      else if (shortcutMatches('restart-play', e)) { e.preventDefault(); restart(); }
+      else if (shortcutMatches('mark-a', e))       { e.preventDefault(); markFocusStartFromCurrent(); }
+      else if (shortcutMatches('mark-b', e))       { e.preventDefault(); markFocusEndFromCurrent(); }
+      else if (shortcutMatches('loop-ab', e))      { e.preventDefault(); setFocusLoop(prev => canEnableFocusLoop ? !prev : false); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [togglePlay, seek, seekTo, jumpToWord, restart, toggleMute, volumeUp, volumeDown, nudgeSpeed, setPlaybackSpeed, markFocusStartFromCurrent, markFocusEndFromCurrent, effectiveDuration, duration, canEnableFocusLoop]);
+  }, [shortcutMatches, togglePlay, seek, seekTo, jumpToWord, restart, toggleMute, volumeUp, volumeDown, nudgeSpeed, setPlaybackSpeed, markFocusStartFromCurrent, markFocusEndFromCurrent, effectiveDuration, duration, canEnableFocusLoop]);
 
   const formatTime = (t: number) => {
     if (!isFinite(t)) return '00:00';
@@ -2414,11 +2547,11 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   const Wrapper = compact ? 'div' as const : Card;
   const wrapperClass = compact
     ? 'p-3 rounded-xl border bg-gradient-to-l from-primary/5 to-transparent space-y-3'
-    : `p-4 space-y-3 ${isExpanded ? 'fixed inset-4 z-50 overflow-auto' : ''}`;
+    : `p-5 space-y-4 ${isExpanded ? 'fixed inset-4 z-50 overflow-auto' : ''}`;
 
   // ─── Mixer Panel (extracted for split layout) ───────────────
   const mixerPanel = (
-    <div className="space-y-2 rounded-lg border bg-background/40 p-2 group/panel-noise">
+    <div className="space-y-3 rounded-lg border bg-background/40 p-4 group/panel-noise">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold flex items-center gap-1.5">
           <Sparkles className="w-4 h-4 text-primary no-theme-icon" />
@@ -2604,89 +2737,200 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           crossOrigin="anonymous"
         />
 
-        {/* ─── Layout edit toolbar (drag/resize widgets) ───── */}
+        {/* ─── Layout / Features toolbar ─────────────────── */}
         {!compact && (
-          <div className="flex items-center justify-end gap-2 mb-2 px-1" dir="rtl">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={layoutEditMode ? 'default' : 'outline'}
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs"
-                  onClick={() => setLayoutEditMode((v) => !v)}
-                >
-                  <LayoutGrid className="w-3.5 h-3.5 no-theme-icon" />
-                  {layoutEditMode ? 'סיים עריכת פריסה' : 'ערוך פריסה'}
+          <div className="flex items-center gap-2 mb-2 px-1" dir="rtl">
+            {/* ── Features ON/OFF Popover ── */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant={layoutEditMode ? 'secondary' : 'outline'} size="sm" className="h-7 gap-1.5 text-xs">
+                  <SlidersHorizontal className="w-3.5 h-3.5 no-theme-icon" />
+                  פיצ'רים
+                  {layoutEditMode && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />}
                 </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {layoutEditMode
-                  ? 'הוויג\'טים נעולים אחרי לחיצה'
-                  : 'הפעל גרירה ושינוי גודל של הוויג\'טים'}
-              </TooltipContent>
-            </Tooltip>
-            {layoutEditMode && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 gap-1.5 text-xs text-muted-foreground"
-                    onClick={handleAutoArrangeStudioLayout}
-                  >
-                    <Sparkles className="w-3.5 h-3.5 no-theme-icon" />
-                    סידור אוטומטי
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">התאם אוטומטית ווידג'טים בלי חפיפה ועם ריווח קבוע</TooltipContent>
-              </Tooltip>
-            )}
-            {layoutEditMode && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 gap-1.5 text-xs text-muted-foreground"
-                    onClick={handleResetStudioLayout}
-                  >
-                    <RotateCw className="w-3.5 h-3.5 no-theme-icon" />
-                    אפס פריסה
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">החזר לפריסת ברירת המחדל</TooltipContent>
-              </Tooltip>
-            )}
-            {!layoutEditMode && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                    onClick={handleAutoArrangeStudioLayout}
-                  >
-                    <Sparkles className="w-3.5 h-3.5 no-theme-icon" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">סידור אוטומטי לווידג'טים</TooltipContent>
-              </Tooltip>
-            )}
-            {!layoutEditMode && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                    onClick={handleResetStudioLayout}
-                  >
-                    <RotateCw className="w-3.5 h-3.5 no-theme-icon" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">אפס פריסה לברירת מחדל</TooltipContent>
-              </Tooltip>
-            )}
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-3" align="start" dir="rtl">
+                {/* ── Grid layout edit controls ── */}
+                <div className="flex items-center justify-between gap-2 mb-3 pb-2 border-b border-border/40">
+                  <p className="text-xs font-semibold text-muted-foreground">עריכת פריסת גריד</p>
+                  <div className="flex items-center gap-1">
+                    <Button variant={layoutEditMode ? 'default' : 'ghost'} size="icon" className="h-6 w-6" onClick={() => setLayoutEditMode((v) => !v)} title={layoutEditMode ? 'נעל פריסה' : 'ערוך פריסה'}>
+                      <LayoutGrid className="w-3 h-3 no-theme-icon" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleAutoArrangeStudioLayout} title="סידור אוטומטי">
+                      <Sparkles className="w-3 h-3 no-theme-icon" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleResetStudioLayout} title="אפס פריסה">
+                      <RotateCw className="w-3 h-3 no-theme-icon" />
+                    </Button>
+                  </div>
+                </div>
+                {/* ── Widget visibility & order ── */}
+                <p className="text-xs font-semibold text-muted-foreground mb-2">ווידג'טים בגריד</p>
+                <div className="space-y-1 mb-3">
+                  {([
+                    { id: 'player', label: 'נגן אודיו', icon: <Waves className="w-3.5 h-3.5 text-primary no-theme-icon shrink-0" /> },
+                    { id: 'studio', label: 'אקולייזר / EQ', icon: <SlidersHorizontal className="w-3.5 h-3.5 text-primary no-theme-icon shrink-0" /> },
+                  ] as const).map(({ id, label, icon }) => {
+                    const isFirst = widgetOrder[0] === id;
+                    return (
+                      <div key={id} className="flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-muted/50">
+                        {/* Position indicator + swap button */}
+                        <div className="flex flex-col items-center gap-0.5 shrink-0">
+                          <button
+                            className={`p-0.5 rounded transition-colors ${isFirst ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                            onClick={swapWidgetOrder}
+                            title={isFirst ? 'ראשון בגריד' : 'הצב ראשון'}
+                          >
+                            <ChevronUp className="w-3 h-3" />
+                          </button>
+                          <span className="text-[9px] font-mono text-muted-foreground/60 leading-none">{isFirst ? '1' : '2'}</span>
+                          <button
+                            className={`p-0.5 rounded transition-colors ${!isFirst ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                            onClick={swapWidgetOrder}
+                            title={!isFirst ? 'שני בגריד' : 'הצב שני'}
+                          >
+                            <ChevronDown className="w-3 h-3" />
+                          </button>
+                        </div>
+                        <Label className="text-sm flex items-center gap-1.5 flex-1 cursor-default">
+                          {icon}
+                          {label}
+                        </Label>
+                        <Switch
+                          checked={!hiddenWidgets.has(id)}
+                          onCheckedChange={() => toggleWidgetVisible(id)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Divider */}
+                <div className="border-t border-border/40 mb-2 -mx-1" />
+                <p className="text-xs font-semibold text-muted-foreground mb-2">הפעל / כבה פיצ'רים</p>
+                <div className="space-y-1">
+                  {featureOrder.map((id) => {
+                    const isDragTarget = featureDragOver === id;
+                    const rowBase = "flex items-center gap-2 rounded-lg px-1 py-1 transition-colors select-none";
+                    const rowClass = isDragTarget
+                      ? `${rowBase} bg-primary/10 ring-1 ring-primary/40`
+                      : `${rowBase} hover:bg-muted/50`;
+
+                    const handle = (
+                      <span
+                        className="text-muted-foreground/40 hover:text-muted-foreground cursor-grab active:cursor-grabbing shrink-0"
+                        draggable
+                        onDragStart={() => handleFeatureDragStart(id)}
+                        onDragEnd={handleFeatureDragEnd}
+                      >
+                        <GripVertical className="w-3.5 h-3.5" />
+                      </span>
+                    );
+
+                    if (id === 'noise') return (
+                      <div key={id} className={rowClass}
+                        onDragOver={(e) => handleFeatureDragOver(e, id)}
+                        onDrop={() => handleFeatureDrop(id)}>
+                        {handle}
+                        <Label className="text-sm flex items-center gap-1.5 flex-1 cursor-default">
+                          <Sparkles className="w-3.5 h-3.5 text-primary no-theme-icon shrink-0" />
+                          הפחתת רעש חכמה
+                        </Label>
+                        <Switch
+                          checked={!isBypassEnhancement && presetId !== 'off'}
+                          onCheckedChange={(v) => {
+                            if (v) { setIsBypassEnhancement(false); if (presetId === 'off') setPresetId('balanced'); }
+                            else setIsBypassEnhancement(true);
+                          }}
+                        />
+                      </div>
+                    );
+                    if (id === 'eq') return (
+                      <div key={id} className={rowClass}
+                        onDragOver={(e) => handleFeatureDragOver(e, id)}
+                        onDrop={() => handleFeatureDrop(id)}>
+                        {handle}
+                        <Label className="text-sm flex items-center gap-1.5 flex-1 cursor-default">
+                          <AudioLines className="w-3.5 h-3.5 text-primary no-theme-icon shrink-0" />
+                          אקולייזר ומיקסר
+                        </Label>
+                        <Switch checked={isEqPanelOpen} onCheckedChange={setIsEqPanelOpen} />
+                      </div>
+                    );
+                    if (id === 'doubler') return (
+                      <div key={id} className={rowClass}
+                        onDragOver={(e) => handleFeatureDragOver(e, id)}
+                        onDrop={() => handleFeatureDrop(id)}>
+                        {handle}
+                        <Label className="text-sm flex items-center gap-1.5 flex-1 cursor-default">
+                          <Mic className="w-3.5 h-3.5 text-primary no-theme-icon shrink-0" />
+                          הכפלת קול (Doubler)
+                        </Label>
+                        <Switch checked={doublerEnabled} onCheckedChange={setDoublerEnabled} />
+                      </div>
+                    );
+                    if (id === 'waveform') return (
+                      <div key={id} className={rowClass}
+                        onDragOver={(e) => handleFeatureDragOver(e, id)}
+                        onDrop={() => handleFeatureDrop(id)}>
+                        {handle}
+                        <Label className="text-sm flex items-center gap-1.5 flex-1 cursor-default">
+                          <Waves className="w-3.5 h-3.5 text-primary no-theme-icon shrink-0" />
+                          גלי צליל (Waveform)
+                        </Label>
+                        <Switch checked={showEqualizer} onCheckedChange={setShowEqualizer} />
+                      </div>
+                    );
+                    if (id === 'focus') return (
+                      <div key={id} className={rowClass}
+                        onDragOver={(e) => handleFeatureDragOver(e, id)}
+                        onDrop={() => handleFeatureDrop(id)}>
+                        {handle}
+                        <Label className="text-sm flex items-center gap-1.5 flex-1 cursor-default">
+                          <Brain className="w-3.5 h-3.5 text-primary no-theme-icon shrink-0" />
+                          קטעים שדורשים תשומת לב
+                        </Label>
+                        <Switch
+                          checked={!isFocusPanelCollapsed}
+                          onCheckedChange={(v) => setIsFocusPanelCollapsed(!v)}
+                        />
+                      </div>
+                    );
+                    if (id === 'noise-details') return (
+                      <div key={id} className={rowClass}
+                        onDragOver={(e) => handleFeatureDragOver(e, id)}
+                        onDrop={() => handleFeatureDrop(id)}>
+                        {handle}
+                        <Label className="text-sm flex items-center gap-1.5 flex-1 cursor-default">
+                          <Filter className="w-3.5 h-3.5 text-primary no-theme-icon shrink-0" />
+                          פרטי הפחתת רעש
+                        </Label>
+                        <Switch
+                          checked={!isNoisePanelCollapsed}
+                          onCheckedChange={(v) => setIsNoisePanelCollapsed(!v)}
+                        />
+                      </div>
+                    );
+                    if (id === 'mixer-details') return (
+                      <div key={id} className={rowClass}
+                        onDragOver={(e) => handleFeatureDragOver(e, id)}
+                        onDrop={() => handleFeatureDrop(id)}>
+                        {handle}
+                        <Label className="text-sm flex items-center gap-1.5 flex-1 cursor-default">
+                          <SlidersHorizontal className="w-3.5 h-3.5 text-primary no-theme-icon shrink-0" />
+                          פרטי המיקסר
+                        </Label>
+                        <Switch
+                          checked={!isMixerConsoleCollapsed}
+                          onCheckedChange={(v) => setIsMixerConsoleCollapsed(!v)}
+                        />
+                      </div>
+                    );
+                    return null;
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
         )}
 
@@ -2694,23 +2938,23 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         <div dir="ltr">
         <ResponsiveReactGridLayout
           className={`studio-grid ${layoutEditMode ? 'is-editing' : ''}`}
-          layouts={studioLayouts}
+          layouts={effectiveLayouts}
           breakpoints={{ lg: 996, md: 768, sm: 480 }}
           cols={{ lg: 12, md: 10, sm: 6 }}
           rowHeight={32}
-          margin={[14, 14]}
-          containerPadding={[10, 10]}
-          isDraggable={layoutEditMode}
+          margin={[6, 6]}
+          containerPadding={[4, 4]}
+          isDraggable
           isResizable={layoutEditMode}
-          isBounded
-          preventCollision
+          isBounded={false}
+          preventCollision={false}
           draggableHandle=".studio-widget-handle"
           onLayoutChange={handleStudioLayoutChange}
           compactType="vertical"
           useCSSTransforms
         >
           {/* ═══ WIDGET 1: Player ═══ */}
-          <div key="player" className="studio-widget-body" dir="rtl">
+          <div key="player" className="studio-widget-body" ref={playerBodyRef} dir="rtl">
             <div className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground">
               <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
               <span>נגן סינכרוני</span>
@@ -2766,105 +3010,6 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                 </Button>
               </div>
             </div>
-
-            {/* ─── Frequency Spectrum Equalizer Visualization ─────── */}
-            {showEqualizer && (
-              <div className="space-y-1">
-                <div
-                  className="relative flex items-center justify-end gap-1"
-                  onMouseEnter={() => setEqStyleBarHover(true)}
-                  onMouseLeave={() => setEqStyleBarHover(false)}
-                >
-                  {eqStyleBarHover && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute -top-1 left-0 h-5 w-5 z-10 bg-background/80 backdrop-blur border shadow-sm"
-                          onClick={() => setEqStyleBarCollapsed((v) => !v)}
-                        >
-                          {eqStyleBarCollapsed
-                            ? <Maximize2 className="w-3 h-3 no-theme-icon" />
-                            : <Minimize2 className="w-3 h-3 no-theme-icon" />}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        {eqStyleBarCollapsed ? 'הרחב סרגל סגנונות' : 'מזער סרגל סגנונות'}
-                      </TooltipContent>
-                    </Tooltip>
-                  )}
-                  {!eqStyleBarCollapsed && ([
-                    { id: 'bars' as const, label: '▥ עמודות' },
-                    { id: 'mirror' as const, label: '⬍ מראה' },
-                    { id: 'wave' as const, label: '〰 גל' },
-                    { id: 'circle' as const, label: '◎ מעגלי' },
-                    { id: 'spectrum' as const, label: '📈 ספקטרום' },
-                    { id: 'flame' as const, label: '🔥 להבה' },
-                    { id: 'radar' as const, label: '📡 רדאר' },
-                    { id: 'dots' as const, label: '✦ נקודות' },
-                  ]).map((s) => (
-                    <button
-                      key={s.id}
-                      className={`px-1.5 py-0.5 rounded text-[9px] transition-all ${eqVizStyle === s.id ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80 text-muted-foreground'}`}
-                      onClick={() => setEqVizStyle(s.id)}
-                    >{s.label}</button>
-                  ))}
-                  {eqStyleBarCollapsed && (
-                    <span className="text-[10px] text-muted-foreground px-2">סרגל סגנונות מוזער</span>
-                  )}
-                </div>
-                {!eqCanvasCollapsed ? (
-                  <div
-                    className="relative"
-                    onMouseEnter={() => setEqCanvasHover(true)}
-                    onMouseLeave={() => setEqCanvasHover(false)}
-                  >
-                    {eqCanvasHover && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="absolute top-1 left-1 h-6 w-6 z-10 bg-background/80 backdrop-blur border shadow-sm"
-                            onClick={() => setEqCanvasCollapsed(true)}
-                          >
-                            <Minimize2 className="w-3.5 h-3.5 no-theme-icon" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">מזער ויזואליזציה</TooltipContent>
-                      </Tooltip>
-                    )}
-                    <canvas
-                      ref={eqCanvasRef}
-                      className="w-full rounded-lg"
-                      style={{ height: ['circle', 'radar', 'dots'].includes(eqVizStyle) ? 140 : (isExpanded ? 80 : 48), background: 'rgba(15, 23, 42, 0.4)' }}
-                    />
-                  </div>
-                ) : (
-                  <div
-                    className="relative flex items-center justify-between rounded-lg bg-muted/30 px-3 py-1.5 border border-dashed"
-                    onMouseEnter={() => setEqCanvasHover(true)}
-                    onMouseLeave={() => setEqCanvasHover(false)}
-                  >
-                    <span className="text-[10px] text-muted-foreground">ויזואליזציה מוזערת</span>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={() => setEqCanvasCollapsed(false)}
-                        >
-                          <Maximize2 className="w-3.5 h-3.5 no-theme-icon" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">הרחב ויזואליזציה</TooltipContent>
-                    </Tooltip>
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* ─── Static Waveform ── */}
             {!staticWaveCollapsed ? (
@@ -3178,12 +3323,12 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                       <AlertTriangle className="w-3 h-3 text-amber-500 no-theme-icon" />
                       קטעים שדורשים תשומת לב ({problemSegments.length})
                     </p>
-                    <div className="max-h-24 overflow-y-auto space-y-1">
+                    <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
                       {problemSegments.slice(0, 8).map((seg) => (
                         <button
                           key={seg.id}
                           type="button"
-                          className="w-full text-right text-[11px] rounded border px-2 py-1 hover:bg-muted/60 transition-colors"
+                          className="shrink-0 text-right text-[11px] rounded border px-2 py-1 hover:bg-muted/60 transition-colors whitespace-nowrap"
                           onClick={() => {
                             setFocusStart(seg.start);
                             setFocusEnd(Math.min(effectiveDuration || seg.end, seg.end + 0.6));
@@ -3219,7 +3364,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           </div>{/* close studio-widget-body for player */}
 
           {/* ═══ WIDGET 2: Studio (Mixer & Processing) ═══ */}
-          <div key="studio" className="studio-widget-body" dir="rtl">
+          <div key="studio" className="studio-widget-body" ref={studioBodyRef} dir="rtl">
             <div className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground">
               <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
               <span>סטודיו (מיקסר ועיבוד)</span>
@@ -3257,10 +3402,10 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
               {mixerPanel}
 
               {/* ─── EQ + Processing Mixing Console ── */}
-              <div className={`space-y-2 rounded-lg border bg-muted/20 p-3 group/panel-mixer transition-all ${isMixerFullscreen ? 'fixed inset-0 z-50 flex flex-col bg-background p-6' : ''}`}>
+              <div className={`space-y-4 rounded-lg border bg-muted/20 p-4 group/panel-mixer transition-all ${isMixerFullscreen ? 'fixed inset-0 z-50 flex flex-col bg-background p-6' : ''}`}>
                 {isMixerFullscreen && <div className="fixed inset-0 -z-10 bg-background" />}
                 {/* When fullscreen, wrap everything above the player bar in a scrollable area */}
-                <div className={isMixerFullscreen ? 'flex-1 overflow-auto space-y-2 min-h-0' : 'contents'}>
+                <div className={isMixerFullscreen ? 'flex-1 overflow-auto space-y-4 min-h-0' : 'contents'}>
                 <div className="flex items-center justify-between">
                   <p className={`font-semibold flex items-center gap-1.5 ${isMixerFullscreen ? 'text-sm' : 'text-xs'}`}>
                     <AudioLines className="w-3.5 h-3.5 text-primary no-theme-icon" />
@@ -3313,27 +3458,27 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                       מתקדם
                     </Button>
                     <button
-                      className={`p-1 rounded text-[10px] transition-all font-mono ${eqBandCount === 31 ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
+                      className={`px-2 py-1 rounded-lg text-xs transition-all font-mono ${eqBandCount === 31 ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
                       onClick={() => setEqBandCount(eqBandCount === 31 ? 10 : 31)}
                       title={eqBandCount === 31 ? 'מעבר ל-10 רצועות' : 'מעבר ל-31 רצועות'}
                     >{eqBandCount}b</button>
                     <button
-                      className={`p-1 rounded text-[10px] transition-all ${eqViewMode === 'horizontal' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
+                      className={`px-2 py-1 rounded-lg text-xs transition-all ${eqViewMode === 'horizontal' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
                       onClick={() => setEqViewMode('horizontal')}
                       title="תצוגה אופקית"
                     >═</button>
                     <button
-                      className={`p-1 rounded text-[10px] transition-all ${eqViewMode === 'vertical' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
+                      className={`px-2 py-1 rounded-lg text-xs transition-all ${eqViewMode === 'vertical' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
                       onClick={() => setEqViewMode('vertical')}
                       title="תצוגה אנכית (מיקסר)"
                     >║</button>
                     <button
-                      className={`p-1 rounded text-[10px] transition-all ${eqViewMode === 'circular' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
+                      className={`px-2 py-1 rounded-lg text-xs transition-all ${eqViewMode === 'circular' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
                       onClick={() => setEqViewMode('circular')}
                       title="תצוגת כפתורים מעגליים"
                     >◒</button>
                     <button
-                      className={`p-1 rounded text-[10px] transition-all ${eqViewMode === 'parametric' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
+                      className={`px-2 py-1 rounded-lg text-xs transition-all ${eqViewMode === 'parametric' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
                       onClick={() => setEqViewMode('parametric')}
                       title="EQ פרמטרי גרפי עם Q"
                     >∿</button>
@@ -3342,12 +3487,12 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
                 {/* EQ Slider Theme Selector */}
                 {!isMixerConsoleCollapsed && (
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[10px] text-muted-foreground font-medium">עיצוב:</span>
+                  <div className="flex items-center gap-2 flex-wrap py-1">
+                    <span className="text-xs text-muted-foreground font-medium">עיצוב:</span>
                     {EQ_SLIDER_THEMES.map((t) => (
                       <button
                         key={t.id}
-                        className={`px-1.5 py-0.5 rounded text-[9px] transition-all ${
+                        className={`px-2.5 py-1 rounded-lg text-xs transition-all ${
                           eqSliderTheme === t.id ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-muted hover:bg-muted/80 text-muted-foreground'
                         }`}
                         onClick={() => setEqSliderTheme(t.id)}
@@ -3365,7 +3510,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                   <>
 
                 {/* EQ Presets */}
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-2 py-1">
                   {[
                     { id: 'flat', label: 'שטוח', icon: '⚖️', values: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
                     { id: 'clear-speech', label: 'דיבור ברור', icon: '🎙️', values: [-3, -2, -1, 0, 2, 4, 6, 4, 2, 0] },
@@ -3384,7 +3529,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                     return (
                       <button
                         key={preset.id}
-                        className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] transition-all
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all
                           ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}
                         `}
                         onClick={() => {
@@ -3922,12 +4067,31 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
                 {/* ─── Vocal Doubler Panel ───────────── */}
                 <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
                       <Mic className="w-3.5 h-3.5 text-violet-500 no-theme-icon" />
                       <span className="text-xs font-semibold">הכפלת קול (Vocal Doubler)</span>
                       {doublerEnabled && <Badge variant="secondary" className="text-[9px] h-4 px-1">פעיל</Badge>}
                     </div>
+                    {/* ── סינק אישי icon inline ── */}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] border transition-all ${
+                            showOverlayPanel
+                              ? 'bg-rose-100 dark:bg-rose-950/40 border-rose-300 dark:border-rose-700 text-rose-700 dark:text-rose-300'
+                              : 'border-border hover:bg-muted text-muted-foreground'
+                          }`}
+                          onClick={() => setShowOverlayPanel(v => !v)}
+                        >
+                          <Layers className="w-3 h-3 no-theme-icon" />
+                          <span>סינק אישי</span>
+                          {overlayBuffer && overlayEnabled && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block" />}
+                          {isRecording && <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block animate-pulse" />}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="text-xs">סינק אישי (הוספת קול)</TooltipContent>
+                    </Tooltip>
                     <Switch checked={doublerEnabled} onCheckedChange={setDoublerEnabled} />
                   </div>
                   {doublerEnabled && (
@@ -4018,20 +4182,18 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                   )}
                 </div>
 
-                {/* ─── Vocal Overlay (Personal Sync) Panel ───────────── */}
-                <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Layers className="w-3.5 h-3.5 text-rose-500 no-theme-icon" />
-                      <span className="text-xs font-semibold">סינק אישי (הוספת קול)</span>
-                      {overlayBuffer && overlayEnabled && <Badge variant="secondary" className="text-[9px] h-4 px-1">פעיל</Badge>}
-                      {isRecording && <Badge variant="destructive" className="text-[9px] h-4 px-1 animate-pulse">מקליט</Badge>}
-                    </div>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowOverlayPanel(v => !v)}>
-                      {showOverlayPanel ? <ChevronUp className="w-3.5 h-3.5 no-theme-icon" /> : <ChevronDown className="w-3.5 h-3.5 no-theme-icon" />}
+                {/* ─── Vocal Overlay (Personal Sync) Panel ─ collapsed/expanded via inline button ── */}
+                {showOverlayPanel && (<div className="space-y-2 rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50/30 dark:bg-rose-950/20 p-3">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <Layers className="w-3.5 h-3.5 text-rose-500 no-theme-icon" />
+                    <span className="text-xs font-semibold">סינק אישי (הוספת קול)</span>
+                    {overlayBuffer && overlayEnabled && <Badge variant="secondary" className="text-[9px] h-4 px-1">פעיל</Badge>}
+                    {isRecording && <Badge variant="destructive" className="text-[9px] h-4 px-1 animate-pulse">מקליט</Badge>}
+                    <Button variant="ghost" size="icon" className="h-5 w-5 mr-auto" onClick={() => setShowOverlayPanel(false)}>
+                      <X className="w-3 h-3 no-theme-icon" />
                     </Button>
                   </div>
-                  {showOverlayPanel && (
+                  {true && (
                     <div className="space-y-3">
                       {/* Import / Record buttons */}
                       <div className="flex items-center gap-2 flex-wrap">
@@ -4156,7 +4318,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                       )}
                     </div>
                   )}
-                </div>
+                </div>)}
 
                 <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-md p-2 flex items-start gap-1.5">
                   <Brain className="w-3 h-3 mt-0.5 shrink-0 text-primary no-theme-icon" />
@@ -4483,34 +4645,6 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         </ResponsiveReactGridLayout>
         </div>
 
-        {/* ─── Keyboard shortcuts panel ──────────────────────── */}
-        <div className="text-center">
-          <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground opacity-70 hover:opacity-100"
-            onClick={() => setShowKeyboardHelp(v => !v)}>
-            ⌨️ {showKeyboardHelp ? 'הסתר קיצורי מקלדת' : 'קיצורי מקלדת (?)'}
-          </Button>
-        </div>
-        {showKeyboardHelp && (
-          <div className="rounded-lg border bg-muted/30 p-3 space-y-2 text-xs" dir="rtl">
-            <p className="font-medium text-sm mb-2">⌨️ קיצורי מקלדת לנגן</p>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-              <div className="flex justify-between"><span>נגן / עצור</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">Space</kbd></div>
-              <div className="flex justify-between"><span>±5 שניות</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">← →</kbd></div>
-              <div className="flex justify-between"><span>±15 שניות</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">Ctrl+← →</kbd></div>
-              <div className="flex justify-between"><span>מילה קודמת / הבאה</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">Shift+← →</kbd></div>
-              <div className="flex justify-between"><span>דיוק ±0.5 שניות</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">, .</kbd></div>
-              <div className="flex justify-between"><span>עוצמה ↑↓</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">↑ ↓</kbd></div>
-              <div className="flex justify-between"><span>השתקה</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">M</kbd></div>
-              <div className="flex justify-between"><span>האט / האץ</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">[ ]</kbd></div>
-              <div className="flex justify-between"><span>מהירות רגילה</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">\</kbd></div>
-              <div className="flex justify-between"><span>התחלה / סוף</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">Home End</kbd></div>
-              <div className="flex justify-between"><span>נגן מההתחלה</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">Ctrl+R</kbd></div>
-              <div className="flex justify-between"><span>סמן נקודה A / B</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">A B</kbd></div>
-              <div className="flex justify-between"><span>לופ A-B</span><kbd className="bg-background border rounded px-1.5 py-0.5 text-[10px] font-mono">L</kbd></div>
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-1">* חצים מותאמים ל-RTL: ← = קדימה, → = אחורה</p>
-          </div>
-        )}
       </Wrapper>
     </TooltipProvider>
   );

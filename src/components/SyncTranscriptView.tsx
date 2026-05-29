@@ -1,4 +1,5 @@
 import { useRef, useEffect, useMemo, useState, useCallback } from "react";
+import type { CSSProperties } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,7 @@ import { addDictionaryReplacement, addIgnoredWord } from "@/utils/hebrewGrammarD
 import type { MenuSuggestion } from "@/utils/syncedSpellAssist";
 import { useTextMarking } from "@/hooks/useTextMarking";
 import { MarkingToolbar } from "@/components/MarkingToolbar";
-import { AlignRight, Clock, Search, ChevronUp, ChevronDown, X } from "lucide-react";
+import { AlignRight, Clock, Search, ChevronUp, ChevronDown, X, Highlighter, Palette } from "lucide-react";
 import type { WordTiming } from "./SyncAudioPlayer";
 
 interface SyncTranscriptViewProps {
@@ -36,6 +37,24 @@ function normalizeWord(word: string): string {
   return word.replace(/[.,;:!?"'׳״()\[\]{}<>\-–—]/g, "").trim();
 }
 
+const HIGHLIGHT_STYLE_KEY = "word_highlight_style_v1";
+const WORD_HIGHLIGHT_STYLES: Array<{ id: string; label: string; previewStyle: CSSProperties; activeClass: string; lineMode?: boolean }> = [
+  { id: "fill-blue",   label: "כחול",               previewStyle: { background: "#3b82f6", color: "#fff" },                        activeClass: "bg-blue-500 text-white font-bold" },
+  { id: "fill-yellow", label: "צהוב",               previewStyle: { background: "#fde047", color: "#000" },                        activeClass: "bg-yellow-300 text-black font-bold" },
+  { id: "fill-green",  label: "ירוק",               previewStyle: { background: "#4ade80", color: "#000" },                        activeClass: "bg-green-400 text-black font-bold" },
+  { id: "fill-orange", label: "כתום",               previewStyle: { background: "#fb923c", color: "#000" },                        activeClass: "bg-orange-400 text-black font-bold" },
+  { id: "fill-purple", label: "סגול",               previewStyle: { background: "#a855f7", color: "#fff" },                        activeClass: "bg-purple-500 text-white font-bold" },
+  { id: "fill-red",    label: "אדום",               previewStyle: { background: "#ef4444", color: "#fff" },                        activeClass: "bg-red-500 text-white font-bold" },
+  { id: "ul-blue",     label: "קו תחתון כחול",      previewStyle: { borderBottom: "3px solid #3b82f6" },                           activeClass: "border-b-4 border-blue-500 font-bold" },
+  { id: "ul-yellow",   label: "קו תחתון צהוב",      previewStyle: { borderBottom: "3px solid #eab308" },                           activeClass: "border-b-4 border-yellow-400 font-bold" },
+  { id: "box-blue",    label: "מסגרת כחולה",        previewStyle: { outline: "2px solid #3b82f6", outlineOffset: "1px" },          activeClass: "ring-2 ring-blue-500 font-bold" },
+  { id: "box-yellow",  label: "מסגרת צהובה",        previewStyle: { outline: "2px solid #eab308", outlineOffset: "1px" },          activeClass: "ring-2 ring-yellow-400 font-bold" },
+  { id: "line-yellow", label: "שורה — צהוב",        previewStyle: { background: "#fef9c3", borderRight: "3px solid #eab308" },     activeClass: "bg-yellow-100 dark:bg-yellow-900/40 border-r-[3px] border-yellow-400", lineMode: true },
+  { id: "line-blue",   label: "שורה — כחול",        previewStyle: { background: "#dbeafe", borderRight: "3px solid #3b82f6" },     activeClass: "bg-blue-100 dark:bg-blue-900/40 border-r-[3px] border-blue-400",   lineMode: true },
+  { id: "line-green",  label: "שורה — ירוק",        previewStyle: { background: "#dcfce7", borderRight: "3px solid #4ade80" },     activeClass: "bg-green-100 dark:bg-green-900/40 border-r-[3px] border-green-400", lineMode: true },
+  { id: "line-orange", label: "שורה — כתום",        previewStyle: { background: "#ffedd5", borderRight: "3px solid #fb923c" },     activeClass: "bg-orange-100 dark:bg-orange-900/40 border-r-[3px] border-orange-400", lineMode: true },
+];
+
 export const SyncTranscriptView = ({
   wordTimings,
   currentTime,
@@ -54,6 +73,47 @@ export const SyncTranscriptView = ({
   const [spellMenu, setSpellMenu] = useState<SpellMenuState | null>(null);
   const [customCorrection, setCustomCorrection] = useState("");
   const [dictionaryVersion, setDictionaryVersion] = useState(0);
+  const [showWordHighlight, setShowWordHighlight] = useState<boolean>(() => {
+    try { return localStorage.getItem("sync_transcript_word_highlight") !== "0"; } catch { return true; }
+  });
+
+  const toggleWordHighlight = () => {
+    setShowWordHighlight((v) => {
+      const next = !v;
+      try { localStorage.setItem("sync_transcript_word_highlight", next ? "1" : "0"); } catch {}
+      return next;
+    });
+  };
+
+  const [highlightStyleId, setHighlightStyleId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(HIGHLIGHT_STYLE_KEY);
+      return WORD_HIGHLIGHT_STYLES.some(s => s.id === saved) ? saved! : "fill-blue";
+    } catch { return "fill-blue"; }
+  });
+  const [showStylePicker, setShowStylePicker] = useState(false);
+  const activeStyle = WORD_HIGHLIGHT_STYLES.find(s => s.id === highlightStyleId) ?? WORD_HIGHLIGHT_STYLES[0];
+  const activeHighlightClass = activeStyle.activeClass;
+  const isLineMode = activeStyle.lineMode ?? false;
+
+  const [wordsPerRow, setWordsPerRow] = useState(10);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width;
+      setWordsPerRow(Math.max(5, Math.round(w / (fontSize * 3.2))));
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [fontSize]);
+
+  useEffect(() => {
+    if (!showStylePicker) return;
+    const close = () => setShowStylePicker(false);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [showStylePicker]);
 
   useEffect(() => {
     if (!spellMenu) return;
@@ -96,21 +156,12 @@ export const SyncTranscriptView = ({
   const sentences = useMemo(() => {
     if (!wordTimings.length) return [];
     const groups: { words: (WordTiming & { globalIndex: number })[]; startTime: number }[] = [];
-    let current: (WordTiming & { globalIndex: number })[] = [];
-
-    wordTimings.forEach((wt, i) => {
-      current.push({ ...wt, globalIndex: i });
-      const endsWithPunctuation = /[.!?،؛:\n]$/.test(wt.word);
-      if (endsWithPunctuation || current.length >= 15) {
-        groups.push({ words: current, startTime: current[0].start });
-        current = [];
-      }
-    });
-    if (current.length > 0) {
-      groups.push({ words: current, startTime: current[0].start });
+    for (let i = 0; i < wordTimings.length; i += wordsPerRow) {
+      const chunk = wordTimings.slice(i, i + wordsPerRow).map((wt, j) => ({ ...wt, globalIndex: i + j }));
+      groups.push({ words: chunk, startTime: chunk[0].start });
     }
     return groups;
-  }, [wordTimings]);
+  }, [wordTimings, wordsPerRow]);
 
   useEffect(() => {
     if (activeWordRef.current && containerRef.current) {
@@ -203,6 +254,80 @@ export const SyncTranscriptView = ({
           <Badge variant="secondary" className="text-xs min-w-[74px] justify-center">
             {currentWordIndex + 1} / {wordTimings.length}
           </Badge>
+          <Button
+            variant={showWordHighlight ? "secondary" : "ghost"}
+            size="icon"
+            className="h-7 w-7"
+            onClick={toggleWordHighlight}
+            title={showWordHighlight ? "כבה הדגשת מילה פעילה" : "הפעל הדגשת מילה פעילה"}
+          >
+            <Highlighter className={`w-3.5 h-3.5 ${showWordHighlight ? "" : "opacity-40"}`} />
+          </Button>
+          <div className="relative">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={(e) => { e.stopPropagation(); setShowStylePicker(v => !v); }}
+              title="בחר סגנון הדגשה"
+            >
+              <Palette className="w-3.5 h-3.5 opacity-70" />
+            </Button>
+            {showStylePicker && (
+              <div
+                className="absolute top-8 right-0 z-[100] bg-popover border rounded-lg shadow-xl p-2.5"
+                dir="rtl"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="text-[10px] text-muted-foreground mb-1.5 font-medium">הדגשת מילה</div>
+                <div className="flex flex-wrap gap-1.5 mb-3" style={{ maxWidth: 168 }}>
+                  {WORD_HIGHLIGHT_STYLES.filter(s => !s.lineMode).map(style => (
+                    <button
+                      key={style.id}
+                      title={style.label}
+                      onClick={() => {
+                        setHighlightStyleId(style.id);
+                        try { localStorage.setItem(HIGHLIGHT_STYLE_KEY, style.id); } catch {}
+                        setShowStylePicker(false);
+                      }}
+                      className={cn(
+                        "w-7 h-7 rounded flex items-center justify-center text-xs font-bold border-2 transition-all hover:scale-110",
+                        highlightStyleId === style.id
+                          ? "border-foreground shadow-sm"
+                          : "border-transparent hover:border-muted-foreground/50"
+                      )}
+                      style={style.previewStyle}
+                    >
+                      א
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[10px] text-muted-foreground mb-1.5 font-medium">הדגשת שורה שלמה</div>
+                <div className="flex flex-col gap-1" style={{ width: 168 }}>
+                  {WORD_HIGHLIGHT_STYLES.filter(s => s.lineMode).map(style => (
+                    <button
+                      key={style.id}
+                      title={style.label}
+                      onClick={() => {
+                        setHighlightStyleId(style.id);
+                        try { localStorage.setItem(HIGHLIGHT_STYLE_KEY, style.id); } catch {}
+                        setShowStylePicker(false);
+                      }}
+                      className={cn(
+                        "w-full h-6 rounded flex items-center px-2 text-[11px] font-medium border-2 transition-all hover:opacity-90",
+                        highlightStyleId === style.id
+                          ? "border-foreground shadow-sm"
+                          : "border-transparent hover:border-muted-foreground/50"
+                      )}
+                      style={style.previewStyle}
+                    >
+                      {style.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -249,18 +374,20 @@ export const SyncTranscriptView = ({
         style={{ fontSize: `${fontSize}px`, fontFamily, lineHeight: 2 }}
       >
         {sentences.map((sentence, si) => {
-          const isActiveSentence = sentence.words.some((w) => w.globalIndex === currentWordIndex);
+          const displayWordIndex = showWordHighlight ? currentWordIndex : -1;
+          const isActiveSentence = sentence.words.some((w) => w.globalIndex === displayWordIndex);
           return (
             <div
               key={si}
               className={cn(
-                "inline transition-opacity duration-300",
-                isActiveSentence ? "opacity-100" : "opacity-70",
+                "block mb-1",
+                showWordHighlight && isLineMode && isActiveSentence && cn(activeHighlightClass, "rounded px-1 -mx-1 py-0.5"),
+                showWordHighlight && (isActiveSentence ? "opacity-100" : "opacity-70"),
               )}
             >
               {sentence.words.map((wt) => {
-                const isActive = wt.globalIndex === currentWordIndex;
-                const isPast = wt.globalIndex < currentWordIndex;
+                const isActive = wt.globalIndex === displayWordIndex;
+                const isPast = wt.globalIndex < displayWordIndex;
                 const prob = wt.probability;
                 const confidenceStyle = prob != null && prob < 0.5
                   ? "border-b-2 border-red-400/70"
@@ -281,7 +408,7 @@ export const SyncTranscriptView = ({
                     key={wt.globalIndex}
                     ref={isActive || isSearchActive ? activeWordRef : undefined}
                     className={cn(
-                      "px-0.5 py-0.5 rounded cursor-pointer transition-all duration-150 inline-block",
+                      "px-0.5 py-0.5 rounded cursor-pointer transition-colors duration-150 inline-block",
                       confidenceStyle,
                       markingClass,
                       isSearchActive
@@ -290,7 +417,7 @@ export const SyncTranscriptView = ({
                           ? "bg-yellow-200/70 dark:bg-yellow-800/40"
                           : "",
                       isActive && !isSearchActive
-                        ? "bg-primary text-primary-foreground font-bold scale-110 shadow-md mx-0.5"
+                        ? isLineMode ? "font-extrabold underline underline-offset-2 decoration-2" : activeHighlightClass
                         : isPast
                           ? "text-muted-foreground hover:bg-muted"
                           : "hover:bg-muted",
@@ -314,7 +441,6 @@ export const SyncTranscriptView = ({
                   </span>
                 );
               })}
-              {" "}
             </div>
           );
         })}

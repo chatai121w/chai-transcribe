@@ -218,6 +218,31 @@ LOSHON_KODESH_HOTWORDS = (
     'הלכה למעשה, אמר, תנא, שמע מינה, רבא, אביי'
 )
 
+# ─── Default Hebrew hotwords — common confusable pairs ─────────────────────────
+# Boosts probability of the correct word when a phonetically similar error-word
+# might otherwise score higher.  Whisper's hotwords work by adding a log-prob
+# bonus at decoding time, so listing the correct word makes the model prefer it.
+# Format: "correct_word" (the error variant is NOT listed — listing it would
+# boost the wrong word instead).
+HEBREW_DEFAULT_HOTWORDS = (
+    # ─ Construct state vs. base form ──────────────────────────────────────
+    'מגמת, ערכת, קבוצת, מדיניות, '
+    # ─ Prefix-bearing forms that models drop the prefix on ───────────────
+    'לניהול, באחריות, להתפתח, בפיתוח, לשיפור, '
+    # ─ ח/כ confusables ──────────────────────────────────────────────────
+    'עיבוד, חיפוש, צמיחה, ביטוח, השקעה, '
+    # ─ ע ayin-drop at start ──────────────────────────────────────────────
+    'ערכות, אבטחה, עיבוד, '
+    # ─ Plural vs. singular ───────────────────────────────────────────────
+    'תשתיות, מסמכים, קבוצות, '
+    # ─ Shin/samech, shin/ayin ────────────────────────────────────────────
+    'מפגש, אחריות, ניהול, '
+    # ─ tav-drop / lamed-drop ─────────────────────────────────────────────
+    'תהליך, '
+    # ─ adj vs. noun suffix ───────────────────────────────────────────────
+    'כלכלית'
+)
+
 
 def _resolve_prompt_and_hotwords(language, user_initial_prompt, user_hotwords, loshon_kodesh):
     """Decide which initial_prompt and hotwords to send to Whisper.
@@ -226,7 +251,8 @@ def _resolve_prompt_and_hotwords(language, user_initial_prompt, user_hotwords, l
       1. explicit user_initial_prompt
       2. Loshon Kodesh torani prompt (when loshon_kodesh=True)
       3. default Hebrew prompt (only for he)
-    Hotwords: when Loshon Kodesh is on, merge user hotwords + torani list.
+    Hotwords: always merge user hotwords + Hebrew defaults for 'he'.
+    When Loshon Kodesh is on, additionally merge torani list.
     """
     if user_initial_prompt:
         prompt = user_initial_prompt
@@ -237,10 +263,19 @@ def _resolve_prompt_and_hotwords(language, user_initial_prompt, user_hotwords, l
     else:
         prompt = None
 
+    # Build hotword list: user words always first, then language defaults
+    sources = []
+    if user_hotwords and user_hotwords.strip():
+        sources.append(user_hotwords)
+    if language == "he":
+        sources.append(HEBREW_DEFAULT_HOTWORDS)  # always boost common confusables
     if loshon_kodesh:
-        merged = []
+        sources.append(LOSHON_KODESH_HOTWORDS)
+
+    if sources:
         seen = set()
-        for source in ((user_hotwords or ''), LOSHON_KODESH_HOTWORDS):
+        merged = []
+        for source in sources:
             for w in source.split(','):
                 w = w.strip()
                 if w and w not in seen:
@@ -248,7 +283,8 @@ def _resolve_prompt_and_hotwords(language, user_initial_prompt, user_hotwords, l
                     merged.append(w)
         hotwords = ', '.join(merged) if merged else None
     else:
-        hotwords = (user_hotwords or '').strip() or None
+        hotwords = None
+
     return prompt, hotwords
 
 
@@ -315,24 +351,102 @@ def _check_ffmpeg() -> bool:
         _ffmpeg_available = False
     return _ffmpeg_available
 
+def _estimate_dynamic_range(input_path: str) -> float:
+    """Estimate audio dynamic range (peak_dB − rms_dB).
+
+    Higher = cleaner audio.  Typical values:
+      Clean speech         → 18–30 dB
+      Light noise  -24dB   → 14–20 dB
+      Medium noise -18dB   → 10–16 dB
+      Heavy noise  -12dB   →  5–13 dB
+
+    Fast path  : reads s16 WAV directly in Python — ~0 ms overhead.
+    Slow path  : FFmpeg volumedetect on first 10 s for non-WAV inputs — < 0.5 s.
+    Returns 25.0 on any error (safe default → keep afftdn enabled).
+    """
+    import wave, array, math
+
+    # ── Fast path: PCM s16 WAV ────────────────────────────────────────
+    try:
+        with wave.open(input_path, 'rb') as wf:
+            if wf.getsampwidth() == 2:  # s16le
+                sr = wf.getframerate()
+                n = min(wf.getnframes(), sr * 30)   # up to 30 s of samples
+                raw = wf.readframes(n)
+                samples = array.array('h', raw)
+                if len(samples) >= 100:
+                    rms = math.sqrt(sum(s * s for s in samples) / len(samples))
+                    peak = max(abs(s) for s in samples)
+                    if rms >= 10 and peak >= 10:
+                        return 20 * math.log10(peak / rms)
+    except Exception:
+        pass
+
+    # ── Slow path: FFmpeg volumedetect on first 10 s (non-WAV inputs) ─
+    import subprocess, re
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-t", "10", "-i", input_path,
+             "-af", "volumedetect", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=15,
+        )
+        mean_m = re.search(r"mean_volume:\s*([-\d.]+)\s*dB", result.stderr)
+        max_m  = re.search(r"max_volume:\s*([-\d.]+)\s*dB", result.stderr)
+        if mean_m and max_m:
+            return float(max_m.group(1)) - float(mean_m.group(1))
+    except Exception:
+        pass
+
+    return 25.0  # safe default → keep afftdn
+
+
+# Dynamic range threshold below which afftdn is skipped.
+# Calibrated on benchmark data:
+#   clean -4.5dBFS peak → dyn_range ~16 dB  → afftdn safe
+#   -24dB noise         → dyn_range ~16 dB  → afftdn safe
+#   -18dB noise         → dyn_range ~15 dB  → afftdn safe (WER improves)
+#   -12dB noise         → dyn_range ~13 dB  → afftdn HARMFUL (WER 7→72%)
+# Threshold 14 dB sits cleanly between the last two cases.
+_AFFTDN_MIN_DYNAMIC_RANGE_DB = 14.0
+
+
 def _normalize_audio(input_path: str) -> str:
-    """Normalize audio loudness using FFmpeg loudnorm filter.
-    Returns path to normalized file (or original if FFmpeg unavailable)."""
+    """Pre-process audio for best Whisper accuracy:
+      1. Highpass 80Hz  — removes low-frequency rumble (HVAC, traffic)
+      2. Lowpass 8kHz   — removes high-freq noise above speech range
+      3. afftdn         — spectral noise reduction (skipped if SNR too low)
+      4. loudnorm       — EBU R128 loudness normalization
+      5. 16kHz mono     — exactly what Whisper expects (skips internal ffmpeg pass)
+    Always outputs .wav (PCM s16le) — avoids container confusion from any input format.
+    Returns path to processed .wav file (or original if FFmpeg unavailable)."""
     if not _check_ffmpeg():
         return input_path
     import subprocess
-    suffix = Path(input_path).suffix or ".wav"
-    output_path = input_path + "_norm" + suffix
+    # Measure dynamic range to decide whether afftdn is safe to use.
+    # When the noise floor is very high (small dynamic range), afftdn
+    # suppresses speech energy and makes Whisper hallucinate / drop words.
+    dyn_range = _estimate_dynamic_range(input_path)
+    use_afftdn = dyn_range >= _AFFTDN_MIN_DYNAMIC_RANGE_DB
+    if use_afftdn:
+        af_chain = "highpass=f=80,lowpass=f=8000,afftdn=nf=-25,loudnorm=I=-16:TP=-1.5:LRA=11"
+    else:
+        af_chain = "highpass=f=80,lowpass=f=8000,loudnorm=I=-16:TP=-1.5:LRA=11"
+        _log.info(f"Audio dynamic range {dyn_range:.1f}dB < {_AFFTDN_MIN_DYNAMIC_RANGE_DB}dB — skipping afftdn (noisy input)")
+
+    # Always output as .wav — Whisper reads it natively with no extra decode step
+    output_path = input_path + "_norm.wav"
     try:
         result = subprocess.run(
             ["ffmpeg", "-y", "-i", input_path,
-             "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+             "-af", af_chain,
              "-ar", "16000", "-ac", "1",
+             "-acodec", "pcm_s16le",
              output_path],
             capture_output=True, timeout=120,
         )
         if result.returncode == 0 and os.path.exists(output_path):
             return output_path
+        _log.warning(f"Audio normalization ffmpeg exit {result.returncode}: {result.stderr.decode(errors='replace')[:200]}")
     except (subprocess.TimeoutExpired, Exception) as e:
         _log.warning(f"Audio normalization failed: {e}")
     return input_path
@@ -687,9 +801,9 @@ TRANSCRIPTION_PRESETS = {
         "label_en": "Balanced",
         "description": "איזון טוב בין מהירות לדיוק — ברירת מחדל מומלצת",
         "fast_mode": True,
-        "beam_size": 1,
+        "beam_size": 3,         # was 1 — beam=3 improves Hebrew WER significantly
         "batch_size": 16,
-        "condition_on_previous_text": False,
+        "condition_on_previous_text": True,  # was False — context between segments helps Hebrew
         "vad_aggressive": False,
         "compute_type": "int8_float16",
     },
@@ -1141,9 +1255,10 @@ def transcribe():
             except Exception as denoise_err:
                 _log.warning(f"  [ai_denoise] Failed, continuing without: {denoise_err}")
 
-        # SHA-256 cache lookup — skip GPU work for repeated files
+        # SHA-256 cache lookup — skip GPU work for repeated files.
+        # Include normalize flag in key: normalized audio sounds different from raw.
         file_hash = _file_sha256(tmp_path)
-        cache_key = f"{file_hash}:{resolved}:{language}:{beam_size}"
+        cache_key = f"{file_hash}:{resolved}:{language}:{beam_size}:norm={int(normalize)}"
         cached = _cache_get(cache_key)
         if cached:
             _log.info(f"  Cache HIT for {audio_file.filename} ({cache_key[:16]}...)")
@@ -1161,7 +1276,14 @@ def transcribe():
 
         print(f"\n  Transcribing: {audio_file.filename} (model={resolved}, lang={language})")
         start = time.time()
-        hebrew_prompt = "תמלול שיחה בעברית." if language == "he" else None
+
+        # Use full prompt resolution (supports hotwords, loshon_kodesh, user prompts)
+        user_initial_prompt = request.form.get("initial_prompt", "")
+        user_hotwords = request.form.get("hotwords", "")
+        loshon_kodesh = request.form.get("loshon_kodesh", "0") == "1"
+        initial_prompt, hotwords = _resolve_prompt_and_hotwords(
+            language, user_initial_prompt, user_hotwords, loshon_kodesh
+        )
 
         def _run_transcribe(m):
             from faster_whisper import BatchedInferencePipeline
@@ -1172,7 +1294,9 @@ def transcribe():
                 word_timestamps=True,
                 beam_size=beam_size,
                 batch_size=auto_batch_size(),
-                initial_prompt=hebrew_prompt,
+                initial_prompt=initial_prompt,
+                hotwords=hotwords,
+                condition_on_previous_text=True,
             )
 
         try:
@@ -1723,6 +1847,8 @@ def transcribe_live():
     language = request.form.get("language", "he")
     model_id = request.form.get("model", _current_model_id or _default_model_for(language))
     is_final = str(request.form.get("final", "0")).lower() in ("1", "true", "yes")
+    # Context from previous chunk (last N words) — used as initial_prompt for continuity
+    live_context = request.form.get("context", "").strip()
 
     resolved = MODEL_REGISTRY.get(model_id, model_id)
     suffix = _safe_suffix(audio_file.filename)
@@ -1759,11 +1885,19 @@ def transcribe_live():
         start = time.time()
 
         def _run_live(m):
-            # Live mode: beam_size=1, temperature=0 for deterministic, suppressed blanks.
+            # Live mode: beam_size=2, VAD=True for better quality on 5s chunks.
             # Final mode: beam_size=3 for best quality, with VAD/word-timestamps.
-            beam_size = 3 if is_final else 1
-            vad_filter = True if is_final else False
+            beam_size = 3 if is_final else 2
+            vad_filter = True  # always filter silence — prevents garbage transcription
             with_timestamps = True if is_final else False
+            # Build initial_prompt: combine Hebrew prefix + previous chunk context
+            if is_final:
+                prompt = "תמלול בעברית." if language == "he" else None
+            elif live_context:
+                # Carry last words from previous chunk for linguistic continuity
+                prompt = f"תמלול בעברית. {live_context}" if language == "he" else live_context
+            else:
+                prompt = "תמלול בעברית." if language == "he" else None
             segments, info = m.transcribe(
                 tmp_path,
                 language=language if language != "auto" else None,
@@ -1775,7 +1909,7 @@ def transcribe_live():
                 temperature=0.0,
                 no_speech_threshold=0.6,
                 suppress_blank=True,
-                initial_prompt="תמלול בעברית." if language == "he" else None,
+                initial_prompt=prompt,
             )
             # Materialize segments to surface errors (e.g. flash attention)
             # inside this function rather than during lazy iteration.
@@ -3276,6 +3410,14 @@ def main():
     print("    POST /convert-mp3       — Convert audio/video to MP3/OPUS/AAC (server FFmpeg)")
     print("    POST /enhance-audio     — Enhance audio (AI/non-AI presets) to MP3/OPUS/AAC")
     print("    POST /harmonize         — Generate harmonies (basic/pro/studio)")
+    print("    GET  /lk/dictionary     — Lashon Kodesh personal dictionary (list)")
+    print("    POST /lk/dictionary     — Add / update word pair")
+    print("    DELETE /lk/dictionary/<id> — Remove word pair")
+    print("    GET  /lk/rules          — Grammar rules list")
+    print("    POST /lk/rules          — Add / update rule")
+    print("    PATCH /lk/rules/<id>    — Toggle rule enabled/disabled")
+    print("    DELETE /lk/rules/<id>   — Remove rule")
+    print("    POST /lk/transcribe     — Transcribe with LK mode + post-processing")
     print("    GET  /harmonize/capabilities — Available harmony tiers")
     print("    POST /load-model        — Load model into GPU memory")
     print("    POST /preload-stream    — Preload model via SSE (background)")
@@ -3299,6 +3441,1028 @@ def main():
         print("  Tip: pip install waitress")
         print()
         app.run(host="0.0.0.0", port=args.port, debug=False)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  LASHON KODESH — Personal dictionary, grammar rules, post-processing
+# ════════════════════════════════════════════════════════════════════════════
+
+import sqlite3 as _sqlite3
+import re as _re
+
+_LK_DB_PATH = Path(__file__).parent / "lk_data.db"
+
+_LK_SCHEMA = """
+CREATE TABLE IF NOT EXISTS lk_dictionary (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    spoken_form   TEXT NOT NULL,
+    correct_form  TEXT NOT NULL,
+    source        TEXT DEFAULT 'manual',
+    note          TEXT,
+    count_applied INTEGER DEFAULT 0,
+    created_at    TEXT DEFAULT (datetime('now')),
+    UNIQUE(spoken_form)
+);
+CREATE TABLE IF NOT EXISTS lk_grammar_rules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    pattern     TEXT NOT NULL,
+    replacement TEXT NOT NULL,
+    tradition   TEXT DEFAULT 'ashkenazi',
+    enabled     INTEGER DEFAULT 1,
+    priority    INTEGER DEFAULT 10,
+    created_at  TEXT DEFAULT (datetime('now')),
+    UNIQUE(name)
+);
+CREATE TABLE IF NOT EXISTS lk_sessions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      TEXT UNIQUE,
+    created_at      TEXT DEFAULT (datetime('now')),
+    audio_filename  TEXT,
+    raw_text        TEXT,
+    corrected_text  TEXT,
+    words_fixed     INTEGER DEFAULT 0
+);
+"""
+
+# Built-in Ashkenazi grammar rules seeded on first run
+_LK_BUILTIN_RULES = [
+    ("תו-ללא-דגש → ס (אשכנז)",
+     r'\bת(?=[אוּוּ])', "ס",
+     "ashkenazi", 1, 100),
+    ("שַׁבָּת → שַׁבָּס",
+     r'\bשַׁבָּת\b', "שַׁבָּס",
+     "ashkenazi", 1, 90),
+    ("מִצְוָה → מִצְוָה (maintain)",
+     r'\bמִצְוָה\b', "מִצְוָה",
+     "ashkenazi", 1, 80),
+    ("ברכות → ברוכות (blessing-form)",
+     r'\bבְּרָכוֹת\b', "ברוכות",
+     "ashkenazi", 0, 70),
+    ("תורה → תוירה",
+     r'\bתּוֹרָה\b', "תּוֹירָה",
+     "ashkenazi", 0, 60),
+    ("שבת → שבס",
+     r'\bשבת\b', "שבס",
+     "ashkenazi", 1, 50),
+    ("מצוה → מצוה",
+     r'\bמצוה\b', "מצוה",
+     "ashkenazi", 1, 40),
+    ("יום טוב → יום טויב",
+     r'\bיום טוב\b', "יום טויב",
+     "ashkenazi", 0, 30),
+]
+
+
+def _lk_db():
+    """Open LK SQLite connection (thread-safe)."""
+    _LK_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = _sqlite3.connect(str(_LK_DB_PATH), check_same_thread=False)
+    conn.row_factory = _sqlite3.Row
+    return conn
+
+
+def _lk_init():
+    """Ensure schema and seed built-in rules."""
+    with _lk_db() as conn:
+        conn.executescript(_LK_SCHEMA)
+        for (name, pattern, replacement, tradition, enabled, priority) in _LK_BUILTIN_RULES:
+            conn.execute(
+                "INSERT OR IGNORE INTO lk_grammar_rules "
+                "(name, pattern, replacement, tradition, enabled, priority) "
+                "VALUES (?,?,?,?,?,?)",
+                (name, pattern, replacement, tradition, enabled, priority)
+            )
+        conn.commit()
+
+# Initialise on import
+try:
+    _lk_init()
+except Exception as _e:
+    _log.warning(f"[LK] DB init failed: {_e}")
+
+
+def _lk_apply_postprocessing(text: str) -> tuple[str, int]:
+    """
+    Apply enabled grammar rules (by priority DESC) then dictionary substitutions.
+    Returns (corrected_text, words_fixed_count).
+    """
+    fixed = 0
+    result = text
+
+    # 1. Grammar rules (sorted by priority DESC)
+    with _lk_db() as conn:
+        rules = conn.execute(
+            "SELECT pattern, replacement FROM lk_grammar_rules "
+            "WHERE enabled=1 ORDER BY priority DESC"
+        ).fetchall()
+        for row in rules:
+            new_result = _re.sub(row["pattern"], row["replacement"], result)
+            if new_result != result:
+                fixed += result.count(row["pattern"])  # rough estimate
+                result = new_result
+
+        # 2. Dictionary substitutions (exact word match, case-insensitive)
+        dictionary = conn.execute(
+            "SELECT id, spoken_form, correct_form FROM lk_dictionary"
+        ).fetchall()
+
+    for entry in dictionary:
+        spoken = _re.escape(entry["spoken_form"])
+        pattern = rf'\b{spoken}\b'
+        new_result = _re.sub(pattern, entry["correct_form"], result, flags=_re.IGNORECASE)
+        if new_result != result:
+            fixed += len(_re.findall(pattern, result, flags=_re.IGNORECASE))
+            result = new_result
+            # Increment count_applied asynchronously
+            try:
+                with _lk_db() as conn:
+                    conn.execute(
+                        "UPDATE lk_dictionary SET count_applied=count_applied+1 WHERE id=?",
+                        (entry["id"],)
+                    )
+                    conn.commit()
+            except Exception:
+                pass
+
+    return result, fixed
+
+
+# ── LK API endpoints ──────────────────────────────────────────────────────────
+
+@app.route("/lk/dictionary", methods=["GET"])
+def lk_dict_list():
+    """Return all LK dictionary entries."""
+    with _lk_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM lk_dictionary ORDER BY created_at DESC"
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/lk/dictionary", methods=["POST"])
+def lk_dict_add():
+    """Add or update a dictionary entry. Body: {spoken_form, correct_form, note?}"""
+    data = request.get_json(force=True) or {}
+    spoken = (data.get("spoken_form") or "").strip()
+    correct = (data.get("correct_form") or "").strip()
+    note = (data.get("note") or "").strip() or None
+    source = data.get("source", "manual")
+    if not spoken or not correct:
+        return jsonify({"error": "spoken_form and correct_form are required"}), 400
+    with _lk_db() as conn:
+        conn.execute(
+            "INSERT INTO lk_dictionary (spoken_form, correct_form, note, source) "
+            "VALUES (?,?,?,?) ON CONFLICT(spoken_form) DO UPDATE SET "
+            "correct_form=excluded.correct_form, note=excluded.note",
+            (spoken, correct, note, source)
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM lk_dictionary WHERE spoken_form=?", (spoken,)
+        ).fetchone()
+    return jsonify(dict(row)), 201
+
+
+@app.route("/lk/dictionary/<int:entry_id>", methods=["DELETE"])
+def lk_dict_delete(entry_id: int):
+    """Delete a dictionary entry by id."""
+    with _lk_db() as conn:
+        conn.execute("DELETE FROM lk_dictionary WHERE id=?", (entry_id,))
+        conn.commit()
+    return jsonify({"deleted": entry_id})
+
+
+@app.route("/lk/rules", methods=["GET"])
+def lk_rules_list():
+    """Return all grammar rules."""
+    with _lk_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM lk_grammar_rules ORDER BY priority DESC, id"
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/lk/rules", methods=["POST"])
+def lk_rules_add():
+    """Add or update a grammar rule. Body: {name, pattern, replacement, tradition?, priority?}"""
+    data = request.get_json(force=True) or {}
+    name = (data.get("name") or "").strip()
+    pattern = (data.get("pattern") or "").strip()
+    replacement = (data.get("replacement") or "").strip()
+    tradition = data.get("tradition", "ashkenazi")
+    enabled = 1 if data.get("enabled", True) else 0
+    priority = int(data.get("priority", 10))
+    if not name or not pattern:
+        return jsonify({"error": "name and pattern are required"}), 400
+    # Validate regex
+    try:
+        _re.compile(pattern)
+    except _re.error as e:
+        return jsonify({"error": f"Invalid regex: {e}"}), 400
+    with _lk_db() as conn:
+        conn.execute(
+            "INSERT INTO lk_grammar_rules "
+            "(name, pattern, replacement, tradition, enabled, priority) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET "
+            "pattern=excluded.pattern, replacement=excluded.replacement, "
+            "tradition=excluded.tradition, enabled=excluded.enabled, priority=excluded.priority",
+            (name, pattern, replacement, tradition, enabled, priority)
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM lk_grammar_rules WHERE name=?", (name,)
+        ).fetchone()
+    return jsonify(dict(row)), 201
+
+
+@app.route("/lk/rules/<int:rule_id>", methods=["PATCH"])
+def lk_rules_toggle(rule_id: int):
+    """Toggle enabled/disabled or update any field. Body: {enabled?, name?, ...}"""
+    data = request.get_json(force=True) or {}
+    with _lk_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM lk_grammar_rules WHERE id=?", (rule_id,)
+        ).fetchone()
+        if not row:
+            return jsonify({"error": "Rule not found"}), 404
+        enabled = int(data.get("enabled", row["enabled"]))
+        name = data.get("name", row["name"])
+        pattern = data.get("pattern", row["pattern"])
+        replacement = data.get("replacement", row["replacement"])
+        priority = int(data.get("priority", row["priority"]))
+        conn.execute(
+            "UPDATE lk_grammar_rules SET enabled=?, name=?, pattern=?, "
+            "replacement=?, priority=? WHERE id=?",
+            (enabled, name, pattern, replacement, priority, rule_id)
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM lk_grammar_rules WHERE id=?", (rule_id,)
+        ).fetchone()
+    return jsonify(dict(row))
+
+
+@app.route("/lk/rules/<int:rule_id>", methods=["DELETE"])
+def lk_rules_delete(rule_id: int):
+    """Delete a grammar rule by id."""
+    with _lk_db() as conn:
+        conn.execute("DELETE FROM lk_grammar_rules WHERE id=?", (rule_id,))
+        conn.commit()
+    return jsonify({"deleted": rule_id})
+
+
+@app.route("/lk/transcribe", methods=["POST"])
+def lk_transcribe():
+    """
+    Transcribe audio with Lashon Kodesh mode ON + post-processing.
+    Same as /transcribe but forces loshon_kodesh=True and applies the
+    full LK post-processing pipeline (rules → dictionary).
+    Form fields: file, beam_size (default 5), normalize (default 1).
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    audio_file = request.files["file"]
+    language = "he"
+    beam_size = int(request.form.get("beam_size", 5))
+    normalize = request.form.get("normalize", "1") == "1"
+
+    # Force LK mode
+    model_id = request.form.get("model", _current_model_id or _default_model_for("he"))
+    resolved = MODEL_REGISTRY.get(model_id, model_id)
+    user_hotwords = request.form.get("hotwords", "")
+
+    initial_prompt, hotwords = _resolve_prompt_and_hotwords(
+        "he", "", user_hotwords, loshon_kodesh=True
+    )
+
+    suffix = _safe_suffix(audio_file.filename)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        audio_file.save(tmp)
+        tmp_path = tmp.name
+
+    norm_path = None
+    try:
+        transcribe_path = tmp_path
+        if normalize:
+            norm_path = _normalize_audio(tmp_path)
+            if norm_path != tmp_path:
+                transcribe_path = norm_path
+
+        model = load_model(resolved)
+        start = time.time()
+
+        from faster_whisper import BatchedInferencePipeline
+        pipeline = BatchedInferencePipeline(model=model)
+        segments_gen, info = pipeline.transcribe(
+            transcribe_path,
+            language="he",
+            word_timestamps=True,
+            beam_size=beam_size,
+            batch_size=auto_batch_size(),
+            initial_prompt=initial_prompt,
+            hotwords=hotwords,
+            condition_on_previous_text=True,
+        )
+        segments = list(segments_gen)
+
+        full_text_parts = []
+        word_timings = []
+        for seg in segments:
+            full_text_parts.append(seg.text.strip())
+            if seg.words:
+                for w in seg.words:
+                    word_timings.append({
+                        "word": w.word.strip(),
+                        "start": round(w.start, 3),
+                        "end": round(w.end, 3),
+                        "probability": round(w.probability, 3),
+                    })
+
+        raw_text = " ".join(full_text_parts)
+        corrected_text, words_fixed = _lk_apply_postprocessing(raw_text)
+        elapsed = time.time() - start
+
+        # Save session
+        import uuid as _uuid
+        session_id = str(_uuid.uuid4())[:12]
+        try:
+            with _lk_db() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO lk_sessions "
+                    "(session_id, audio_filename, raw_text, corrected_text, words_fixed) "
+                    "VALUES (?,?,?,?,?)",
+                    (session_id, audio_file.filename, raw_text, corrected_text, words_fixed)
+                )
+                conn.commit()
+        except Exception:
+            pass
+
+        return jsonify({
+            "text": corrected_text,
+            "raw_text": raw_text,
+            "words_fixed": words_fixed,
+            "wordTimings": word_timings,
+            "duration": round(info.duration, 2),
+            "processing_time": round(elapsed, 2),
+            "session_id": session_id,
+            "lk_mode": True,
+        })
+
+    except Exception as e:
+        _log.error(f"[LK] transcribe error: {e}")
+        return jsonify({"error": "Transcription failed"}), 500
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        if norm_path and norm_path != tmp_path:
+            try:
+                os.unlink(norm_path)
+            except OSError:
+                pass
+
+
+@app.route("/lk/sessions", methods=["GET"])
+def lk_sessions_list():
+    """Return recent LK transcription sessions."""
+    limit = min(int(request.args.get("limit", 50)), 200)
+    with _lk_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM lk_sessions ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/lk/sessions/<string:session_id>/words", methods=["POST"])
+def lk_session_add_word(session_id: str):
+    """
+    Learn a word correction from a transcription session.
+    Body: {spoken_form, correct_form, note?}
+    """
+    data = request.get_json(force=True) or {}
+    spoken = (data.get("spoken_form") or "").strip()
+    correct = (data.get("correct_form") or "").strip()
+    note = (data.get("note") or "").strip() or None
+    if not spoken or not correct:
+        return jsonify({"error": "spoken_form and correct_form required"}), 400
+    with _lk_db() as conn:
+        conn.execute(
+            "INSERT INTO lk_dictionary (spoken_form, correct_form, note, source) "
+            "VALUES (?,?,?,'session_correction') ON CONFLICT(spoken_form) DO UPDATE SET "
+            "correct_form=excluded.correct_form, note=excluded.note",
+            (spoken, correct, note)
+        )
+        conn.commit()
+    return jsonify({"learned": spoken, "correct": correct}), 201
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# COMPARE ENDPOINTS — in-app transcription comparison (12 systems)
+# ════════════════════════════════════════════════════════════════════════════
+
+_CMP_DB_PATH = Path(__file__).parent.parent / "tools" / "transcription_feedback.db"
+
+_CMP_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sessions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id       TEXT UNIQUE,
+    created_at       TEXT,
+    audio_hash       TEXT,
+    audio_filename   TEXT,
+    duration_s       REAL,
+    channels         INTEGER,
+    sample_rate      INTEGER,
+    dynamic_range_db REAL,
+    snr_estimate_db  REAL,
+    noise_rms        REAL,
+    noise_level      TEXT,
+    results_json     TEXT,
+    recommended_id   TEXT,
+    user_chosen_id   TEXT,
+    user_notes       TEXT
+);
+"""
+
+# 12 compare system configs: (id, label, beam, cond_prev, vad_agg, compute, normalize, denoise)
+_CMP_SYSTEMS = [
+    ("fast_n",  "⚡ Fast · norm",        1, False, True,  "int8_float16", True,  False),
+    ("fast_r",  "⚡ Fast · raw",         1, False, True,  "int8_float16", False, False),
+    ("bal_n",   "⚖ Balanced · norm",    3, True,  False, "int8_float16", True,  False),
+    ("bal_r",   "⚖ Balanced · raw",     3, True,  False, "int8_float16", False, False),
+    ("acc_n",   "🎯 Accurate · norm",    5, True,  False, "float16",      True,  False),
+    ("acc_r",   "🎯 Accurate · raw",     5, True,  False, "float16",      False, False),
+    ("b3_n",    "B3 · norm",            3, True,  False, "int8_float16", True,  False),
+    ("b3_r",    "B3 · raw",             3, True,  False, "int8_float16", False, False),
+    ("b5_n",    "B5 · norm",            5, True,  False, "int8_float16", True,  False),
+    ("b5_r",    "B5 · raw",             5, True,  False, "int8_float16", False, False),
+    ("b5_dn",   "B5+denoise · norm",    5, True,  False, "float16",      True,  True),
+    ("b5_dr",   "B5+denoise · raw",     5, True,  False, "float16",      False, True),
+]
+
+
+def _cmp_db():
+    _CMP_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = _sqlite3.connect(str(_CMP_DB_PATH))
+    conn.row_factory = _sqlite3.Row
+    conn.execute(_CMP_SCHEMA)
+    conn.commit()
+    return conn
+
+
+def _cmp_recommend(dynamic_range: float, snr_db: float) -> tuple[str, str]:
+    """Simple rule-based recommender (mirrors smart_compare.py logic)."""
+    import math
+    # Try k-NN from labeled sessions
+    with _cmp_db() as conn:
+        labeled = conn.execute(
+            "SELECT dynamic_range_db, snr_estimate_db, duration_s, user_chosen_id "
+            "FROM sessions WHERE user_chosen_id IS NOT NULL LIMIT 100"
+        ).fetchall()
+
+    K = 5
+    if len(labeled) >= 3:
+        def feat(dr, snr):
+            return [min(1.0, dr / 30.0), min(1.0, snr / 40.0)]
+        v = feat(dynamic_range, snr_db)
+        neighbors = []
+        for row in labeled:
+            rv = feat(row["dynamic_range_db"] or 20, row["snr_estimate_db"] or 30)
+            dist = math.sqrt(sum((a - b)**2 for a, b in zip(v, rv)))
+            neighbors.append((dist, row["user_chosen_id"]))
+        neighbors.sort(key=lambda x: x[0])
+        top = neighbors[:K]
+        votes: dict = {}
+        for dist, cid in top:
+            w = 1.0 / (dist + 0.01)
+            votes[cid] = votes.get(cid, 0) + w
+        best = max(votes, key=lambda k: votes[k])
+        total = sum(votes.values())
+        conf = votes[best] / total if total else 0
+        if conf >= 0.5:
+            sys_map = {s[0]: s[1] for s in _CMP_SYSTEMS}
+            label = sys_map.get(best, best)
+            return best, f"k-NN ({len(labeled)} דוגמאות) → {label} ({conf:.0%} ביטחון)"
+
+    # Rule-based fallback
+    if dynamic_range >= 16:
+        return "fast_n", f"חוקים (dynamic range={dynamic_range:.1f}dB — נקי)"
+    elif dynamic_range >= 15:
+        return "bal_n", f"חוקים (dynamic range={dynamic_range:.1f}dB — רעש קל)"
+    elif dynamic_range >= 14:
+        return "b5_n", f"חוקים (dynamic range={dynamic_range:.1f}dB — רעש בינוני)"
+    else:
+        return "fast_r", f"חוקים (dynamic range={dynamic_range:.1f}dB — רעש כבד, skip norm)"
+
+
+def _cmp_analyze_audio(path: str) -> dict:
+    """Quick audio quality metrics (WAV only)."""
+    info = {
+        "duration_s": 0.0, "channels": 1, "sample_rate": 16000,
+        "dynamic_range_db": 25.0, "snr_estimate_db": 40.0,
+        "noise_rms": 0.0, "clipping_count": 0,
+        "noise_level_label": "לא ידוע",
+    }
+    try:
+        import wave, array, math, struct
+        with wave.open(path, "rb") as wf:
+            info["channels"] = wf.getnchannels()
+            info["sample_rate"] = wf.getframerate()
+            frames = wf.readframes(wf.getnframes())
+            info["duration_s"] = wf.getnframes() / wf.getframerate()
+            width = wf.getsampwidth()
+        if width == 2:
+            samples = array.array("h", frames)
+            vals = [abs(s) for s in samples]
+            if not vals:
+                return info
+            peak = max(vals)
+            peak_db = 20 * math.log10(max(peak, 1) / 32768)
+            rms = math.sqrt(sum(s * s for s in samples) / len(samples))
+            rms_db = 20 * math.log10(max(rms, 1) / 32768)
+            n = len(samples) // 10
+            quiet = sorted(vals)[:n]
+            noise_rms = math.sqrt(sum(s * s for s in quiet) / max(len(quiet), 1))
+            noise_db = 20 * math.log10(max(noise_rms, 1) / 32768)
+            dynamic_range = rms_db - noise_db
+            snr = rms_db - noise_db + 20
+            clipping = sum(1 for s in samples if abs(s) >= 32700)
+            info.update({
+                "dynamic_range_db": round(dynamic_range, 1),
+                "snr_estimate_db": round(max(snr, 0), 1),
+                "noise_rms": round(noise_rms / 32768, 4),
+                "clipping_count": clipping,
+            })
+            dr = dynamic_range
+            if dr >= 16:
+                info["noise_level_label"] = "נקי"
+            elif dr >= 14:
+                info["noise_level_label"] = "רעש קל"
+            elif dr >= 10:
+                info["noise_level_label"] = "רעש בינוני"
+            else:
+                info["noise_level_label"] = "רעש כבד"
+    except Exception:
+        pass
+    return info
+
+
+@app.route("/compare/sessions", methods=["GET"])
+def compare_sessions_list():
+    """List saved compare sessions, newest first."""
+    limit = min(int(request.args.get("limit", 50)), 200)
+    with _cmp_db() as conn:
+        rows = conn.execute(
+            "SELECT id, session_id, created_at, audio_filename, duration_s, "
+            "noise_level, recommended_id, user_chosen_id "
+            "FROM sessions ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/compare/sessions/<string:sid>", methods=["GET"])
+def compare_session_get(sid: str):
+    """Get a single compare session with full results."""
+    with _cmp_db() as conn:
+        row = conn.execute("SELECT * FROM sessions WHERE session_id=?", (sid,)).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    d = dict(row)
+    d["results"] = json.loads(d.pop("results_json") or "[]")
+    return jsonify(d)
+
+
+@app.route("/compare/sessions/<string:sid>/feedback", methods=["PATCH"])
+def compare_session_feedback(sid: str):
+    """Save user feedback for a session."""
+    data = request.get_json(force=True) or {}
+    chosen = (data.get("user_chosen_id") or "").strip() or None
+    notes = (data.get("user_notes") or "").strip() or None
+    with _cmp_db() as conn:
+        conn.execute(
+            "UPDATE sessions SET user_chosen_id=?, user_notes=? WHERE session_id=?",
+            (chosen, notes, sid)
+        )
+        conn.commit()
+    return jsonify({"updated": True})
+
+
+@app.route("/compare/run", methods=["POST"])
+def compare_run():
+    """
+    Run all 12 transcription systems on an uploaded audio file.
+    Returns SSE stream: each event is one system result, final event has 'done':true.
+    """
+    import hashlib as _hl
+    import uuid as _uuid
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    audio_file = request.files["file"]
+    suffix = os.path.splitext(audio_file.filename or "audio.wav")[1] or ".wav"
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        audio_file.save(tmp.name)
+        tmp_path = tmp.name
+
+    orig_filename = audio_file.filename or "audio"
+
+    def _sse_stream():
+        import hashlib as _hm
+        import subprocess, wave, math, array
+
+        denoise_path = None
+        norm_path = None
+        try:
+            # Hash for session id
+            h = _hm.sha256()
+            with open(tmp_path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+            audio_hash = h.hexdigest()[:16]
+            session_id = f"cmp_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{audio_hash[:6]}"
+
+            # Audio analysis
+            audio_info = _cmp_analyze_audio(tmp_path)
+            audio_info["filename"] = orig_filename
+
+            # Convert non-wav to wav for analysis
+            work_path = tmp_path
+            if not suffix.lower().endswith(".wav"):
+                wav_out = tmp_path + "_base.wav"
+                try:
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-i", tmp_path, "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le", wav_out],
+                        capture_output=True, timeout=60
+                    )
+                    if os.path.exists(wav_out):
+                        work_path = wav_out
+                        audio_info = _cmp_analyze_audio(wav_out)
+                        audio_info["filename"] = orig_filename
+                except Exception:
+                    pass
+
+            # Pre-normalize
+            norm_path = _normalize_audio(work_path)
+
+            # Pre-denoise (aggressive ffmpeg afftdn)
+            denoise_path = work_path + "_dn.wav"
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", work_path,
+                     "-af", "highpass=f=80,lowpass=f=8000,afftdn=nf=-30,loudnorm=I=-16:TP=-1.5:LRA=11",
+                     "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le", denoise_path],
+                    capture_output=True, timeout=60
+                )
+                if not os.path.exists(denoise_path):
+                    denoise_path = work_path
+            except Exception:
+                denoise_path = work_path
+
+            # Recommendation
+            recommended_id, rec_reason = _cmp_recommend(
+                audio_info["dynamic_range_db"], audio_info["snr_estimate_db"]
+            )
+
+            # Emit audio_info event
+            yield f"data: {json.dumps({'type':'audio_info','audio_info':audio_info,'session_id':session_id,'recommended_id':recommended_id,'rec_reason':rec_reason,'total':len(_CMP_SYSTEMS)}, ensure_ascii=False)}\n\n"
+
+            model = load_model(_current_model_id or DEFAULT_MODEL)
+            results = []
+
+            for idx, (sid_sys, label, beam, cond_prev, vad_agg, compute, do_norm, do_denoise) in enumerate(_CMP_SYSTEMS):
+                t0 = time.time()
+                try:
+                    audio_for_sys = (norm_path if do_norm else work_path) if not do_denoise else denoise_path
+                    if do_denoise and do_norm:
+                        # denoise already applied; now apply loudnorm on top
+                        audio_for_sys = denoise_path
+
+                    from faster_whisper import BatchedInferencePipeline
+                    pipeline = BatchedInferencePipeline(model=model)
+                    segs_iter, info = pipeline.transcribe(
+                        audio_for_sys,
+                        language="he",
+                        beam_size=beam,
+                        batch_size=auto_batch_size(),
+                        condition_on_previous_text=cond_prev,
+                        word_timestamps=True,
+                    )
+                    words = []
+                    text_parts = []
+                    for seg in segs_iter:
+                        text_parts.append(seg.text.strip())
+                        if seg.words:
+                            for w in seg.words:
+                                words.append({
+                                    "word": w.word.strip(),
+                                    "prob": round(float(w.probability), 3),
+                                })
+                    full_text = " ".join(text_parts)
+                    elapsed = round(time.time() - t0, 2)
+                    word_count = len(full_text.split()) if full_text else 0
+                    avg_prob = round(sum(w["prob"] for w in words) / max(len(words), 1), 3)
+
+                    result = {
+                        "id": sid_sys, "label": label, "beam": beam,
+                        "normalize": do_norm, "denoise": do_denoise,
+                        "text": full_text, "word_count": word_count,
+                        "elapsed_s": elapsed, "avg_prob": avg_prob,
+                        "words": words, "error": None,
+                    }
+                except Exception as e:
+                    elapsed = round(time.time() - t0, 2)
+                    result = {
+                        "id": sid_sys, "label": label, "beam": beam,
+                        "normalize": do_norm, "denoise": do_denoise,
+                        "text": "", "word_count": 0, "elapsed_s": elapsed,
+                        "avg_prob": 0, "words": [], "error": str(e)[:200],
+                    }
+
+                results.append(result)
+                event_data = {"type": "result", "index": idx, "total": len(_CMP_SYSTEMS), "result": result}
+                yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+            # Save session
+            with _cmp_db() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO sessions "
+                    "(session_id, created_at, audio_hash, audio_filename, duration_s, channels, "
+                    "sample_rate, dynamic_range_db, snr_estimate_db, noise_rms, noise_level, "
+                    "results_json, recommended_id) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        session_id,
+                        datetime.now(timezone.utc).isoformat(),
+                        audio_hash,
+                        orig_filename,
+                        audio_info["duration_s"],
+                        audio_info["channels"],
+                        audio_info["sample_rate"],
+                        audio_info["dynamic_range_db"],
+                        audio_info["snr_estimate_db"],
+                        audio_info["noise_rms"],
+                        audio_info["noise_level_label"],
+                        json.dumps(results, ensure_ascii=False),
+                        recommended_id,
+                    )
+                )
+                conn.commit()
+
+            done_event = {
+                "type": "done",
+                "session_id": session_id,
+                "recommended_id": recommended_id,
+                "rec_reason": rec_reason,
+                "audio_info": audio_info,
+                "results": results,
+            }
+            yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type':'error','error':str(e)[:400]}, ensure_ascii=False)}\n\n"
+        finally:
+            for p in [tmp_path, denoise_path, norm_path]:
+                if p and p != tmp_path and os.path.exists(p):
+                    try:
+                        os.unlink(p)
+                    except Exception:
+                        pass
+            if os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+    return Response(
+        _sse_stream(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── Benchmark stats ───────────────────────────────────────────────────────────
+@app.route("/lk/benchmark/stats", methods=["GET"])
+def lk_benchmark_stats():
+    """Aggregate personal benchmark statistics."""
+    import statistics as _st
+
+    with _lk_db() as conn:
+        sessions = conn.execute(
+            "SELECT session_id, audio_filename, raw_text, corrected_text, words_fixed, created_at "
+            "FROM lk_sessions ORDER BY created_at DESC LIMIT 100"
+        ).fetchall()
+        dict_entries = conn.execute(
+            "SELECT spoken_form, correct_form, count_applied, source "
+            "FROM lk_dictionary ORDER BY count_applied DESC LIMIT 20"
+        ).fetchall()
+        rules = conn.execute(
+            "SELECT id, name, enabled FROM lk_grammar_rules"
+        ).fetchall()
+
+    total_sessions = len(sessions)
+    total_words_fixed = sum(s["words_fixed"] for s in sessions)
+    enabled_rules = sum(1 for r in rules if r["enabled"])
+
+    session_data = []
+    for s in sessions[:30]:
+        raw_words = len((s["raw_text"] or "").split()) if s["raw_text"] else 0
+        wf = s["words_fixed"] or 0
+        session_data.append({
+            "date": (s["created_at"] or "")[:16],
+            "filename": s["audio_filename"] or "",
+            "words_fixed": wf,
+            "word_count": raw_words,
+            "correction_rate": round(wf / max(raw_words, 1) * 100, 1),
+        })
+
+    top_corrections = [
+        {"spoken": e["spoken_form"], "correct": e["correct_form"],
+         "count": e["count_applied"], "source": e["source"]}
+        for e in dict_entries if (e["count_applied"] or 0) > 0
+    ]
+
+    # Trend: compare last 5 sessions vs prior 5
+    recent = [s["words_fixed"] for s in sessions[:5]]
+    older = [s["words_fixed"] for s in sessions[5:10]]
+    if recent and older:
+        r_avg = _st.mean(recent)
+        o_avg = _st.mean(older)
+        if r_avg > o_avg * 1.1:
+            trend, trend_label = "improving", "מגמת שיפור 📈"
+        elif r_avg < o_avg * 0.9:
+            trend, trend_label = "declining", "מגמת ירידה 📉"
+        else:
+            trend, trend_label = "stable", "יציב 📊"
+    else:
+        trend, trend_label = "unknown", "אין מספיק נתונים"
+
+    return jsonify({
+        "total_sessions": total_sessions,
+        "total_words_fixed": total_words_fixed,
+        "total_dict_entries": len(dict_entries),
+        "enabled_rules": enabled_rules,
+        "top_corrections": top_corrections,
+        "sessions": session_data,
+        "trend": trend,
+        "trend_label": trend_label,
+    })
+
+
+# ── Benchmark run ─────────────────────────────────────────────────────────────
+@app.route("/lk/benchmark/run", methods=["POST"])
+def lk_benchmark_run():
+    """
+    Full benchmark analysis of an audio file.
+    Returns per-word confidence, pronunciation score, rules fired, and personalised feedback.
+    """
+    import statistics as _st
+    import re as _re
+    import uuid as _uuid
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    audio_file = request.files["file"]
+    beam_size = int(request.form.get("beam_size", 5))
+
+    suffix = os.path.splitext(audio_file.filename or "audio.wav")[1] or ".wav"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        audio_file.save(tmp.name)
+        tmp_path = tmp.name
+
+    try:
+        t0 = time.time()
+        model = load_model(_current_model_id or DEFAULT_MODEL)
+
+        segments_iter, info = model.transcribe(
+            tmp_path,
+            beam_size=beam_size,
+            language="he",
+            word_timestamps=True,
+            initial_prompt=LOSHON_KODESH_PROMPT,
+            hotwords=",".join(LOSHON_KODESH_HOTWORDS[:20]) if LOSHON_KODESH_HOTWORDS else None,
+            condition_on_previous_text=False,
+            no_speech_threshold=0.6,
+            compression_ratio_threshold=2.4,
+            repetition_penalty=1.3,
+            log_prob_threshold=-1.0,
+        )
+
+        word_timings = []
+        for seg in segments_iter:
+            if hasattr(seg, "words") and seg.words:
+                for w in seg.words:
+                    word_timings.append({
+                        "word": w.word.strip(),
+                        "start": round(w.start, 2),
+                        "end": round(w.end, 2),
+                        "probability": round(float(w.probability), 3),
+                    })
+
+        raw_text = " ".join(wt["word"] for wt in word_timings if wt["word"])
+        duration = float(info.duration or 0)
+        processing_time = round(time.time() - t0, 2)
+
+        corrected_text, words_fixed = _lk_apply_postprocessing(raw_text)
+
+        # Detect which rules fired
+        rules_fired = []
+        with _lk_db() as conn:
+            rules = conn.execute(
+                "SELECT name, pattern FROM lk_grammar_rules WHERE enabled=1 ORDER BY priority DESC"
+            ).fetchall()
+            for r in rules:
+                try:
+                    if _re.search(r["pattern"], raw_text):
+                        rules_fired.append(r["name"])
+                except Exception:
+                    pass
+            dict_ents = conn.execute(
+                "SELECT spoken_form, correct_form FROM lk_dictionary"
+            ).fetchall()
+            for e in dict_ents:
+                if e["spoken_form"].lower() in raw_text.lower():
+                    rules_fired.append(f"מילון: {e['spoken_form']} → {e['correct_form']}")
+
+        # Scores
+        probs = [wt["probability"] for wt in word_timings if wt["probability"] > 0]
+        avg_prob = _st.mean(probs) if probs else 0.0
+        total_words = len(word_timings) or 1
+        pronunciation_score = round(avg_prob * 100, 1)
+        rtf = round(processing_time / max(duration, 0.1), 3)
+
+        # Grade
+        if pronunciation_score >= 88:
+            grade, grade_color = "מצוין 🏆", "green"
+        elif pronunciation_score >= 74:
+            grade, grade_color = "טוב 👍", "blue"
+        elif pronunciation_score >= 60:
+            grade, grade_color = "בסדר 📚", "amber"
+        else:
+            grade, grade_color = "צריך שיפור 💪", "red"
+
+        weak_words = [wt["word"] for wt in word_timings if wt["probability"] < 0.65 and len(wt["word"]) > 1][:10]
+        strong_words = [wt["word"] for wt in word_timings if wt["probability"] > 0.9 and len(wt["word"]) > 1]
+        strong_pct = round(len(strong_words) / total_words * 100)
+
+        if pronunciation_score >= 88:
+            feedback = f"הגייה ברמה גבוהה מאוד! Whisper זיהה {strong_pct}% מהמילים ברמת ביטחון גבוהה."
+        elif pronunciation_score >= 74:
+            feedback = f"הגייה טובה. {strong_pct}% מהמילים זוהו בביטחון גבוה. {len(weak_words)} מילים צריכות חיזוק."
+        elif pronunciation_score >= 60:
+            feedback = f"הגייה ממוצעת. מומלץ לאמן את המילים: {', '.join(weak_words[:5]) if weak_words else '—'}."
+        else:
+            feedback = f"קצב דיבור מהיר מדי, רעש רקע, או הגייה לא מוכרת. {len(weak_words)} מילים ברמת ביטחון נמוכה."
+
+        tips = []
+        if weak_words:
+            tips.append(f"תרגל את המילים: {', '.join(weak_words[:5])}")
+        if words_fixed > 0:
+            tips.append(f"המערכת תיקנה {words_fixed} מילים — עיין בטאב מילון")
+        if rtf > 0.5:
+            tips.append("שקול שימוש במיקרופון איכותי לשיפור הדיוק")
+        if not tips:
+            tips.append("כל הכבוד! המשך לשמור על הגייה נקייה וברורה")
+
+        # Save to sessions
+        session_id = str(_uuid.uuid4())[:8]
+        with _lk_db() as conn:
+            conn.execute(
+                "INSERT INTO lk_sessions (session_id, audio_filename, raw_text, corrected_text, words_fixed) "
+                "VALUES (?,?,?,?,?)",
+                (session_id, audio_file.filename or "benchmark", raw_text, corrected_text, words_fixed),
+            )
+            conn.commit()
+
+        return jsonify({
+            "session_id": session_id,
+            "raw_text": raw_text,
+            "corrected_text": corrected_text,
+            "words_fixed": words_fixed,
+            "word_timings": word_timings,
+            "duration": round(duration, 2),
+            "processing_time": processing_time,
+            "rtf": rtf,
+            "total_words": total_words,
+            "pronunciation_score": pronunciation_score,
+            "avg_probability": round(avg_prob, 3),
+            "grade": grade,
+            "grade_color": grade_color,
+            "weak_words": weak_words,
+            "strong_pct": strong_pct,
+            "rules_fired": rules_fired,
+            "feedback": feedback,
+            "tips": tips,
+        })
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

@@ -9,11 +9,23 @@
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#1a3a6b" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="תמלול" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180.png" />
     <link rel="apple-touch-icon" sizes="512x512" href="/pwa-512.png" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700&family=Rubik:wght@400;500;700&family=Heebo:wght@400;500;700&family=Frank+Ruhl+Libre:wght@400;500;700&subset=hebrew,latin&display=swap" />
+    <!-- Inline critical above-fold styles to prevent FOUC (flash of unstyled content) -->
+    <style>
+      :root { --background: 0 0% 100%; --foreground: 222.2 84% 4.9%; }
+      @media (prefers-color-scheme: dark) { :root { --background: 222.2 84% 4.9%; --foreground: 210 40% 98%; } }
+      body { margin: 0; background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: 'Assistant', 'Heebo', system-ui, sans-serif; }
+      #root { min-height: 100vh; }
+      /* Skeleton loader for initial paint */
+      .app-boot-skeleton { display:flex; align-items:center; justify-content:center; min-height:100vh; }
+      .app-boot-spinner { width:2rem; height:2rem; border:3px solid #e5e7eb; border-top-color:#3b82f6; border-radius:50%; animation:spin .7s linear infinite; }
+      @keyframes spin { to { transform:rotate(360deg); } }
+    </style>
 
     
     
@@ -32,7 +44,25 @@
 
   <body>
     <noscript><p style="text-align:center;padding:2rem;font-family:sans-serif">אפליקציה זו דורשת JavaScript לפעולה תקינה.</p></noscript>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Instant skeleton shown before React boots — removed once React mounts -->
+      <div class="app-boot-skeleton" id="boot-skeleton">
+        <div class="app-boot-spinner"></div>
+      </div>
+    </div>
+    <script>
+      // Remove boot skeleton once React takes over
+      document.addEventListener('DOMContentLoaded', () => {
+        const obs = new MutationObserver(() => {
+          const sk = document.getElementById('boot-skeleton');
+          if (sk && sk.parentElement && sk.parentElement.children.length > 1) {
+            sk.remove(); obs.disconnect();
+          }
+        });
+        const root = document.getElementById('root');
+        if (root) obs.observe(root, { childList: true });
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {

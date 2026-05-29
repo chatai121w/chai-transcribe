@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>דוח תמלול — hard_clean.wav</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0;
+         background: #f5f7fa; color: #222; direction: rtl; }
+  .header { background: linear-gradient(135deg,#1a1a2e,#16213e);
+             color: #fff; padding: 28px 40px; }
+  .header h1 { margin: 0 0 6px; font-size: 22px; }
+  .header .sub { color: #aaa; font-size: 13px; }
+  .container { max-width: 960px; margin: 0 auto; padding: 30px 20px; }
+  .panel { background: #fff; border-radius: 12px; padding: 20px 24px;
+            box-shadow: 0 2px 12px rgba(0,0,0,.08); margin-bottom: 24px; }
+  .panel h2 { margin: 0 0 16px; font-size: 16px; color: #555;
+               border-bottom: 2px solid #f0f0f0; padding-bottom: 8px; }
+  .info-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr));
+                gap: 12px; }
+  .info-cell { background: #f8f9fa; border-radius: 8px; padding: 12px;
+                text-align: center; }
+  .info-cell .val { font-size: 22px; font-weight: bold; color: #2c3e50; }
+  .info-cell .lbl { font-size: 12px; color: #888; margin-top: 2px; }
+  .rec-box { background: linear-gradient(135deg,#0f3460,#16213e);
+              color: #fff; border-radius: 12px; padding: 20px 24px;
+              margin-bottom: 24px; }
+  .rec-box h2 { margin: 0 0 8px; font-size: 16px; color: #a0c4ff; }
+  .rec-box .rec-name { font-size: 22px; font-weight: bold; }
+  .rec-box .rec-reason { color: #ccc; font-size: 13px; margin-top: 6px; }
+  .feedback { background: #fff; border-radius: 12px; padding: 20px 24px;
+               box-shadow: 0 2px 12px rgba(0,0,0,.08); margin-bottom: 24px;
+               border-right: 4px solid #3498db; }
+  .badge { display:inline-block; background:#e8f4fd; color:#2980b9;
+            border-radius:6px; padding:2px 8px; font-size:12px; margin:2px; }
+  @media(max-width:600px) { .container { padding:16px 10px; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🎙 דוח השוואת תמלול</h1>
+  <div class="sub">
+    hard_clean.wav &nbsp;·&nbsp;
+    01/05/2026 11:50 &nbsp;·&nbsp;
+    Session: 20260501
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Audio Analysis -->
+  <div class="panel">
+    <h2>🔍 ניתוח הקלטה</h2>
+    <div class="info-grid">
+      <div class="info-cell">
+        <div class="val">0:24</div>
+        <div class="lbl">משך</div>
+      </div>
+      <div class="info-cell">
+        <div class="val">מונו</div>
+        <div class="lbl">ערוצים</div>
+      </div>
+      <div class="info-cell">
+        <div class="val">16kHz</div>
+        <div class="lbl">קצב דגימה</div>
+      </div>
+      <div class="info-cell">
+        <div class="val">16bit</div>
+        <div class="lbl">עומק סיביות</div>
+      </div>
+      <div class="info-cell">
+        <div class="val">16.1dB</div>
+        <div class="lbl">טווח דינמי</div>
+      </div>
+      <div class="info-cell">
+        <div class="val">40.0dB</div>
+        <div class="lbl">יחס אות/רעש (SNR)</div>
+      </div>
+      <div class="info-cell">
+        <div class="val" style="color:#2ecc71">נקי</div>
+        <div class="lbl">רמת רעש</div>
+      </div>
+      <div class="info-cell">
+        <div class="val" style="color:#2ecc71">
+          ✓ תקין
+        </div>
+        <div class="lbl">רמת שיא (-4.5dB)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recommendation -->
+  <div class="rec-box">
+    <h2>💡 המלצת המערכת</h2>
+    <div class="rec-name">⚡ Fast · norm</div>
+    <div class="rec-reason">חוקים (dynamic range=16.1dB, נקי)</div>
+  </div>
+
+  <!-- Feedback note -->
+  <div class="feedback">
+    <strong>📋 משוב</strong> — לאחר עיון בתוצאות, חזור לחלון הטרמינל ובחר את המספר של התמלול הטוב ביותר.
+    המשוב שלך ישפר את ההמלצות העתידיות.
+  </div>
+
+  <!-- Results -->
+  <div class="panel">
+    <h2>📊 תוצאות 12 המערכות</h2>
+    
+        <div style="border:2px solid #2ecc71;border-radius:10px;padding:16px;background:#f0fff4;margin-bottom:14px" id="sys-1">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              <span style="background:#2ecc71;color:#fff;padding:2px 8px;border-radius:10px;font-size:12px;margin-right:6px">✨ מומלץ</span>
+              <strong style="font-size:15px">1. ⚡ Fast · norm</strong>
+              &nbsp;<span style="background:#3498db;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">norm</span>
+            </div>
+            <div style="color:#888;font-size:13px">⏱ 1.0s &nbsp; 📝 43 מילים</div>
+          </div>
+          <div dir="rtl" style="font-size:15px;line-height:1.7;color:#222;background:#fafafa;padding:10px;border-radius:6px;border-right:3px solid #2ecc71">
+            הממשלה הכריזה על מדיניות כלכלית חדשה שתשפיע ישירות על ביטוח הבריאות הלאומי ועל מערכת החינוך. מוסדות הפיתוח הטכנולוגי יקבלו השקעה משמעותית לבניית תשתיות דיגיטליות ברחבי הארץ. הוועדה לניהול משאבי המדינה דנה באחריות כל משרד ממשלתי. מגמת הצמיחה השנתית מראה שיפור ניכר בכלכלה הלאומית.
+          </div>
+        </div>
+        <div style="border:2px solid #ddd;border-radius:10px;padding:16px;background:#fff;margin-bottom:14px" id="sys-2">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              
+              <strong style="font-size:15px">2. ⚡ Fast · raw</strong>
+              &nbsp;<span style="background:#95a5a6;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">raw</span>
+            </div>
+            <div style="color:#888;font-size:13px">⏱ 0.8s &nbsp; 📝 43 מילים</div>
+          </div>
+          <div dir="rtl" style="font-size:15px;line-height:1.7;color:#222;background:#fafafa;padding:10px;border-radius:6px;border-right:3px solid #ddd">
+            הממשלה הכריזה על מדיניות כלכלית חדשה שתשפיע ישירות על ביטוח הבריאות הלאומי ועל מערכת החינוך. מוסדות הפיתוח הטכנולוגי יקבלו השקעה משמעותית לבניית תשתיות דיגיטליות ברחבי הארץ. הוועדה לניהול משאבי המדינה דנה באחריות כל משרד ממשלתי. מגמת הצמיחה השנתית מראה שיפור ניכר בכלכלה הלאומית.
+          </div>
+        </div>
+        <div style="border:2px solid #ddd;border-radius:10px;padding:16px;background:#fff;margin-bottom:14px" id="sys-3">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              
+              <strong style="font-size:15px">3. ⚖ Balanced · norm</strong>
+              &nbsp;<span style="background:#3498db;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">norm</span>
+            </div>
+            <div style="color:#888;font-size:13px">⏱ 0.9s &nbsp; 📝 43 מילים</div>
+          </div>
+          <div dir="rtl" style="font-size:15px;line-height:1.7;color:#222;background:#fafafa;padding:10px;border-radius:6px;border-right:3px solid #ddd">
+            הממשלה הכריזה על מדיניות כלכלית חדשה שתשפיע ישירות על ביטוח הבריאות הלאומי ועל מערכת החינוך. מוסדות הפיתוח הטכנולוגי יקבלו השקעה משמעותית לבניית תשתיות דיגיטליות ברחבי הארץ. הוועדה לניהול משאבי המדינה דנה באחריות כל משרד ממשלתי. מגמת הצמיחה השנתית מראה שיפור ניכר בכלכלה הלאומית.
+          </div>
+        </div>
+        <div style="border:2px solid #ddd;border-radius:10px;padding:16px;background:#fff;margin-bottom:14px" id="sys-4">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              
+              <strong style="font-size:15px">4. ⚖ Balanced · raw</strong>
+              &nbsp;<span style="background:#95a5a6;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">raw</span>
+            </div>
+            <div style="color:#888;font-size:13px">⏱ 0.9s &nbsp; 📝 43 מילים</div>
+          </div>
+          <div dir="rtl" style="font-size:15px;line-height:1.7;color:#222;background:#fafafa;padding:10px;border-radius:6px;border-right:3px solid #ddd">
+            הממשלה הכריזה על מדיניות כלכלית חדשה שתשפיע ישירות על ביטוח הבריאות הלאומי ועל מערכת החינוך. מוסדות הפיתוח הטכנולוגי יקבלו השקעה משמעותית לבניית תשתיות דיגיטליות ברחבי הארץ. הוועדה לניהול משאבי המדינה דנה באחריות כל משרד ממשלתי. מגמת הצמיחה השנתית מראה שיפור ניכר בכלכלה הלאומית.
+          </div>
+        </div>
+        <div style="border:2px solid #ddd;border-radius:10px;padding:16px;background:#fff;margin-bottom:14px" id="sys-5">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              
+              <strong style="font-size:15px">5. 🎯 Accurate · norm</strong>
+              &nbsp;<span style="background:#3498db;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">norm</span>
+            </div>
+            <div style="color:#888;font-size:13px">⏱ 3.4s &nbsp; 📝 43 מילים</div>
+          </div>
+          <div dir="rtl" style="font-size:15px;line-height:1.7;color:#222;background:#fafafa;padding:10px;border-radius:6px;border-right:3px solid #ddd">
+            הממשלה הכריזה על מדיניות כלכלית חדשה שתשפיע ישירות על ביטוח הבריאות הלאומי ועל מערכת החינוך. מוסדות הפיתוח הטכנולוגי יקבלו השקעה משמעותית לבניית תשתיות דיגיטליות ברחבי הארץ. הוועדה לניהול משאבי המדינה דנה באחריות כל משרד ממשלתי. מגמת הצמיחה השנתית מראה שיפור ניכר בכלכלה הלאומית.
+          </div>
+        </div>
+        <div style="border:2px solid #ddd;border-radius:10px;padding:16px;background:#fff;margin-bottom:14px" id="sys-6">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              
+              <strong style="font-size:15px">6. 🎯 Accurate · raw</strong>
+              &nbsp;<span style="background:#95a5a6;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">raw</span>
+            </div>
+            <div style="color:#888;font-size:13px">⏱ 1.1s &nbsp; 📝 43 מילים</div>
+          </div>
+          <div dir="rtl" style="font-size:15px;line-height:1.7;color:#222;background:#fafafa;padding:10px;border-radius:6px;border-right:3px solid #ddd">
+            הממשלה הכריזה על מדיניות כלכלית חדשה שתשפיע ישירות על ביטוח הבריאות הלאומי ועל מערכת החינוך. מוסדות הפיתוח הטכנולוגי יקבלו השקעה משמעותית לבניית תשתיות דיגיטליות ברחבי הארץ. הוועדה לניהול משאבי המדינה דנה באחריות כל משרד ממשלתי. מגמת הצמיחה השנתית מראה שיפור ניכר בכלכלה הלאומית.
+          </div>
+        </div>
+        <div style="border:2px solid #ddd;border-radius:10px;padding:16px;background:#fff;margin-bottom:14px" id="sys-7">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              
+              <strong style="font-size:15px">7. B3 · norm</strong>
+              &nbsp;<span style="background:#3498db;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">norm</span>
+            </div>
+            <div style="color:#888;font-size:13px">⏱ 1.3s &nbsp; 📝 43 מילים</div>
+          </div>
+          <div dir="rtl" style="font-size:15px;line-height:1.7;color:#222;background:#fafafa;padding:10px;border-radius:6px;border-right:3px solid #ddd">
+            הממשלה הכריזה על מדיניות כלכלית חדשה שתשפיע ישירות על ביטוח הבריאות הלאומי ועל מערכת החינוך. מוסדות הפיתוח הטכנולוגי יקבלו השקעה משמעותית לבניית תשתיות דיגיטליות ברחבי הארץ. הוועדה לניהול משאבי המדינה דנה באחריות כל משרד ממשלתי. מגמת הצמיחה השנתית מראה שיפור ניכר בכלכלה הלאומית.
+          </div>
+        </div>
+        <div style="border:2px solid #ddd;border-radius:10px;padding:16px;background:#fff;margin-bottom:14px" id="sys-8">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              
+              <strong style="font-size:15px">8. B3 · raw</strong>
+              &nbsp;<span style="background:#95a5a6;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">raw</span>
+            </div>
+            <div style="color:#888;font-size:13px">⏱ 0.8s &nbsp; 📝 43 מילים</div>
+          </div>
+          <div dir="rtl" style="font-size:15px;line-height:1.7;color:#222;background:#fafafa;padding:10px;border-radius:6px;border-right:3px solid #ddd">
+            הממשלה הכריזה על מדיניות כלכלית חדשה שתשפיע ישירות על ביטוח הבריאות הלאומי ועל מערכת החינוך. מוסדות הפיתוח הטכנולוגי יקבלו השקעה משמעותית לבניית תשתיות דיגיטליות ברחבי הארץ. הוועדה לניהול משאבי המדינה דנה באחריות כל משרד ממשלתי. מגמת הצמיחה השנתית מראה שיפור ניכר בכלכלה הלאומית.
+          </div>
+        </div>
+        <div style="border:2px solid #ddd;border-radius:10px;padding:16px;background:#fff;margin-bottom:14px" id="sys-9">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              
+              <strong style="font-size:15px">9. B5 · norm</strong>
+              &nbsp;<span style="background:#3498db;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">norm</span>
+            </div>
+            <div style="color:#888;font-size:13px">⏱ 0.0s &nbsp; 📝 43 מילים</div>
+          </div>
+          <div dir="rtl" style="font-size:15px;line-height:1.7;color:#222;background:#fafafa;padding:10px;border-radius:6px;border-right:3px solid #ddd">
+            הממשלה הכריזה על מדיניות כלכלית חדשה שתשפיע ישירות על ביטוח הבריאות הלאומי ועל מערכת החינוך. מוסדות הפיתוח הטכנולוגי יקבלו השקעה משמעותית לבניית תשתיות דיגיטליות ברחבי הארץ. הוועדה לניהול משאבי המדינה דנה באחריות כל משרד ממשלתי. מגמת הצמיחה השנתית מראה שיפור ניכר בכלכלה הלאומית.
+          </div>
+        </div>
+        <div style="border:2px solid #ddd;border-radius:10px;padding:16px;background:#fff;margin-bottom:14px" id="sys-10">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              
+              <strong style="font-size:15px">10. B5 · raw</strong>
+              &nbsp;<span style="background:#95a5a6;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">raw</span>
+            </div>
+            <div style="color:#888;font-size:13px">⏱ 0.8s &nbsp; 📝 43 מילים</div>
+          </div>
+          <div dir="rtl" style="font-size:15px;line-height:1.7;color:#222;background:#fafafa;padding:10px;border-radius:6px;border-right:3px solid #ddd">
+            הממשלה הכריזה על מדיניות כלכלית חדשה שתשפיע ישירות על ביטוח הבריאות הלאומי ועל מערכת החינוך. מוסדות הפיתוח הטכנולוגי יקבלו השקעה משמעותית לבניית תשתיות דיגיטליות ברחבי הארץ. הוועדה לניהול משאבי המדינה דנה באחריות כל משרד ממשלתי. מגמת הצמיחה השנתית מראה שיפור ניכר בכלכלה הלאומית.
+          </div>
+        </div>
+        <div style="border:2px solid #ddd;border-radius:10px;padding:16px;background:#fff;margin-bottom:14px" id="sys-11">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              
+              <strong style="font-size:15px">11. B5 + denoise · norm</strong>
+              &nbsp;<span style="background:#3498db;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">norm</span><span style="background:#9b59b6;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">denoise</span>
+            </div>
+            <div style="color:#888;font-size:13px">⏱ 2.0s &nbsp; 📝 36 מילים</div>
+          </div>
+          <div dir="rtl" style="font-size:15px;line-height:1.7;color:#222;background:#fafafa;padding:10px;border-radius:6px;border-right:3px solid #ddd">
+            הממשלה הכריזה על מדיניות כלכלית חדשה שתשפיע ישירות על ביטוח הבריאות הלאומי ועל מערכת החינוך. מוסדות הפיתוח הטכנולוגי יקבלו השקעה משמעותית תשתיות דיגיטליות. הוועדה לנקבי המדינה דנה באחריות כל משרד ממשלתי, השנתית מראה שיפור עיקר בכלכלה.
+          </div>
+        </div>
+        <div style="border:2px solid #ddd;border-radius:10px;padding:16px;background:#fff;margin-bottom:14px" id="sys-12">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              
+              <strong style="font-size:15px">12. B5 + denoise · raw</strong>
+              &nbsp;<span style="background:#95a5a6;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">raw</span><span style="background:#9b59b6;color:#fff;padding:1px 6px;border-radius:8px;font-size:11px">denoise</span>
+            </div>
+            <div style="color:#888;font-size:13px">⏱ 1.0s &nbsp; 📝 43 מילים</div>
+          </div>
+          <div dir="rtl" style="font-size:15px;line-height:1.7;color:#222;background:#fafafa;padding:10px;border-radius:6px;border-right:3px solid #ddd">
+            הממשלה הכריזה על מדיניות כלכלית חדשה שתשפיע ישירות על ביטוח הבריאות הלאומי ועל מערכת החינוך. מוסדות הפיתוח הטכנולוגי יקבלו השקעה משמעותית לבניית תשתיות דיגיטליות ברחבי הארץ. הוועדה לניהול משאבי המדינה דנה באחריות כל משרד ממשלתי. מגמת הצמיחה השנתית מראה שיפור ניכר בכלכלה הלאומית.
+          </div>
+        </div>
+  </div>
+
+</div>
+
+<script>
+  // Highlight anchor on click
+  document.querySelectorAll('[id^=sys-]').forEach(el => {
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', () => {
+      document.querySelectorAll('[id^=sys-]').forEach(e => e.style.outline = '');
+      el.style.outline = '3px solid #3498db';
+    });
+  });
+</script>
+</body>
+</html>

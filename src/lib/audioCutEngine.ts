@@ -13,7 +13,10 @@
  *  - IndexedDB persistence: cut results survive page refresh
  *  - Real-time progress + callback system
  *  - Lazy audio decoding: decode once, cut many times
+ *  - WAV encoding off-loaded to Web Worker (wavEncoder.worker.ts)
  */
+
+import { encodeWavInWorker } from "./wavEncoderWorker";
 
 export type CutMode = "manual" | "time" | "count";
 
@@ -292,24 +295,12 @@ export function generateSegments(
 
 // ─── WAV encoding (same as audioSegment but self-contained) ──────────────────
 
-function encodeSegmentWav(
-  buffer: AudioBuffer,
-  startSample: number,
-  sampleLength: number,
+function encodeSegmentWavSync(
+  monoData: Float32Array,
+  sampleRate: number,
 ): ArrayBuffer {
-  const channels = buffer.numberOfChannels;
-  const sampleRate = buffer.sampleRate;
-  const monoData = new Float32Array(sampleLength);
-
-  for (let ch = 0; ch < channels; ch++) {
-    const channelData = buffer.getChannelData(ch);
-    for (let i = 0; i < sampleLength; i++) {
-      monoData[i] += channelData[startSample + i] / channels;
-    }
-  }
-
-  const pcm = new Int16Array(sampleLength);
-  for (let i = 0; i < sampleLength; i++) {
+  const pcm = new Int16Array(monoData.length);
+  for (let i = 0; i < monoData.length; i++) {
     const sample = Math.max(-1, Math.min(1, monoData[i]));
     pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
   }
@@ -348,21 +339,38 @@ function formatSecTag(sec: number): string {
   return `${m.toString().padStart(2, "0")}m${s.toString().padStart(2, "0")}s`;
 }
 
-// ─── Single segment extraction ───────────────────────────────────────────────
+// ── Single segment extraction (async — WAV encoding runs in worker) ────────────────────
 
-function extractSingleSegment(
+async function extractSingleSegment(
   audioBuffer: AudioBuffer,
   segment: CutSegment,
   baseName: string,
-): File {
+): Promise<File> {
   const sr = audioBuffer.sampleRate;
   const startSample = Math.floor(segment.startSec * sr);
   const endSample = Math.min(Math.floor(segment.endSec * sr), audioBuffer.length);
   const sampleLength = Math.max(1, endSample - startSample);
 
-  const wavBuffer = encodeSegmentWav(audioBuffer, startSample, sampleLength);
-  const fileName = `${baseName}-${formatSecTag(segment.startSec)}-${formatSecTag(segment.endSec)}.wav`;
+  // Mix down all channels to mono on main thread (cheap memory copy)
+  const monoData = new Float32Array(sampleLength);
+  const channels = audioBuffer.numberOfChannels;
+  for (let ch = 0; ch < channels; ch++) {
+    const chData = audioBuffer.getChannelData(ch);
+    for (let i = 0; i < sampleLength; i++) {
+      monoData[i] += chData[startSample + i] / channels;
+    }
+  }
 
+  // WAV encoding runs in worker thread (transfers monoData — zero-copy)
+  let wavBuffer: ArrayBuffer;
+  try {
+    wavBuffer = await encodeWavInWorker(monoData, sr);
+  } catch {
+    // Fallback: encode synchronously on main thread
+    wavBuffer = encodeSegmentWavSync(monoData, sr);
+  }
+
+  const fileName = `${baseName}-${formatSecTag(segment.startSec)}-${formatSecTag(segment.endSec)}.wav`;
   return new File([wavBuffer], fileName, { type: "audio/wav" });
 }
 
@@ -380,9 +388,7 @@ async function processSegmentsBatch(
   async function worker() {
     while (nextIdx < segments.length) {
       const seg = segments[nextIdx++];
-      // Use setTimeout(0) to yield to the main thread between segments
-      await new Promise((r) => setTimeout(r, 0));
-      const file = extractSingleSegment(audioBuffer, seg, baseName);
+      const file = await extractSingleSegment(audioBuffer, seg, baseName);
       const result: CutResult = {
         segmentIndex: seg.index,
         file,

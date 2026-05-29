@@ -60,6 +60,9 @@ const AudioCleanLab = lazyWithLog('AudioCleanLab', () => import("./pages/AudioCl
 const Harmonika = lazyWithLog('Harmonika', () => import("./pages/Harmonika"));
 const MeetingRecorder = lazyWithLog('MeetingRecorder', () => import("./pages/MeetingRecorder"));
 const VoiceCommandAdmin = lazyWithLog('VoiceCommandAdmin', () => import("./pages/VoiceCommandAdmin"));
+const SystemDashboard   = lazyWithLog('SystemDashboard',   () => import("./pages/SystemDashboard"));
+const LashoKodesh       = lazyWithLog('LashoKodesh',       () => import("./pages/LashoKodesh"));
+const CompareReport     = lazyWithLog('CompareReport',     () => import("./pages/CompareReport"));
 
 // Lazy non-critical UI widgets — defer past first paint
 const SmartConsoleLazy = lazy(() => import("./components/SmartConsole").then(m => ({ default: m.SmartConsole })));
@@ -145,40 +148,43 @@ const App = () => {
     return () => debugLog.info('App', '📦 App component unmounted');
   }, []);
 
-  // Prefetch likely routes after idle — eliminates spinner on first navigation
+  // Prefetch likely routes after idle — eliminates spinner on first navigation.
+  // Heavy pages (AudioCleanLab=rnnoise, Index=transformers) are NOT prefetched;
+  // they carry large async chunks and are best loaded on-demand.
   useEffect(() => {
     const w = window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number };
-    const prefetchAll = () => {
-      // High-priority: most visited pages
+
+    // Tier 1 — tiny pages, always useful (4-8 kB each)
+    const prefetchTier1 = () => {
       import("./pages/Dashboard").catch(() => {});
-      import("./pages/Index").catch(() => {});
       import("./pages/Settings").catch(() => {});
-    };
-    const prefetchSecondary = () => {
-      // Lower-priority: prefetch after the primary ones land
-      import("./pages/TextEditor").catch(() => {});
       import("./pages/Folders").catch(() => {});
-      import("./pages/Diarization").catch(() => {});
-      import("./pages/VoiceStudio").catch(() => {});
-      import("./pages/MeetingRecorder").catch(() => {});
-      import("./pages/AudioCleanLab").catch(() => {});
     };
-    const prefetchRare = () => {
+
+    // Tier 2 — medium pages, load after Tier 1
+    const prefetchTier2 = () => {
+      import("./pages/TextEditor").catch(() => {});
+      import("./pages/Diarization").catch(() => {});
+      import("./pages/MeetingRecorder").catch(() => {});
+    };
+
+    // Tier 3 — heavier pages, only load when truly idle.
+    // Index is excluded because it pulls @huggingface/transformers lazily and
+    // prefetching would force that 879 kB chunk to download early.
+    const prefetchTier3 = () => {
       import("./pages/Benchmark").catch(() => {});
       import("./pages/VideoToMp3").catch(() => {});
-      import("./pages/AudacityLab").catch(() => {});
-      import("./pages/Harmonika").catch(() => {});
-      import("./pages/DiarizationComparePage").catch(() => {});
+      import("./pages/VoiceStudio").catch(() => {});
     };
 
     if (typeof w.requestIdleCallback === 'function') {
-      w.requestIdleCallback(prefetchAll, { timeout: 3000 });
-      w.requestIdleCallback(prefetchSecondary, { timeout: 6000 });
-      w.requestIdleCallback(prefetchRare, { timeout: 12000 });
+      w.requestIdleCallback(prefetchTier1, { timeout: 3000 });
+      w.requestIdleCallback(prefetchTier2, { timeout: 8000 });
+      w.requestIdleCallback(prefetchTier3, { timeout: 15000 });
     } else {
-      setTimeout(prefetchAll, 1500);
-      setTimeout(prefetchSecondary, 4000);
-      setTimeout(prefetchRare, 8000);
+      setTimeout(prefetchTier1, 2000);
+      setTimeout(prefetchTier2, 6000);
+      setTimeout(prefetchTier3, 12000);
     }
   }, []);
 
@@ -247,6 +253,9 @@ const App = () => {
                 <Route path="/harmonika" element={<ProtectedRoute><Harmonika /></ProtectedRoute>} />
                 <Route path="/meeting-recorder" element={<ProtectedRoute><MeetingRecorder /></ProtectedRoute>} />
                 <Route path="/voice-command-admin" element={<ProtectedRoute><VoiceCommandAdmin /></ProtectedRoute>} />
+                <Route path="/system-dashboard" element={<ProtectedRoute><SystemDashboard /></ProtectedRoute>} />
+                <Route path="/lashon-kodesh" element={<ProtectedRoute><LashoKodesh /></ProtectedRoute>} />
+                <Route path="/compare-report" element={<ProtectedRoute><CompareReport /></ProtectedRoute>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>

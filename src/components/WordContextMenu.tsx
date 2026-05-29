@@ -16,6 +16,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { cn } from '@/lib/utils';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -41,6 +42,7 @@ import {
   Wand2,
   XCircle,
   BookPlus,
+  Anchor,
 } from 'lucide-react';
 import { addTerm } from '@/utils/customVocabulary';
 import {
@@ -70,6 +72,10 @@ export interface WordContextMenuProps {
   onReplace: (newWord: string) => void;
   /** Called when the user clicks "אשר כנכון". */
   onApproveAsCorrect?: () => void;
+  /** Whether this word is currently marked as a timing anchor. */
+  isAnchor?: boolean;
+  /** Called when the user toggles anchor status. */
+  onToggleAnchor?: () => void;
   /** The word span to wrap. */
   children: React.ReactNode;
 }
@@ -79,6 +85,8 @@ export const WordContextMenu = ({
   suggestions = [],
   onReplace,
   onApproveAsCorrect,
+  isAnchor = false,
+  onToggleAnchor,
   children,
 }: WordContextMenuProps) => {
   const [customInput, setCustomInput] = useState('');
@@ -296,6 +304,27 @@ export const WordContextMenu = ({
             )}
           </ContextMenuSubContent>
         </ContextMenuSub>
+
+        <ContextMenuSeparator />
+
+        {/* ─── Timing anchor ─── */}
+        {onToggleAnchor && (
+          <ContextMenuItem
+            className={cn(
+              'gap-2 text-xs',
+              isAnchor
+                ? 'text-amber-600 dark:text-amber-400'
+                : 'text-muted-foreground'
+            )}
+            onSelect={onToggleAnchor}
+          >
+            <Anchor className={cn('w-3.5 h-3.5', isAnchor ? 'text-amber-500' : '')} />
+            {isAnchor ? 'הסר עוגן תזמון' : 'סמן כעוגן תזמון'}
+            {isAnchor && (
+              <span className="ms-auto text-[10px] opacity-60">נעול</span>
+            )}
+          </ContextMenuItem>
+        )}
 
         <ContextMenuSeparator />
 

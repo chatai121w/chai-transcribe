@@ -28,7 +28,7 @@ MODEL_REGISTRY = {
     "ivrit-ai/yi-whisper-large-v3-turbo": "ivrit-ai/yi-whisper-large-v3-turbo",
 }
 
-DEFAULT_MODEL = "ivrit-ai/whisper-large-v3-ct2"
+DEFAULT_MODEL = "ivrit-ai/whisper-large-v3-turbo-ct2"  # matches transcribe_server.py default
 
 # Models that need HF→CT2 conversion (not available as pre-converted on HF Hub)
 MODELS_NEEDING_CONVERSION = {
@@ -57,9 +57,9 @@ TRANSCRIPTION_PRESETS = {
         "label_en": "Balanced",
         "description": "איזון טוב בין מהירות לדיוק — ברירת מחדל מומלצת",
         "fast_mode": True,
-        "beam_size": 1,
+        "beam_size": 3,         # was 1 — beam=3 improves Hebrew WER significantly
         "batch_size": 16,
-        "condition_on_previous_text": False,
+        "condition_on_previous_text": True,  # was False — context between segments helps Hebrew
         "vad_aggressive": False,
         "compute_type": "int8_float16",
     },

@@ -155,7 +155,23 @@ export default defineConfig(({ mode }) => {
     dedupe: ['react', 'react-dom'],
   },
   optimizeDeps: {
-    include: ['react', 'react-dom', 'fix-webm-duration', 'dexie'],
+    include: [
+      // Core framework
+      'react', 'react-dom', 'react-router-dom',
+      // State / data
+      '@tanstack/react-query', '@supabase/supabase-js',
+      // UI primitives (Radix) — pre-bundle so first page-load doesn't transform each separately
+      '@radix-ui/react-dialog', '@radix-ui/react-popover', '@radix-ui/react-tooltip',
+      '@radix-ui/react-select', '@radix-ui/react-tabs', '@radix-ui/react-dropdown-menu',
+      '@radix-ui/react-scroll-area', '@radix-ui/react-toast', '@radix-ui/react-switch',
+      // Utilities used on every page
+      'lucide-react', 'clsx', 'tailwind-merge', 'class-variance-authority',
+      'zod', 'date-fns', 'sonner', 'diff-match-patch',
+      // Forms
+      'react-hook-form', '@hookform/resolvers',
+      // Previously listed
+      'fix-webm-duration', 'dexie',
+    ],
     exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/core', '@ffmpeg/util', '@shiguredo/rnnoise-wasm'],
   },
   build: {
@@ -163,20 +179,50 @@ export default defineConfig(({ mode }) => {
     minify: 'terser',
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Core React framework
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          // UI component library
-          'vendor-ui': ['@radix-ui/react-dialog', '@radix-ui/react-popover', '@radix-ui/react-tooltip', '@radix-ui/react-select', '@radix-ui/react-tabs'],
-          // Supabase client
-          'vendor-supabase': ['@supabase/supabase-js'],
-          // Heavy utilities
-          'vendor-utils': ['jszip', 'file-saver', 'lucide-react'],
-          // Heavy libraries — split for better caching
-          'vendor-charts': ['recharts'],
-          'vendor-pdf': ['jspdf'],
-          'vendor-docx': ['docx'],
-          'vendor-ai': ['@huggingface/transformers'],
+        manualChunks(id) {
+          // ── Critical path: always eagerly needed ──────────────────────────
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/react-router-dom/') || id.includes('node_modules/scheduler/')) {
+            return 'vendor-react';
+          }
+          if (id.includes('node_modules/@supabase/')) {
+            return 'vendor-supabase';
+          }
+          // Radix UI primitives — needed on every page
+          if (id.includes('node_modules/@radix-ui/')) {
+            return 'vendor-ui';
+          }
+          // lucide-react — used everywhere
+          if (id.includes('node_modules/lucide-react')) {
+            return 'vendor-icons';
+          }
+
+          // ── Heavy libs: kept in own async chunks ──────────────────────────
+          // These load only when the page/feature that needs them is first visited.
+          if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-') || id.includes('node_modules/victory-')) {
+            return 'vendor-charts';
+          }
+          if (id.includes('node_modules/jspdf') || id.includes('node_modules/html2canvas')) {
+            return 'vendor-pdf';
+          }
+          if (id.includes('node_modules/docx')) {
+            return 'vendor-docx';
+          }
+          // wavesurfer — audio pages only
+          if (id.includes('node_modules/wavesurfer')) {
+            return 'vendor-wavesurfer';
+          }
+          // @huggingface/transformers + onnxruntime — loaded lazily on demand
+          if (id.includes('node_modules/@huggingface/') || id.includes('node_modules/onnxruntime')) {
+            return 'vendor-ai';
+          }
+          // rnnoise — loaded lazily, huge WASM blob
+          if (id.includes('node_modules/@shiguredo/rnnoise-wasm')) {
+            return 'rnnoise';
+          }
+          // ffmpeg — loaded lazily
+          if (id.includes('node_modules/@ffmpeg/')) {
+            return 'vendor-ffmpeg';
+          }
         },
       },
     },

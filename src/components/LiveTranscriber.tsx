@@ -4,22 +4,25 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
 import {
   Mic, Square, Copy, Trash2, Radio, Cpu, Globe, Volume2, Clock, Zap,
-  AlertTriangle, Pause, Play, Save, FolderOpen, FolderPlus, Download
+  AlertTriangle, Pause, Play, Save, FolderOpen, FolderPlus, Download,
+  X, FileText
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { getServerUrl } from "@/lib/serverConfig";
 
 type LiveMode = "browser" | "cuda";
 
-const LIVE_CHUNK_MS = 2000;           // 2s chunks for lower latency
+const LIVE_CHUNK_MS = 5000;           // 5s chunks — bigger window = more context for Whisper
 const LIVE_RECORDING_TIMESLICE_MS = 150;
 const LIVE_MIN_BLOB_BYTES = 800;
 const SILENCE_THRESHOLD = 5;          // Skip chunks below this audio level (averaged over chunk window)
+const LIVE_CONTEXT_WORDS = 10;        // Last N words carried as context into next chunk (initial_prompt)
 const MAX_CONSECUTIVE_ERRORS = 5;
 const SEND_TIMEOUT_MS = 18000;        // 18s timeout — allows for larger accumulated chunks
 
@@ -31,12 +34,17 @@ interface LiveStats {
   silenceSkips: number;
 }
 
+const SAVE_FORMATS = ['txt', 'docx', 'srt', 'json', 'vtt'] as const;
+type SaveFormat = typeof SAVE_FORMATS[number];
+
 export interface LiveTranscriptResult {
   text: string;
   audioBlob?: Blob;
   wordTimings?: Array<{word: string; start: number; end: number; probability?: number}>;
   folder?: string;
   durationSec?: number;
+  fileName?: string;
+  format?: string;
 }
 
 interface LiveTranscriberProps {
@@ -63,6 +71,13 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const [customFolders, setCustomFolders] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('local_folders') || '[]'); } catch { return []; }
   });
+
+  // Save settings
+  const [fileName, setFileName] = useState("");
+  const [saveFormat, setSaveFormat] = useState<SaveFormat>('txt');
+  const [micGain, setMicGain] = useState(2.0); // sensitivity boost: 1x=normal, 4x=max
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const processedStreamRef = useRef<MediaStream | null>(null);
 
   // Pause timer tracking
   const pausedAtRef = useRef(0);
@@ -238,6 +253,11 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       const formData = new FormData();
       formData.append("file", blob, "chunk.webm");
       formData.append("language", "he");
+      // Carry last N words of previous transcript as context (initial_prompt on server)
+      const prevWords = finalTextRef.current.trim().split(/\s+/).filter(Boolean);
+      if (prevWords.length > 0) {
+        formData.append("context", prevWords.slice(-LIVE_CONTEXT_WORDS).join(" "));
+      }
 
       const res = await fetch(`${getBaseUrl()}/transcribe-live`, {
         method: "POST",
@@ -368,14 +388,38 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         setElapsedSec(Math.floor((Date.now() - startTimeRef.current) / 1000));
       }, 1000);
 
-      // Audio level monitoring with smoothing
+      // Audio level monitoring with smoothing + mic gain boost
       try {
         const actx = new AudioContext({ sampleRate: 16000 });
         const src = actx.createMediaStreamSource(stream);
+
+        // DynamicsCompressor prevents clipping even at high gain settings
+        const compressor = actx.createDynamicsCompressor();
+        compressor.threshold.value = -24;
+        compressor.knee.value = 30;
+        compressor.ratio.value = 12;
+        compressor.attack.value = 0.003;
+        compressor.release.value = 0.25;
+
+        // Gain boost — amplifies quiet microphones before sending to Whisper
+        const gainNode = actx.createGain();
+        gainNode.gain.value = micGain;
+        gainNodeRef.current = gainNode;
+
+        // Destination: records the processed (boosted) audio instead of raw mic
+        const dest = actx.createMediaStreamDestination();
+
         const analyser = actx.createAnalyser();
         analyser.fftSize = 512;
         analyser.smoothingTimeConstant = 0.6;
-        src.connect(analyser);
+
+        // Chain: raw mic → compressor → gain → VU meter analyser + recording dest
+        src.connect(compressor);
+        compressor.connect(gainNode);
+        gainNode.connect(analyser);
+        gainNode.connect(dest);
+        processedStreamRef.current = dest.stream;
+
         audioCtxRef.current = actx;
         analyserRef.current = analyser;
         const dataArr = new Uint8Array(analyser.frequencyBinCount);
@@ -401,7 +445,9 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         : "audio/webm";
       mimeTypeRef.current = mimeType;
 
-      const recorder = new MediaRecorder(stream, { mimeType });
+      // Use the gain-boosted processed stream if AudioContext succeeded, else raw mic
+      const recorderStream = processedStreamRef.current ?? stream;
+      const recorder = new MediaRecorder(recorderStream, { mimeType });
       mediaRecorderRef.current = recorder;
 
       recorder.ondataavailable = (e) => {
@@ -475,7 +521,8 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       audioCtxRef.current = null;
     }
     analyserRef.current = null;
-    setAudioLevel(0);
+    gainNodeRef.current = null;
+    processedStreamRef.current = null;
     audioLevelRef.current = 0;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
@@ -642,8 +689,8 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
           audioBlob,
           wordTimings: wordTimingsRef.current.length > 0 ? wordTimingsRef.current : undefined,
           folder: selectedFolder || undefined,
-          durationSec: duration,
-        });
+          durationSec: duration,          fileName: fileName.trim() || undefined,
+          format: saveFormat,        });
       }
     } else {
       stopBrowser();
@@ -652,10 +699,12 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         onTranscriptComplete({
           text: currentText.trim(),
           folder: selectedFolder || undefined,
+          fileName: fileName.trim() || undefined,
+          format: saveFormat,
         });
       }
     }
-  }, [appendDedupText, mode, selectedFolder, onTranscriptComplete, runFinalRefinePass, stopCudaCleanup, stopBrowser]);
+  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, stopCudaCleanup, stopBrowser]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(finalText);
@@ -668,12 +717,34 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     wordTimingsRef.current = [];
   };
 
+  // Cancel recording — discard everything, do not save
+  const handleCancel = useCallback(() => {
+    if (mode === "cuda") {
+      if (chunkIntervalRef.current) { clearInterval(chunkIntervalRef.current); chunkIntervalRef.current = null; }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
+      allChunksRef.current = [];
+      stopCudaCleanup();
+    } else {
+      stopBrowser();
+    }
+    setFinalText("");
+    setInterimText("");
+    setIsRefining(false);
+    wordTimingsRef.current = [];
+    toast({ title: "❌ התמלול בוטל" });
+  }, [mode, stopCudaCleanup, stopBrowser]);
+
   // Save current transcription without stopping
   const handleSaveIntermediate = () => {
     if (!finalText.trim()) return;
     onTranscriptComplete({
       text: finalText.trim(),
       folder: selectedFolder || undefined,
+      fileName: fileName.trim() || undefined,
+      format: saveFormat,
     });
     toast({ title: "✅ תמלול נשמר", description: "ניתן להמשיך להקליט" });
   };
@@ -865,6 +936,28 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
             </Button>
           </div>
 
+          {/* File name + format selector */}
+          <div className="flex items-center gap-2 justify-center flex-wrap">
+            <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+            <Input
+              value={fileName}
+              onChange={e => setFileName(e.target.value)}
+              placeholder="שם הקובץ (אופציונלי)..."
+              className="h-8 w-[190px] text-sm"
+              dir="rtl"
+            />
+            <Select value={saveFormat} onValueChange={v => setSaveFormat(v as SaveFormat)}>
+              <SelectTrigger className="h-8 w-[82px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SAVE_FORMATS.map(f => (
+                  <SelectItem key={f} value={f} className="text-xs">.{f}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* Folder selector */}
           <div className="flex items-center gap-2 justify-center">
             <FolderOpen className="w-4 h-4 text-muted-foreground" />
@@ -898,6 +991,23 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
               </div>
             )}
           </div>
+
+          {/* Mic sensitivity (gain) — only relevant for CUDA mode */}
+          {mode === "cuda" && (
+            <div className="flex items-center gap-3 justify-center px-2">
+              <Volume2 className="w-4 h-4 text-muted-foreground shrink-0" />
+              <span className="text-xs text-muted-foreground whitespace-nowrap">רגישות מיקרופון</span>
+              <Slider
+                min={1}
+                max={4}
+                step={0.5}
+                value={[micGain]}
+                onValueChange={([v]) => setMicGain(v)}
+                className="w-[130px]"
+              />
+              <span className="text-xs font-mono text-muted-foreground w-8">{micGain}x</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -921,6 +1031,23 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         </div>
       </ScrollArea>
 
+      {/* Compact save settings strip — shown during recording */}
+      {isListening && (
+        <div className="flex items-center justify-center gap-2 mb-3 text-xs flex-wrap">
+          <div className="flex items-center gap-1 text-muted-foreground">
+            <FileText className="w-3.5 h-3.5" />
+            <span>{fileName.trim() || 'שם אוטומטי'}</span>
+          </div>
+          <Badge variant="outline" className="text-[11px] py-0 h-5 px-1.5">.{saveFormat}</Badge>
+          {selectedFolder && (
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <FolderOpen className="w-3.5 h-3.5" />
+              <span>{selectedFolder}</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Controls */}
       <div className="flex justify-center gap-3">
         {!isListening ? (
@@ -943,6 +1070,10 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
                 המשך
               </Button>
             )}
+            <Button onClick={handleCancel} variant="outline" className="gap-2 rounded-full px-5 h-12 text-base text-muted-foreground hover:text-destructive hover:border-destructive">
+              <X className="w-5 h-5" />
+              בטל
+            </Button>
             <Button onClick={stopListening} variant="destructive" className="gap-2 rounded-full px-8 h-12 text-base">
               <Square className="w-5 h-5" />
               עצור ושמור

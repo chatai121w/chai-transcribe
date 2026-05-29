@@ -50,6 +50,7 @@ const LocalModelManager = lazy(() => import("@/components/LocalModelManager").th
 const BackgroundJobsPanel = lazy(() => import("@/components/BackgroundJobsPanel").then(m => ({ default: m.BackgroundJobsPanel })));
 const SpeakerDiarization = lazy(() => import("@/components/SpeakerDiarization").then(m => ({ default: m.SpeakerDiarization })));
 const YouTubeTranscriber = lazy(() => import("@/components/YouTubeTranscriber").then(m => ({ default: m.YouTubeTranscriber })));
+import { WaveformPlayer, type WaveformPlayerHandle } from "@/components/WaveformPlayer";
 
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
@@ -109,6 +110,9 @@ const Index = () => {
   const lastFileRef = useRef<File | null>(null);
   const lastAudioUrlRef = useRef<string | null>(null);
   const resumeFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Waveform player ref for word click-to-seek
+  const waveformRef = useRef<WaveformPlayerHandle | null>(null);
 
   // Pending file waiting for local server to come up
   const pendingServerFileRef = useRef<{ file: File; audioUrl: string } | null>(null);
@@ -1906,25 +1910,64 @@ const Index = () => {
         />
 
         {engine === 'local-server' && (
-          <div
-            className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm"
-            dir="rtl"
-          >
-            <label className="flex items-center gap-2 cursor-pointer flex-1">
-              <input
-                type="checkbox"
-                checked={loshonKodeshOn}
-                onChange={(e) => {
-                  setLoshonKodeshEnabled(e.target.checked);
-                  setLoshonKodeshOn(e.target.checked);
-                }}
-                className="rounded border-amber-400"
-              />
-              <span className="font-medium">לשון הקודש (הגייה אשכנזית)</span>
-              <span className="text-xs text-muted-foreground">
-                — מטה את התמלול למינוח תורני וכתיב מסורתי (תורה / גמרא / רמב"ם וכו').
-              </span>
-            </label>
+          <div className="flex flex-col gap-2" dir="rtl">
+            {/* Cloud save mode selector */}
+            <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 px-3 py-2" dir="rtl">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-muted-foreground">מה לעשות אחרי התמלול?</span>
+                <span className="text-sm font-medium">💾 מצב שמירה</span>
+              </div>
+              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                {([
+                  { value: 'immediate', icon: '☁️', label: 'שמור לענן', desc: 'טקסט + אודיו → Supabase' },
+                  { value: 'text-only', icon: '📝', label: 'טקסט בלבד', desc: 'רק הטקסט → Supabase' },
+                  { value: 'skip',      icon: '🏠', label: 'מקומי בלבד', desc: 'localStorage, לא לענן' },
+                ] as const).map(({ value, icon, label, desc }) => {
+                  const active = (preferences.cuda_cloud_save || 'immediate') === value;
+                  return (
+                    <button
+                      key={value}
+                      onClick={() => updatePreference('cuda_cloud_save', value)}
+                      title={desc}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
+                        active
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                          : 'bg-background text-muted-foreground border-border hover:border-blue-400 hover:text-foreground'
+                      }`}
+                    >
+                      <span>{icon}</span>
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                {(preferences.cuda_cloud_save || 'immediate') === 'immediate' && '☁️ טקסט + קובץ אודיו יועלו ל-Supabase אחרי כל תמלול'}
+                {(preferences.cuda_cloud_save || 'immediate') === 'text-only'  && '📝 רק הטקסט המתומלל יישמר בענן — האודיו נשאר מקומי'}
+                {(preferences.cuda_cloud_save || 'immediate') === 'skip'       && '🏠 שום דבר לא יישמר לענן — רק ב-localStorage של הדפדפן'}
+              </p>
+            </div>
+
+            {/* Loshon Kodesh toggle */}
+            <div
+              className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm"
+            >
+              <label className="flex items-center gap-2 cursor-pointer flex-1">
+                <input
+                  type="checkbox"
+                  checked={loshonKodeshOn}
+                  onChange={(e) => {
+                    setLoshonKodeshEnabled(e.target.checked);
+                    setLoshonKodeshOn(e.target.checked);
+                  }}
+                  className="rounded border-amber-400"
+                />
+                <span className="font-medium">לשון הקודש (הגייה אשכנזית)</span>
+                <span className="text-xs text-muted-foreground">
+                  — מטה את התמלול למינוח תורני וכתיב מסורתי (תורה / גמרא / רמב"ם וכו').
+                </span>
+              </label>
+            </div>
           </div>
         )}
 
@@ -2019,6 +2062,13 @@ const Index = () => {
             isLoading={isLoading}
             progress={progress}
             engine={engine}
+            statusText={
+              isLoading && engine === 'local-server' && (serverProgress === 0 || serverProgress === undefined)
+                ? serverPhase === 'loading-model'
+                  ? '⏳ טוען מודל AI...'
+                  : '📤 מעלה קובץ לשרת...'
+                : undefined
+            }
             isAuthenticated={isAuthenticated}
             isCloudEngine={engine !== 'local' && engine !== 'local-server'}
             onSubmitBatch={(files) => submitBatchJobs(files, engine, sourceLanguage)}
@@ -2162,11 +2212,14 @@ const Index = () => {
                   </span>
                 </div>
 
-                {/* Big percentage + audio second tracker (CUDA only) */}
-                {engine === 'local-server' && progress !== undefined && progress > 0 && (
-                  <div className="flex items-baseline justify-between gap-2 px-1">
-                    <span className="text-2xl font-bold tabular-nums text-primary">{progress}<span className="text-sm text-muted-foreground">%</span></span>
-                    {serverAudioDur > 0 && (
+                {/* Big percentage display — all engines with real progress */}
+                {progress !== undefined && progress > 0 && (
+                  <div className="flex items-center justify-between gap-2 px-1">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-3xl font-bold tabular-nums text-primary leading-none">{progress}</span>
+                      <span className="text-base font-medium text-muted-foreground">%</span>
+                    </div>
+                    {engine === 'local-server' && serverAudioDur > 0 && (
                       <span className="text-xs text-muted-foreground tabular-nums">
                         🎵 {Math.floor(serverAudioProcessed / 60)}:{String(Math.floor(serverAudioProcessed % 60)).padStart(2, '0')}
                         {' / '}
@@ -2177,24 +2230,21 @@ const Index = () => {
                 )}
 
                 {/* Progress bar */}
-                <div className="relative h-3 rounded-full bg-muted overflow-hidden">
+                <div className="relative h-4 rounded-full bg-muted overflow-hidden">
                   {progress !== undefined && progress > 0 ? (
                     <div
-                      className="absolute top-0 right-0 h-full rounded-full bg-primary transition-[width] duration-500 ease-out overflow-hidden"
-                      style={{ width: `${Math.max(progress, 3)}%` }}
+                      className="absolute top-0 right-0 h-full rounded-full bg-primary transition-[width] duration-300 ease-out overflow-hidden"
+                      style={{ width: `${Math.max(progress, 2)}%` }}
                     >
-                      <div className="absolute top-0 left-0 h-full w-6 bg-white/30 animate-pulse rounded-full" />
+                      <div className="absolute inset-0 bg-white/20 animate-pulse" />
                     </div>
                   ) : (
-                    <div className="absolute inset-0 rounded-full overflow-hidden">
-                      <div className="h-full w-full bg-primary/30 rounded-full" />
-                      <div
-                        className="absolute top-0 h-full w-1/3 bg-primary/70 rounded-full"
-                        style={{ animation: 'transcription-scan 1.6s ease-in-out infinite' }}
-                      />
-                    </div>
+                    <div className="absolute inset-0 bg-primary/40 rounded-full animate-pulse" />
                   )}
                 </div>
+                {engine === 'local-server' && serverPhase === 'loading-model' && (
+                  <p className="text-xs text-muted-foreground text-center -mt-0.5">⏳ טוען מודל AI — התמלול יתחיל בקרוב</p>
+                )}
 
                 {/* Bottom row: timer + ETA */}
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -2419,6 +2469,16 @@ const Index = () => {
           </>
         )}
 
+        {/* Waveform player — shown when audio available */}
+        {audioUrl && (
+          <WaveformPlayer
+            ref={waveformRef}
+            audioSrc={audioUrl}
+            wordTimings={wordTimings}
+            className="mt-2"
+          />
+        )}
+
         {transcript && (
           <div 
             style={{
@@ -2433,6 +2493,7 @@ const Index = () => {
               originalTranscript={originalTranscript}
               onTranscriptChange={setTranscript}
               wordTimings={wordTimings}
+              onWordClick={(w) => waveformRef.current?.seekTo(w.start)}
               searchOpen={searchOpen}
               onSearchOpenChange={setSearchOpen}
             />

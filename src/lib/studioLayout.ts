@@ -18,7 +18,7 @@ export type StudioWidgetKey = 'player' | 'studio';
 export const STUDIO_WIDGET_KEYS: StudioWidgetKey[] = ['player', 'studio'];
 
 /** localStorage key used for persistence. */
-export const STUDIO_LAYOUT_STORAGE_KEY = 'studio_widget_layouts_v1';
+export const STUDIO_LAYOUT_STORAGE_KEY = 'studio_widget_layouts_v5';
 
 /** localStorage key for the edit-mode toggle (so it persists across reloads). */
 export const STUDIO_LAYOUT_EDIT_MODE_KEY = 'studio_widget_edit_mode';
@@ -32,16 +32,16 @@ export const STUDIO_LAYOUT_EDIT_MODE_KEY = 'studio_widget_edit_mode';
  */
 export const DEFAULT_STUDIO_LAYOUTS: Layouts = {
   lg: [
-    { i: 'player', x: 0, y: 0, w: 6, h: 22, minW: 4, minH: 10 },
-    { i: 'studio', x: 6, y: 0, w: 6, h: 30, minW: 4, minH: 10 },
+    { i: 'player', x: 0, y: 0,  w: 12, h: 18, minW: 4, minH: 10 },
+    { i: 'studio', x: 0, y: 18, w: 12, h: 28, minW: 4, minH: 10 },
   ],
   md: [
     { i: 'player', x: 0, y: 0,  w: 10, h: 18, minW: 4, minH: 10 },
-    { i: 'studio', x: 0, y: 18, w: 10, h: 30, minW: 4, minH: 10 },
+    { i: 'studio', x: 0, y: 18, w: 10, h: 28, minW: 4, minH: 10 },
   ],
   sm: [
     { i: 'player', x: 0, y: 0,  w: 6, h: 18 },
-    { i: 'studio', x: 0, y: 18, w: 6, h: 30 },
+    { i: 'studio', x: 0, y: 18, w: 6, h: 28 },
   ],
 };
 

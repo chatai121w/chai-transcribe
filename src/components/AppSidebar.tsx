@@ -32,6 +32,7 @@ import {
   AudioLines,
   Video,
   Bot,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -65,6 +66,9 @@ const navItems: NavItem[] = [
   { label: "ממיר ל-MP3", icon: Music, path: "/video-to-mp3" },
   { label: "הרמוניקיה", icon: AudioLines, path: "/harmonika" },
   { label: "התקנת שרת", icon: Server, path: "/setup" },
+  { label: "לוח בקרה", icon: Bot, path: "/system-dashboard" },
+  { label: "לשון הקודש", icon: ScrollText, path: "/lashon-kodesh" },
+  { label: "השוואת תמלולים", icon: GitCompareArrows, path: "/compare-report" },
   { label: "הגדרות", icon: Settings, path: "/settings" },
 ];
 

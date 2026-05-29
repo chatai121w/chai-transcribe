@@ -56,18 +56,25 @@ TASK_NAME = "SmartTranscriberLauncher"
 LOVABLE_URL = "https://a1add912-bd72-490b-949a-bf5fe8ed03b5.lovable.app"
 
 # ─── State ──────────────────────────────────────────────
-whisper_process = None
-vite_process = None
-cloudflare_process = None
-whisper_running = False
-ollama_running = False
-vite_running = False
-cloudflare_running = False
+whisper_process     = None
+vite_process        = None
+cloudflare_process  = None
+voice_hotkey_process = None
+voice_cmd_process    = None
+whisper_running      = False
+ollama_running       = False
+vite_running         = False
+cloudflare_running   = False
+voice_hotkey_running = False
+voice_cmd_running    = False
 cloudflare_url: str | None = None  # public trycloudflare.com URL
 
 # ─── Cloudflare constants ─────────────────────────────────
 CLOUDFLARED_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "cloudflared" / "cloudflared.exe"
 CLOUDFLARED_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+
+VOICE_HOTKEY_SCRIPT  = PROJECT_ROOT / "server" / "voice_hotkey.py"
+VOICE_CMD_SCRIPT     = PROJECT_ROOT / "tools" / "voice-command" / "voice_command_listener.py"
 
 
 # ─── Helpers ────────────────────────────────────────────
@@ -296,6 +303,85 @@ def stop_cloudflare():
     return True, "stopped"
 
 
+# ─── Voice Hotkey ────────────────────────────────────────
+
+def check_voice_hotkey() -> bool:
+    """Return True if voice_hotkey process is alive."""
+    return voice_hotkey_process is not None and voice_hotkey_process.poll() is None
+
+
+def start_voice_hotkey():
+    """Start voice_hotkey.py (registers Ctrl+Shift+H global hotkey)."""
+    global voice_hotkey_process, voice_hotkey_running
+    if check_voice_hotkey():
+        return True, "already running"
+    python_path = find_python()
+    if not python_path:
+        return False, "No venv found"
+    try:
+        voice_hotkey_process = subprocess.Popen(
+            [python_path, str(VOICE_HOTKEY_SCRIPT)],
+            cwd=str(PROJECT_ROOT),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        voice_hotkey_running = True
+        return True, "started"
+    except Exception as e:
+        return False, str(e)
+
+
+def stop_voice_hotkey():
+    """Stop voice_hotkey process."""
+    global voice_hotkey_process, voice_hotkey_running
+    if voice_hotkey_process and voice_hotkey_process.poll() is None:
+        voice_hotkey_process.terminate()
+    voice_hotkey_process = None
+    voice_hotkey_running = False
+    return True, "stopped"
+
+
+# ─── Voice Command Listener ──────────────────────────────
+
+def check_voice_cmd() -> bool:
+    """Return True if voice_command_listener process is alive."""
+    return voice_cmd_process is not None and voice_cmd_process.poll() is None
+
+
+def start_voice_cmd(wake_word: str = "ביג"):
+    """Start voice_command_listener with wake word."""
+    global voice_cmd_process, voice_cmd_running
+    if check_voice_cmd():
+        return True, "already running"
+    python_path = find_python()
+    if not python_path:
+        return False, "No venv found"
+    cmd = [python_path, str(VOICE_CMD_SCRIPT),
+           "--wake-word", wake_word,
+           "--model", "tiny",
+           "--device", "cuda"]
+    try:
+        voice_cmd_process = subprocess.Popen(
+            cmd, cwd=str(PROJECT_ROOT),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        voice_cmd_running = True
+        return True, "started"
+    except Exception as e:
+        return False, str(e)
+
+
+def stop_voice_cmd():
+    """Stop voice_command_listener process."""
+    global voice_cmd_process, voice_cmd_running
+    if voice_cmd_process and voice_cmd_process.poll() is None:
+        voice_cmd_process.terminate()
+    voice_cmd_process = None
+    voice_cmd_running = False
+    return True, "stopped"
+
+
 def check_cloudflare():
     """Check if cloudflare tunnel process is alive."""
     return cloudflare_running and cloudflare_process is not None and cloudflare_process.poll() is None
@@ -355,15 +441,17 @@ $sc.Save()
 
 # ─── Tray Icon ──────────────────────────────────────────
 
-def create_icon_image(cuda_on=False, ollama_on=False, vite_on=False, cf_on=False):
-    """Create icon with 4 colored dots for each service status."""
+def create_icon_image(cuda_on=False, ollama_on=False, vite_on=False, cf_on=False,
+                      hotkey_on=False, vcmd_on=False):
+    """Create icon with 6 colored dots for each service status."""
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     # Background circle
-    running_count = sum([cuda_on, ollama_on, vite_on, cf_on])
-    if running_count >= 3:
+    running_count = sum([cuda_on, ollama_on, vite_on, cf_on, hotkey_on, vcmd_on])
+    total = 6
+    if running_count >= total - 1:
         bg = (76, 175, 80, 255)    # green — most running
     elif running_count > 0:
         bg = (255, 193, 7, 255)    # yellow — partial
@@ -375,19 +463,17 @@ def create_icon_image(cuda_on=False, ollama_on=False, vite_on=False, cf_on=False
     # "T" letter
     draw.text((size // 2 - 6, 6), "T", fill=(255, 255, 255, 255))
 
-    # 4 small status dots at bottom — green=on, red=off
-    dot_y = size - 14
-    dot_r = 5
-    dots = [
-        (9,  dot_y, cuda_on),     # CUDA
-        (23, dot_y, ollama_on),   # Ollama
-        (41, dot_y, vite_on),     # Vite
-        (55, dot_y, cf_on),       # Cloudflare
-    ]
+    # 6 small status dots at bottom — green=on, red=off
+    dot_y = size - 12
+    dot_r = 4
+    # evenly spaced across 64px: start=5, step=10
+    xs = [5, 15, 25, 35, 45, 55]
+    dots = list(zip(xs, [dot_y]*6,
+                    [cuda_on, ollama_on, vite_on, cf_on, hotkey_on, vcmd_on]))
     for cx, cy, on in dots:
-        color = (0, 200, 0, 255) if on else (200, 0, 0, 255)
+        color = (0, 220, 0, 255) if on else (220, 0, 0, 255)
         draw.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], fill=color)
-        draw.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], outline=(255, 255, 255, 200))
+        draw.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], outline=(255, 255, 255, 180))
 
     return img
 
@@ -398,20 +484,28 @@ _tray_icon = None
 def refresh_status():
     """Update all service statuses and refresh icon."""
     global whisper_running, ollama_running, vite_running, cloudflare_running
+    global voice_hotkey_running, voice_cmd_running
     whisper_running, _ = check_whisper()
     ollama_running, _ = check_ollama()
     vite_running = check_vite()
     cloudflare_running = check_cloudflare()
+    voice_hotkey_running = check_voice_hotkey()
+    voice_cmd_running = check_voice_cmd()
     if _tray_icon:
-        _tray_icon.icon = create_icon_image(whisper_running, ollama_running, vite_running, cloudflare_running)
-        running_count = sum([whisper_running, ollama_running, vite_running, cloudflare_running])
+        _tray_icon.icon = create_icon_image(
+            whisper_running, ollama_running, vite_running, cloudflare_running,
+            voice_hotkey_running, voice_cmd_running)
+        running_count = sum([whisper_running, ollama_running, vite_running,
+                             cloudflare_running, voice_hotkey_running, voice_cmd_running])
         parts = [
             f"CUDA: {'ON' if whisper_running else 'OFF'}",
             f"Ollama: {'ON' if ollama_running else 'OFF'}",
             f"Vite: {'ON' if vite_running else 'OFF'}",
             f"CF: {'ON' if cloudflare_running else 'OFF'}",
+            f"Hotkey: {'ON' if voice_hotkey_running else 'OFF'}",
+            f"VCmd: {'ON' if voice_cmd_running else 'OFF'}",
         ]
-        _tray_icon.title = f"Smart Transcriber ({running_count}/4) — {' | '.join(parts)}"
+        _tray_icon.title = f"Smart Transcriber ({running_count}/6) — {' | '.join(parts)}"
         _tray_icon.update_menu()
 
 
@@ -422,6 +516,8 @@ def on_start_all(icon, item):
     start_whisper()
     start_vite()
     start_cloudflare()
+    start_voice_hotkey()
+    start_voice_cmd()
     time.sleep(2)
     refresh_status()
 
@@ -430,6 +526,8 @@ def on_stop_all(icon, item):
     stop_ollama()
     stop_vite()
     stop_cloudflare()
+    stop_voice_hotkey()
+    stop_voice_cmd()
     time.sleep(1)
     refresh_status()
 
@@ -456,6 +554,34 @@ def on_toggle_vite(icon, item):
         start_vite()
     time.sleep(2)
     refresh_status()
+
+def on_toggle_voice_hotkey(icon, item):
+    if voice_hotkey_running:
+        stop_voice_hotkey()
+    else:
+        start_voice_hotkey()
+    time.sleep(1)
+    refresh_status()
+
+def on_toggle_voice_cmd(icon, item):
+    if voice_cmd_running:
+        stop_voice_cmd()
+    else:
+        start_voice_cmd()
+    time.sleep(1)
+    refresh_status()
+
+def voice_hotkey_checked(item):
+    return voice_hotkey_running
+
+def voice_cmd_checked(item):
+    return voice_cmd_running
+
+def voice_hotkey_label(item):
+    return f"🎙 Voice Hotkey (Ctrl+Shift+H)"
+
+def voice_cmd_label(item):
+    return f"🔔 Voice Command (wake: ביג)"
 
 def on_open_lovable(icon, item):
     os.startfile(LOVABLE_URL)
@@ -524,13 +650,20 @@ def build_menu():
         pystray.MenuItem("Start All", on_start_all),
         pystray.MenuItem("Stop All", on_stop_all),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem(cuda_label, on_toggle_cuda, checked=cuda_checked, radio=True),
-        pystray.MenuItem(ollama_label, on_toggle_ollama, checked=ollama_checked, radio=True),
-        pystray.MenuItem(vite_label, on_toggle_vite, checked=vite_checked, radio=True),
-        pystray.MenuItem(cloudflare_label, on_toggle_cloudflare, checked=cloudflare_checked, radio=True),
+        pystray.MenuItem("── Transcription ──", None, enabled=False),
+        pystray.MenuItem(cuda_label, on_toggle_cuda, checked=cuda_checked),
+        pystray.MenuItem(ollama_label, on_toggle_ollama, checked=ollama_checked),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Open Lovable", on_open_lovable),
+        pystray.MenuItem("── Voice ──", None, enabled=False),
+        pystray.MenuItem(voice_hotkey_label, on_toggle_voice_hotkey, checked=voice_hotkey_checked),
+        pystray.MenuItem(voice_cmd_label, on_toggle_voice_cmd, checked=voice_cmd_checked),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("── Frontend ──", None, enabled=False),
+        pystray.MenuItem(vite_label, on_toggle_vite, checked=vite_checked),
+        pystray.MenuItem(cloudflare_label, on_toggle_cloudflare, checked=cloudflare_checked),
+        pystray.Menu.SEPARATOR,
         pystray.MenuItem("Open localhost", on_open_local),
+        pystray.MenuItem("Open Lovable", on_open_lovable),
         pystray.MenuItem("Copy Tunnel URL", on_copy_tunnel),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Auto-start with Windows", on_toggle_autostart, checked=autostart_checked),
@@ -680,23 +813,29 @@ def main():
     flask_thread.start()
 
     # Auto-boot essential services (CUDA + Ollama only)
-    # Vite and Cloudflare can be started manually from the tray menu
+    # Others can be started manually from the tray menu
     global whisper_running, ollama_running, vite_running, cloudflare_running
+    global voice_hotkey_running, voice_cmd_running
     whisper_running, _ = check_whisper()
     ollama_running, _ = check_ollama()
     if not whisper_running:
         start_whisper()
     if not ollama_running:
         start_ollama()
-    # Just check status for Vite and Cloudflare (don't auto-start)
+    # Just check status for the rest (don't auto-start)
     vite_running = check_vite()
     cloudflare_running = check_cloudflare()
+    voice_hotkey_running = check_voice_hotkey()
+    voice_cmd_running = check_voice_cmd()
 
     # Create tray icon with actual status
+    running_total = sum([whisper_running, ollama_running, vite_running,
+                         cloudflare_running, voice_hotkey_running, voice_cmd_running])
     _tray_icon = pystray.Icon(
         "smart_transcriber",
-        create_icon_image(whisper_running, ollama_running, vite_running, cloudflare_running),
-        f"Smart Transcriber ({sum([whisper_running, ollama_running, vite_running, cloudflare_running])}/4)",
+        create_icon_image(whisper_running, ollama_running, vite_running, cloudflare_running,
+                         voice_hotkey_running, voice_cmd_running),
+        f"Smart Transcriber ({running_total}/6)",
         menu=build_menu(),
     )
 

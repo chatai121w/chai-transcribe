@@ -14,7 +14,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-function UploadProgressBar({ progress, fileName, fileSize }: { progress?: number; fileName?: string; fileSize?: number }) {
+function UploadProgressBar({ progress, fileName, fileSize, statusText }: { progress?: number; fileName?: string; fileSize?: number; statusText?: string }) {
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     setElapsed(0);
@@ -65,7 +65,7 @@ function UploadProgressBar({ progress, fileName, fileSize }: { progress?: number
       {/* Bottom row: percentage */}
       <div className="flex items-center justify-between text-xs" dir="rtl">
         <span className="font-medium text-primary">
-          {hasProgress ? `${pct}%` : 'מעבד...'}
+          {hasProgress ? `${pct}%` : (statusText || 'מעבד...')}
         </span>
         {hasProgress && pct < 100 && elapsed > 3 && (
           <span className="text-muted-foreground text-[11px]">
@@ -103,6 +103,7 @@ interface FileUploaderProps {
   isLoading: boolean;
   progress?: number;
   engine?: string;
+  statusText?: string;
   // Batch/background props (cloud engines only)
   isAuthenticated?: boolean;
   isCloudEngine?: boolean;
@@ -115,7 +116,7 @@ interface FileUploaderProps {
 }
 
 export const FileUploader = ({
-  onFileSelect, isLoading, progress, engine,
+  onFileSelect, isLoading, progress, engine, statusText,
   isAuthenticated, isCloudEngine,
   onSubmitBatch, onSaveTranscript, onRetryJob, onSubmitBackgroundJob,
   jobs = [], maxFileSizeMB = 500,
@@ -333,7 +334,7 @@ export const FileUploader = ({
 
         {/* Progress bar with elapsed time */}
         {isLoading && (
-          <UploadProgressBar progress={progress} fileName={selectedFile?.name} fileSize={selectedFile?.size} />
+          <UploadProgressBar progress={progress} fileName={selectedFile?.name} fileSize={selectedFile?.size} statusText={statusText} />
         )}
 
         {/* Action buttons row */}
