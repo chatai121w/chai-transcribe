@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ApiKeyUsagePanel } from "@/components/ApiKeyUsagePanel";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useLocalTranscription } from "@/hooks/useLocalTranscription";
@@ -15,7 +17,7 @@ import { useBackgroundTask } from "@/hooks/useBackgroundTask";
 import { debugLog } from "@/lib/debugLogger";
 import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
 import { useTranscriptionAnalytics } from "@/hooks/useTranscriptionAnalytics";
-import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Pause, Play, Square, Copy, Check, Keyboard, Activity, Users } from "lucide-react";
+import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Pause, Play, Square, Copy, Check, Keyboard, Activity, Users, KeyRound } from "lucide-react";
 import { usePerfMonitor } from "@/hooks/usePerfMonitor";
 import { PerfMonitorPanel } from "@/components/PerfMonitorPanel";
 import { db } from "@/lib/localDb";
@@ -142,6 +144,33 @@ const Index = () => {
   const { addRecord: addAnalyticsRecord } = useTranscriptionAnalytics();
   const perfMonitor = usePerfMonitor();
   const [showPerfPanel, setShowPerfPanel] = useState(false);
+  const [showApiUsage, setShowApiUsage] = useState(false);
+  const [apiUsageWidgetOpen, setApiUsageWidgetOpen] = useState(false);
+  const [groqPoolText, setGroqPoolText] = useState<string>(() => {
+    try {
+      const raw = localStorage.getItem('groq_api_keys_pool');
+      if (!raw) return '';
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.join('\n') : '';
+    } catch { return ''; }
+  });
+
+  useEffect(() => {
+    const refresh = () => {
+      try {
+        const raw = localStorage.getItem('groq_api_keys_pool');
+        if (!raw) { setGroqPoolText(''); return; }
+        const arr = JSON.parse(raw);
+        setGroqPoolText(Array.isArray(arr) ? arr.join('\n') : '');
+      } catch { setGroqPoolText(''); }
+    };
+    window.addEventListener('storage', refresh);
+    window.addEventListener('api-key-usage-updated', refresh);
+    return () => {
+      window.removeEventListener('storage', refresh);
+      window.removeEventListener('api-key-usage-updated', refresh);
+    };
+  }, []);
 
   useEffect(() => {
     serverConnectedRef.current = serverConnected;
@@ -1890,7 +1919,7 @@ const Index = () => {
 
         {/* Navigation Tabs */}
         <Tabs defaultValue="transcribe" className="w-full" dir="rtl">
-          <TabsList className="grid w-full grid-cols-2 mb-6">
+          <TabsList className="grid w-full grid-cols-3 mb-6">
             <TabsTrigger value="transcribe">תמלול</TabsTrigger>
             <TabsTrigger 
               value="edit"
@@ -1899,8 +1928,38 @@ const Index = () => {
               <FileEdit className="w-4 h-4 ml-1 text-blue-900" />
               עריכת טקסט
             </TabsTrigger>
+            <TabsTrigger
+              value="api-usage"
+              onClick={(e) => { e.preventDefault(); setShowApiUsage(true); }}
+            >
+              <KeyRound className="w-4 h-4 ml-1 text-blue-900" />
+              ניצול מפתחות API
+            </TabsTrigger>
           </TabsList>
         </Tabs>
+
+        {/* API usage widget on home page */}
+        <Collapsible open={apiUsageWidgetOpen} onOpenChange={setApiUsageWidgetOpen} className="mb-4" dir="rtl">
+          <Card className="border-blue-500/30 bg-blue-500/5">
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex items-center justify-between w-full px-4 py-2 text-right"
+              >
+                <ChevronDown className={`h-4 w-4 transition-transform ${apiUsageWidgetOpen ? 'rotate-180' : ''}`} />
+                <span className="flex items-center gap-2 text-sm font-semibold">
+                  <KeyRound className="h-4 w-4 text-blue-900" />
+                  ניצול מפתחות Groq (24 שעות)
+                </span>
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="px-3 pb-3">
+                <ApiKeyUsagePanel provider="groq" keysText={groqPoolText} />
+              </div>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
 
         {/* Incoming file banner — shows immediately when a file is received from another page */}
         {incomingFileBanner && (
@@ -2538,6 +2597,17 @@ const Index = () => {
       </div>
     </div>
     <KeyboardShortcutsDialog open={showHelp} onOpenChange={setShowHelp} />
+    <Dialog open={showApiUsage} onOpenChange={setShowApiUsage}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" dir="rtl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <KeyRound className="h-5 w-5 text-blue-900" />
+            ניצול מפתחות Groq
+          </DialogTitle>
+        </DialogHeader>
+        <ApiKeyUsagePanel provider="groq" keysText={groqPoolText} />
+      </DialogContent>
+    </Dialog>
     </Suspense>
   );
 };
