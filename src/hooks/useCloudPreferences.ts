@@ -294,8 +294,9 @@ export const useCloudPreferences = () => {
           if (!row) return;
           const cloudTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
           const localTime = Number(localStorage.getItem('app_theme_updated_at') || 0);
+          const localPersonalTime = Number(localStorage.getItem('personal_pronunciation_updated_at') || 0);
           // Ignore echoes of our own writes
-          if (localTime >= cloudTime) return;
+          if (localTime >= cloudTime && localPersonalTime >= cloudTime) return;
           if (row.theme && row.theme !== localStorage.getItem('app_theme_id')) {
             localStorage.setItem('app_theme_id', row.theme);
             localStorage.setItem('app_theme_updated_at', String(cloudTime));
@@ -307,6 +308,16 @@ export const useCloudPreferences = () => {
             window.dispatchEvent(new CustomEvent('cloud-theme-external-update', {
               detail: { source: 'remote', themeId: row.theme }
             }));
+          }
+          if (typeof row.personal_pronunciation_enabled === 'boolean' && localPersonalTime < cloudTime) {
+            localStorage.setItem('personal_pronunciation_enabled', row.personal_pronunciation_enabled ? '1' : '0');
+            localStorage.setItem('personal_pronunciation_updated_at', String(cloudTime));
+            setPreferences(prev => ({ ...prev, personal_pronunciation_enabled: row.personal_pronunciation_enabled }));
+            debugLog.info('CloudPreferences', 'Applied remote personal pronunciation preference', {
+              enabled: row.personal_pronunciation_enabled,
+              source: 'realtime',
+            });
+            window.dispatchEvent(new CustomEvent('cloud-prefs-loaded'));
           }
         }
       )
