@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { db, isDbAvailable } from '@/lib/localDb';
 import { getLocalPreferences, savePreferencesLocally, syncPreferencesDown } from '@/lib/syncEngine';
+import { debugLog } from '@/lib/debugLogger';
 
 export interface UserPreferences {
   font_size: number;
@@ -34,6 +35,7 @@ export interface UserPreferences {
   cuda_paragraph_threshold: number;
   cuda_preload_mode: string;   // 'preload' | 'direct'
   cuda_cloud_save: string;     // 'immediate' | 'text-only' | 'skip'
+  personal_pronunciation_enabled: boolean;
 }
 
 const DEFAULT_PREFERENCES: UserPreferences = {
@@ -64,6 +66,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   cuda_paragraph_threshold: 0,
   cuda_preload_mode: 'preload',
   cuda_cloud_save: 'immediate',
+  personal_pronunciation_enabled: true,
 };
 
 export const useCloudPreferences = () => {
@@ -113,6 +116,7 @@ export const useCloudPreferences = () => {
           const cParagraph = localStorage.getItem('cuda_paragraph_threshold');
           const cPreload = localStorage.getItem('cuda_preload_mode');
           const cCloudSave = localStorage.getItem('cuda_cloud_save');
+          const personalPronunciation = localStorage.getItem('personal_pronunciation_enabled');
           if (cPreset) prefs.cuda_preset = cPreset;
           if (cFast !== null) prefs.cuda_fast_mode = cFast === '1';
           if (cCompute) prefs.cuda_compute_type = cCompute;
@@ -123,6 +127,7 @@ export const useCloudPreferences = () => {
           if (cParagraph) prefs.cuda_paragraph_threshold = Number(cParagraph);
           if (cPreload) prefs.cuda_preload_mode = cPreload;
           if (cCloudSave) prefs.cuda_cloud_save = cCloudSave;
+          if (personalPronunciation !== null) prefs.personal_pronunciation_enabled = personalPronunciation === '1';
           setPreferences(prefs);
         }
       } catch {}
@@ -188,6 +193,7 @@ export const useCloudPreferences = () => {
           cuda_paragraph_threshold: (data as any).cuda_paragraph_threshold ?? DEFAULT_PREFERENCES.cuda_paragraph_threshold,
           cuda_preload_mode: (data as any).cuda_preload_mode ?? DEFAULT_PREFERENCES.cuda_preload_mode,
           cuda_cloud_save: (data as any).cuda_cloud_save ?? DEFAULT_PREFERENCES.cuda_cloud_save,
+          personal_pronunciation_enabled: (data as any).personal_pronunciation_enabled ?? DEFAULT_PREFERENCES.personal_pronunciation_enabled,
         };
         setPreferences(loaded);
         // Mirror to localStorage so useTheme picks up cloud values
@@ -205,6 +211,12 @@ export const useCloudPreferences = () => {
         localStorage.setItem('cuda_paragraph_threshold', String(loaded.cuda_paragraph_threshold));
         localStorage.setItem('cuda_preload_mode', loaded.cuda_preload_mode);
         localStorage.setItem('cuda_cloud_save', loaded.cuda_cloud_save);
+        localStorage.setItem('personal_pronunciation_enabled', loaded.personal_pronunciation_enabled ? '1' : '0');
+        localStorage.setItem('personal_pronunciation_updated_at', String(cloudUpdatedAt || Date.now()));
+        debugLog.info('CloudPreferences', 'Loaded personal pronunciation preference', {
+          enabled: loaded.personal_pronunciation_enabled,
+          source: 'cloud',
+        });
         window.dispatchEvent(new CustomEvent('cloud-prefs-loaded'));
 
         // If local theme is newer than cloud's stored theme, immediately push it back
@@ -303,6 +315,12 @@ export const useCloudPreferences = () => {
     localStorage.setItem('cuda_paragraph_threshold', String(updated.cuda_paragraph_threshold));
     localStorage.setItem('cuda_preload_mode', updated.cuda_preload_mode);
     localStorage.setItem('cuda_cloud_save', updated.cuda_cloud_save);
+    localStorage.setItem('personal_pronunciation_enabled', updated.personal_pronunciation_enabled ? '1' : '0');
+    localStorage.setItem('personal_pronunciation_updated_at', String(Date.now()));
+    debugLog.info('CloudPreferences', 'Saving personal pronunciation preference', {
+      enabled: updated.personal_pronunciation_enabled,
+      hasUser: Boolean(user),
+    });
 
     // Save to local DB (instant, offline-capable)
     if (user) {
@@ -355,6 +373,7 @@ export const useCloudPreferences = () => {
           cuda_paragraph_threshold: updated.cuda_paragraph_threshold,
           cuda_preload_mode: updated.cuda_preload_mode,
           cuda_cloud_save: updated.cuda_cloud_save,
+          personal_pronunciation_enabled: updated.personal_pronunciation_enabled,
           updated_at: new Date().toISOString(),
         } as any, { onConflict: 'user_id' });
 
