@@ -82,7 +82,7 @@ export async function pushToCloud(): Promise<SyncResult> {
   // Upsert in chunks of 25 to avoid request size limits.
   for (let i = 0; i < rows.length; i += 25) {
     const chunk = rows.slice(i, i + 25);
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('pronunciation_profiles_cloud')
       .upsert(chunk as any, { onConflict: 'id' });
     if (error) {
@@ -107,7 +107,7 @@ export async function pullFromCloud(): Promise<SyncResult> {
     return result;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from('pronunciation_profiles_cloud')
     .select('id, name, payload, updated_at')
     .eq('user_id', userId);
@@ -191,7 +191,7 @@ export async function deleteFromCloud(profileId: string): Promise<void> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session?.session?.user?.id;
   if (!userId) return;
-  await supabase
+  await (supabase as any)
     .from('pronunciation_profiles_cloud')
     .delete()
     .eq('user_id', userId)
