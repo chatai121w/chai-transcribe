@@ -83,7 +83,14 @@ export const useCloudPreferences = () => {
         const saved = localStorage.getItem('user_preferences');
         if (saved) {
           const parsed = JSON.parse(saved);
-          setPreferences({ ...DEFAULT_PREFERENCES, ...parsed });
+          const personalPronunciation = localStorage.getItem('personal_pronunciation_enabled');
+          setPreferences({
+            ...DEFAULT_PREFERENCES,
+            ...parsed,
+            ...(personalPronunciation !== null
+              ? { personal_pronunciation_enabled: personalPronunciation === '1' }
+              : {}),
+          });
         } else {
           // Try individual keys for backward compat
           const prefs = { ...DEFAULT_PREFERENCES };
@@ -140,7 +147,14 @@ export const useCloudPreferences = () => {
       const localPrefs = await getLocalPreferences();
       if (localPrefs) {
         const { id: _id, _dirty, ...rest } = localPrefs;
-        setPreferences({ ...DEFAULT_PREFERENCES, ...rest });
+        const personalPronunciation = localStorage.getItem('personal_pronunciation_enabled');
+        setPreferences({
+          ...DEFAULT_PREFERENCES,
+          ...rest,
+          ...(personalPronunciation !== null
+            ? { personal_pronunciation_enabled: personalPronunciation === '1' }
+            : {}),
+        });
         setIsLoaded(true);
       }
 
@@ -158,6 +172,9 @@ export const useCloudPreferences = () => {
         const localTheme = localStorage.getItem('app_theme_id');
         const localCustomThemes = localStorage.getItem('app_custom_themes');
         const localIsNewer = localThemeMtime > 0 && localThemeMtime > cloudUpdatedAt;
+        const localPersonalPronunciationUpdatedAt = Number(localStorage.getItem('personal_pronunciation_updated_at') || 0);
+        const localPersonalPronunciation = localStorage.getItem('personal_pronunciation_enabled');
+        const localPersonalIsNewer = localPersonalPronunciation !== null && localPersonalPronunciationUpdatedAt > cloudUpdatedAt;
 
         const loaded: UserPreferences = {
           font_size: data.font_size ?? DEFAULT_PREFERENCES.font_size,
@@ -193,7 +210,9 @@ export const useCloudPreferences = () => {
           cuda_paragraph_threshold: (data as any).cuda_paragraph_threshold ?? DEFAULT_PREFERENCES.cuda_paragraph_threshold,
           cuda_preload_mode: (data as any).cuda_preload_mode ?? DEFAULT_PREFERENCES.cuda_preload_mode,
           cuda_cloud_save: (data as any).cuda_cloud_save ?? DEFAULT_PREFERENCES.cuda_cloud_save,
-          personal_pronunciation_enabled: (data as any).personal_pronunciation_enabled ?? DEFAULT_PREFERENCES.personal_pronunciation_enabled,
+          personal_pronunciation_enabled: localPersonalIsNewer
+            ? localPersonalPronunciation === '1'
+            : ((data as any).personal_pronunciation_enabled ?? DEFAULT_PREFERENCES.personal_pronunciation_enabled),
         };
         setPreferences(loaded);
         // Mirror to localStorage so useTheme picks up cloud values
@@ -230,6 +249,16 @@ export const useCloudPreferences = () => {
             updated_at: new Date().toISOString(),
           } as any, { onConflict: 'user_id' }).then(() => {
             localStorage.setItem('app_theme_updated_at', String(Date.now()));
+          });
+        }
+
+        if (localPersonalIsNewer && typeof loaded.personal_pronunciation_enabled === 'boolean' && (data as any).personal_pronunciation_enabled !== loaded.personal_pronunciation_enabled) {
+          supabase.from('user_preferences').upsert({
+            user_id: user.id,
+            personal_pronunciation_enabled: loaded.personal_pronunciation_enabled,
+            updated_at: new Date().toISOString(),
+          } as any, { onConflict: 'user_id' }).then(() => {
+            localStorage.setItem('personal_pronunciation_updated_at', String(Date.now()));
           });
         }
 
