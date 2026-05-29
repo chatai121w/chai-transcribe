@@ -148,7 +148,7 @@ async function transcribeBlob(
   fileName: string,
   userApiKeys?: Record<string, any>,
   chunkLabel: string = 'single'
-): Promise<string> {
+): Promise<{ text: string; usedKey: string | null; provider: string }> {
   const safeFileName = sanitizeFileName(fileName);
 
   if (engine === 'local' || engine === 'local-server') {
@@ -162,7 +162,7 @@ async function transcribeBlob(
     );
     if (pool.length === 0) throw new Error('GROQ_API_KEY not configured. Please add your Groq API key in Settings.');
 
-    const { result } = await runWithPool(pool, { provider: 'groq', chunkLabel }, async (apiKey) => {
+    const { result, usedKey } = await runWithPool(pool, { provider: 'groq', chunkLabel }, async (apiKey) => {
       const fd = new FormData();
       fd.append('file', blob, safeFileName);
       fd.append('model', 'whisper-large-v3');
@@ -188,7 +188,7 @@ async function transcribeBlob(
       }
       return await response.text();
     });
-    return result;
+    return { text: result, usedKey, provider: 'groq' };
   } else if (engine === 'openai') {
     const pool = buildPool(
       userApiKeys?.openai_key || Deno.env.get('OPENAI_API_KEY'),
@@ -196,7 +196,7 @@ async function transcribeBlob(
     );
     if (pool.length === 0) throw new Error('OPENAI_API_KEY not configured. Please add your OpenAI API key in Settings.');
 
-    const { result } = await runWithPool(pool, { provider: 'openai', chunkLabel }, async (apiKey) => {
+    const { result, usedKey } = await runWithPool(pool, { provider: 'openai', chunkLabel }, async (apiKey) => {
       const fd = new FormData();
       fd.append('file', blob, safeFileName);
       fd.append('model', 'whisper-1');
@@ -220,7 +220,7 @@ async function transcribeBlob(
       }
       return await response.text();
     });
-    return result;
+    return { text: result, usedKey, provider: 'openai' };
   } else if (engine === 'deepgram') {
     const pool = buildPool(
       userApiKeys?.deepgram_key || Deno.env.get('DEEPGRAM_API_KEY'),
@@ -228,7 +228,7 @@ async function transcribeBlob(
     );
     if (pool.length === 0) throw new Error('DEEPGRAM_API_KEY not configured. Please add your Deepgram API key in Settings.');
 
-    const { result } = await runWithPool(pool, { provider: 'deepgram', chunkLabel }, async (apiKey) => {
+    const { result, usedKey } = await runWithPool(pool, { provider: 'deepgram', chunkLabel }, async (apiKey) => {
       const arrayBuffer = await blob.arrayBuffer();
       const langMap: Record<string, string> = { 'he': 'he', 'yi': 'he', 'en': 'en', 'auto': 'multi' };
       const dgLang = langMap[language] || 'multi';
@@ -256,7 +256,7 @@ async function transcribeBlob(
       if (!text) throw new Error('No transcription received from Deepgram');
       return text;
     });
-    return result;
+    return { text: result, usedKey, provider: 'deepgram' };
   } else if (engine === 'assemblyai') {
     const pool = buildPool(
       userApiKeys?.assemblyai_key || Deno.env.get('ASSEMBLYAI_API_KEY'),
@@ -264,7 +264,7 @@ async function transcribeBlob(
     );
     if (pool.length === 0) throw new Error('ASSEMBLYAI_API_KEY not configured. Please add your AssemblyAI API key in Settings.');
 
-    const { result } = await runWithPool(pool, { provider: 'assemblyai', chunkLabel }, async (apiKey) => {
+    const { result, usedKey } = await runWithPool(pool, { provider: 'assemblyai', chunkLabel }, async (apiKey) => {
       const uploadRes = await fetch('https://api.assemblyai.com/v2/upload', {
         method: 'POST', headers: { 'authorization': apiKey }, body: blob,
       });
@@ -301,7 +301,7 @@ async function transcribeBlob(
         await new Promise(r => setTimeout(r, 1500));
       }
     });
-    return result;
+    return { text: result, usedKey, provider: 'assemblyai' };
   } else if (engine === 'google') {
     const pool = buildPool(
       userApiKeys?.google_key || Deno.env.get('GOOGLE_API_KEY'),
@@ -309,7 +309,7 @@ async function transcribeBlob(
     );
     if (pool.length === 0) throw new Error('GOOGLE_API_KEY not configured. Please add your Google API key in Settings.');
 
-    const { result } = await runWithPool(pool, { provider: 'google', chunkLabel }, async (apiKey) => {
+    const { result, usedKey } = await runWithPool(pool, { provider: 'google', chunkLabel }, async (apiKey) => {
       const arrayBuffer = await blob.arrayBuffer();
       const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
       const ext = (safeFileName).split('.').pop()?.toLowerCase() || 'webm';
@@ -343,10 +343,26 @@ async function transcribeBlob(
       if (!text) throw new Error('No transcription received from Google');
       return text;
     });
-    return result;
+    return { text: result, usedKey, provider: 'google' };
   }
 
   throw new Error(`Unsupported engine: ${engine}`);
+}
+
+function keyFp(key: string | null): string {
+  if (!key) return '';
+  const k = key.trim();
+  if (k.length <= 10) return k;
+  return `${k.slice(0, 4)}...${k.slice(-4)}`;
+}
+
+function wordCount(text: string): number {
+  return (text || '').split(/\s+/).filter(Boolean).length;
+}
+
+// Rough estimate: ~16kB/s for typical compressed audio (~128kbps).
+function estimateSecondsFromBytes(bytes: number): number {
+  return bytes / 16000;
 }
 
 serve(async (req) => {
@@ -412,10 +428,22 @@ serve(async (req) => {
     const startChunk = job.completed_chunks || 0;
     let partialResult = job.partial_result || '';
 
+    // Per-key usage accumulator for this job (key_fp -> totals)
+    const usageByKey: Record<string, { provider: string; seconds: number; words: number }> = {};
+    const recordUsage = (provider: string, key: string | null, seconds: number, words: number) => {
+      const fp = keyFp(key);
+      if (!fp) return;
+      const k = `${provider}:${fp}`;
+      if (!usageByKey[k]) usageByKey[k] = { provider, seconds: 0, words: 0 };
+      usageByKey[k].seconds += Math.max(0, seconds);
+      usageByKey[k].words += Math.max(0, words);
+    };
+
     if (totalChunks <= 1 || fileData.size <= CHUNK_SIZE) {
       // Single chunk - simple path
-      const text = await transcribeBlob(fileData, engine, job.language || 'he', job.file_name || 'audio.webm', userApiKeys, 'single');
-      partialResult = text;
+      const r = await transcribeBlob(fileData, engine, job.language || 'he', job.file_name || 'audio.webm', userApiKeys, 'single');
+      partialResult = r.text;
+      recordUsage(r.provider, r.usedKey, estimateSecondsFromBytes(fileData.size), wordCount(r.text));
     } else {
       // Multi-chunk processing with resume
       const actualChunks = Math.ceil(fileData.size / CHUNK_SIZE);
@@ -428,11 +456,12 @@ serve(async (req) => {
         const chunkLabel = `chunk ${i + 1}/${actualChunks}`;
         console.log(`[${engine}] processing ${chunkLabel} (${chunkBlob.size} bytes)`);
 
-        const chunkText = await transcribeBlob(
+        const r = await transcribeBlob(
           chunkBlob, engine, job.language || 'he', job.file_name || 'audio.webm', userApiKeys, chunkLabel
         );
 
-        partialResult += (partialResult ? ' ' : '') + chunkText;
+        partialResult += (partialResult ? ' ' : '') + r.text;
+        recordUsage(r.provider, r.usedKey, estimateSecondsFromBytes(chunkBlob.size), wordCount(r.text));
 
         // Save partial progress
         const chunkProgress = 50 + Math.round(((i + 1) / actualChunks) * 40);
@@ -445,6 +474,24 @@ serve(async (req) => {
           })
           .eq('id', jobId);
       }
+    }
+
+    // Persist per-key usage events (one row per key used in this job)
+    try {
+      const rows = Object.entries(usageByKey).map(([k, v]) => ({
+        user_id: job.user_id,
+        provider: v.provider,
+        key_fp: k.split(':')[1],
+        seconds: Number(v.seconds.toFixed(2)),
+        words: v.words,
+      }));
+      if (rows.length > 0) {
+        const { error: usageErr } = await adminClient.from('api_key_usage_events').insert(rows);
+        if (usageErr) console.warn('Failed to insert api_key_usage_events:', usageErr.message);
+        else console.log(`Recorded ${rows.length} usage event(s) for job ${jobId}`);
+      }
+    } catch (e) {
+      console.warn('Usage tracking error:', e);
     }
 
     // Complete
