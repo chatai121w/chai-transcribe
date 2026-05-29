@@ -23,6 +23,7 @@ import {
   isProfileLoshonKodesh,
 } from "@/lib/pronunciationProfiles";
 import { getHotwordsString, applyVocabularyCorrections } from "@/utils/customVocabulary";
+import { recordKeyUsage } from "@/lib/apiKeyUsage";
 import { addNotification } from "@/hooks/useNotifications";
 import { isVideoFile, extractAudioFromVideo, VIDEO_NEEDS_EXTRACTION, MAX_VIDEO_SIZE_MB, MAX_AUDIO_SIZE_MB } from "@/lib/videoUtils";
 import { compressAudio, needsCompression, formatFileSize, CLOUD_API_LIMIT } from "@/lib/audioCompression";
@@ -313,6 +314,10 @@ export function useTranscriptionEngines(
       }
 
       const timings = data.wordTimings || [];
+      const usedKey = keyPool[usedIndex];
+      const usedSeconds = Number(data.duration) || (timings.length ? (timings[timings.length - 1]?.end || 0) : 0);
+      const usedWords = (data.text || '').split(/\s+/).filter(Boolean).length;
+      recordKeyUsage(provider, usedKey, usedSeconds, usedWords);
       await handleSuccess(data.text, timings, engineLabel, file, fileAudioUrl);
     } catch (error) {
       handleError(engineLabel, file, error);

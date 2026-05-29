@@ -14,6 +14,7 @@ import DevToolsPanel from "@/components/DevToolsPanel";
 import { OllamaManager } from "@/components/OllamaManager";
 import { ThemeManager } from "@/components/ThemeManager";
 import { getApiKey } from "@/lib/keyCrypto";
+import { ApiKeyUsagePanel } from "@/components/ApiKeyUsagePanel";
 
 const Settings = () => {
   const { isAuthenticated, logout, isLoading, isAdmin, user } = useAuth();
@@ -423,6 +424,8 @@ const Settings = () => {
               <p className="text-xs text-muted-foreground text-right">
                 כשהמפתח הראשון נכשל/מגיע למגבלה, המערכת תעבור אוטומטית למפתח הבא ותציג הודעה.
               </p>
+
+              <ApiKeyUsagePanel provider="groq" keysText={groqKeysPoolText} />
             </div>
 
             <div className="space-y-2">

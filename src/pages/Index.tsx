@@ -30,6 +30,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
 import { getApiKey } from "@/lib/keyCrypto";
+import { recordKeyUsage } from "@/lib/apiKeyUsage";
 import { isLoshonKodeshEnabled, setLoshonKodeshEnabled } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
 import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
@@ -949,6 +950,10 @@ const Index = () => {
       if (data?.text) {
         debugLog.info('Groq', `Transcription received, length: ${data.text.length}`);
         const timings = data.wordTimings || [];
+        const usedKey = keyPool[usedIndex];
+        const usedSeconds = Number(data.duration) || (timings.length ? (timings[timings.length - 1]?.end || 0) : 0);
+        const usedWords = (data.text || '').split(/\s+/).filter(Boolean).length;
+        recordKeyUsage('groq', usedKey, usedSeconds, usedWords);
         setTranscriptFromEngine(data.text);
         setWordTimings(timings);
         await saveToHistory(data.text, 'Groq Whisper', undefined, timings);

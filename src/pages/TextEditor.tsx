@@ -7,19 +7,20 @@ import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
 import { debugLog } from "@/lib/debugLogger";
 import type { TextVersion } from "@/components/TextEditHistory";
 import type { WordTiming } from "@/components/SyncAudioPlayer";
+import { TextStyleControl } from "@/components/TextStyleControl";
 
 // Lazy-loaded heavy components
+const SyncAudioPlayer = lazy(() => import("@/components/SyncAudioPlayer").then(m => ({ default: m.SyncAudioPlayer })));
 const AIEditorDual = lazy(() => import("@/components/AIEditorDual").then(m => ({ default: m.AIEditorDual })));
 const TextComparisonMulti = lazy(() => import("@/components/TextComparisonMulti").then(m => ({ default: m.TextComparisonMulti })));
 const EditingTemplates = lazy(() => import("@/components/EditingTemplates").then(m => ({ default: m.EditingTemplates })));
 const AdvancedDiffView = lazy(() => import("@/components/AdvancedDiffView").then(m => ({ default: m.AdvancedDiffView })));
-const TextStyleControl = lazy(() => import("@/components/TextStyleControl").then(m => ({ default: m.TextStyleControl })));
+// TextStyleControl is in the header (always rendered) — must be eager to avoid triggering outer Suspense
 const TextEditHistory = lazy(() => import("@/components/TextEditHistory").then(m => ({ default: m.TextEditHistory })));
 const PromptLibrary = lazy(() => import("@/components/PromptLibrary").then(m => ({ default: m.PromptLibrary })));
 const EditPipeline = lazy(() => import("@/components/EditPipeline").then(m => ({ default: m.EditPipeline })));
 const OllamaManager = lazy(() => import("@/components/OllamaManager").then(m => ({ default: m.OllamaManager })));
 const CorrectionLearningPanel = lazy(() => import("@/components/CorrectionLearningPanel").then(m => ({ default: m.CorrectionLearningPanel })));
-const SyncAudioPlayer = lazy(() => import("@/components/SyncAudioPlayer").then(m => ({ default: m.SyncAudioPlayer })));
 const SyncEditableView = lazy(() => import("@/components/SyncEditableView").then(m => ({ default: m.SyncEditableView })));
 const SyncTranscriptView = lazy(() => import("@/components/SyncTranscriptView").then(m => ({ default: m.SyncTranscriptView })));
 const SyncMirrorLayout = lazy(() => import("@/components/SyncMirrorLayout").then(m => ({ default: m.SyncMirrorLayout })));
@@ -301,6 +302,9 @@ const TextEditor = () => {
       }
     };
     window.addEventListener('keydown', handleKeyDown);
+
+    // Preload SyncAudioPlayer chunk in background so tab opens instantly
+    import("@/components/SyncAudioPlayer").catch(() => {});
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
@@ -766,7 +770,7 @@ const TextEditor = () => {
   }, [buildSyncedTimings, saveCloudVersion, transcriptId]);
 
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>}>
+    <Suspense fallback={null}>
     <div className="min-h-screen bg-background p-2 md:p-4" dir="rtl">
       <div className="max-w-full mx-auto space-y-3">
         {/* Compact Header */}
@@ -1007,6 +1011,7 @@ const TextEditor = () => {
                 </FloatingPlayerPortal>
               </Suspense>
             ) : (
+              <Suspense fallback={null}>
               <div className="rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden">
                 <SyncAudioPlayer
                   audioUrl={audioUrl}
@@ -1020,6 +1025,7 @@ const TextEditor = () => {
                   eqPortalTarget={eqPortalTarget}
                 />
               </div>
+              </Suspense>
             )}
 
             {/* Floating EQ window */}
