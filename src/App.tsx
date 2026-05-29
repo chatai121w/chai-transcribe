@@ -69,7 +69,7 @@ const BackgroundSyncLazy = lazy(() => import("./components/BackgroundSync").then
 const SWUpdateNotifierLazy = lazy(() => import("./components/SWUpdateNotifier").then(m => ({ default: m.SWUpdateNotifier })));
 const CloudKeySyncLazy = lazy(() => import("./components/CloudKeySync"));
 const DiarizationFloatingStatusLazy = lazy(() => import("./components/DiarizationFloatingStatus").then(m => ({ default: m.DiarizationFloatingStatus })));
-const VoiceInputFABLazy = lazy(() => import("./components/VoiceInputFAB").then(m => ({ default: m.VoiceInputFAB })));
+
 
 /** Mounts children only after the browser is idle / a delay — keeps them off the critical path. */
 function DeferredMount({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
@@ -224,7 +224,7 @@ const App = () => {
           {devFloatingButtons.transcriptionAnalytics && <DeferredMount delay={1500}><TranscriptionAnalyticsLazy /></DeferredMount>}
           {devFloatingButtons.pwaInstall && <DeferredMount delay={2000}><PWAInstallButtonLazy /></DeferredMount>}
           {devFloatingButtons.diarizationStatus && <DeferredMount delay={500}><DiarizationFloatingStatusLazy /></DeferredMount>}
-          <DeferredMount delay={800}><VoiceInputFABLazy /></DeferredMount>
+          
           <AppSidebar />
           <AppLayout>
             <Suspense fallback={<PageLoader label="suspense" />}>
