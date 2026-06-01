@@ -961,7 +961,8 @@ function CommandTester({ connected }: { connected: boolean }) {
 // ─── Config Panel ─────────────────────────────────────────────────────────────
 
 function ConfigPanel() {
-  const { apiKeys, isLoading: keysLoading } = useCloudApiKeys();
+  const { keys: apiKeys, isLoaded } = useCloudApiKeys();
+  const keysLoading = !isLoaded;
   const [wakeWord, setWakeWord] = useState("מערכת");
   const [groqKey, setGroqKey] = useState("");
   const [fromSystem, setFromSystem] = useState(false);
