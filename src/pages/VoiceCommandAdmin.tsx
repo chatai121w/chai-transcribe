@@ -1065,7 +1065,8 @@ function ConfigPanel() {
 // ─── Engine Panel ─────────────────────────────────────────────────────────────
 
 function EnginePanel({ connected }: { connected: boolean }) {
-  const { apiKeys, isLoading: keysLoading } = useCloudApiKeys();
+  const { keys: apiKeys, isLoaded } = useCloudApiKeys();
+  const keysLoading = !isLoaded;
   const [mode, setMode]               = useState<EngineMode>("groq_first");
   const [groqKey, setGroqKey]         = useState("");
   const [fromSystem, setFromSystem]   = useState(false);
