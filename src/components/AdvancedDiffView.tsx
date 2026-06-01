@@ -9,6 +9,7 @@ import { ArrowRightLeft, Copy, ArrowUp, ArrowDown, Layers, Loader2 } from "lucid
 import { TextVersion } from "@/components/TextEditHistory";
 import { useDiffWorker, type DiffOp } from "@/hooks/useDiffWorker";
 import { toast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 interface AdvancedDiffViewProps {
   versions: TextVersion[];
