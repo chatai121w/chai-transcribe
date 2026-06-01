@@ -130,9 +130,13 @@ const AppSidebar = () => {
   }, [preferences.sidebar_pinned]);
 
   useEffect(() => {
-    updatePreference('sidebar_pinned', isPinned);
+    // Only write back when the value actually changed from cloud preferences,
+    // to avoid an echo-write on every mount (which caused redundant cloud upserts).
+    if (isPinned !== preferences.sidebar_pinned) {
+      updatePreference('sidebar_pinned', isPinned);
+    }
     window.dispatchEvent(new CustomEvent("sidebar-pin-change", { detail: isPinned }));
-  }, [isPinned]);
+  }, [isPinned, preferences.sidebar_pinned, updatePreference]);
 
   useEffect(() => {
     if (isPinned) setIsOpen(true);
