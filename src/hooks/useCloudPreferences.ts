@@ -383,12 +383,12 @@ export const useCloudPreferences = () => {
     };
   }, [user]);
 
-  // Debounced save to cloud
-  const saveToCloud = useCallback((updated: UserPreferences) => {
+  // Save to cloud (debounced by default; some critical keys go immediate)
+  const saveToCloud = useCallback((updated: UserPreferences, opts?: { immediate?: boolean }) => {
     // Always save to localStorage for quick access
     localStorage.setItem('user_preferences', JSON.stringify(updated));
 
-    // Also mirror individual localStorage keys for backward compat
+    // Mirror individual localStorage keys for backward compat
     localStorage.setItem('transcript_engine', updated.engine);
     localStorage.setItem('transcript_sourceLanguage', updated.source_language);
     localStorage.setItem('transcript_fontSize', String(updated.font_size));
@@ -399,7 +399,6 @@ export const useCloudPreferences = () => {
     localStorage.setItem('app_theme_updated_at', String(Date.now()));
     localStorage.setItem('app_custom_themes', updated.custom_themes);
     localStorage.setItem('editor_columns', String(updated.editor_columns));
-    // Mirror CUDA settings
     localStorage.setItem('cuda_preset', updated.cuda_preset);
     localStorage.setItem('cuda_fast_mode', updated.cuda_fast_mode ? '1' : '0');
     localStorage.setItem('cuda_compute_type', updated.cuda_compute_type);
@@ -419,9 +418,10 @@ export const useCloudPreferences = () => {
       localStorage.removeItem('pp_active_profile');
     }
     localStorage.setItem('diarize_enabled', updated.diarize_enabled ? '1' : '0');
-    debugLog.info('CloudPreferences', 'Saving personal pronunciation preference', {
-      enabled: updated.personal_pronunciation_enabled,
+    debugLog.info('CloudPreferences', 'saveToCloud invoked', {
+      pp_enabled: updated.personal_pronunciation_enabled,
       hasUser: Boolean(user),
+      immediate: opts?.immediate ?? false,
     });
 
     // Save to local DB (instant, offline-capable)
@@ -436,15 +436,13 @@ export const useCloudPreferences = () => {
 
     if (!user) return;
 
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      // Parse custom_themes string to JSON for DB storage
+    const doUpsert = async () => {
       let customThemesParsed: unknown = [];
       try { customThemesParsed = JSON.parse(updated.custom_themes); } catch {}
       let tabSettingsParsed: unknown = null;
       try { if (updated.tab_settings_json) tabSettingsParsed = JSON.parse(updated.tab_settings_json); } catch {}
 
-      const { error } = await supabase
+      const { data: row, error } = await supabase
         .from('user_preferences')
         .upsert({
           user_id: user.id,
@@ -480,10 +478,13 @@ export const useCloudPreferences = () => {
           active_pronunciation_profile: updated.active_pronunciation_profile || '',
           diarize_enabled: updated.diarize_enabled,
           updated_at: new Date().toISOString(),
-        } as any, { onConflict: 'user_id' });
+        } as any, { onConflict: 'user_id' })
+        .select('updated_at, personal_pronunciation_enabled')
+        .maybeSingle();
 
-      // Fallback: if CUDA columns don't exist yet, save without them
       if (error) {
+        debugLog.error('CloudPreferences', 'Upsert failed', { msg: error.message, code: (error as any).code });
+        // Fallback retry — keep pp_enabled in the payload
         const { error: error2 } = await supabase
           .from('user_preferences')
           .upsert({
@@ -498,34 +499,40 @@ export const useCloudPreferences = () => {
             source_language: updated.source_language,
             custom_themes: customThemesParsed,
             editor_columns: updated.editor_columns,
-            dashboard_view_mode: updated.dashboard_view_mode,
-            folder_view_mode: updated.folder_view_mode,
-            folder_sort_key: updated.folder_sort_key,
-            folder_sort_asc: updated.folder_sort_asc,
-            player_layout: updated.player_layout,
-            tab_settings_json: tabSettingsParsed,
-            default_ai_model: updated.default_ai_model || null,
+            personal_pronunciation_enabled: updated.personal_pronunciation_enabled,
+            loshon_kodesh_enabled: updated.loshon_kodesh_enabled,
+            active_pronunciation_profile: updated.active_pronunciation_profile || '',
+            diarize_enabled: updated.diarize_enabled,
             updated_at: new Date().toISOString(),
           } as any, { onConflict: 'user_id' });
-
-        // Last resort: save only original columns
         if (error2) {
-          await supabase
-            .from('user_preferences')
-            .upsert({
-              user_id: user.id,
-              font_size: updated.font_size,
-              font_family: updated.font_family,
-              text_color: updated.text_color,
-              line_height: updated.line_height,
-              sidebar_pinned: updated.sidebar_pinned,
-              theme: updated.theme,
-              updated_at: new Date().toISOString(),
-            }, { onConflict: 'user_id' });
+          debugLog.error('CloudPreferences', 'Fallback upsert failed', { msg: error2.message });
         }
+      } else {
+        const serverTime = row?.updated_at ? new Date(row.updated_at).getTime() : Date.now();
+        // Align local timestamp with server-trigger updated_at so it always wins on reload
+        localStorage.setItem('personal_pronunciation_updated_at', String(serverTime));
+        debugLog.info('CloudPreferences', 'Upsert OK', {
+          serverTime,
+          pp_enabled_server: row?.personal_pronunciation_enabled,
+        });
       }
-    }, 500);
+    };
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    if (opts?.immediate) {
+      void doUpsert();
+    } else {
+      saveTimerRef.current = setTimeout(doUpsert, 500);
+    }
   }, [user]);
+
+  const IMMEDIATE_KEYS: Array<keyof UserPreferences> = [
+    'personal_pronunciation_enabled',
+    'loshon_kodesh_enabled',
+    'active_pronunciation_profile',
+    'diarize_enabled',
+  ];
 
   const updatePreference = useCallback(<K extends keyof UserPreferences>(
     key: K,
@@ -533,7 +540,7 @@ export const useCloudPreferences = () => {
   ) => {
     setPreferences(prev => {
       const updated = { ...prev, [key]: value };
-      saveToCloud(updated);
+      saveToCloud(updated, { immediate: IMMEDIATE_KEYS.includes(key) });
       return updated;
     });
   }, [saveToCloud]);
@@ -541,7 +548,8 @@ export const useCloudPreferences = () => {
   const updatePreferences = useCallback((partial: Partial<UserPreferences>) => {
     setPreferences(prev => {
       const updated = { ...prev, ...partial };
-      saveToCloud(updated);
+      const hasImmediate = Object.keys(partial).some(k => IMMEDIATE_KEYS.includes(k as keyof UserPreferences));
+      saveToCloud(updated, { immediate: hasImmediate });
       return updated;
     });
   }, [saveToCloud]);

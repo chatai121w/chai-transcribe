@@ -14,6 +14,36 @@ export type Database = {
   }
   public: {
     Tables: {
+      api_key_usage_events: {
+        Row: {
+          created_at: string
+          id: number
+          key_fp: string
+          provider: string
+          seconds: number
+          user_id: string
+          words: number
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          key_fp: string
+          provider: string
+          seconds?: number
+          user_id: string
+          words?: number
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          key_fp?: string
+          provider?: string
+          seconds?: number
+          user_id?: string
+          words?: number
+        }
+        Relationships: []
+      }
       conversion_history: {
         Row: {
           created_at: string
@@ -550,6 +580,7 @@ export type Database = {
       }
       user_preferences: {
         Row: {
+          active_pronunciation_profile: string
           compare_settings_json: Json | null
           created_at: string
           cuda_beam_size: number | null
@@ -565,6 +596,7 @@ export type Database = {
           custom_themes: Json | null
           dashboard_view_mode: string | null
           default_ai_model: string | null
+          diarize_enabled: boolean
           draft_text: string | null
           editor_columns: number | null
           engine: string | null
@@ -575,6 +607,7 @@ export type Database = {
           font_size: number | null
           id: string
           line_height: number | null
+          loshon_kodesh_enabled: boolean
           personal_pronunciation_enabled: boolean
           player_layout: string | null
           sidebar_pinned: boolean | null
@@ -586,6 +619,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          active_pronunciation_profile?: string
           compare_settings_json?: Json | null
           created_at?: string
           cuda_beam_size?: number | null
@@ -601,6 +635,7 @@ export type Database = {
           custom_themes?: Json | null
           dashboard_view_mode?: string | null
           default_ai_model?: string | null
+          diarize_enabled?: boolean
           draft_text?: string | null
           editor_columns?: number | null
           engine?: string | null
@@ -611,6 +646,7 @@ export type Database = {
           font_size?: number | null
           id?: string
           line_height?: number | null
+          loshon_kodesh_enabled?: boolean
           personal_pronunciation_enabled?: boolean
           player_layout?: string | null
           sidebar_pinned?: boolean | null
@@ -622,6 +658,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          active_pronunciation_profile?: string
           compare_settings_json?: Json | null
           created_at?: string
           cuda_beam_size?: number | null
@@ -637,6 +674,7 @@ export type Database = {
           custom_themes?: Json | null
           dashboard_view_mode?: string | null
           default_ai_model?: string | null
+          diarize_enabled?: boolean
           draft_text?: string | null
           editor_columns?: number | null
           engine?: string | null
@@ -647,6 +685,7 @@ export type Database = {
           font_size?: number | null
           id?: string
           line_height?: number | null
+          loshon_kodesh_enabled?: boolean
           personal_pronunciation_enabled?: boolean
           player_layout?: string | null
           sidebar_pinned?: boolean | null
