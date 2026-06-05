@@ -232,6 +232,7 @@ const App = () => {
           {devFloatingButtons.diarizationStatus && <DeferredMount delay={500}><DiarizationFloatingStatusLazy /></DeferredMount>}
           
           <AppSidebar />
+          <DeferredMount delay={200}><QuickCutDialogLazy /></DeferredMount>
           <AppLayout>
             <Suspense fallback={<PageLoader label="suspense" />}>
               <Routes>
