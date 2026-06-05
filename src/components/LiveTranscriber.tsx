@@ -106,6 +106,15 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const audioLevelSamplesRef = useRef<number[]>([]);
   const finalTextRef = useRef("");
 
+  // Groq word-timestamp accumulation
+  const cumulativeAudioSecRef = useRef(0);
+  const currentGroqRecorderRef = useRef<{
+    rec: MediaRecorder;
+    chunks: Blob[];
+    startMs: number;
+    offsetSec: number;
+  } | null>(null);
+
   // Audio level indicator refs
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -235,7 +244,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   // ─── CUDA Whisper Live Mode ───
   const getBaseUrl = () => getServerUrl();
 
-  const sendChunk = useCallback(async (blob: Blob) => {
+  const sendChunk = useCallback(async (blob: Blob, offsetSec: number = 0) => {
     if (blob.size < LIVE_MIN_BLOB_BYTES || processingRef.current) return;
 
     // Client-side silence skip — use averaged audio level over chunk window
@@ -342,6 +351,19 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         const text = data.text?.trim();
         const latencyMs = Math.round(performance.now() - sendStart);
         const newWords = text ? text.split(/\s+/).length : 0;
+
+        // Accumulate word-level timings (Groq returns them per chunk; shift by offset)
+        if (Array.isArray(data.wordTimings) && data.wordTimings.length > 0) {
+          for (const w of data.wordTimings) {
+            if (typeof w?.start === 'number' && typeof w?.end === 'number' && w?.word) {
+              wordTimingsRef.current.push({
+                word: String(w.word),
+                start: w.start + offsetSec,
+                end: w.end + offsetSec,
+              });
+            }
+          }
+        }
 
         setStats(prev => ({
           ...prev,
@@ -495,35 +517,46 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
       if (mode === "groq") {
         // Groq requires a complete, standalone media file per request.
-        // Concatenating timeslice chunks (header + segments) produces malformed
-        // webm that Groq rejects with 400 "could not process file".
-        // Solution: stop & restart MediaRecorder every chunkSec so each emitted
-        // blob is a fully self-contained webm file.
-        const startFreshRecorder = () => {
+        // Each chunk = its own standalone webm recording. We track per-chunk
+        // start time and cumulative offset to shift word timestamps correctly,
+        // and expose the active recorder so stopListening can flush the tail.
+        cumulativeAudioSecRef.current = 0;
+        wordTimingsRef.current = [];
+
+        const startGroqRecorder = () => {
           const rec = new MediaRecorder(recorderStream, { mimeType });
           const localChunks: Blob[] = [];
+          const ctx = {
+            rec,
+            chunks: localChunks,
+            startMs: Date.now(),
+            offsetSec: cumulativeAudioSecRef.current,
+          };
           rec.ondataavailable = (e) => {
             if (e.data.size > 0) localChunks.push(e.data);
           };
-          rec.onstop = () => {
+          // Default onstop: auto-cycle; overridden by cycleGroqRecorder / flush.
+          rec.onstop = async () => {
+            const durationSec = (Date.now() - ctx.startMs) / 1000;
+            cumulativeAudioSecRef.current += durationSec;
             if (localChunks.length > 0) {
               const blob = new Blob(localChunks, { type: mimeType });
               allChunksRef.current.push(blob);
-              if (!processingRef.current) sendChunk(blob);
-              else pendingRetryRef.current = blob;
+              await sendChunk(blob, ctx.offsetSec);
             }
-            if (isListeningRef.current && mediaRecorderRef.current === rec) {
-              startFreshRecorder();
+            if (isListeningRef.current && !isPausedRef.current && currentGroqRecorderRef.current === ctx) {
+              startGroqRecorder();
             }
           };
+          currentGroqRecorderRef.current = ctx;
           mediaRecorderRef.current = rec;
           rec.start();
         };
-        startFreshRecorder();
+        startGroqRecorder();
 
         chunkIntervalRef.current = setInterval(() => {
-          const rec = mediaRecorderRef.current;
-          if (rec && rec.state === "recording") rec.stop();
+          const ctx = currentGroqRecorderRef.current;
+          if (ctx && ctx.rec.state === "recording") ctx.rec.stop();
         }, chunkSecRef.current * 1000);
       } else {
         const recorder = new MediaRecorder(recorderStream, { mimeType });
@@ -593,9 +626,12 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     processedStreamRef.current = null;
     audioLevelRef.current = 0;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      // Override any pending onstop to avoid auto-restart or stray sends
+      try { mediaRecorderRef.current.onstop = null as any; } catch { /* noop */ }
       mediaRecorderRef.current.stop();
     }
     mediaRecorderRef.current = null;
+    currentGroqRecorderRef.current = null;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
@@ -714,12 +750,42 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     }
   }, [mode, startCuda, startBrowser]);
 
+  // Flush the in-flight Groq recorder: stop it, transcribe the tail (if >=1s),
+  // and resolve once the final sendChunk completes. No auto-cycle.
+  const flushGroqTail = useCallback(async (): Promise<void> => {
+    const ctx = currentGroqRecorderRef.current;
+    currentGroqRecorderRef.current = null;
+    if (!ctx) return;
+    if (ctx.rec.state === "inactive") return;
+    await new Promise<void>((resolve) => {
+      ctx.rec.onstop = async () => {
+        const durationSec = (Date.now() - ctx.startMs) / 1000;
+        cumulativeAudioSecRef.current += durationSec;
+        if (ctx.chunks.length > 0 && durationSec >= 1) {
+          const blob = new Blob(ctx.chunks, { type: mimeTypeRef.current });
+          allChunksRef.current.push(blob);
+          setInterimText("מתמלל את הסיום...");
+          try { await sendChunk(blob, ctx.offsetSec); } catch { /* swallow */ }
+        }
+        resolve();
+      };
+      try { ctx.rec.stop(); } catch { resolve(); }
+    });
+  }, [sendChunk]);
+
   const stopListening = useCallback(async () => {
     if (mode === "cuda" || mode === "groq") {
-      // Stop recording FIRST so no new chunks arrive during refine
+      // Stop the chunk timer first so no new cycles trigger during flush
       if (chunkIntervalRef.current) { clearInterval(chunkIntervalRef.current); chunkIntervalRef.current = null; }
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-        mediaRecorderRef.current.stop();
+      // Prevent auto-restart of groq recorder during flush
+      isListeningRef.current = false;
+
+      if (mode === "groq") {
+        await flushGroqTail();
+      } else {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
       }
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
 
@@ -774,7 +840,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         });
       }
     }
-  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, stopCudaCleanup, stopBrowser]);
+  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, stopCudaCleanup, stopBrowser, flushGroqTail]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(finalText);
