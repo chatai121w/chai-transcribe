@@ -747,12 +747,42 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     }
   }, [mode, startCuda, startBrowser]);
 
+  // Flush the in-flight Groq recorder: stop it, transcribe the tail (if >=1s),
+  // and resolve once the final sendChunk completes. No auto-cycle.
+  const flushGroqTail = useCallback(async (): Promise<void> => {
+    const ctx = currentGroqRecorderRef.current;
+    currentGroqRecorderRef.current = null;
+    if (!ctx) return;
+    if (ctx.rec.state === "inactive") return;
+    await new Promise<void>((resolve) => {
+      ctx.rec.onstop = async () => {
+        const durationSec = (Date.now() - ctx.startMs) / 1000;
+        cumulativeAudioSecRef.current += durationSec;
+        if (ctx.chunks.length > 0 && durationSec >= 1) {
+          const blob = new Blob(ctx.chunks, { type: mimeTypeRef.current });
+          allChunksRef.current.push(blob);
+          setInterimText("מתמלל את הסיום...");
+          try { await sendChunk(blob, ctx.offsetSec); } catch { /* swallow */ }
+        }
+        resolve();
+      };
+      try { ctx.rec.stop(); } catch { resolve(); }
+    });
+  }, [sendChunk]);
+
   const stopListening = useCallback(async () => {
     if (mode === "cuda" || mode === "groq") {
-      // Stop recording FIRST so no new chunks arrive during refine
+      // Stop the chunk timer first so no new cycles trigger during flush
       if (chunkIntervalRef.current) { clearInterval(chunkIntervalRef.current); chunkIntervalRef.current = null; }
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-        mediaRecorderRef.current.stop();
+      // Prevent auto-restart of groq recorder during flush
+      isListeningRef.current = false;
+
+      if (mode === "groq") {
+        await flushGroqTail();
+      } else {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
       }
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
 
@@ -807,7 +837,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         });
       }
     }
-  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, stopCudaCleanup, stopBrowser]);
+  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, stopCudaCleanup, stopBrowser, flushGroqTail]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(finalText);
