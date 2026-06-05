@@ -263,34 +263,62 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         formData.append("context", prevWords.slice(-LIVE_CONTEXT_WORDS).join(" "));
       }
 
-      const res = await fetch(`${getBaseUrl()}/transcribe-live`, {
-        method: "POST",
-        body: formData,
-        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
-      });
+      let status = 0;
+      let data: any = null;
+      let ok = false;
 
-      if (res.status === 429) {
-        // Save for retry — DON'T unshift back to chunksRef (avoids duplicate headers)
-        pendingRetryRef.current = blob;
-        const now = Date.now();
-        if (now - gpuBusyToastAtRef.current > 4000) {
-          gpuBusyToastAtRef.current = now;
-          toast({ title: "GPU עסוק", description: "ממשיך אוטומטית כשהשרת יתפנה" });
+      if (mode === "groq") {
+        // Groq via edge function — chunked near-live transcription
+        const { data: gd, error: gerr } = await supabase.functions.invoke('transcribe-groq', {
+          body: formData,
+        });
+        if (gerr) {
+          // 429 from Groq surfaces as error; treat as rate limited
+          const msg = String(gerr.message || gerr);
+          if (msg.includes('429') || /rate/i.test(msg)) {
+            pendingRetryRef.current = blob;
+            const now = Date.now();
+            if (now - gpuBusyToastAtRef.current > 4000) {
+              gpuBusyToastAtRef.current = now;
+              toast({ title: "Groq עסוק", description: "ממתין ומנסה שוב" });
+            }
+            setInterimText("Groq rate limit — ממתין...");
+            return;
+          }
+          throw new Error(msg);
         }
-        setInterimText("GPU עסוק — ממתין...");
-        return;
-      }
-
-      if (res.status === 500) {
-        consecutiveErrorsRef.current++;
-        if (consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS) {
-          toast({ title: "שגיאות חוזרות", description: "מנותק מהשרת — בדוק את שרת CUDA", variant: "destructive" });
-          setInterimText("שגיאה — שרת לא מגיב");
+        data = gd;
+        ok = true;
+      } else {
+        const res = await fetch(`${getBaseUrl()}/transcribe-live`, {
+          method: "POST",
+          body: formData,
+          signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+        });
+        status = res.status;
+        ok = res.ok;
+        if (status === 429) {
+          pendingRetryRef.current = blob;
+          const now = Date.now();
+          if (now - gpuBusyToastAtRef.current > 4000) {
+            gpuBusyToastAtRef.current = now;
+            toast({ title: "GPU עסוק", description: "ממשיך אוטומטית כשהשרת יתפנה" });
+          }
+          setInterimText("GPU עסוק — ממתין...");
           return;
         }
-        pendingRetryRef.current = blob;
-        setStats(prev => ({ ...prev, errorsCount: prev.errorsCount + 1 }));
-        return;
+        if (status === 500) {
+          consecutiveErrorsRef.current++;
+          if (consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS) {
+            toast({ title: "שגיאות חוזרות", description: "מנותק מהשרת — בדוק את שרת CUDA", variant: "destructive" });
+            setInterimText("שגיאה — שרת לא מגיב");
+            return;
+          }
+          pendingRetryRef.current = blob;
+          setStats(prev => ({ ...prev, errorsCount: prev.errorsCount + 1 }));
+          return;
+        }
+        if (ok) data = await res.json();
       }
 
       if (res.ok) {
