@@ -30,9 +30,36 @@ import {
   type CutResult,
   type TieredCutProgress,
 } from "@/lib/tieredCutEngine";
+import {
+  convertAudio,
+  onJobUpdate,
+  type ConversionJob,
+  type OutputFormat,
+} from "@/lib/ffmpegConverter";
 import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { formatTime } from "@/lib/audioCutEngine";
+
+type ConvFormat = "none" | OutputFormat;
+
+/** Run convertAudio and resolve with the produced File once the job finishes. */
+function convertOne(file: File, format: OutputFormat): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const job = convertAudio(file, format);
+    const off = onJobUpdate((j: ConversionJob) => {
+      if (j.id !== job.id) return;
+      if (j.status === "done" && j.outputBlob) {
+        off();
+        const ext = format === "mp3" ? "mp3" : format === "opus" ? "opus" : "m4a";
+        const outName = file.name.replace(/\.[^/.]+$/, "") + "." + ext;
+        resolve(new File([j.outputBlob], outName, { type: j.outputBlob.type }));
+      } else if (j.status === "error") {
+        off();
+        reject(new Error(j.error || "המרה נכשלה"));
+      }
+    });
+  });
+}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
