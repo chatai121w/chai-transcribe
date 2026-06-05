@@ -61,7 +61,10 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const [interimText, setInterimText] = useState("");
   const [finalText, setFinalText] = useState("");
   const [isSupported, setIsSupported] = useState(true);
-  const [mode, setMode] = useState<LiveMode>(serverConnected ? "cuda" : "browser");
+  const [mode, setMode] = useState<LiveMode>(serverConnected ? "cuda" : "groq");
+  const [chunkSec, setChunkSec] = useState<number>(DEFAULT_CHUNK_SEC);
+  const chunkSecRef = useRef<number>(DEFAULT_CHUNK_SEC);
+  useEffect(() => { chunkSecRef.current = chunkSec; }, [chunkSec]);
   const recognitionRef = useRef<any>(null);
   const [isRefining, setIsRefining] = useState(false);
 
