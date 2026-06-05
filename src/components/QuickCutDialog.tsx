@@ -155,19 +155,20 @@ export default function QuickCutDialog() {
     return { mode: "time", chunkDurationSec: sec };
   };
 
-  const handleCut = async () => {
+  const handleCut = async (): Promise<CutResult[] | null> => {
     if (!file) {
       toast({ title: "לא נבחר קובץ", variant: "destructive" });
-      return;
+      return null;
     }
     const config = buildConfig();
     if (!config) {
       toast({ title: "הגדרות לא תקינות", variant: "destructive" });
-      return;
+      return null;
     }
 
     setIsCutting(true);
     setResults([]);
+    setConvertedFiles([]);
     setProgress({ tier: "wav-slice", message: "מתחיל…", completed: 0, total: 1 });
 
     try {
@@ -182,9 +183,11 @@ export default function QuickCutDialog() {
         title: "✂️ חיתוך הושלם",
         description: `${outcome.results.length} מקטעים (מנוע: ${labelForTier(outcome.tier)})`,
       });
+      return outcome.results;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       toast({ title: "שגיאת חיתוך", description: msg, variant: "destructive" });
+      return null;
     } finally {
       setIsCutting(false);
       setProgress(null);
