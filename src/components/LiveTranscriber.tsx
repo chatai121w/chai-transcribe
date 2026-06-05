@@ -967,7 +967,36 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
               <Cpu className="w-4 h-4 ml-1" />
               CUDA Whisper
             </Button>
+            <Button
+              variant={mode === "groq" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setMode("groq")}
+              title="Groq Whisper בענן — לא דורש שרת מקומי"
+            >
+              <Zap className="w-4 h-4 ml-1" />
+              Groq
+            </Button>
           </div>
+
+          {/* Chunk size — applies to CUDA & Groq */}
+          {(mode === "cuda" || mode === "groq") && (
+            <div className="flex items-center gap-3 justify-center px-2">
+              <Clock className="w-4 h-4 text-muted-foreground shrink-0" />
+              <span className="text-xs text-muted-foreground whitespace-nowrap">גודל צ'אנק</span>
+              <Slider
+                min={2}
+                max={15}
+                step={1}
+                value={[chunkSec]}
+                onValueChange={([v]) => setChunkSec(v)}
+                className="w-[140px]"
+              />
+              <span className="text-xs font-mono text-muted-foreground w-12">{chunkSec}s</span>
+              <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                {chunkSec <= 3 ? '⚡ מהיר' : chunkSec >= 8 ? '🎯 מדויק' : 'מאוזן'}
+              </span>
+            </div>
+          )}
 
           {/* File name + format selector */}
           <div className="flex items-center gap-2 justify-center flex-wrap">
