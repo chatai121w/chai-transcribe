@@ -267,6 +267,22 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       let ok = false;
 
       if (mode === "groq") {
+        // Pick a Groq key — pool first, then single key
+        const pool = apiKeys.groq_keys_pool?.filter(Boolean) || [];
+        const groqKey = pool.length > 0
+          ? pool[Math.floor(Math.random() * pool.length)]
+          : apiKeys.groq_key;
+        if (!groqKey) {
+          toast({
+            title: "חסר מפתח Groq",
+            description: "הוסף מפתח Groq בהגדרות → API Keys",
+            variant: "destructive",
+          });
+          setInterimText("חסר מפתח Groq — בדוק הגדרות");
+          consecutiveErrorsRef.current = MAX_CONSECUTIVE_ERRORS;
+          return;
+        }
+        formData.append("apiKey", groqKey);
         // Groq via edge function — chunked near-live transcription
         const { data: gd, error: gerr } = await supabase.functions.invoke('transcribe-groq', {
           body: formData,
