@@ -763,38 +763,39 @@ export default function VideoToMp3() {
   };
 
   return (
-    <div className="container max-w-4xl mx-auto py-6 px-4 space-y-6" dir="rtl">
+    <div className="container max-w-4xl mx-auto py-4 sm:py-6 px-3 sm:px-4 space-y-4 sm:space-y-6" dir="rtl">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Music className="w-6 h-6 text-primary" />
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
+            <Music className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
             ממיר וידאו ואודיו
           </h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            המרה היברידית ל-MP3 / OPUS / AAC — דפדפן לקבצים קטנים, שרת לקבצים גדולים. תומך ב-{getSupportedExtensions().length}+ פורמטים.
+          <p className="text-muted-foreground text-xs sm:text-sm mt-1">
+            המרה היברידית ל-MP3 / OPUS / AAC — דפדפן לקבצים קטנים, שרת לקבצים גדולים.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="gap-1">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Badge variant="outline" className="gap-1 text-[10px] sm:text-xs">
             <Cpu className="w-3 h-3" />
             {getMaxParallel()} מקבילים
           </Badge>
-          <Badge variant={ffmpegReady ? "secondary" : "outline"} className="gap-1">
+          <Badge variant={ffmpegReady ? "secondary" : "outline"} className="gap-1 text-[10px] sm:text-xs">
             {ffmpegReady ? (
               <><CheckCircle2 className="w-3 h-3 text-green-500" /> מוכן</>
             ) : (
-              <><Loader2 className="w-3 h-3 animate-spin" /> טוען מנוע...</>
+              <><Loader2 className="w-3 h-3 animate-spin" /> טוען...</>
             )}
           </Badge>
           {serverOnline !== null && (
-            <Badge variant={serverOnline ? "secondary" : "outline"} className="gap-1">
+            <Badge variant={serverOnline ? "secondary" : "outline"} className="gap-1 text-[10px] sm:text-xs">
               <Server className="w-3 h-3" />
-              {serverOnline ? "שרת מחובר" : "שרת לא זמין"}
+              {serverOnline ? "שרת" : "ללא שרת"}
             </Badge>
           )}
         </div>
       </div>
+
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "convert" | "cut")} className="space-y-4" dir="rtl">
         <TabsList className="grid w-full grid-cols-2 max-w-[360px]">
