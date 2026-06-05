@@ -22,8 +22,12 @@ import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenuLabel, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
   Scissors, Upload, Download, Loader2, FileAudio, X, ListChecks,
-  Check, ChevronRight, Mic, Music, RotateCcw,
+  Check, ChevronRight, Mic, Music, RotateCcw, FileAudio2,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -132,13 +136,17 @@ function Stepper({ step }: { step: Step }) {
 function SegmentCard({
   result,
   convertedFile,
+  isConverting,
   onDownload,
   onTranscribe,
+  onConvert,
 }: {
   result: CutResult;
   convertedFile?: File;
+  isConverting?: boolean;
   onDownload: () => void;
   onTranscribe: () => void;
+  onConvert: (fmt: OutputFormat) => void;
 }) {
   const fileToUse = convertedFile ?? result.file;
   const [url, setUrl] = useState<string>("");
@@ -163,6 +171,11 @@ function SegmentCard({
             <span className="text-xs text-muted-foreground">
               {formatTime(result.durationSec)} · {formatBytes(fileToUse.size)}
             </span>
+            {convertedFile && (
+              <Badge variant="secondary" className="h-5 text-[10px] px-1.5">
+                הומר
+              </Badge>
+            )}
           </div>
           <p className="text-xs font-medium truncate mt-0.5" title={fileToUse.name}>
             {fileToUse.name}
@@ -178,7 +191,28 @@ function SegmentCard({
           style={{ minHeight: 36 }}
         />
       )}
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="h-8" disabled={isConverting}>
+              {isConverting ? (
+                <Loader2 className="w-3.5 h-3.5 ml-1 animate-spin" />
+              ) : (
+                <Music className="w-3.5 h-3.5 ml-1" />
+              )}
+              המר
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel className="text-xs">בחר פורמט</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {(["mp3", "opus", "aac"] as OutputFormat[]).map((f) => (
+              <DropdownMenuItem key={f} onClick={() => onConvert(f)}>
+                {f.toUpperCase()}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button variant="outline" size="sm" onClick={onDownload} className="h-8">
           <Download className="w-3.5 h-3.5 ml-1" />
           הורד
@@ -221,6 +255,7 @@ export default function QuickCutDialog() {
   const [isConverting, setIsConverting] = useState(false);
   const [convProgress, setConvProgress] = useState<{ done: number; total: number } | null>(null);
   const [convertedFiles, setConvertedFiles] = useState<File[]>([]);
+  const [segConverting, setSegConverting] = useState<Record<number, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { submitBatchJobs } = useTranscriptionJobs();
@@ -357,6 +392,37 @@ export default function QuickCutDialog() {
       description: `${ids.length} מקטעים בתור (מנוע: ${onlineEngine})`,
     });
   };
+
+  const convertSegmentTo = async (idx: number, fmt: OutputFormat) => {
+    const seg = results[idx];
+    if (!seg) return;
+    setSegConverting((s) => ({ ...s, [idx]: true }));
+    try {
+      const out = await convertOne(seg.file, fmt);
+      setConvertedFiles((prev) => {
+        const next = [...prev];
+        next[idx] = out;
+        return next;
+      });
+      toast({ title: "✅ הומר", description: `${out.name}` });
+    } catch (e) {
+      toast({
+        title: "שגיאת המרה",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setSegConverting((s) => { const n = { ...s }; delete n[idx]; return n; });
+    }
+  };
+
+  const convertAllAs = async (fmt: OutputFormat) => {
+    setOutputFormat(fmt);
+    try {
+      await runConvertAll(results);
+    } catch { /* toast shown */ }
+  };
+
 
   const downloadOne = (f: File) => {
     const url = URL.createObjectURL(f);
@@ -638,6 +704,45 @@ export default function QuickCutDialog() {
               </div>
             </div>
 
+            {/* Global actions — Convert (dropdown) + Transcribe-all icons */}
+            <div className="flex items-center gap-2 px-1">
+              <span className="text-xs text-muted-foreground flex-1">פעולות על כל המקטעים:</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 gap-1" disabled={busy}>
+                    {isConverting ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <FileAudio2 className="w-3.5 h-3.5" />
+                    )}
+                    המר הכל
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuLabel className="text-xs">המר את כל המקטעים ל-</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {(["mp3", "opus", "aac"] as OutputFormat[]).map((f) => (
+                    <DropdownMenuItem key={f} onClick={() => convertAllAs(f)}>
+                      {f.toUpperCase()}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                size="sm"
+                onClick={handleTranscribeAll}
+                disabled={busy}
+                className="h-8 gap-1 bg-yellow-600 hover:bg-yellow-700"
+              >
+                {sendingToTranscribe ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Mic className="w-3.5 h-3.5" />
+                )}
+                תמלל הכל
+              </Button>
+            </div>
+
             {isConverting && convProgress && (
               <div className="space-y-2 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3">
                 <div className="flex items-center gap-2 text-sm">
@@ -657,7 +762,9 @@ export default function QuickCutDialog() {
                   key={r.segmentIndex}
                   result={r}
                   convertedFile={convertedFiles[i]}
+                  isConverting={!!segConverting[i]}
                   onDownload={() => downloadOne(convertedFiles[i] ?? r.file)}
+                  onConvert={(fmt) => void convertSegmentTo(i, fmt)}
                   onTranscribe={async () => {
                     setSendingToTranscribe(true);
                     try {
