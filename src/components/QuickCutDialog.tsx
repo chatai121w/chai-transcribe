@@ -255,6 +255,7 @@ export default function QuickCutDialog() {
   const [isConverting, setIsConverting] = useState(false);
   const [convProgress, setConvProgress] = useState<{ done: number; total: number } | null>(null);
   const [convertedFiles, setConvertedFiles] = useState<File[]>([]);
+  const [segConverting, setSegConverting] = useState<Record<number, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { submitBatchJobs } = useTranscriptionJobs();
