@@ -517,35 +517,46 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
       if (mode === "groq") {
         // Groq requires a complete, standalone media file per request.
-        // Concatenating timeslice chunks (header + segments) produces malformed
-        // webm that Groq rejects with 400 "could not process file".
-        // Solution: stop & restart MediaRecorder every chunkSec so each emitted
-        // blob is a fully self-contained webm file.
-        const startFreshRecorder = () => {
+        // Each chunk = its own standalone webm recording. We track per-chunk
+        // start time and cumulative offset to shift word timestamps correctly,
+        // and expose the active recorder so stopListening can flush the tail.
+        cumulativeAudioSecRef.current = 0;
+        wordTimingsRef.current = [];
+
+        const startGroqRecorder = () => {
           const rec = new MediaRecorder(recorderStream, { mimeType });
           const localChunks: Blob[] = [];
+          const ctx = {
+            rec,
+            chunks: localChunks,
+            startMs: Date.now(),
+            offsetSec: cumulativeAudioSecRef.current,
+          };
           rec.ondataavailable = (e) => {
             if (e.data.size > 0) localChunks.push(e.data);
           };
-          rec.onstop = () => {
+          // Default onstop: auto-cycle; overridden by cycleGroqRecorder / flush.
+          rec.onstop = async () => {
+            const durationSec = (Date.now() - ctx.startMs) / 1000;
+            cumulativeAudioSecRef.current += durationSec;
             if (localChunks.length > 0) {
               const blob = new Blob(localChunks, { type: mimeType });
               allChunksRef.current.push(blob);
-              if (!processingRef.current) sendChunk(blob);
-              else pendingRetryRef.current = blob;
+              await sendChunk(blob, ctx.offsetSec);
             }
-            if (isListeningRef.current && mediaRecorderRef.current === rec) {
-              startFreshRecorder();
+            if (isListeningRef.current && !isPausedRef.current && currentGroqRecorderRef.current === ctx) {
+              startGroqRecorder();
             }
           };
+          currentGroqRecorderRef.current = ctx;
           mediaRecorderRef.current = rec;
           rec.start();
         };
-        startFreshRecorder();
+        startGroqRecorder();
 
         chunkIntervalRef.current = setInterval(() => {
-          const rec = mediaRecorderRef.current;
-          if (rec && rec.state === "recording") rec.stop();
+          const ctx = currentGroqRecorderRef.current;
+          if (ctx && ctx.rec.state === "recording") ctx.rec.stop();
         }, chunkSecRef.current * 1000);
       } else {
         const recorder = new MediaRecorder(recorderStream, { mimeType });
