@@ -205,24 +205,24 @@ export default function QuickCutDialog() {
     }
   };
 
-  /** Convert all cut segments to the chosen output format (sequential, with progress). */
-  const runConvertAll = async (): Promise<File[]> => {
-    if (outputFormat === "none" || results.length === 0) {
-      return results.map((r) => r.file);
+  /** Convert provided segments to the chosen output format (sequential, with progress). */
+  const runConvertAll = async (segments: CutResult[]): Promise<File[]> => {
+    if (outputFormat === "none" || segments.length === 0) {
+      return segments.map((r) => r.file);
     }
     setIsConverting(true);
-    setConvProgress({ done: 0, total: results.length });
+    setConvProgress({ done: 0, total: segments.length });
     const out: File[] = [];
     try {
-      for (let i = 0; i < results.length; i++) {
-        const converted = await convertOne(results[i].file, outputFormat);
+      for (let i = 0; i < segments.length; i++) {
+        const converted = await convertOne(segments[i].file, outputFormat as OutputFormat);
         out.push(converted);
-        setConvProgress({ done: i + 1, total: results.length });
+        setConvProgress({ done: i + 1, total: segments.length });
       }
       setConvertedFiles(out);
       toast({
         title: "✅ המרה הושלמה",
-        description: `${out.length} מקטעים הומרו ל-${outputFormat.toUpperCase()}`,
+        description: `${out.length} מקטעים הומרו ל-${(outputFormat as string).toUpperCase()}`,
       });
       return out;
     } catch (e) {
@@ -261,7 +261,7 @@ export default function QuickCutDialog() {
   const handleConvertAndTranscribe = async () => {
     setSendingToTranscribe(true);
     try {
-      const files = await runConvertAll();
+      const files = await runConvertAll(results);
       if (autoTranscribe) await sendFilesToTranscribe(files);
     } catch {
       /* toast already shown */
@@ -270,12 +270,21 @@ export default function QuickCutDialog() {
     }
   };
 
-  /** One-click full pipeline: cut → convert → transcribe. */
+  /** One-click full pipeline: cut → (optional convert) → (optional transcribe). */
   const handleDoEverything = async () => {
-    await handleCut();
-    // handleCut updates `results` via state; need to wait next tick — but we use
-    // the local outcome path: rerun convert/transcribe by reading current results state
-    // through a microtask. Simpler: replicate cut logic inline.
+    const segs = await handleCut();
+    if (!segs || segs.length === 0) return;
+    setSendingToTranscribe(true);
+    try {
+      const files = outputFormat !== "none"
+        ? await runConvertAll(segs)
+        : segs.map((r) => r.file);
+      if (autoTranscribe) await sendFilesToTranscribe(files);
+    } catch {
+      /* toast already shown */
+    } finally {
+      setSendingToTranscribe(false);
+    }
   };
 
   return (
