@@ -491,54 +491,76 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         : "audio/webm";
       mimeTypeRef.current = mimeType;
 
-      // Use the gain-boosted processed stream if AudioContext succeeded, else raw mic
       const recorderStream = processedStreamRef.current ?? stream;
-      const recorder = new MediaRecorder(recorderStream, { mimeType });
-      mediaRecorderRef.current = recorder;
 
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          // Save the first chunk — it contains the WebM header/init segment.
-          // Without it, later chunks are invalid standalone WebM files.
-          if (!headerChunkRef.current) {
-            headerChunkRef.current = e.data;
-            // Don't push header to chunksRef — it's prepended separately in the interval.
-            // Only add to allChunksRef for the final combined audio blob.
+      if (mode === "groq") {
+        // Groq requires a complete, standalone media file per request.
+        // Concatenating timeslice chunks (header + segments) produces malformed
+        // webm that Groq rejects with 400 "could not process file".
+        // Solution: stop & restart MediaRecorder every chunkSec so each emitted
+        // blob is a fully self-contained webm file.
+        const startFreshRecorder = () => {
+          const rec = new MediaRecorder(recorderStream, { mimeType });
+          const localChunks: Blob[] = [];
+          rec.ondataavailable = (e) => {
+            if (e.data.size > 0) localChunks.push(e.data);
+          };
+          rec.onstop = () => {
+            if (localChunks.length > 0) {
+              const blob = new Blob(localChunks, { type: mimeType });
+              allChunksRef.current.push(blob);
+              if (!processingRef.current) sendChunk(blob);
+              else pendingRetryRef.current = blob;
+            }
+            if (isListeningRef.current && mediaRecorderRef.current === rec) {
+              startFreshRecorder();
+            }
+          };
+          mediaRecorderRef.current = rec;
+          rec.start();
+        };
+        startFreshRecorder();
+
+        chunkIntervalRef.current = setInterval(() => {
+          const rec = mediaRecorderRef.current;
+          if (rec && rec.state === "recording") rec.stop();
+        }, chunkSecRef.current * 1000);
+      } else {
+        const recorder = new MediaRecorder(recorderStream, { mimeType });
+        mediaRecorderRef.current = recorder;
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            if (!headerChunkRef.current) {
+              headerChunkRef.current = e.data;
+              allChunksRef.current.push(e.data);
+              return;
+            }
+            chunksRef.current.push(e.data);
             allChunksRef.current.push(e.data);
+          }
+        };
+
+        recorder.start(LIVE_RECORDING_TIMESLICE_MS);
+
+        chunkIntervalRef.current = setInterval(() => {
+          if (processingRef.current) return;
+          if (pendingRetryRef.current) {
+            const retryBlob = pendingRetryRef.current;
+            pendingRetryRef.current = null;
+            sendChunk(retryBlob);
             return;
           }
-          chunksRef.current.push(e.data);
-          allChunksRef.current.push(e.data);
-        }
-      };
-
-      recorder.start(LIVE_RECORDING_TIMESLICE_MS);
-
-      // Send accumulated chunks every LIVE_CHUNK_MS.
-      // Always prepend the WebM header chunk so each blob is a valid, standalone file.
-      chunkIntervalRef.current = setInterval(() => {
-        if (processingRef.current) return; // wait for current processing to finish
-
-        // If there's a pending retry blob, send it first
-        if (pendingRetryRef.current) {
-          const retryBlob = pendingRetryRef.current;
-          pendingRetryRef.current = null;
-          sendChunk(retryBlob);
-          return;
-        }
-
-        if (chunksRef.current.length > 0) {
-          const parts: Blob[] = [];
-          // Always prepend the WebM header for a valid standalone file
-          if (headerChunkRef.current) {
-            parts.push(headerChunkRef.current);
+          if (chunksRef.current.length > 0) {
+            const parts: Blob[] = [];
+            if (headerChunkRef.current) parts.push(headerChunkRef.current);
+            parts.push(...chunksRef.current);
+            const blob = new Blob(parts, { type: mimeType });
+            chunksRef.current = [];
+            sendChunk(blob);
           }
-          parts.push(...chunksRef.current);
-          const blob = new Blob(parts, { type: mimeType });
-          chunksRef.current = [];
-          sendChunk(blob);
-        }
-      }, chunkSecRef.current * 1000);
+        }, chunkSecRef.current * 1000);
+      }
 
       setInterimText("מאזין...");
       isListeningRef.current = true;
@@ -547,7 +569,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       console.error("Microphone access error:", err);
       toast({ title: "גישה למיקרופון נדחתה", description: "אנא אפשר גישה למיקרופון בהגדרות הדפדפן", variant: "destructive" });
     }
-  }, [sendChunk]);
+  }, [sendChunk, mode]);
 
   const stopCudaCleanup = useCallback(() => {
     if (chunkIntervalRef.current) {
