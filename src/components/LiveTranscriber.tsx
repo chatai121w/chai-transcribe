@@ -146,10 +146,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   }, []);
 
   useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition && !serverConnected) {
-      setIsSupported(false);
-    }
+    // Groq is always available (no browser/server requirement), so isSupported stays true.
     return () => {
       if (recognitionRef.current) {
         recognitionRef.current.abort();
