@@ -103,6 +103,9 @@ export default function QuickCutDialog() {
     setProgress(null);
     setTierUsed("");
     setIsCutting(false);
+    setConvertedFiles([]);
+    setConvProgress(null);
+    setIsConverting(false);
   }, []);
 
   // Listen to global open events
