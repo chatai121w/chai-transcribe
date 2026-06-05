@@ -13,7 +13,7 @@ import { chooseConversionPath, convertOnServer, isServerAvailable } from "./conv
 import { debugLog } from "./debugLogger";
 
 export type JobStatus = "queued" | "loading" | "converting" | "done" | "error";
-export type OutputFormat = "mp3" | "opus" | "aac";
+export type OutputFormat = "mp3" | "opus" | "aac" | "wav";
 
 interface OutputFormatConfig {
   ext: string;
@@ -36,6 +36,11 @@ const OUTPUT_FORMAT_CONFIG: Record<OutputFormat, OutputFormatConfig> = {
     ext: "m4a",
     mime: "audio/mp4",
     ffmpegArgs: ["-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2"],
+  },
+  wav: {
+    ext: "wav",
+    mime: "audio/wav",
+    ffmpegArgs: ["-c:a", "pcm_s16le", "-ar", "44100", "-ac", "2"],
   },
 };
 
