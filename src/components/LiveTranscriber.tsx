@@ -55,6 +55,7 @@ interface LiveTranscriberProps {
 }
 
 export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveTranscriberProps) => {
+  const { keys: apiKeys } = useCloudApiKeys();
   const [isListening, setIsListening] = useState(false);
   const isListeningRef = useRef(false);
   const [isPaused, setIsPaused] = useState(false);
