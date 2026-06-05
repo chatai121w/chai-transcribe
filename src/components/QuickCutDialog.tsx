@@ -136,13 +136,17 @@ function Stepper({ step }: { step: Step }) {
 function SegmentCard({
   result,
   convertedFile,
+  isConverting,
   onDownload,
   onTranscribe,
+  onConvert,
 }: {
   result: CutResult;
   convertedFile?: File;
+  isConverting?: boolean;
   onDownload: () => void;
   onTranscribe: () => void;
+  onConvert: (fmt: OutputFormat) => void;
 }) {
   const fileToUse = convertedFile ?? result.file;
   const [url, setUrl] = useState<string>("");
@@ -167,6 +171,11 @@ function SegmentCard({
             <span className="text-xs text-muted-foreground">
               {formatTime(result.durationSec)} · {formatBytes(fileToUse.size)}
             </span>
+            {convertedFile && (
+              <Badge variant="secondary" className="h-5 text-[10px] px-1.5">
+                הומר
+              </Badge>
+            )}
           </div>
           <p className="text-xs font-medium truncate mt-0.5" title={fileToUse.name}>
             {fileToUse.name}
@@ -182,7 +191,28 @@ function SegmentCard({
           style={{ minHeight: 36 }}
         />
       )}
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="h-8" disabled={isConverting}>
+              {isConverting ? (
+                <Loader2 className="w-3.5 h-3.5 ml-1 animate-spin" />
+              ) : (
+                <Music className="w-3.5 h-3.5 ml-1" />
+              )}
+              המר
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" dir="rtl">
+            <DropdownMenuLabel className="text-xs">בחר פורמט</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {(["mp3", "opus", "aac"] as OutputFormat[]).map((f) => (
+              <DropdownMenuItem key={f} onClick={() => onConvert(f)}>
+                {f.toUpperCase()}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button variant="outline" size="sm" onClick={onDownload} className="h-8">
           <Download className="w-3.5 h-3.5 ml-1" />
           הורד
