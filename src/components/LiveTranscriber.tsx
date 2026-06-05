@@ -626,9 +626,12 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     processedStreamRef.current = null;
     audioLevelRef.current = 0;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      // Override any pending onstop to avoid auto-restart or stray sends
+      try { mediaRecorderRef.current.onstop = null as any; } catch { /* noop */ }
       mediaRecorderRef.current.stop();
     }
     mediaRecorderRef.current = null;
+    currentGroqRecorderRef.current = null;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
