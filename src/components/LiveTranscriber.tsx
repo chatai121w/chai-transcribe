@@ -663,7 +663,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         chunksRef.current = [];
         sendChunk(blob);
       }
-    }, LIVE_CHUNK_MS);
+    }, chunkSecRef.current * 1000);
     setInterimText("מאזין...");
     toast({ title: "▶ תמלול ממשיך" });
   }, [sendChunk]);
