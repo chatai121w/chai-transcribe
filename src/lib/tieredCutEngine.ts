@@ -329,7 +329,9 @@ async function tierFFmpegCopy(
       ];
       await ffmpeg.exec(args);
       const data = await ffmpeg.readFile(outName);
-      const blob = new Blob([data as Uint8Array], { type: mime });
+      const u8 = data as Uint8Array;
+      const ab = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
+      const blob = new Blob([ab], { type: mime });
       try { await ffmpeg.deleteFile(outName); } catch { /* */ }
       results.push(toResult(seg, file, blob, outExt));
       options.onProgress?.({
