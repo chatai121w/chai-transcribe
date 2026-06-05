@@ -2099,7 +2099,18 @@ const Index = () => {
               />
               <span>חיתוך אודיו לפני עיבוד</span>
             </label>
-            <span className="text-xs text-muted-foreground">מומלץ לקבצים ארוכים ולבדיקה נקודתית</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => openQuickCut()}
+                className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md border border-yellow-500/50 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
+                title="פתח חיתוך מהיר לקובץ חיצוני"
+              >
+                <Scissors className="w-3.5 h-3.5" />
+                חיתוך מהיר
+              </button>
+              <span className="text-xs text-muted-foreground">מומלץ לקבצים ארוכים</span>
+            </div>
           </div>
           {rangeEnabled && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
