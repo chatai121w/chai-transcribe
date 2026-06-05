@@ -15,10 +15,11 @@ import {
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { getServerUrl } from "@/lib/serverConfig";
+import { supabase } from "@/integrations/supabase/client";
 
-type LiveMode = "browser" | "cuda";
+type LiveMode = "browser" | "cuda" | "groq";
 
-const LIVE_CHUNK_MS = 5000;           // 5s chunks — bigger window = more context for Whisper
+const DEFAULT_CHUNK_SEC = 5;
 const LIVE_RECORDING_TIMESLICE_MS = 150;
 const LIVE_MIN_BLOB_BYTES = 800;
 const SILENCE_THRESHOLD = 5;          // Skip chunks below this audio level (averaged over chunk window)
