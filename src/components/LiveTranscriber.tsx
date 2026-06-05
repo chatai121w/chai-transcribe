@@ -106,6 +106,15 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const audioLevelSamplesRef = useRef<number[]>([]);
   const finalTextRef = useRef("");
 
+  // Groq word-timestamp accumulation
+  const cumulativeAudioSecRef = useRef(0);
+  const currentGroqRecorderRef = useRef<{
+    rec: MediaRecorder;
+    chunks: Blob[];
+    startMs: number;
+    offsetSec: number;
+  } | null>(null);
+
   // Audio level indicator refs
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
