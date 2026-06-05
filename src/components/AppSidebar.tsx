@@ -33,7 +33,9 @@ import {
   Video,
   Bot,
   ScrollText,
+  Scissors,
 } from "lucide-react";
+import { openQuickCut } from "@/lib/quickCutBus";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -310,6 +312,19 @@ const AppSidebar = () => {
                 <span className="flex-1 text-right">{item.label}</span>
               </button>
             ))}
+
+            {/* Quick Cut – global action (not a route) */}
+            <button
+              onClick={() => {
+                openQuickCut();
+                if (!isPinned) setIsOpen(false);
+              }}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors w-full border border-yellow-500/40 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/10"
+            >
+              <Scissors className="w-5 h-5 shrink-0" />
+              <span className="flex-1 text-right">✂️ חיתוך מהיר</span>
+            </button>
+
             {/* Admin-only: Voice Command */}
             {isAdmin && (
               <button

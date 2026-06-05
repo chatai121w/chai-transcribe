@@ -1,78 +1,49 @@
 
+## מה נבנה
 
-# תוכנית: שדרוג מערכת שיפור איכות קול והורדת רעשים
+### 1. מנוע חיתוך מדורג חדש — `src/lib/tieredCutEngine.ts`
+הבעיה הקיימת: `audioCutEngine` מפענח את כל הקובץ ל-`AudioBuffer` בזיכרון (76MB דחוס ≈ 800MB RAM) → קורס בשקט במובייל. אין fallback ואין הודעת שגיאה ברורה.
 
-## מה מצאתי במחקר
+הפתרון — ניסיון אוטומטי במדרג, מהיר → איכותי:
 
-### טכנולוגיות AI (רצות בדפדפן, ללא שרת):
+**Tier 1 — Byte-slice מהיר (ל-WAV/PCM בלבד)**
+פיענוח כותרת WAV → חיתוך לפי offset בייטים → File חדש. ללא decode כלל. ~50ms לקובץ 76MB.
 
-| טכנולוגיה | תיאור | גודל | יתרונות |
-|---|---|---|---|
-| **RNNoise (WASM)** | רשת RNN של Xiph.Org, רצה בדפדפן דרך `@shiguredo/rnnoise-wasm` | ~200KB | מהיר מאוד, real-time, תמיכה מלאה בכל הדפדפנים |
-| **DeepFilterNet3 (WASM)** | רשת עמוקה מתקדמת יותר, יש חבילת npm `deepfilternet3-workers` | ~2MB | איכות גבוהה יותר מ-RNNoise, תמיכה ב-React |
-| **Hush** | מודל חדש (2026) מותאם ל-Voice AI, real-time | חדש | מותאם לדיבור, causal |
+**Tier 2 — ffmpeg.wasm stream-copy**
+שימוש ב-`ffmpegConverter.ts` הקיים עם `-ss/-to -c copy` (ללא re-encode). עובד על mp3/m4a/webm/wav. ~2-5s לקובץ 76MB. מטפל ב-cut count/time/manual.
 
-### טכנולוגיות ללא AI (Web Audio API מטבעי):
+**Tier 3 — AudioBuffer המקורי (נשאר fallback אחרון)**
+המנוע הקיים, רק לקבצים קטנים או כשהשניים הקודמים נכשלו.
 
-| טכנולוגיה | תיאור |
+הלוגיקה: try Tier 1 → catch → Tier 2 → catch → Tier 3 → catch → toast שגיאה עם הסבר.
+לכל שלב toast התקדמות ("מנסה חיתוך מהיר…", "נופל לחזרה ל-ffmpeg…").
+
+### 2. רכיב `QuickCutDialog.tsx` משותף
+דיאלוג קטן: בחירת קובץ + 3 כפתורי חיתוך מהיר (`לחצי`, `3 חלקים`, `כל 5 דק'`) + "מותאם אישית" שפותח את `AdvancedCutPanel`.
+מציג רשימת מקטעים שנוצרו + שני כפתורים:
+- **תמלל הכל** — מוסיף את כל המקטעים ל-`transcription_jobs` (תור הרקע הקיים)
+- **הורד הכל** — zip להורדה
+
+### 3. שילוב בשני מקומות
+- **AppSidebar**: פריט תפריט חדש "✂️ חיתוך מהיר" שפותח את הדיאלוג
+- **Index**: כפתור צף/חלק מסרגל הפעולות שפותח את אותו דיאלוג
+
+### 4. חיבור לתור התמלול
+אחרי חיתוך, "תמלל הכל" קורא ל-hook הקיים `useTranscriptionJobs` (או `useBackgroundTask`) ומעלה כל File ל-`audio-files` bucket + יוצר רשומה ב-`transcription_jobs`. רשימת התמלולים מתעדכנת בזמן אמת.
+
+## שינויי קוד
+
+| קובץ | פעולה |
 |---|---|
-| **Spectral Gate** | חיתוך רעש על בסיס ספקטרום — לומדים "טביעת אצבע" של הרעש משקט ומנכים |
-| **Adaptive Notch Filter** | סינון אוטומטי של תדרי רעש ספציפיים (זמזום חשמל 50/60Hz) |
-| **Expander/Gate חכם** | שער רעש מתקדם שמזהה רמת סף דינמית |
-| **De-Reverb** | הפחתת הד בחדר באמצעות IIR filters |
-| **Voice Activity Detection (VAD)** | זיהוי מתי יש דיבור ומתי שקט — מאפשר להשתיק רק את הרעש |
+| `src/lib/tieredCutEngine.ts` | חדש — מנוע מדורג + WAV slicer |
+| `src/components/QuickCutDialog.tsx` | חדש — UI דיאלוג |
+| `src/components/AppSidebar.tsx` | להוסיף פריט "חיתוך מהיר" |
+| `src/pages/Index.tsx` | להוסיף כפתור פתיחה |
+| `src/components/AdvancedCutPanel.tsx` | להפנות את `submitCutJob` למנוע המדורג + להוסיף "תמלל הכל" |
 
-## מה קיים כבר במערכת
+## מה לא נוגעים
+- `audioCutEngine.ts` נשאר כ-Tier 3 fallback
+- מערכת התמלול הקיימת — רק קוראים לתור
+- שום שינוי schema
 
-- 5 פריסטים של הפחתת רעש (Web Audio: BiquadFilter + DynamicsCompressor + Noise Gate)
-- אקולייזר 5 פסים, Notch Filter, Highpass/Lowpass
-- שליחה לשרת חיצוני להשבחה (`/enhance-audio`)
-
-## מה חסר ומה אוסיף
-
-### 1. RNNoise בדפדפן (AI — אפס תלות בשרת)
-- התקנת `@shiguredo/rnnoise-wasm`
-- יצירת AudioWorklet שמעביר כל frame דרך RNNoise
-- הוספת כפתור "AI Denoise" למיקסר שמפעיל/מכבה את הפילטר בזמן אמת
-- עובד על הקובץ הטעון + על הקלטה חיה
-
-### 2. Spectral Noise Gate (ללא AI)
-- לימוד פרופיל רעש מ-0.5 שניות שקט ראשונות
-- חיסור ספקטרלי (spectral subtraction) באמצעות AnalyserNode + ScriptProcessor
-- כפתור "למד רעש" שמאפשר למשתמש לבחור קטע שקט
-
-### 3. Voice Activity Detection (VAD)
-- זיהוי אוטומטי של קטעי דיבור vs שקט
-- השתקת אוטומטית של קטעי שקט (Auto-Mute)
-- חיווי ויזואלי על הגל של אזורי דיבור/שקט
-
-### 4. De-Hum (הסרת זמזום חשמל)
-- Auto-detect של 50Hz או 60Hz + הרמוניות
-- Notch filters אוטומטיים על 50/100/150/200Hz או 60/120/180/240Hz
-
-### 5. Loudness Normalization
-- נורמליזציה ל-LUFS סטנדרטי (broadcast: -14 LUFS, podcast: -16 LUFS)
-- מד LUFS בזמן אמת
-
-## פירוט טכני
-
-### קבצים חדשים:
-- `src/lib/rnnoiseProcessor.ts` — wrapper סביב `@shiguredo/rnnoise-wasm` עם AudioWorklet
-- `src/lib/spectralGate.ts` — spectral noise profiling + subtraction
-- `src/lib/voiceActivityDetection.ts` — VAD מבוסס אנרגיה + zero-crossing
-- `src/lib/deHum.ts` — auto-detect hum frequency + cascaded notch filters
-- `src/lib/loudnessNorm.ts` — LUFS measurement + normalization
-
-### שינויים בקבצים קיימים:
-- `src/components/SyncAudioPlayer.tsx` — הוספת כפתורי AI Denoise, Spectral Gate, VAD, De-Hum, LUFS meter לפאנל המיקסר
-- `package.json` — הוספת `@shiguredo/rnnoise-wasm`
-
-### סדר ביצוע:
-1. התקנת חבילה + יצירת RNNoise Worklet
-2. שילוב RNNoise במיקסר כ-toggle
-3. הוספת Spectral Gate עם כפתור "למד רעש"
-4. הוספת De-Hum אוטומטי
-5. הוספת VAD עם חיווי ויזואלי
-6. הוספת מד LUFS + נורמליזציה
-7. שמירת כל ההגדרות בענן
-
+מוכן לבנות?
