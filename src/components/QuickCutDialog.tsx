@@ -395,6 +395,40 @@ export default function QuickCutDialog() {
           </Tabs>
         )}
 
+        {/* Format + auto-transcribe options */}
+        {file && (
+          <div className="rounded-xl border bg-muted/20 p-3 space-y-2">
+            <div className="text-sm font-medium">המרה לאחר חיתוך</div>
+            <div className="flex flex-wrap gap-2">
+              {([
+                { v: "none", l: "ללא המרה" },
+                { v: "mp3", l: "MP3" },
+                { v: "opus", l: "Opus" },
+                { v: "aac", l: "AAC (m4a)" },
+              ] as { v: ConvFormat; l: string }[]).map((opt) => (
+                <Button
+                  key={opt.v}
+                  variant={outputFormat === opt.v ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setOutputFormat(opt.v)}
+                  disabled={isCutting || isConverting}
+                >
+                  {opt.l}
+                </Button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoTranscribe}
+                onChange={(e) => setAutoTranscribe(e.target.checked)}
+                className="accent-yellow-600"
+              />
+              שלח אוטומטית לתמלול בסיום
+            </label>
+          </div>
+        )}
+
         {/* Progress */}
         {isCutting && progress && (
           <div className="space-y-2 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3">
