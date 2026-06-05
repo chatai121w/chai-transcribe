@@ -352,6 +352,19 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         const latencyMs = Math.round(performance.now() - sendStart);
         const newWords = text ? text.split(/\s+/).length : 0;
 
+        // Accumulate word-level timings (Groq returns them per chunk; shift by offset)
+        if (Array.isArray(data.wordTimings) && data.wordTimings.length > 0) {
+          for (const w of data.wordTimings) {
+            if (typeof w?.start === 'number' && typeof w?.end === 'number' && w?.word) {
+              wordTimingsRef.current.push({
+                word: String(w.word),
+                start: w.start + offsetSec,
+                end: w.end + offsetSec,
+              });
+            }
+          }
+        }
+
         setStats(prev => ({
           ...prev,
           chunksProcessed: prev.chunksProcessed + 1,
