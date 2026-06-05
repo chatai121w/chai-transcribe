@@ -1115,7 +1115,9 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
       <p className="text-xs text-muted-foreground text-center mt-3">
         {mode === "cuda"
-          ? `Whisper + GPU — chunks כל ${LIVE_CHUNK_MS / 1000}s + refine בעצירה | השהה/המשך | שמירת הקלטה`
+          ? `Whisper + GPU — chunks כל ${chunkSec}s + refine בעצירה | השהה/המשך | שמירת הקלטה`
+          : mode === "groq"
+          ? `Groq Whisper בענן — chunks כל ${chunkSec}s | חכם וזריז`
           : "Web Speech API — עובד ישירות בדפדפן, ללא מפתח API"
         }
       </p>
