@@ -704,6 +704,45 @@ export default function QuickCutDialog() {
               </div>
             </div>
 
+            {/* Global actions — Convert (dropdown) + Transcribe-all icons */}
+            <div className="flex items-center gap-2 px-1">
+              <span className="text-xs text-muted-foreground flex-1">פעולות על כל המקטעים:</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 gap-1" disabled={busy}>
+                    {isConverting ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <FileAudio2 className="w-3.5 h-3.5" />
+                    )}
+                    המר הכל
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuLabel className="text-xs">המר את כל המקטעים ל-</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {(["mp3", "opus", "aac"] as OutputFormat[]).map((f) => (
+                    <DropdownMenuItem key={f} onClick={() => convertAllAs(f)}>
+                      {f.toUpperCase()}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                size="sm"
+                onClick={handleTranscribeAll}
+                disabled={busy}
+                className="h-8 gap-1 bg-yellow-600 hover:bg-yellow-700"
+              >
+                {sendingToTranscribe ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Mic className="w-3.5 h-3.5" />
+                )}
+                תמלל הכל
+              </Button>
+            </div>
+
             {isConverting && convProgress && (
               <div className="space-y-2 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3">
                 <div className="flex items-center gap-2 text-sm">
@@ -723,7 +762,9 @@ export default function QuickCutDialog() {
                   key={r.segmentIndex}
                   result={r}
                   convertedFile={convertedFiles[i]}
+                  isConverting={!!segConverting[i]}
                   onDownload={() => downloadOne(convertedFiles[i] ?? r.file)}
+                  onConvert={(fmt) => void convertSegmentTo(i, fmt)}
                   onTranscribe={async () => {
                     setSendingToTranscribe(true);
                     try {
