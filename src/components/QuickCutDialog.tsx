@@ -477,25 +477,57 @@ export default function QuickCutDialog() {
           </div>
         )}
 
-        <DialogFooter className="gap-2 sm:gap-2">
+        <DialogFooter className="gap-2 sm:gap-2 flex-wrap">
           {results.length === 0 ? (
-            <Button
-              onClick={handleCut}
-              disabled={!file || isCutting}
-              className="bg-yellow-600 hover:bg-yellow-700"
-            >
-              {isCutting ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <Scissors className="w-4 h-4 ml-2" />}
-              חתוך
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                onClick={handleCut}
+                disabled={!file || isCutting || isConverting}
+              >
+                {isCutting ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <Scissors className="w-4 h-4 ml-2" />}
+                חתוך בלבד
+              </Button>
+              <Button
+                onClick={handleDoEverything}
+                disabled={!file || isCutting || isConverting || sendingToTranscribe}
+                className="bg-yellow-600 hover:bg-yellow-700"
+              >
+                {(isCutting || isConverting || sendingToTranscribe) ? (
+                  <Loader2 className="w-4 h-4 animate-spin ml-2" />
+                ) : (
+                  <Scissors className="w-4 h-4 ml-2" />
+                )}
+                {outputFormat !== "none" && autoTranscribe
+                  ? "חתוך, המר ותמלל"
+                  : outputFormat !== "none"
+                  ? "חתוך והמר"
+                  : autoTranscribe
+                  ? "חתוך ותמלל"
+                  : "חתוך"}
+              </Button>
+            </>
           ) : (
             <>
               <Button variant="outline" onClick={handleDownloadAll}>
                 <Download className="w-4 h-4 ml-2" />
                 הורד הכל
               </Button>
+              {outputFormat !== "none" && convertedFiles.length === 0 && (
+                <Button
+                  variant="outline"
+                  onClick={handleConvertAndTranscribe}
+                  disabled={isConverting || sendingToTranscribe}
+                >
+                  {isConverting ? (
+                    <Loader2 className="w-4 h-4 animate-spin ml-2" />
+                  ) : null}
+                  המר {autoTranscribe ? "+ תמלל" : `ל-${(outputFormat as string).toUpperCase()}`}
+                </Button>
+              )}
               <Button
                 onClick={handleTranscribeAll}
-                disabled={sendingToTranscribe}
+                disabled={sendingToTranscribe || isConverting}
                 className="bg-yellow-600 hover:bg-yellow-700"
               >
                 {sendingToTranscribe ? (
@@ -503,7 +535,7 @@ export default function QuickCutDialog() {
                 ) : (
                   <ListChecks className="w-4 h-4 ml-2" />
                 )}
-                תמלל הכל
+                {convertedFiles.length > 0 ? "תמלל מומרים" : "תמלל הכל"}
               </Button>
             </>
           )}
