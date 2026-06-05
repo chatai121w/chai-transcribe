@@ -321,10 +321,9 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         if (ok) data = await res.json();
       }
 
-      if (res.ok) {
+      if (ok && data) {
         consecutiveErrorsRef.current = 0;
         pendingRetryRef.current = null; // clear any pending retry on success
-        const data = await res.json();
         const text = data.text?.trim();
         const latencyMs = Math.round(performance.now() - sendStart);
         const newWords = text ? text.split(/\s+/).length : 0;
@@ -356,7 +355,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     } finally {
       processingRef.current = false;
     }
-  }, [appendDedupText]);
+  }, [appendDedupText, mode]);
 
   const runFinalRefinePass = useCallback(async (): Promise<string | null> => {
     if (allChunksRef.current.length === 0) return null;
