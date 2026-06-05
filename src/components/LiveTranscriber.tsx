@@ -370,7 +370,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     } finally {
       processingRef.current = false;
     }
-  }, [appendDedupText, mode]);
+  }, [appendDedupText, mode, apiKeys.groq_key, apiKeys.groq_keys_pool]);
 
   const runFinalRefinePass = useCallback(async (): Promise<string | null> => {
     if (allChunksRef.current.length === 0) return null;
