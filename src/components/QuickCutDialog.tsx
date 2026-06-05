@@ -393,6 +393,37 @@ export default function QuickCutDialog() {
     });
   };
 
+  const convertSegmentTo = async (idx: number, fmt: OutputFormat) => {
+    const seg = results[idx];
+    if (!seg) return;
+    setSegConverting((s) => ({ ...s, [idx]: true }));
+    try {
+      const out = await convertOne(seg.file, fmt);
+      setConvertedFiles((prev) => {
+        const next = [...prev];
+        next[idx] = out;
+        return next;
+      });
+      toast({ title: "✅ הומר", description: `${out.name}` });
+    } catch (e) {
+      toast({
+        title: "שגיאת המרה",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setSegConverting((s) => { const n = { ...s }; delete n[idx]; return n; });
+    }
+  };
+
+  const convertAllAs = async (fmt: OutputFormat) => {
+    setOutputFormat(fmt);
+    try {
+      await runConvertAll(results);
+    } catch { /* toast shown */ }
+  };
+
+
   const downloadOne = (f: File) => {
     const url = URL.createObjectURL(f);
     const a = document.createElement("a");
