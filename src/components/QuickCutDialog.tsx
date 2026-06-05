@@ -23,7 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import {
   Scissors, Upload, Download, Loader2, FileAudio, X, ListChecks,
-  Check, ChevronRight, ChevronLeft, Mic, Music, RotateCcw,
+  Check, ChevronRight, Mic, Music, RotateCcw,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
