@@ -203,7 +203,7 @@ function SegmentCard({
               המר
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" dir="rtl">
+          <DropdownMenuContent align="end">
             <DropdownMenuLabel className="text-xs">בחר פורמט</DropdownMenuLabel>
             <DropdownMenuSeparator />
             {(["mp3", "opus", "aac"] as OutputFormat[]).map((f) => (
