@@ -33,7 +33,9 @@ import {
   Video,
   Bot,
   ScrollText,
+  Scissors,
 } from "lucide-react";
+import { openQuickCut } from "@/lib/quickCutBus";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
