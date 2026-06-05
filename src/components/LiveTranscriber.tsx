@@ -752,7 +752,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
   // Cancel recording — discard everything, do not save
   const handleCancel = useCallback(() => {
-    if (mode === "cuda") {
+    if ((mode === "cuda" || mode === "groq")) {
       if (chunkIntervalRef.current) { clearInterval(chunkIntervalRef.current); chunkIntervalRef.current = null; }
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
         mediaRecorderRef.current.stop();
@@ -883,7 +883,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         </div>
         <div className="flex items-center gap-2">
           {/* Timer */}
-          {isListening && mode === "cuda" && (
+          {isListening && (mode === "cuda" || mode === "groq") && (
             <Badge variant="outline" className="text-xs gap-1 font-mono">
               <Clock className="w-3 h-3" />
               {formatTime(elapsedSec)}
@@ -894,7 +894,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
               <Button variant="ghost" size="sm" onClick={handleSaveIntermediate} title="שמור תמלול נוכחי">
                 <Save className="w-4 h-4" />
               </Button>
-              {isListening && mode === "cuda" && (
+              {isListening && (mode === "cuda" || mode === "groq") && (
                 <Button variant="ghost" size="sm" onClick={handleDownloadAudio} title="הורד הקלטה">
                   <Download className="w-4 h-4" />
                 </Button>
@@ -911,7 +911,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       </div>
 
       {/* Audio Level Bar + Stats (CUDA only, while listening & not paused) */}
-      {isListening && mode === "cuda" && !isPaused && (
+      {isListening && (mode === "cuda" || mode === "groq") && !isPaused && (
         <div className="mb-3 space-y-2">
           {/* Waveform-style VU meter */}
           <div className="flex items-center gap-2">
@@ -1026,7 +1026,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
           </div>
 
           {/* Mic sensitivity (gain) — only relevant for CUDA mode */}
-          {mode === "cuda" && (
+          {(mode === "cuda" || mode === "groq") && (
             <div className="flex items-center gap-3 justify-center px-2">
               <Volume2 className="w-4 h-4 text-muted-foreground shrink-0" />
               <span className="text-xs text-muted-foreground whitespace-nowrap">רגישות מיקרופון</span>
@@ -1091,13 +1091,13 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         ) : (
           <>
             {/* Pause / Resume (CUDA only) */}
-            {mode === "cuda" && !isPaused && (
+            {(mode === "cuda" || mode === "groq") && !isPaused && (
               <Button onClick={pauseCuda} variant="outline" className="gap-2 rounded-full px-6 h-12 text-base border-yellow-400 text-yellow-700 hover:bg-yellow-50">
                 <Pause className="w-5 h-5" />
                 השהה
               </Button>
             )}
-            {mode === "cuda" && isPaused && (
+            {(mode === "cuda" || mode === "groq") && isPaused && (
               <Button onClick={resumeCuda} variant="outline" className="gap-2 rounded-full px-6 h-12 text-base border-green-400 text-green-700 hover:bg-green-50">
                 <Play className="w-5 h-5" />
                 המשך
