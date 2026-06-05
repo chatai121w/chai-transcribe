@@ -244,7 +244,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   // ─── CUDA Whisper Live Mode ───
   const getBaseUrl = () => getServerUrl();
 
-  const sendChunk = useCallback(async (blob: Blob) => {
+  const sendChunk = useCallback(async (blob: Blob, offsetSec: number = 0) => {
     if (blob.size < LIVE_MIN_BLOB_BYTES || processingRef.current) return;
 
     // Client-side silence skip — use averaged audio level over chunk window
