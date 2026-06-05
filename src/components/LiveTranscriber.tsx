@@ -569,7 +569,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       console.error("Microphone access error:", err);
       toast({ title: "גישה למיקרופון נדחתה", description: "אנא אפשר גישה למיקרופון בהגדרות הדפדפן", variant: "destructive" });
     }
-  }, [sendChunk]);
+  }, [sendChunk, mode]);
 
   const stopCudaCleanup = useCallback(() => {
     if (chunkIntervalRef.current) {
