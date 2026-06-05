@@ -670,7 +670,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
   // ─── Unified controls ───
   const startListening = useCallback(() => {
-    if (mode === "cuda") {
+    if (mode === "cuda" || mode === "groq") {
       startCuda();
     } else {
       startBrowser();
@@ -678,7 +678,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   }, [mode, startCuda, startBrowser]);
 
   const stopListening = useCallback(async () => {
-    if (mode === "cuda") {
+    if (mode === "cuda" || mode === "groq") {
       // Stop recording FIRST so no new chunks arrive during refine
       if (chunkIntervalRef.current) { clearInterval(chunkIntervalRef.current); chunkIntervalRef.current = null; }
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
@@ -693,24 +693,24 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         : undefined;
       const duration = Math.floor((Date.now() - startTimeRef.current - totalPausedMsRef.current) / 1000);
 
-      // Preserve existing word timings as fallback
-      const prevTimings = [...wordTimingsRef.current];
-      wordTimingsRef.current = [];
-      const refinedText = await runFinalRefinePass();
-      // If refine failed, restore previous timings
-      if (!refinedText && wordTimingsRef.current.length === 0) {
-        wordTimingsRef.current = prevTimings;
-      }
-
-      // Use ref for current finalText to avoid stale closure
-      const currentFinalText = finalTextRef.current;
-      const merged = refinedText
-        ? (refinedText.length >= Math.max(20, Math.floor(currentFinalText.length * 0.8))
-          ? refinedText
-          : appendDedupText(currentFinalText, refinedText))
-        : currentFinalText;
-      if (refinedText) {
-        setFinalText(merged);
+      // Refine pass only available for CUDA (local server). Groq uses accumulated text as-is.
+      let merged = finalTextRef.current;
+      if (mode === "cuda") {
+        const prevTimings = [...wordTimingsRef.current];
+        wordTimingsRef.current = [];
+        const refinedText = await runFinalRefinePass();
+        if (!refinedText && wordTimingsRef.current.length === 0) {
+          wordTimingsRef.current = prevTimings;
+        }
+        const currentFinalText = finalTextRef.current;
+        merged = refinedText
+          ? (refinedText.length >= Math.max(20, Math.floor(currentFinalText.length * 0.8))
+            ? refinedText
+            : appendDedupText(currentFinalText, refinedText))
+          : currentFinalText;
+        if (refinedText) {
+          setFinalText(merged);
+        }
       }
       stopCudaCleanup();
       allChunksRef.current = [];
@@ -720,8 +720,10 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
           audioBlob,
           wordTimings: wordTimingsRef.current.length > 0 ? wordTimingsRef.current : undefined,
           folder: selectedFolder || undefined,
-          durationSec: duration,          fileName: fileName.trim() || undefined,
-          format: saveFormat,        });
+          durationSec: duration,
+          fileName: fileName.trim() || undefined,
+          format: saveFormat,
+        });
       }
     } else {
       stopBrowser();
