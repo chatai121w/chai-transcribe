@@ -30,9 +30,36 @@ import {
   type CutResult,
   type TieredCutProgress,
 } from "@/lib/tieredCutEngine";
+import {
+  convertAudio,
+  onJobUpdate,
+  type ConversionJob,
+  type OutputFormat,
+} from "@/lib/ffmpegConverter";
 import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { formatTime } from "@/lib/audioCutEngine";
+
+type ConvFormat = "none" | OutputFormat;
+
+/** Run convertAudio and resolve with the produced File once the job finishes. */
+function convertOne(file: File, format: OutputFormat): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const job = convertAudio(file, format);
+    const off = onJobUpdate((j: ConversionJob) => {
+      if (j.id !== job.id) return;
+      if (j.status === "done" && j.outputBlob) {
+        off();
+        const ext = format === "mp3" ? "mp3" : format === "opus" ? "opus" : "m4a";
+        const outName = file.name.replace(/\.[^/.]+$/, "") + "." + ext;
+        resolve(new File([j.outputBlob], outName, { type: j.outputBlob.type }));
+      } else if (j.status === "error") {
+        off();
+        reject(new Error(j.error || "המרה נכשלה"));
+      }
+    });
+  });
+}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -58,6 +85,11 @@ export default function QuickCutDialog() {
   const [tierUsed, setTierUsed] = useState<string>("");
 
   const [sendingToTranscribe, setSendingToTranscribe] = useState(false);
+  const [outputFormat, setOutputFormat] = useState<ConvFormat>("mp3");
+  const [autoTranscribe, setAutoTranscribe] = useState(true);
+  const [isConverting, setIsConverting] = useState(false);
+  const [convProgress, setConvProgress] = useState<{ done: number; total: number } | null>(null);
+  const [convertedFiles, setConvertedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { submitBatchJobs } = useTranscriptionJobs();
@@ -71,6 +103,9 @@ export default function QuickCutDialog() {
     setProgress(null);
     setTierUsed("");
     setIsCutting(false);
+    setConvertedFiles([]);
+    setConvProgress(null);
+    setIsConverting(false);
   }, []);
 
   // Listen to global open events
@@ -120,19 +155,20 @@ export default function QuickCutDialog() {
     return { mode: "time", chunkDurationSec: sec };
   };
 
-  const handleCut = async () => {
+  const handleCut = async (): Promise<CutResult[] | null> => {
     if (!file) {
       toast({ title: "לא נבחר קובץ", variant: "destructive" });
-      return;
+      return null;
     }
     const config = buildConfig();
     if (!config) {
       toast({ title: "הגדרות לא תקינות", variant: "destructive" });
-      return;
+      return null;
     }
 
     setIsCutting(true);
     setResults([]);
+    setConvertedFiles([]);
     setProgress({ tier: "wav-slice", message: "מתחיל…", completed: 0, total: 1 });
 
     try {
@@ -147,9 +183,11 @@ export default function QuickCutDialog() {
         title: "✂️ חיתוך הושלם",
         description: `${outcome.results.length} מקטעים (מנוע: ${labelForTier(outcome.tier)})`,
       });
+      return outcome.results;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       toast({ title: "שגיאת חיתוך", description: msg, variant: "destructive" });
+      return null;
     } finally {
       setIsCutting(false);
       setProgress(null);
@@ -167,22 +205,83 @@ export default function QuickCutDialog() {
     }
   };
 
+  /** Convert provided segments to the chosen output format (sequential, with progress). */
+  const runConvertAll = async (segments: CutResult[]): Promise<File[]> => {
+    if (outputFormat === "none" || segments.length === 0) {
+      return segments.map((r) => r.file);
+    }
+    setIsConverting(true);
+    setConvProgress({ done: 0, total: segments.length });
+    const out: File[] = [];
+    try {
+      for (let i = 0; i < segments.length; i++) {
+        const converted = await convertOne(segments[i].file, outputFormat as OutputFormat);
+        out.push(converted);
+        setConvProgress({ done: i + 1, total: segments.length });
+      }
+      setConvertedFiles(out);
+      toast({
+        title: "✅ המרה הושלמה",
+        description: `${out.length} מקטעים הומרו ל-${(outputFormat as string).toUpperCase()}`,
+      });
+      return out;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast({ title: "שגיאת המרה", description: msg, variant: "destructive" });
+      throw e;
+    } finally {
+      setIsConverting(false);
+    }
+  };
+
+  const sendFilesToTranscribe = async (files: File[]) => {
+    const engine = (preferences as { engine?: string }).engine || "groq";
+    const lang = (preferences as { source_language?: string }).source_language || "he";
+    const onlineEngine = (engine === "local" || engine === "local-server") ? "groq" : engine;
+    const ids = await submitBatchJobs(files, onlineEngine, lang);
+    toast({
+      title: "נשלח לתור התמלול",
+      description: `${ids.length} מקטעים בתור (מנוע: ${onlineEngine})`,
+    });
+  };
+
   const handleTranscribeAll = async () => {
     if (results.length === 0) return;
     setSendingToTranscribe(true);
     try {
-      const engine = (preferences as { engine?: string }).engine || "groq";
-      const lang = (preferences as { source_language?: string }).source_language || "he";
-      const onlineEngine = (engine === "local" || engine === "local-server") ? "groq" : engine;
-      const ids = await submitBatchJobs(
-        results.map((r) => r.file),
-        onlineEngine,
-        lang,
-      );
-      toast({
-        title: "נשלח לתור התמלול",
-        description: `${ids.length} מקטעים בתור (מנוע: ${onlineEngine})`,
-      });
+      const filesToSend = convertedFiles.length > 0
+        ? convertedFiles
+        : results.map((r) => r.file);
+      await sendFilesToTranscribe(filesToSend);
+    } finally {
+      setSendingToTranscribe(false);
+    }
+  };
+
+  const handleConvertAndTranscribe = async () => {
+    setSendingToTranscribe(true);
+    try {
+      const files = await runConvertAll(results);
+      if (autoTranscribe) await sendFilesToTranscribe(files);
+    } catch {
+      /* toast already shown */
+    } finally {
+      setSendingToTranscribe(false);
+    }
+  };
+
+  /** One-click full pipeline: cut → (optional convert) → (optional transcribe). */
+  const handleDoEverything = async () => {
+    const segs = await handleCut();
+    if (!segs || segs.length === 0) return;
+    setSendingToTranscribe(true);
+    try {
+      const files = outputFormat !== "none"
+        ? await runConvertAll(segs)
+        : segs.map((r) => r.file);
+      if (autoTranscribe) await sendFilesToTranscribe(files);
+    } catch {
+      /* toast already shown */
     } finally {
       setSendingToTranscribe(false);
     }
@@ -296,6 +395,40 @@ export default function QuickCutDialog() {
           </Tabs>
         )}
 
+        {/* Format + auto-transcribe options */}
+        {file && (
+          <div className="rounded-xl border bg-muted/20 p-3 space-y-2">
+            <div className="text-sm font-medium">המרה לאחר חיתוך</div>
+            <div className="flex flex-wrap gap-2">
+              {([
+                { v: "none", l: "ללא המרה" },
+                { v: "mp3", l: "MP3" },
+                { v: "opus", l: "Opus" },
+                { v: "aac", l: "AAC (m4a)" },
+              ] as { v: ConvFormat; l: string }[]).map((opt) => (
+                <Button
+                  key={opt.v}
+                  variant={outputFormat === opt.v ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setOutputFormat(opt.v)}
+                  disabled={isCutting || isConverting}
+                >
+                  {opt.l}
+                </Button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoTranscribe}
+                onChange={(e) => setAutoTranscribe(e.target.checked)}
+                className="accent-yellow-600"
+              />
+              שלח אוטומטית לתמלול בסיום
+            </label>
+          </div>
+        )}
+
         {/* Progress */}
         {isCutting && progress && (
           <div className="space-y-2 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3">
@@ -305,6 +438,22 @@ export default function QuickCutDialog() {
               <span className="text-muted-foreground">— {progress.message}</span>
             </div>
             <Progress value={(progress.completed / Math.max(1, progress.total)) * 100} />
+          </div>
+        )}
+
+        {/* Conversion progress */}
+        {isConverting && convProgress && (
+          <div className="space-y-2 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3">
+            <div className="flex items-center gap-2 text-sm">
+              <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
+              <span className="font-medium">
+                ממיר ל-{(outputFormat as string).toUpperCase()}
+              </span>
+              <span className="text-muted-foreground">
+                — {convProgress.done}/{convProgress.total}
+              </span>
+            </div>
+            <Progress value={(convProgress.done / Math.max(1, convProgress.total)) * 100} />
           </div>
         )}
 
@@ -328,25 +477,57 @@ export default function QuickCutDialog() {
           </div>
         )}
 
-        <DialogFooter className="gap-2 sm:gap-2">
+        <DialogFooter className="gap-2 sm:gap-2 flex-wrap">
           {results.length === 0 ? (
-            <Button
-              onClick={handleCut}
-              disabled={!file || isCutting}
-              className="bg-yellow-600 hover:bg-yellow-700"
-            >
-              {isCutting ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <Scissors className="w-4 h-4 ml-2" />}
-              חתוך
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                onClick={handleCut}
+                disabled={!file || isCutting || isConverting}
+              >
+                {isCutting ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <Scissors className="w-4 h-4 ml-2" />}
+                חתוך בלבד
+              </Button>
+              <Button
+                onClick={handleDoEverything}
+                disabled={!file || isCutting || isConverting || sendingToTranscribe}
+                className="bg-yellow-600 hover:bg-yellow-700"
+              >
+                {(isCutting || isConverting || sendingToTranscribe) ? (
+                  <Loader2 className="w-4 h-4 animate-spin ml-2" />
+                ) : (
+                  <Scissors className="w-4 h-4 ml-2" />
+                )}
+                {outputFormat !== "none" && autoTranscribe
+                  ? "חתוך, המר ותמלל"
+                  : outputFormat !== "none"
+                  ? "חתוך והמר"
+                  : autoTranscribe
+                  ? "חתוך ותמלל"
+                  : "חתוך"}
+              </Button>
+            </>
           ) : (
             <>
               <Button variant="outline" onClick={handleDownloadAll}>
                 <Download className="w-4 h-4 ml-2" />
                 הורד הכל
               </Button>
+              {outputFormat !== "none" && convertedFiles.length === 0 && (
+                <Button
+                  variant="outline"
+                  onClick={handleConvertAndTranscribe}
+                  disabled={isConverting || sendingToTranscribe}
+                >
+                  {isConverting ? (
+                    <Loader2 className="w-4 h-4 animate-spin ml-2" />
+                  ) : null}
+                  המר {autoTranscribe ? "+ תמלל" : `ל-${(outputFormat as string).toUpperCase()}`}
+                </Button>
+              )}
               <Button
                 onClick={handleTranscribeAll}
-                disabled={sendingToTranscribe}
+                disabled={sendingToTranscribe || isConverting}
                 className="bg-yellow-600 hover:bg-yellow-700"
               >
                 {sendingToTranscribe ? (
@@ -354,7 +535,7 @@ export default function QuickCutDialog() {
                 ) : (
                   <ListChecks className="w-4 h-4 ml-2" />
                 )}
-                תמלל הכל
+                {convertedFiles.length > 0 ? "תמלל מומרים" : "תמלל הכל"}
               </Button>
             </>
           )}
