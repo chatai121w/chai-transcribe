@@ -585,7 +585,7 @@ function CutJobCard({
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
-                onTranscribe={() => onTranscribeResult(converted ?? r)}
+                onTranscribe={() => onTranscribeResult(converted ? { ...r, file: converted } : r)}
                 onConvert={(fmt) => {
                   const baseFile = converted ?? r.file;
                   onConvertResult(job.id, r.segmentIndex, baseFile, fmt);
