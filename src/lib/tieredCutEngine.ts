@@ -284,15 +284,18 @@ async function tierFFmpegCopy(
     const inName = `cut_in.${ext}`;
     await ffmpeg.writeFile(inName, await fetchFile(file));
 
-    let duration = options.knownDurationSec ?? 0;
-    if (!duration) {
-      try {
-        duration = await probeDurationViaFFmpeg(ffmpeg, file, ext);
-      } catch {
-        // fall through — caller will fall back to Tier 3
-        throw new Error("ffmpeg-probe-failed");
-      }
+    // Always prefer ffmpeg's own probe — knownDurationSec from a browser
+    // decodeAudioData can be truncated for long MP3/MP4 files.
+    let duration = 0;
+    try {
+      duration = await probeDurationViaFFmpeg(ffmpeg, file, ext);
+    } catch {
+      duration = options.knownDurationSec ?? 0;
     }
+    if (!duration || duration <= 0) {
+      throw new Error("ffmpeg-probe-failed");
+    }
+
 
     const segments = generateSegments(options.config, duration);
     if (segments.length === 0) throw new Error("לא נוצרו קטעים — בדוק את ההגדרות");
@@ -387,13 +390,50 @@ async function tierAudioBuffer(
 
 // ───────────────────────────── public entry ─────────────────────────────────
 
-/** Best-effort duration probe — tries WAV header first, then legacy decode. */
+/**
+ * Fast, accurate duration probe via HTMLMediaElement metadata.
+ * Works for almost any browser-playable audio/video without full decode,
+ * and unlike `decodeAudioData` it does NOT silently truncate long files.
+ */
+function probeDurationViaMediaElement(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const isVideo = file.type.startsWith("video") || /\.(mp4|mkv|mov|webm|avi)$/i.test(file.name);
+    const el = document.createElement(isVideo ? "video" : "audio") as HTMLMediaElement;
+    el.preload = "metadata";
+    let done = false;
+    const finish = (d: number | null) => {
+      if (done) return;
+      done = true;
+      try { el.removeAttribute("src"); el.load(); } catch { /* */ }
+      URL.revokeObjectURL(url);
+      resolve(d);
+    };
+    const timer = window.setTimeout(() => finish(null), 8000);
+    el.addEventListener("loadedmetadata", () => {
+      window.clearTimeout(timer);
+      const d = el.duration;
+      finish(Number.isFinite(d) && d > 0 ? d : null);
+    });
+    el.addEventListener("error", () => {
+      window.clearTimeout(timer);
+      finish(null);
+    });
+    el.src = url;
+  });
+}
+
+/** Best-effort duration probe — WAV header → MediaElement → legacy decode. */
 export async function probeDurationFast(file: File): Promise<number | null> {
   try {
     if (["wav", "wave"].includes(fileExt(file.name))) {
       const info = await parseWavHeader(file);
       if (info) return info.durationSec;
     }
+  } catch { /* */ }
+  try {
+    const d = await probeDurationViaMediaElement(file);
+    if (d && d > 0) return d;
   } catch { /* */ }
   try {
     return await legacyProbe(file);
