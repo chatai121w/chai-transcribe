@@ -889,6 +889,91 @@ export default function AdvancedCutPanel({
     [navigate],
   );
 
+  const sendFilesToTranscribeQueue = useCallback(async (files: File[]) => {
+    const engine = (preferences as { engine?: string }).engine || "groq";
+    const lang = (preferences as { source_language?: string }).source_language || "he";
+    const onlineEngine = (engine === "local" || engine === "local-server") ? "groq" : engine;
+    const ids = await submitBatchJobs(files, onlineEngine, lang);
+    toast({
+      title: "נשלח לתור התמלול",
+      description: `${ids.length} מקטעים בתור (מנוע: ${onlineEngine})`,
+    });
+  }, [preferences, submitBatchJobs]);
+
+  const handleConvertResult = useCallback(
+    async (jobId: string, segIndex: number, baseFile: File, fmt: OutputFormat) => {
+      const key = `${jobId}_${segIndex}`;
+      setSegConvertingSet((s) => ({ ...s, [key]: true }));
+      try {
+        const out = await convertOne(baseFile, fmt);
+        setConvertedMap((m) => ({ ...m, [key]: out }));
+        toast({ title: "✅ הומר", description: out.name });
+      } catch (e) {
+        toast({
+          title: "שגיאת המרה",
+          description: e instanceof Error ? e.message : String(e),
+          variant: "destructive",
+        });
+      } finally {
+        setSegConvertingSet((s) => { const n = { ...s }; delete n[key]; return n; });
+      }
+    },
+    [],
+  );
+
+  const handleConvertAllForJob = useCallback(
+    async (job: CutJob, fmt: OutputFormat) => {
+      setConvertingAllJobs((s) => ({ ...s, [job.id]: true }));
+      let done = 0;
+      try {
+        for (const r of job.results) {
+          const key = `${job.id}_${r.segmentIndex}`;
+          setSegConvertingSet((s) => ({ ...s, [key]: true }));
+          try {
+            const out = await convertOne(r.file, fmt);
+            setConvertedMap((m) => ({ ...m, [key]: out }));
+            done++;
+          } finally {
+            setSegConvertingSet((s) => { const n = { ...s }; delete n[key]; return n; });
+          }
+        }
+        toast({
+          title: "✅ המרה הושלמה",
+          description: `${done}/${job.results.length} מקטעים ל-${fmt.toUpperCase()}`,
+        });
+      } catch (e) {
+        toast({
+          title: "שגיאת המרה",
+          description: e instanceof Error ? e.message : String(e),
+          variant: "destructive",
+        });
+      } finally {
+        setConvertingAllJobs((s) => { const n = { ...s }; delete n[job.id]; return n; });
+      }
+    },
+    [],
+  );
+
+  const handleTranscribeAllForJob = useCallback(
+    async (job: CutJob) => {
+      setTranscribingAllJobs((s) => ({ ...s, [job.id]: true }));
+      try {
+        const files = job.results.map((r) => convertedMap[`${job.id}_${r.segmentIndex}`] ?? r.file);
+        await sendFilesToTranscribeQueue(files);
+      } catch (e) {
+        toast({
+          title: "שגיאת שליחה לתמלול",
+          description: e instanceof Error ? e.message : String(e),
+          variant: "destructive",
+        });
+      } finally {
+        setTranscribingAllJobs((s) => { const n = { ...s }; delete n[job.id]; return n; });
+      }
+    },
+    [convertedMap, sendFilesToTranscribeQueue],
+  );
+
+
   const handleClearDone = useCallback(() => {
     setCutJobs((prev) => {
       const toRemove = prev.filter((j) => j.status === "done" || j.status === "error");
