@@ -30,6 +30,13 @@ import {
   type EnhanceQueueJob,
 } from "@/lib/audioEnhanceQueue";
 import { useConversionHistory } from "@/hooks/useConversionHistory";
+import { convertAudio, onJobUpdate, type ConversionJob, type OutputFormat } from "@/lib/ffmpegConverter";
+import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
+import { useCloudPreferences } from "@/hooks/useCloudPreferences";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
