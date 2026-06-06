@@ -284,15 +284,18 @@ async function tierFFmpegCopy(
     const inName = `cut_in.${ext}`;
     await ffmpeg.writeFile(inName, await fetchFile(file));
 
-    let duration = options.knownDurationSec ?? 0;
-    if (!duration) {
-      try {
-        duration = await probeDurationViaFFmpeg(ffmpeg, file, ext);
-      } catch {
-        // fall through — caller will fall back to Tier 3
-        throw new Error("ffmpeg-probe-failed");
-      }
+    // Always prefer ffmpeg's own probe — knownDurationSec from a browser
+    // decodeAudioData can be truncated for long MP3/MP4 files.
+    let duration = 0;
+    try {
+      duration = await probeDurationViaFFmpeg(ffmpeg, file, ext);
+    } catch {
+      duration = options.knownDurationSec ?? 0;
     }
+    if (!duration || duration <= 0) {
+      throw new Error("ffmpeg-probe-failed");
+    }
+
 
     const segments = generateSegments(options.config, duration);
     if (segments.length === 0) throw new Error("לא נוצרו קטעים — בדוק את ההגדרות");
