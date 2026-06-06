@@ -1320,8 +1320,15 @@ export default function AdvancedCutPanel({
                   <CutJobCard
                     key={job.id}
                     job={job}
+                    convertedMap={convertedMap}
+                    segConvertingSet={segConvertingSet}
+                    isTranscribingAll={!!transcribingAllJobs[job.id]}
+                    isConvertingAll={!!convertingAllJobs[job.id]}
                     onRemove={handleRemoveJob}
                     onDownloadAll={handleDownloadAll}
+                    onConvertAll={handleConvertAllForJob}
+                    onTranscribeAll={handleTranscribeAllForJob}
+                    onConvertResult={handleConvertResult}
                     onEnhanceAll={handleEnhanceAllResults}
                     onTranscribeResult={handleTranscribeResult}
                     onEnhanceResult={setEnhanceTarget}
