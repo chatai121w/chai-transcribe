@@ -645,6 +645,15 @@ export default function AdvancedCutPanel({
   const [cutJobs, setCutJobs] = useState<CutJob[]>([]);
   const [enhanceQueueJobs, setEnhanceQueueJobs] = useState<EnhanceQueueJob[]>(() => getEnhanceQueueJobs());
 
+  // Per-segment conversion state — key = `${jobId}_${segIndex}`
+  const [convertedMap, setConvertedMap] = useState<Record<string, File>>({});
+  const [segConvertingSet, setSegConvertingSet] = useState<Record<string, boolean>>({});
+  const [convertingAllJobs, setConvertingAllJobs] = useState<Record<string, boolean>>({});
+  const [transcribingAllJobs, setTranscribingAllJobs] = useState<Record<string, boolean>>({});
+
+  const { submitBatchJobs } = useTranscriptionJobs();
+  const { preferences } = useCloudPreferences();
+
   // Set initial file
   useEffect(() => {
     if (initialFile) {
