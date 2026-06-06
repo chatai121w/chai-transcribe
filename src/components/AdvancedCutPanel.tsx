@@ -396,8 +396,15 @@ function CutResultRow({
 
 function CutJobCard({
   job,
+  convertedMap,
+  segConvertingSet,
+  isTranscribingAll,
+  isConvertingAll,
   onRemove,
   onDownloadAll,
+  onConvertAll,
+  onTranscribeAll,
+  onConvertResult,
   onEnhanceAll,
   onTranscribeResult,
   onEnhanceResult,
@@ -405,8 +412,15 @@ function CutJobCard({
   onSaveResultToHistory,
 }: {
   job: CutJob;
+  convertedMap: Record<string, File>;
+  segConvertingSet: Record<string, boolean>;
+  isTranscribingAll: boolean;
+  isConvertingAll: boolean;
   onRemove: (id: string) => void;
   onDownloadAll: (job: CutJob) => void;
+  onConvertAll: (job: CutJob, fmt: OutputFormat) => void;
+  onTranscribeAll: (job: CutJob) => void;
+  onConvertResult: (jobId: string, segIndex: number, file: File, fmt: OutputFormat) => void;
   onEnhanceAll: (job: CutJob) => void;
   onTranscribeResult: (result: CutResult) => void;
   onEnhanceResult: (result: CutResult) => void;
