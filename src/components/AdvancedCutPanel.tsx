@@ -585,12 +585,17 @@ function CutJobCard({
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
-                onTranscribe={() => onTranscribeResult(r)}
+                onTranscribe={() => onTranscribeResult(converted ?? r)}
+                onConvert={(fmt) => {
+                  const baseFile = converted ?? r.file;
+                  onConvertResult(job.id, r.segmentIndex, baseFile, fmt);
+                }}
                 onEnhance={() => onEnhanceResult(r)}
                 onDelete={() => onDeleteResult(job.id, r.segmentIndex)}
                 onSaveToHistory={(name, folder) => onSaveResultToHistory(r, name, folder)}
               />
-            ))}
+              );
+            })}
           </div>
         )}
       </CardContent>
