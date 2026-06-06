@@ -30,6 +30,13 @@ import {
   type EnhanceQueueJob,
 } from "@/lib/audioEnhanceQueue";
 import { useConversionHistory } from "@/hooks/useConversionHistory";
+import { convertAudio, onJobUpdate, type ConversionJob, type OutputFormat } from "@/lib/ffmpegConverter";
+import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
+import { useCloudPreferences } from "@/hooks/useCloudPreferences";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -66,8 +73,30 @@ import {
   FolderOpen,
   Save,
   Check,
+  Music,
+  FileAudio2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// ─── Convert helper ──────────────────────────────────────────────────────────
+
+function convertOne(file: File, format: OutputFormat): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const job = convertAudio(file, format);
+    const off = onJobUpdate((j: ConversionJob) => {
+      if (j.id !== job.id) return;
+      if (j.status === "done" && j.outputBlob) {
+        off();
+        const ext = format === "mp3" ? "mp3" : format === "opus" ? "opus" : "m4a";
+        const outName = file.name.replace(/\.[^/.]+$/, "") + "." + ext;
+        resolve(new File([j.outputBlob], outName, { type: j.outputBlob.type }));
+      } else if (j.status === "error") {
+        off();
+        reject(new Error(j.error || "המרה נכשלה"));
+      }
+    });
+  });
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -237,15 +266,21 @@ function SegmentPreviewList({
 
 function CutResultRow({
   result,
+  convertedFile,
+  isConverting,
   onDownload,
   onTranscribe,
+  onConvert,
   onEnhance,
   onDelete,
   onSaveToHistory,
 }: {
   result: CutResult;
+  convertedFile?: File;
+  isConverting?: boolean;
   onDownload: () => void;
   onTranscribe: () => void;
+  onConvert: (fmt: OutputFormat) => void;
   onEnhance: () => void;
   onDelete: () => void;
   onSaveToHistory: (name: string, folder: string) => void;
@@ -266,10 +301,12 @@ function CutResultRow({
     toast({ title: "נשמר להיסטוריה", description: editName });
   };
 
+  const displayFile = convertedFile ?? result.file;
+
   return (
     <div className="border rounded-lg p-2.5 space-y-1.5 bg-card/50">
       <div className="flex items-center gap-2">
-        <AudioPreview file={result.file} />
+        <AudioPreview file={displayFile} />
         <div className="flex-1 min-w-0">
           {isEditing ? (
             <div className="flex items-center gap-1">
@@ -288,6 +325,11 @@ function CutResultRow({
           ) : (
             <div className="flex items-center gap-1">
               <div className="text-sm font-medium truncate" dir="rtl">{editName}</div>
+              {convertedFile && (
+                <Badge variant="secondary" className="h-4 text-[9px] px-1 shrink-0">
+                  {(convertedFile.name.split(".").pop() || "").toUpperCase()}
+                </Badge>
+              )}
               <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0 opacity-60 hover:opacity-100" onClick={() => setIsEditing(true)}>
                 <Pencil className="w-3 h-3" />
               </Button>
@@ -295,10 +337,26 @@ function CutResultRow({
           )}
           <div className="text-[11px] text-muted-foreground" dir="rtl">
             {formatTime(result.startSec)} → {formatTime(result.endSec)} •{" "}
-            {formatTime(result.durationSec)} • {formatBytes(result.sizeBytes)}
+            {formatTime(result.durationSec)} • {formatBytes(displayFile.size)}
           </div>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="ghost" className="h-7 w-7" title="המר פורמט" disabled={isConverting}>
+                {isConverting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Music className="w-3.5 h-3.5" />}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel className="text-xs">בחר פורמט</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {(["mp3", "opus", "aac"] as OutputFormat[]).map((f) => (
+                <DropdownMenuItem key={f} onClick={() => onConvert(f)}>
+                  {f.toUpperCase()}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button size="icon" variant="ghost" className="h-7 w-7" title="שמור להיסטוריה" onClick={handleSaveToHistory} disabled={saved}>
             {saved ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Save className="w-3.5 h-3.5" />}
           </Button>
@@ -338,8 +396,15 @@ function CutResultRow({
 
 function CutJobCard({
   job,
+  convertedMap,
+  segConvertingSet,
+  isTranscribingAll,
+  isConvertingAll,
   onRemove,
   onDownloadAll,
+  onConvertAll,
+  onTranscribeAll,
+  onConvertResult,
   onEnhanceAll,
   onTranscribeResult,
   onEnhanceResult,
@@ -347,8 +412,15 @@ function CutJobCard({
   onSaveResultToHistory,
 }: {
   job: CutJob;
+  convertedMap: Record<string, File>;
+  segConvertingSet: Record<string, boolean>;
+  isTranscribingAll: boolean;
+  isConvertingAll: boolean;
   onRemove: (id: string) => void;
   onDownloadAll: (job: CutJob) => void;
+  onConvertAll: (job: CutJob, fmt: OutputFormat) => void;
+  onTranscribeAll: (job: CutJob) => void;
+  onConvertResult: (jobId: string, segIndex: number, file: File, fmt: OutputFormat) => void;
   onEnhanceAll: (job: CutJob) => void;
   onTranscribeResult: (result: CutResult) => void;
   onEnhanceResult: (result: CutResult) => void;
@@ -406,8 +478,48 @@ function CutJobCard({
               )}
             </div>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
             <CutStatusBadge status={job.status} />
+            {job.status === "done" && job.results.length > 0 && (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      title="המר את כל הקטעים"
+                      disabled={isConvertingAll}
+                    >
+                      {isConvertingAll
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <FileAudio2 className="w-3.5 h-3.5" />}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel className="text-xs">המר את כל הקטעים ל-</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {(["mp3", "opus", "aac"] as OutputFormat[]).map((f) => (
+                      <DropdownMenuItem key={f} onClick={() => onConvertAll(job, f)}>
+                        {f.toUpperCase()}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7"
+                  title="תמלל את כל הקטעים"
+                  onClick={() => onTranscribeAll(job)}
+                  disabled={isTranscribingAll}
+                >
+                  {isTranscribingAll
+                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    : <Mic className="w-3.5 h-3.5" />}
+                </Button>
+              </>
+            )}
             {job.status === "done" && job.results.length > 1 && (
               <Button
                 size="icon"
@@ -455,24 +567,35 @@ function CutJobCard({
 
         {expanded && job.results.length > 0 && (
           <div className="space-y-1 pt-1 border-t">
-            {job.results.map((r) => (
+            {job.results.map((r) => {
+              const key = `${job.id}_${r.segmentIndex}`;
+              const converted = convertedMap[key];
+              return (
               <CutResultRow
                 key={r.segmentIndex}
                 result={r}
+                convertedFile={converted}
+                isConverting={!!segConvertingSet[key]}
                 onDownload={() => {
-                  const url = URL.createObjectURL(r.file);
+                  const f = converted ?? r.file;
+                  const url = URL.createObjectURL(f);
                   const a = document.createElement("a");
                   a.href = url;
-                  a.download = r.file.name;
+                  a.download = f.name;
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
-                onTranscribe={() => onTranscribeResult(r)}
+                onTranscribe={() => onTranscribeResult(converted ? { ...r, file: converted } : r)}
+                onConvert={(fmt) => {
+                  const baseFile = converted ?? r.file;
+                  onConvertResult(job.id, r.segmentIndex, baseFile, fmt);
+                }}
                 onEnhance={() => onEnhanceResult(r)}
                 onDelete={() => onDeleteResult(job.id, r.segmentIndex)}
                 onSaveToHistory={(name, folder) => onSaveResultToHistory(r, name, folder)}
               />
-            ))}
+              );
+            })}
           </div>
         )}
       </CardContent>
@@ -521,6 +644,15 @@ export default function AdvancedCutPanel({
   // Jobs
   const [cutJobs, setCutJobs] = useState<CutJob[]>([]);
   const [enhanceQueueJobs, setEnhanceQueueJobs] = useState<EnhanceQueueJob[]>(() => getEnhanceQueueJobs());
+
+  // Per-segment conversion state — key = `${jobId}_${segIndex}`
+  const [convertedMap, setConvertedMap] = useState<Record<string, File>>({});
+  const [segConvertingSet, setSegConvertingSet] = useState<Record<string, boolean>>({});
+  const [convertingAllJobs, setConvertingAllJobs] = useState<Record<string, boolean>>({});
+  const [transcribingAllJobs, setTranscribingAllJobs] = useState<Record<string, boolean>>({});
+
+  const { submitBatchJobs } = useTranscriptionJobs();
+  const { preferences } = useCloudPreferences();
 
   // Set initial file
   useEffect(() => {
@@ -756,6 +888,91 @@ export default function AdvancedCutPanel({
     },
     [navigate],
   );
+
+  const sendFilesToTranscribeQueue = useCallback(async (files: File[]) => {
+    const engine = (preferences as { engine?: string }).engine || "groq";
+    const lang = (preferences as { source_language?: string }).source_language || "he";
+    const onlineEngine = (engine === "local" || engine === "local-server") ? "groq" : engine;
+    const ids = await submitBatchJobs(files, onlineEngine, lang);
+    toast({
+      title: "נשלח לתור התמלול",
+      description: `${ids.length} מקטעים בתור (מנוע: ${onlineEngine})`,
+    });
+  }, [preferences, submitBatchJobs]);
+
+  const handleConvertResult = useCallback(
+    async (jobId: string, segIndex: number, baseFile: File, fmt: OutputFormat) => {
+      const key = `${jobId}_${segIndex}`;
+      setSegConvertingSet((s) => ({ ...s, [key]: true }));
+      try {
+        const out = await convertOne(baseFile, fmt);
+        setConvertedMap((m) => ({ ...m, [key]: out }));
+        toast({ title: "✅ הומר", description: out.name });
+      } catch (e) {
+        toast({
+          title: "שגיאת המרה",
+          description: e instanceof Error ? e.message : String(e),
+          variant: "destructive",
+        });
+      } finally {
+        setSegConvertingSet((s) => { const n = { ...s }; delete n[key]; return n; });
+      }
+    },
+    [],
+  );
+
+  const handleConvertAllForJob = useCallback(
+    async (job: CutJob, fmt: OutputFormat) => {
+      setConvertingAllJobs((s) => ({ ...s, [job.id]: true }));
+      let done = 0;
+      try {
+        for (const r of job.results) {
+          const key = `${job.id}_${r.segmentIndex}`;
+          setSegConvertingSet((s) => ({ ...s, [key]: true }));
+          try {
+            const out = await convertOne(r.file, fmt);
+            setConvertedMap((m) => ({ ...m, [key]: out }));
+            done++;
+          } finally {
+            setSegConvertingSet((s) => { const n = { ...s }; delete n[key]; return n; });
+          }
+        }
+        toast({
+          title: "✅ המרה הושלמה",
+          description: `${done}/${job.results.length} מקטעים ל-${fmt.toUpperCase()}`,
+        });
+      } catch (e) {
+        toast({
+          title: "שגיאת המרה",
+          description: e instanceof Error ? e.message : String(e),
+          variant: "destructive",
+        });
+      } finally {
+        setConvertingAllJobs((s) => { const n = { ...s }; delete n[job.id]; return n; });
+      }
+    },
+    [],
+  );
+
+  const handleTranscribeAllForJob = useCallback(
+    async (job: CutJob) => {
+      setTranscribingAllJobs((s) => ({ ...s, [job.id]: true }));
+      try {
+        const files = job.results.map((r) => convertedMap[`${job.id}_${r.segmentIndex}`] ?? r.file);
+        await sendFilesToTranscribeQueue(files);
+      } catch (e) {
+        toast({
+          title: "שגיאת שליחה לתמלול",
+          description: e instanceof Error ? e.message : String(e),
+          variant: "destructive",
+        });
+      } finally {
+        setTranscribingAllJobs((s) => { const n = { ...s }; delete n[job.id]; return n; });
+      }
+    },
+    [convertedMap, sendFilesToTranscribeQueue],
+  );
+
 
   const handleClearDone = useCallback(() => {
     setCutJobs((prev) => {
@@ -1103,8 +1320,15 @@ export default function AdvancedCutPanel({
                   <CutJobCard
                     key={job.id}
                     job={job}
+                    convertedMap={convertedMap}
+                    segConvertingSet={segConvertingSet}
+                    isTranscribingAll={!!transcribingAllJobs[job.id]}
+                    isConvertingAll={!!convertingAllJobs[job.id]}
                     onRemove={handleRemoveJob}
                     onDownloadAll={handleDownloadAll}
+                    onConvertAll={handleConvertAllForJob}
+                    onTranscribeAll={handleTranscribeAllForJob}
+                    onConvertResult={handleConvertResult}
                     onEnhanceAll={handleEnhanceAllResults}
                     onTranscribeResult={handleTranscribeResult}
                     onEnhanceResult={setEnhanceTarget}
