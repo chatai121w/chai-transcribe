@@ -478,8 +478,48 @@ function CutJobCard({
               )}
             </div>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
             <CutStatusBadge status={job.status} />
+            {job.status === "done" && job.results.length > 0 && (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      title="המר את כל הקטעים"
+                      disabled={isConvertingAll}
+                    >
+                      {isConvertingAll
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <FileAudio2 className="w-3.5 h-3.5" />}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel className="text-xs">המר את כל הקטעים ל-</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {(["mp3", "opus", "aac"] as OutputFormat[]).map((f) => (
+                      <DropdownMenuItem key={f} onClick={() => onConvertAll(job, f)}>
+                        {f.toUpperCase()}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7"
+                  title="תמלל את כל הקטעים"
+                  onClick={() => onTranscribeAll(job)}
+                  disabled={isTranscribingAll}
+                >
+                  {isTranscribingAll
+                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    : <Mic className="w-3.5 h-3.5" />}
+                </Button>
+              </>
+            )}
             {job.status === "done" && job.results.length > 1 && (
               <Button
                 size="icon"
@@ -527,15 +567,21 @@ function CutJobCard({
 
         {expanded && job.results.length > 0 && (
           <div className="space-y-1 pt-1 border-t">
-            {job.results.map((r) => (
+            {job.results.map((r) => {
+              const key = `${job.id}_${r.segmentIndex}`;
+              const converted = convertedMap[key];
+              return (
               <CutResultRow
                 key={r.segmentIndex}
                 result={r}
+                convertedFile={converted}
+                isConverting={!!segConvertingSet[key]}
                 onDownload={() => {
-                  const url = URL.createObjectURL(r.file);
+                  const f = converted ?? r.file;
+                  const url = URL.createObjectURL(f);
                   const a = document.createElement("a");
                   a.href = url;
-                  a.download = r.file.name;
+                  a.download = f.name;
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
