@@ -266,15 +266,21 @@ function SegmentPreviewList({
 
 function CutResultRow({
   result,
+  convertedFile,
+  isConverting,
   onDownload,
   onTranscribe,
+  onConvert,
   onEnhance,
   onDelete,
   onSaveToHistory,
 }: {
   result: CutResult;
+  convertedFile?: File;
+  isConverting?: boolean;
   onDownload: () => void;
   onTranscribe: () => void;
+  onConvert: (fmt: OutputFormat) => void;
   onEnhance: () => void;
   onDelete: () => void;
   onSaveToHistory: (name: string, folder: string) => void;
@@ -295,10 +301,12 @@ function CutResultRow({
     toast({ title: "נשמר להיסטוריה", description: editName });
   };
 
+  const displayFile = convertedFile ?? result.file;
+
   return (
     <div className="border rounded-lg p-2.5 space-y-1.5 bg-card/50">
       <div className="flex items-center gap-2">
-        <AudioPreview file={result.file} />
+        <AudioPreview file={displayFile} />
         <div className="flex-1 min-w-0">
           {isEditing ? (
             <div className="flex items-center gap-1">
@@ -317,6 +325,11 @@ function CutResultRow({
           ) : (
             <div className="flex items-center gap-1">
               <div className="text-sm font-medium truncate" dir="rtl">{editName}</div>
+              {convertedFile && (
+                <Badge variant="secondary" className="h-4 text-[9px] px-1 shrink-0">
+                  {(convertedFile.name.split(".").pop() || "").toUpperCase()}
+                </Badge>
+              )}
               <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0 opacity-60 hover:opacity-100" onClick={() => setIsEditing(true)}>
                 <Pencil className="w-3 h-3" />
               </Button>
@@ -324,10 +337,26 @@ function CutResultRow({
           )}
           <div className="text-[11px] text-muted-foreground" dir="rtl">
             {formatTime(result.startSec)} → {formatTime(result.endSec)} •{" "}
-            {formatTime(result.durationSec)} • {formatBytes(result.sizeBytes)}
+            {formatTime(result.durationSec)} • {formatBytes(displayFile.size)}
           </div>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="ghost" className="h-7 w-7" title="המר פורמט" disabled={isConverting}>
+                {isConverting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Music className="w-3.5 h-3.5" />}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel className="text-xs">בחר פורמט</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {(["mp3", "opus", "aac"] as OutputFormat[]).map((f) => (
+                <DropdownMenuItem key={f} onClick={() => onConvert(f)}>
+                  {f.toUpperCase()}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button size="icon" variant="ghost" className="h-7 w-7" title="שמור להיסטוריה" onClick={handleSaveToHistory} disabled={saved}>
             {saved ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Save className="w-3.5 h-3.5" />}
           </Button>
