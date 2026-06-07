@@ -328,7 +328,7 @@ export default function QuickCutDialog() {
   const [tierUsed, setTierUsed] = useState<string>("");
 
   const [sendingToTranscribe, setSendingToTranscribe] = useState(false);
-  const [outputFormat, setOutputFormat] = useState<ConvFormat>("mp3");
+  const [outputFormat, setOutputFormat] = useState<ConvFormat>("none");
   const [autoTranscribe, setAutoTranscribe] = useState(true);
   const [isConverting, setIsConverting] = useState(false);
   const [convProgress, setConvProgress] = useState<{ done: number; total: number } | null>(null);
@@ -860,11 +860,11 @@ export default function QuickCutDialog() {
             <div className="rounded-xl border p-3 space-y-2 bg-card">
               <div className="text-sm font-semibold flex items-center gap-1.5">
                 <Music className="w-4 h-4 text-yellow-600" />
-                המרה לאחר חיתוך
+                פורמט מקטעים
               </div>
               <div className="grid grid-cols-4 gap-1.5">
                 {([
-                  { v: "none", l: "ללא" },
+                  { v: "none", l: "שמור מקור" },
                   { v: "mp3", l: "MP3" },
                   { v: "opus", l: "Opus" },
                   { v: "aac", l: "AAC" },
@@ -883,6 +883,24 @@ export default function QuickCutDialog() {
                     {opt.l}
                   </Button>
                 ))}
+              </div>
+              <div className="text-[11px] text-muted-foreground leading-relaxed pt-1 border-t border-border/50">
+                {outputFormat === "none" ? (
+                  <>
+                    <b>שמור מקור</b> — אין המרה נוספת. הכי מהיר.
+                    קבצי MP3/M4A נחתכים ישירות באותו פורמט (ללא איכות מאבד).
+                    קבצי WAV יישארו WAV (גדולים, אך ללא דחיסה — איכות מושלמת).
+                  </>
+                ) : outputFormat === "mp3" ? (
+                  <><b>MP3</b> — תאימות מקסימלית, גודל קטן (~1MB לדקה). מומלץ להעלאה לתמלול ענן.</>
+                ) : outputFormat === "opus" ? (
+                  <><b>Opus</b> — הדחיסה הטובה ביותר (~0.3MB לדקה) באיכות מעולה. מומלץ לקבצים ארוכים.</>
+                ) : (
+                  <><b>AAC</b> — איכות גבוהה בגודל קטן, נתמך באייפון/מק.</>
+                )}
+                <div className="mt-1 opacity-80">
+                  💡 <b>WAV</b> נוח רק לעריכת אודיו מקצועית — כבד פי 10 ומאט העלאות. עדיף להמיר ל-MP3/Opus לפני שליחה.
+                </div>
               </div>
             </div>
 
