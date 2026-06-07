@@ -63,8 +63,13 @@ const Dashboard = () => {
               התחבר
             </Button>
           )}
-          <Button variant="outline" size="icon" onClick={() => navigate("/settings")}>
-            <Settings className="h-4 w-4 text-blue-900" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="fixed top-3 left-3 z-[61] md:static p-2 text-foreground hover:text-foreground/80 hover:bg-transparent"
+            onClick={() => navigate("/settings")}
+          >
+            <Settings className="h-5 w-5" />
           </Button>
         </div>
 

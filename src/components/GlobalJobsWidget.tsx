@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
@@ -21,6 +21,12 @@ const statusConfig: Record<string, { label: string; icon: React.ElementType; cla
 };
 
 const STORAGE_KEY = "global-jobs-widget-state";
+const STORAGE_SIZE_KEY = "global-jobs-widget-size";
+
+const MIN_WIDTH = 300;
+const MAX_WIDTH = 760;
+const MIN_HEIGHT = 220;
+const MAX_HEIGHT = 680;
 
 type WidgetState = "expanded" | "collapsed" | "hidden";
 
@@ -39,9 +45,125 @@ export const GlobalJobsWidget = () => {
     }
   });
 
+  const [size, setSize] = useState<{ width: number; height: number }>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_SIZE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as { width?: number; height?: number };
+        if (typeof parsed.width === "number" && typeof parsed.height === "number") {
+          return {
+            width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, parsed.width)),
+            height: Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, parsed.height)),
+          };
+        }
+      }
+    } catch {
+      // noop
+    }
+    return { width: 360, height: 420 };
+  });
+
+  const [topOffset, setTopOffset] = useState(120);
+  const dragRef = useRef<{
+    dir: string;
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+  } | null>(null);
+
+  const clampSize = (width: number, height: number) => {
+    const viewportWidth = typeof window !== "undefined" ? window.innerWidth : MAX_WIDTH;
+    const viewportHeight = typeof window !== "undefined" ? window.innerHeight : MAX_HEIGHT;
+
+    const maxWidthByViewport = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, viewportWidth - 32));
+    const maxHeightByViewport = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, viewportHeight - 32));
+
+    return {
+      width: Math.max(MIN_WIDTH, Math.min(maxWidthByViewport, width)),
+      height: Math.max(MIN_HEIGHT, Math.min(maxHeightByViewport, height)),
+    };
+  };
+
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, state); } catch { /* noop */ }
   }, [state]);
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_SIZE_KEY, JSON.stringify(size)); } catch { /* noop */ }
+  }, [size]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const nextTop = Math.max(16, window.innerHeight - size.height - 16);
+    setTopOffset(nextTop);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const onResize = () => {
+      setSize((prev) => clampSize(prev.width, prev.height));
+      setTopOffset((prev) => {
+        const maxTop = Math.max(16, window.innerHeight - 72);
+        return Math.max(16, Math.min(maxTop, prev));
+      });
+    };
+
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const onMove = (event: MouseEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+
+      let nextWidth = drag.startWidth;
+      let nextHeight = drag.startHeight;
+
+      if (drag.dir.includes("e")) nextWidth = drag.startWidth + dx;
+      if (drag.dir.includes("w")) nextWidth = drag.startWidth - dx;
+      if (drag.dir.includes("s")) nextHeight = drag.startHeight + dy;
+      if (drag.dir.includes("n")) nextHeight = drag.startHeight - dy;
+
+      setSize(clampSize(nextWidth, nextHeight));
+    };
+
+    const onUp = () => {
+      dragRef.current = null;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  const startResize = (dir: string, cursor: string, event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = {
+      dir,
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: size.width,
+      startHeight: size.height,
+    };
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = cursor;
+  };
+
+  const bodyHeight = useMemo(() => Math.max(130, size.height - 96), [size.height]);
 
   // Re-show widget automatically when a new job is created
   const activeCount = jobs.filter(j => ['pending', 'uploading', 'processing'].includes(j.status)).length;
@@ -86,8 +208,28 @@ export const GlobalJobsWidget = () => {
   return (
     <Card
       dir="rtl"
-      className="fixed bottom-4 left-4 z-40 w-[360px] max-w-[calc(100vw-2rem)] shadow-2xl border-primary/20"
+      className="fixed left-4 z-40 shadow-2xl border-primary/20 overflow-hidden"
+      style={{
+        width: `${size.width}px`,
+        maxWidth: "calc(100vw - 2rem)",
+        top: `${topOffset}px`,
+      }}
     >
+      {/* Resize handles */}
+      {state === "expanded" && (
+        <>
+          <div className="absolute top-0 left-0 right-0 h-1.5 z-50 cursor-ns-resize" onMouseDown={(e) => startResize("n", "ns-resize", e)} />
+          <div className="absolute bottom-0 left-0 right-0 h-1.5 z-50 cursor-ns-resize" onMouseDown={(e) => startResize("s", "ns-resize", e)} />
+          <div className="absolute top-0 bottom-0 left-0 w-1.5 z-50 cursor-ew-resize" onMouseDown={(e) => startResize("w", "ew-resize", e)} />
+          <div className="absolute top-0 bottom-0 right-0 w-1.5 z-50 cursor-ew-resize" onMouseDown={(e) => startResize("e", "ew-resize", e)} />
+
+          <div className="absolute top-0 left-0 w-3 h-3 z-50 cursor-nwse-resize" onMouseDown={(e) => startResize("nw", "nwse-resize", e)} />
+          <div className="absolute top-0 right-0 w-3 h-3 z-50 cursor-nesw-resize" onMouseDown={(e) => startResize("ne", "nesw-resize", e)} />
+          <div className="absolute bottom-0 left-0 w-3 h-3 z-50 cursor-nesw-resize" onMouseDown={(e) => startResize("sw", "nesw-resize", e)} />
+          <div className="absolute bottom-0 right-0 w-3 h-3 z-50 cursor-nwse-resize" onMouseDown={(e) => startResize("se", "nwse-resize", e)} />
+        </>
+      )}
+
       {/* Header */}
       <div className="flex flex-row-reverse items-center justify-between gap-2 px-3 py-2 border-b bg-muted/30 rounded-t-lg">
         <div className="flex flex-row-reverse items-center gap-2 min-w-0">
@@ -133,7 +275,7 @@ export const GlobalJobsWidget = () => {
 
       {/* Body — only when expanded */}
       {state === "expanded" && (
-        <ScrollArea className="max-h-[320px]">
+        <ScrollArea style={{ height: `${bodyHeight}px` }}>
           <div className="p-2 space-y-1.5">
             {jobs.slice(0, 10).map(job => {
               const config = statusConfig[job.status] || statusConfig.pending;

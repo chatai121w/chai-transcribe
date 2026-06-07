@@ -217,7 +217,7 @@ const AppSidebar = () => {
       {isMobile && !isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="fixed top-3 right-3 z-[61] p-2 rounded-lg bg-card border border-border shadow-lg text-foreground hover:bg-muted transition-colors"
+          className="fixed top-3 right-3 z-[61] p-2 text-foreground hover:text-foreground/80 transition-colors"
           aria-label="פתח תפריט"
         >
           <Menu className="w-5 h-5" />
