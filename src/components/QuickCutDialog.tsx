@@ -329,6 +329,7 @@ export default function QuickCutDialog() {
   const [progress, setProgress] = useState<TieredCutProgress | null>(null);
   const [results, setResults] = useState<CutResult[]>([]);
   const [tierUsed, setTierUsed] = useState<string>("");
+  const [tierEvents, setTierEvents] = useState<TierEvent[]>([]);
 
   const [sendingToTranscribe, setSendingToTranscribe] = useState(false);
   const [outputFormat, setOutputFormat] = useState<ConvFormat>("none");
