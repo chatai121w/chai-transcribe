@@ -351,7 +351,7 @@ export default function VideoToMp3() {
   const [enhanceQueueJobs, setEnhanceQueueJobs] = useState<EnhanceQueueJob[]>(() => getEnhanceQueueJobs());
   const [saveAndTranscribeBusyId, setSaveAndTranscribeBusyId] = useState<string | null>(null);
   const [autoTranscribe, setAutoTranscribe] = useState(false);
-  const [activeTab, setActiveTab] = useState<"convert" | "cut">("convert");
+  const [activeTab, setActiveTab] = useState<"convert" | "extract" | "cut">("convert");
   const [cutInitialFile, setCutInitialFile] = useState<File | null>(null);
   const [cutInitialLabel, setCutInitialLabel] = useState("");
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
