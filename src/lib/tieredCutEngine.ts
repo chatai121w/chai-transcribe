@@ -487,7 +487,16 @@ export async function cutWithFallback(
     debugLog.warn("TieredCut", "Tier 2 failed", msg);
   }
 
-  // Tier 3 — legacy full decode
+  // Tier 3 — legacy full decode (skip for large non-WAV to prevent OOM crash)
+  const LARGE_FILE_LIMIT = 25 * 1024 * 1024; // 25MB
+  if (file.size > LARGE_FILE_LIMIT && !["wav", "wave"].includes(fileExt(file.name))) {
+    throw new Error(
+      `לא ניתן לחתוך את הקובץ — מנוע FFmpeg לא נטען (${errors.join(" | ")}). ` +
+      `הקובץ גדול מדי (${(file.size / 1024 / 1024).toFixed(1)}MB) לפענוח מלא בדפדפן. ` +
+      `נסה לרענן את הדף או בדוק חיבור אינטרנט (נדרש לטעינת FFmpeg).`,
+    );
+  }
+
   try {
     return await tierAudioBuffer(file, options);
   } catch (e) {
