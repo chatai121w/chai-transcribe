@@ -515,8 +515,17 @@ export default function QuickCutDialog() {
     }
   };
 
+  const initPipeline = (opts: { cut: boolean; convert: boolean; transcribe: boolean }) => {
+    const stages: PipelineStage[] = [];
+    if (opts.cut) stages.push({ key: "cut", label: "חיתוך", status: "pending", percent: 0 });
+    if (opts.convert) stages.push({ key: "convert", label: "המרה", status: "pending", percent: 0 });
+    if (opts.transcribe) stages.push({ key: "transcribe", label: "תמלול", status: "pending", percent: 0 });
+    setPipeline(stages);
+  };
+
   const convertAllAs = async (fmt: OutputFormat) => {
     setOutputFormat(fmt);
+    initPipeline({ cut: false, convert: true, transcribe: false });
     try {
       await runConvertAll(results);
     } catch { /* toast shown */ }
@@ -540,18 +549,20 @@ export default function QuickCutDialog() {
   const handleTranscribeAll = async () => {
     if (results.length === 0) return;
     setSendingToTranscribe(true);
+    initPipeline({ cut: false, convert: false, transcribe: true });
     try {
       const filesToSend = convertedFiles.length > 0
         ? convertedFiles
         : results.map((r) => r.file);
       await sendFilesToTranscribe(filesToSend);
-    } finally {
+    } catch { /* toast shown */ } finally {
       setSendingToTranscribe(false);
     }
   };
 
   const handleConvertAndTranscribe = async () => {
     setSendingToTranscribe(true);
+    initPipeline({ cut: false, convert: outputFormat !== "none", transcribe: autoTranscribe });
     try {
       const files = await runConvertAll(results);
       if (autoTranscribe) await sendFilesToTranscribe(files);
@@ -562,6 +573,11 @@ export default function QuickCutDialog() {
 
   /** One-click full pipeline triggered from step-2 CTA. */
   const handleDoEverything = async () => {
+    initPipeline({
+      cut: true,
+      convert: outputFormat !== "none",
+      transcribe: autoTranscribe,
+    });
     const segs = await runCut();
     if (!segs || segs.length === 0) return;
     setSendingToTranscribe(true);
@@ -574,6 +590,7 @@ export default function QuickCutDialog() {
       setSendingToTranscribe(false);
     }
   };
+
 
   const busy = isCutting || isConverting || sendingToTranscribe;
 
