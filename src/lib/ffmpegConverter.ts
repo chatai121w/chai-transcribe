@@ -112,7 +112,11 @@ interface PersistedJob {
   finishedAt?: number;
   error?: string;
   retryCount: number;
+  extract?: boolean;
+  outputExt?: string;
+  outputMime?: string;
 }
+
 
 interface PersistedOutput {
   jobId: string;
