@@ -975,6 +975,15 @@ export default function QuickCutDialog() {
               </div>
             </div>
 
+            {/* Tier engine summary (post-cut) */}
+            {tierEvents.length > 0 && (
+              <TierStatusPanel
+                events={tierEvents}
+                activeProgress={null}
+                finalTier={(tierUsed || null) as CutTier | null}
+              />
+            )}
+
             {mergedTranscriptId && (
               <div className="rounded-xl border bg-primary/5 p-3 text-sm" dir="rtl">
                 <div className="font-semibold">התמלול המאוחד נשמר</div>
