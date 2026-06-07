@@ -38,8 +38,11 @@ import {
   probeDurationFast,
   type CutJobConfig,
   type CutResult,
+  type CutTier,
   type TieredCutProgress,
+  type TierEvent,
 } from "@/lib/tieredCutEngine";
+import { TierStatusPanel } from "@/components/TierStatusPanel";
 import {
   convertAudio,
   onJobUpdate,
