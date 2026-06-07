@@ -678,7 +678,7 @@ export default function VideoToMp3() {
     if (!job.outputUrl) return;
     const a = document.createElement("a");
     a.href = job.outputUrl;
-    a.download = getOutputFileName(job.fileName, job.outputFormat);
+    a.download = getJobOutputName(job);
     a.click();
     setPromptJob(null);
     toast({ title: "הקובץ נשמר ✓" });
