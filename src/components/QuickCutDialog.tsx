@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { pushCompletedFile } from "@/lib/completedFilesBus";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
@@ -541,6 +542,10 @@ export default function QuickCutDialog() {
         },
       });
       setResults(outcome.results);
+      // Feed the global completed-files panel.
+      try {
+        for (const r of outcome.results) pushCompletedFile(r.file, "cut", file?.name);
+      } catch { /* non-fatal */ }
       setTierUsed(outcome.tier);
       updateStage("cut", { status: "done", percent: 100, detail: `${outcome.results.length} מקטעים` });
       setStep(3);
@@ -581,6 +586,9 @@ export default function QuickCutDialog() {
         });
       }
       setConvertedFiles(out);
+      try {
+        for (const f of out) pushCompletedFile(f, "cut+convert", file?.name);
+      } catch { /* non-fatal */ }
       toast({
         title: "✅ המרה הושלמה",
         description: `${out.length} מקטעים הומרו ל-${(outputFormat as string).toUpperCase()}`,

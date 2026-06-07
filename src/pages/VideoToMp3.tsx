@@ -24,6 +24,8 @@ import {
 } from "@/lib/audioEnhanceQueue";
 import { isServerAvailable } from "@/lib/conversionRouter";
 import { useConversionHistory, type ConversionHistoryItem } from "@/hooks/useConversionHistory";
+import { CompletedFilesPanel } from "@/components/CompletedFilesPanel";
+import { pushCompletedFile } from "@/lib/completedFilesBus";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -513,6 +515,10 @@ export default function VideoToMp3() {
             navigate("/transcribe", { state: { file: outputFile } });
             return;
           }
+        }
+        const outFile = toOutputFile(updatedJob);
+        if (outFile) {
+          pushCompletedFile(outFile, "convert", updatedJob.fileName);
         }
         setPromptJob(updatedJob);
       }
@@ -1451,112 +1457,28 @@ export default function VideoToMp3() {
         </TabsContent>
       </Tabs>
 
-      {/* Post-conversion prompt — non-blocking floating panel (minimizable) */}
-      {promptJob && (
-        promptMinimized ? (
-          <div className="fixed bottom-4 left-4 z-50">
-            <Button
-              size="sm"
-              variant="secondary"
-              className="gap-2 shadow-lg border"
-              onClick={() => setPromptMinimized(false)}
-              dir="rtl"
-            >
-              <Maximize2 className="w-4 h-4" />
-              <CheckCircle2 className="w-4 h-4 text-green-500" />
-              <span className="max-w-[180px] truncate">
-                {getOutputFileName(promptJob.fileName, promptJob.outputFormat)}
-              </span>
-            </Button>
-          </div>
-        ) : (
-          <div
-            className="fixed bottom-4 left-4 z-50 w-[calc(100vw-2rem)] sm:w-[28rem] rounded-lg border bg-background shadow-2xl"
-            dir="rtl"
-            role="dialog"
-            aria-label="ההמרה הושלמה"
-          >
-            <div className="flex items-start justify-between gap-2 p-4 pb-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
-                <div className="min-w-0">
-                  <div className="font-semibold text-sm">ההמרה הושלמה!</div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    <span className="font-medium break-all">
-                      {getOutputFileName(promptJob.fileName, promptJob.outputFormat)}
-                    </span>
-                    {promptJob.outputBlob && (
-                      <span> ({formatBytes(promptJob.outputBlob.size)})</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => setPromptMinimized(true)}
-                  title="מזער"
-                  aria-label="מזער"
-                >
-                  <Minus className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => {
-                    setPromptJob(null);
-                    setPromptMinimized(false);
-                  }}
-                  title="סגור"
-                  aria-label="סגור"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-            <div className="px-4 pb-4">
-              <p className="text-xs text-muted-foreground mb-2">
-                מה תרצה לעשות עם הקובץ? (הפעולות ימשיכו ברקע גם אם תסגור)
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <Button
-                  className="gap-2 w-full"
-                  disabled={saveAndTranscribeBusyId === promptJob.id}
-                  onClick={() => {
-                    void handleSaveAndTranscribe(promptJob);
-                  }}
-                >
-                  {saveAndTranscribeBusyId === promptJob.id ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Save className="w-4 h-4" />
-                  )}
-                  שמור + תמלל + ענן
-                </Button>
-                <Button
-                  className="gap-2 w-full"
-                  variant="secondary"
-                  onClick={() => handleTranscribe(promptJob)}
-                >
-                  <Mic className="w-4 h-4" />
-                  תמלל את הקובץ
-                </Button>
-                <Button
-                  variant="outline"
-                  className="gap-2 w-full"
-                  onClick={() => handleSaveMp3(promptJob)}
-                >
-                  <Save className="w-4 h-4" />
-                  שמור קובץ
-                </Button>
-              </div>
-            </div>
-          </div>
-        )
-      )}
+      {/* Aggregated completed-files panel (cut + convert results) */}
+      <CompletedFilesPanel
+        onTranscribe={(file) => navigate("/transcribe", { state: { file } })}
+        onSaveAndTranscribe={async (file) => {
+          // Pseudo-job to reuse the existing save+upload+navigate flow.
+          const pseudo: ConversionJob = {
+            id: `cf_${Date.now()}`,
+            file,
+            fileName: file.name,
+            fileSize: file.size,
+            outputFormat: (file.name.split(".").pop() as OutputFormat) || "mp3",
+            outputBlob: file,
+            outputUrl: URL.createObjectURL(file),
+            status: "done",
+            progress: 100,
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+          } as unknown as ConversionJob;
+          await handleSaveAndTranscribe(pseudo);
+        }}
+      />
+
 
       <AudioEnhanceDialog
         open={!!enhanceTarget}
