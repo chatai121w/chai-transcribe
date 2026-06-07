@@ -772,33 +772,11 @@ export default function QuickCutDialog() {
               />
             </label>
 
-            {/* Cut progress */}
-            {isCutting && progress && (
-              <div className="space-y-2 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
-                  <span className="font-medium">{labelForTier(progress.tier)}</span>
-                </div>
-                <div className="text-xs text-muted-foreground">{progress.message}</div>
-                <Progress value={(progress.completed / Math.max(1, progress.total)) * 100} className="h-1.5" />
-              </div>
+            {/* Unified pipeline progress */}
+            {pipeline.length > 0 && (busy || pipeline.some((s) => s.status !== "pending")) && (
+              <PipelineProgress stages={pipeline} />
             )}
 
-            {/* Conv progress */}
-            {isConverting && convProgress && (
-              <div className="space-y-2 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
-                  <span className="font-medium">
-                    ממיר ל-{(outputFormat as string).toUpperCase()}
-                  </span>
-                  <span className="text-muted-foreground">
-                    — {convProgress.done}/{convProgress.total}
-                  </span>
-                </div>
-                <Progress value={(convProgress.done / Math.max(1, convProgress.total)) * 100} className="h-1.5" />
-              </div>
-            )}
           </>
         )}
 
