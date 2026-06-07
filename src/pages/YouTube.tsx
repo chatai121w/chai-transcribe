@@ -206,6 +206,13 @@ export default function YouTubePage() {
               </p>
             </Card>
           )}
+
+          {activeJob && (
+            <div className="space-y-2">
+              <div className="text-sm font-semibold text-muted-foreground">התקדמות המשימה</div>
+              <JobCard job={activeJob} />
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="manager">
