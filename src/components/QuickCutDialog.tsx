@@ -837,18 +837,10 @@ export default function QuickCutDialog() {
               </Button>
             </div>
 
-            {isConverting && convProgress && (
-              <div className="space-y-2 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
-                  <span className="font-medium">ממיר…</span>
-                  <span className="text-muted-foreground">
-                    {convProgress.done}/{convProgress.total}
-                  </span>
-                </div>
-                <Progress value={(convProgress.done / Math.max(1, convProgress.total)) * 100} className="h-1.5" />
-              </div>
+            {pipeline.length > 0 && (busy || pipeline.some((s) => s.status !== "pending")) && (
+              <PipelineProgress stages={pipeline} />
             )}
+
 
             <div className="space-y-2">
               {results.map((r, i) => (
