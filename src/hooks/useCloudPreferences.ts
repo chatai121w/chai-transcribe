@@ -569,3 +569,20 @@ const useCloudPreferencesImpl = () => {
     updatePreferences,
   };
 };
+
+// ── Singleton via Context to prevent N duplicate state instances/realtime channels ──
+type CloudPrefsValue = ReturnType<typeof useCloudPreferencesImpl>;
+const CloudPreferencesContext = createContext<CloudPrefsValue | null>(null);
+
+export const CloudPreferencesProvider = ({ children }: { children: ReactNode }) => {
+  const value = useCloudPreferencesImpl();
+  return createElement(CloudPreferencesContext.Provider, { value }, children);
+};
+
+export const useCloudPreferences = (): CloudPrefsValue => {
+  const ctx = useContext(CloudPreferencesContext);
+  if (ctx) return ctx;
+  // Fallback (e.g., tests without provider) — runs an isolated instance
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return useCloudPreferencesImpl();
+};
