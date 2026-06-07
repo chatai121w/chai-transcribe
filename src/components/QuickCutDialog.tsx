@@ -928,6 +928,13 @@ export default function QuickCutDialog() {
               </div>
             </div>
 
+            {mergedTranscriptId && (
+              <div className="rounded-xl border bg-primary/5 p-3 text-sm" dir="rtl">
+                <div className="font-semibold">התמלול המאוחד נשמר</div>
+                <div className="text-xs text-muted-foreground">כל חלקי הקובץ אוחדו לרשומה אחת בהיסטוריית התמלולים.</div>
+              </div>
+            )}
+
             {/* Global actions — Convert (dropdown) + Transcribe-all icons */}
             <div className="flex items-center gap-2 px-1">
               <span className="text-xs text-muted-foreground flex-1">פעולות על כל המקטעים:</span>
