@@ -242,6 +242,7 @@ const App = () => {
               <Routes>
                 <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                 <Route path="/transcribe" element={<ProtectedRoute><Index /></ProtectedRoute>} />
+                <Route path="/youtube" element={<ProtectedRoute><YouTube /></ProtectedRoute>} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />

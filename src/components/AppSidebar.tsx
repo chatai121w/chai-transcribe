@@ -31,6 +31,7 @@ import {
   Wand2,
   AudioLines,
   Video,
+  Youtube,
   Bot,
   ScrollText,
   Scissors,
@@ -56,6 +57,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: "דשבורד", icon: LayoutDashboard, path: "/" },
   { label: "תמלול", icon: Mic, path: "/transcribe" },
+  { label: "תמלול מ-YouTube", icon: Youtube, path: "/youtube" },
   { label: "מקליט פגישות", icon: Video, path: "/meeting-recorder" },
   { label: "סטודיו קול", icon: Waves, path: "/voice-studio" },
   { label: "אודסיטי לאב", icon: SlidersHorizontal, path: "/audacity-lab" },
