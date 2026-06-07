@@ -1,10 +1,12 @@
 // Cloud YouTube fetch — multi-backend fallback chain
-//   1) Self-hosted Cobalt (COBALT_SELFHOST_URL)
-//   2) Piped instances (open source, REST, no key)
-//   3) Invidious instances (open source, REST, no key)
-//   4) Public Cobalt instances (best-effort, often rate-limited)
+//   1) Innertube (youtubei.js, iOS client) — direct YouTube internal API, no key
+//   2) Self-hosted Cobalt (COBALT_SELFHOST_URL)
+//   3) Piped instances (open source, REST, no key)
+//   4) Invidious instances (open source, REST, no key)
+//   5) Public Cobalt instances (best-effort, often rate-limited)
 // Name kept as `youtube-cobalt` for backwards-compat with existing callers.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
+import { Innertube } from 'npm:youtubei.js@13.4.0';
 
 const SELFHOST = Deno.env.get('COBALT_SELFHOST_URL')?.trim();
 
@@ -203,12 +205,60 @@ async function tryCobalt(url: string, opts: ReqBody) {
   throw new Error(typeof lastErr === 'string' ? lastErr : 'all_cobalt_instances_failed');
 }
 
+// ── Backend: Innertube (youtubei.js) — direct YouTube internal API ─────────
+// Reliable cloud path: bypasses public mirrors that are mostly dead in 2026.
+async function tryInnertube(videoId: string, opts: ReqBody): Promise<{ url: string; filename: string; title?: string; thumbnail?: string; author?: string; instance: string } | null> {
+  // iOS client returns pre-deciphered URLs; ANDROID/TV are extra fallbacks.
+  const clients = ['iOS', 'ANDROID', 'TV'] as const;
+  for (const client of clients) {
+    try {
+      const yt = await Innertube.create({ generate_session_locally: true });
+      // deno-lint-ignore no-explicit-any
+      const info = await yt.getBasicInfo(videoId, client as any);
+      const fmt = opts.mode === 'video'
+        ? info.chooseFormat({ type: 'video+audio', quality: (opts.videoQuality ?? '720') as never })
+        : info.chooseFormat({ type: 'audio', quality: 'best' });
+      let dlUrl: string | null = fmt?.url ?? null;
+      if (!dlUrl && fmt?.decipher) {
+        try { dlUrl = fmt.decipher(yt.session.player); } catch { /* try next client */ }
+      }
+      if (!dlUrl || !dlUrl.startsWith('http')) continue;
+      const title = info.basic_info.title ?? videoId;
+      const thumb = info.basic_info.thumbnail?.[0]?.url;
+      const author = info.basic_info.author;
+      const ext = (fmt.mime_type ?? '').includes('mp4') ? (opts.mode === 'video' ? 'mp4' : 'm4a')
+        : (fmt.mime_type ?? '').includes('webm') ? 'webm' : 'm4a';
+      const safe = title.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
+      return {
+        url: dlUrl,
+        filename: `${safe}.${ext}`,
+        title,
+        thumbnail: thumb,
+        author,
+        instance: `innertube:${client}`,
+      };
+    } catch { /* try next client */ }
+  }
+  return null;
+}
+
 // ── Orchestrator: try backends in order ─────────────────────────────────────
 async function fetchWithFallbacks(url: string, opts: ReqBody) {
   const videoId = extractVideoId(url);
   const attempts: string[] = [];
 
-  // 1) Self-hosted Cobalt first if configured
+  // 1) Innertube (most reliable cloud path, no infra)
+  if (videoId) {
+    try {
+      const it = await tryInnertube(videoId, opts);
+      if (it) return { status: 'redirect', ...it, attempts: [...attempts, 'innertube:ok'] };
+      attempts.push('innertube:fail');
+    } catch (e) {
+      attempts.push(`innertube:${e instanceof Error ? e.message.slice(0, 60) : 'err'}`);
+    }
+  }
+
+  // 2) Self-hosted Cobalt if configured
   if (SELFHOST) {
     try {
       const r = await tryCobalt(url, opts);
@@ -218,14 +268,14 @@ async function fetchWithFallbacks(url: string, opts: ReqBody) {
     }
   }
 
-  // 2) Piped
+  // 3) Piped
   if (videoId) {
     const piped = await tryPiped(videoId, opts);
     if (piped) return { status: 'redirect', ...piped, attempts: [...attempts, 'piped:ok'] };
     attempts.push('piped:fail');
   }
 
-  // 3) Invidious
+  // 4) Invidious
   if (videoId) {
     const inv = await tryInvidious(videoId, opts);
     if (inv) return { status: 'redirect', ...inv, attempts: [...attempts, 'invidious:ok'] };
