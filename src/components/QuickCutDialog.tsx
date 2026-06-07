@@ -230,6 +230,71 @@ function SegmentCard({
   );
 }
 
+// ─── Pipeline Progress ─────────────────────────────────────────────────────
+type StageKey = "cut" | "convert" | "transcribe";
+type StageStatus = "pending" | "running" | "done" | "error";
+interface PipelineStage {
+  key: StageKey;
+  label: string;
+  status: StageStatus;
+  percent: number; // 0-100
+  detail?: string;
+}
+
+function PipelineProgress({ stages }: { stages: PipelineStage[] }) {
+  const active = stages.filter((s) => s.status !== "pending");
+  const overall = active.length
+    ? Math.round(active.reduce((a, s) => a + (s.status === "done" ? 100 : s.percent), 0) / active.length)
+    : 0;
+  const allDone = stages.length > 0 && stages.every((s) => s.status === "done");
+  return (
+    <div className="space-y-2.5 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3" dir="rtl">
+      <div className="flex items-center gap-2 text-sm">
+        {allDone ? (
+          <Check className="w-4 h-4 text-green-600" />
+        ) : (
+          <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
+        )}
+        <span className="font-semibold">התקדמות כללית</span>
+        <span className="mr-auto text-sm font-bold tabular-nums">{overall}%</span>
+      </div>
+      <Progress value={overall} className="h-2" />
+      <div className="space-y-1.5 pt-1">
+        {stages.map((s) => {
+          const pct = s.status === "done" ? 100 : Math.round(s.percent);
+          return (
+            <div key={s.key} className="space-y-0.5">
+              <div className="flex items-center gap-2 text-xs">
+                {s.status === "done" ? (
+                  <Check className="w-3.5 h-3.5 text-green-600 shrink-0" />
+                ) : s.status === "running" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-yellow-600 shrink-0" />
+                ) : s.status === "error" ? (
+                  <X className="w-3.5 h-3.5 text-destructive shrink-0" />
+                ) : (
+                  <div className="w-3.5 h-3.5 rounded-full border border-muted-foreground/30 shrink-0" />
+                )}
+                <span className={cn(
+                  "font-medium",
+                  s.status === "pending" && "text-muted-foreground",
+                  s.status === "done" && "text-green-700 dark:text-green-500"
+                )}>
+                  {s.label}
+                </span>
+                {s.detail && (
+                  <span className="text-muted-foreground truncate">— {s.detail}</span>
+                )}
+                <span className="mr-auto tabular-nums font-semibold">{pct}%</span>
+              </div>
+              <Progress value={pct} className="h-1" />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Dialog ────────────────────────────────────────────────────────────
 export default function QuickCutDialog() {
   const isMobile = useIsMobile();
@@ -256,10 +321,15 @@ export default function QuickCutDialog() {
   const [convProgress, setConvProgress] = useState<{ done: number; total: number } | null>(null);
   const [convertedFiles, setConvertedFiles] = useState<File[]>([]);
   const [segConverting, setSegConverting] = useState<Record<number, boolean>>({});
+  const [pipeline, setPipeline] = useState<PipelineStage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { submitBatchJobs } = useTranscriptionJobs();
   const { preferences } = useCloudPreferences();
+
+  const updateStage = useCallback((key: StageKey, patch: Partial<PipelineStage>) => {
+    setPipeline((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
+  }, []);
 
   const resetAll = useCallback(() => {
     setFile(null);
@@ -271,6 +341,7 @@ export default function QuickCutDialog() {
     setConvertedFiles([]);
     setConvProgress(null);
     setIsConverting(false);
+    setPipeline([]);
     setStep(1);
   }, []);
 
@@ -330,14 +401,20 @@ export default function QuickCutDialog() {
     setResults([]);
     setConvertedFiles([]);
     setProgress({ tier: "wav-slice", message: "מתחיל…", completed: 0, total: 1 });
+    updateStage("cut", { status: "running", percent: 1, detail: "מתחיל…" });
     try {
       const outcome = await cutWithFallback(file, {
         config,
         knownDurationSec: duration ?? undefined,
-        onProgress: (p) => setProgress(p),
+        onProgress: (p) => {
+          setProgress(p);
+          const pct = Math.max(1, Math.min(99, Math.round((p.completed / Math.max(1, p.total)) * 100)));
+          updateStage("cut", { status: "running", percent: pct, detail: p.message });
+        },
       });
       setResults(outcome.results);
       setTierUsed(outcome.tier);
+      updateStage("cut", { status: "done", percent: 100, detail: `${outcome.results.length} מקטעים` });
       setStep(3);
       toast({
         title: "✂️ חיתוך הושלם",
@@ -346,6 +423,7 @@ export default function QuickCutDialog() {
       return outcome.results;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      updateStage("cut", { status: "error", detail: msg });
       toast({ title: "שגיאת חיתוך", description: msg, variant: "destructive" });
       return null;
     } finally {
@@ -360,12 +438,19 @@ export default function QuickCutDialog() {
     }
     setIsConverting(true);
     setConvProgress({ done: 0, total: segments.length });
+    updateStage("convert", { status: "running", percent: 1, detail: `0/${segments.length}` });
     const out: File[] = [];
     try {
       for (let i = 0; i < segments.length; i++) {
         const converted = await convertOne(segments[i].file, outputFormat as OutputFormat);
         out.push(converted);
         setConvProgress({ done: i + 1, total: segments.length });
+        const pct = Math.round(((i + 1) / segments.length) * 100);
+        updateStage("convert", {
+          status: i + 1 === segments.length ? "done" : "running",
+          percent: pct,
+          detail: `${i + 1}/${segments.length}`,
+        });
       }
       setConvertedFiles(out);
       toast({
@@ -375,6 +460,7 @@ export default function QuickCutDialog() {
       return out;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      updateStage("convert", { status: "error", detail: msg });
       toast({ title: "שגיאת המרה", description: msg, variant: "destructive" });
       throw e;
     } finally {
@@ -386,12 +472,25 @@ export default function QuickCutDialog() {
     const engine = (preferences as { engine?: string }).engine || "groq";
     const lang = (preferences as { source_language?: string }).source_language || "he";
     const onlineEngine = (engine === "local" || engine === "local-server") ? "groq" : engine;
-    const ids = await submitBatchJobs(files, onlineEngine, lang);
-    toast({
-      title: "נשלח לתור התמלול",
-      description: `${ids.length} מקטעים בתור (מנוע: ${onlineEngine})`,
-    });
+    updateStage("transcribe", { status: "running", percent: 10, detail: `שולח ${files.length} מקטעים…` });
+    try {
+      const ids = await submitBatchJobs(files, onlineEngine, lang);
+      updateStage("transcribe", {
+        status: "done",
+        percent: 100,
+        detail: `${ids.length} בתור (${onlineEngine})`,
+      });
+      toast({
+        title: "נשלח לתור התמלול",
+        description: `${ids.length} מקטעים בתור (מנוע: ${onlineEngine})`,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      updateStage("transcribe", { status: "error", detail: msg });
+      throw e;
+    }
   };
+
 
   const convertSegmentTo = async (idx: number, fmt: OutputFormat) => {
     const seg = results[idx];
@@ -416,8 +515,17 @@ export default function QuickCutDialog() {
     }
   };
 
+  const initPipeline = (opts: { cut: boolean; convert: boolean; transcribe: boolean }) => {
+    const stages: PipelineStage[] = [];
+    if (opts.cut) stages.push({ key: "cut", label: "חיתוך", status: "pending", percent: 0 });
+    if (opts.convert) stages.push({ key: "convert", label: "המרה", status: "pending", percent: 0 });
+    if (opts.transcribe) stages.push({ key: "transcribe", label: "תמלול", status: "pending", percent: 0 });
+    setPipeline(stages);
+  };
+
   const convertAllAs = async (fmt: OutputFormat) => {
     setOutputFormat(fmt);
+    initPipeline({ cut: false, convert: true, transcribe: false });
     try {
       await runConvertAll(results);
     } catch { /* toast shown */ }
@@ -441,18 +549,20 @@ export default function QuickCutDialog() {
   const handleTranscribeAll = async () => {
     if (results.length === 0) return;
     setSendingToTranscribe(true);
+    initPipeline({ cut: false, convert: false, transcribe: true });
     try {
       const filesToSend = convertedFiles.length > 0
         ? convertedFiles
         : results.map((r) => r.file);
       await sendFilesToTranscribe(filesToSend);
-    } finally {
+    } catch { /* toast shown */ } finally {
       setSendingToTranscribe(false);
     }
   };
 
   const handleConvertAndTranscribe = async () => {
     setSendingToTranscribe(true);
+    initPipeline({ cut: false, convert: outputFormat !== "none", transcribe: autoTranscribe });
     try {
       const files = await runConvertAll(results);
       if (autoTranscribe) await sendFilesToTranscribe(files);
@@ -463,6 +573,11 @@ export default function QuickCutDialog() {
 
   /** One-click full pipeline triggered from step-2 CTA. */
   const handleDoEverything = async () => {
+    initPipeline({
+      cut: true,
+      convert: outputFormat !== "none",
+      transcribe: autoTranscribe,
+    });
     const segs = await runCut();
     if (!segs || segs.length === 0) return;
     setSendingToTranscribe(true);
@@ -475,6 +590,7 @@ export default function QuickCutDialog() {
       setSendingToTranscribe(false);
     }
   };
+
 
   const busy = isCutting || isConverting || sendingToTranscribe;
 
@@ -656,33 +772,11 @@ export default function QuickCutDialog() {
               />
             </label>
 
-            {/* Cut progress */}
-            {isCutting && progress && (
-              <div className="space-y-2 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
-                  <span className="font-medium">{labelForTier(progress.tier)}</span>
-                </div>
-                <div className="text-xs text-muted-foreground">{progress.message}</div>
-                <Progress value={(progress.completed / Math.max(1, progress.total)) * 100} className="h-1.5" />
-              </div>
+            {/* Unified pipeline progress */}
+            {pipeline.length > 0 && (busy || pipeline.some((s) => s.status !== "pending")) && (
+              <PipelineProgress stages={pipeline} />
             )}
 
-            {/* Conv progress */}
-            {isConverting && convProgress && (
-              <div className="space-y-2 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
-                  <span className="font-medium">
-                    ממיר ל-{(outputFormat as string).toUpperCase()}
-                  </span>
-                  <span className="text-muted-foreground">
-                    — {convProgress.done}/{convProgress.total}
-                  </span>
-                </div>
-                <Progress value={(convProgress.done / Math.max(1, convProgress.total)) * 100} className="h-1.5" />
-              </div>
-            )}
           </>
         )}
 
@@ -743,18 +837,10 @@ export default function QuickCutDialog() {
               </Button>
             </div>
 
-            {isConverting && convProgress && (
-              <div className="space-y-2 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
-                  <span className="font-medium">ממיר…</span>
-                  <span className="text-muted-foreground">
-                    {convProgress.done}/{convProgress.total}
-                  </span>
-                </div>
-                <Progress value={(convProgress.done / Math.max(1, convProgress.total)) * 100} className="h-1.5" />
-              </div>
+            {pipeline.length > 0 && (busy || pipeline.some((s) => s.status !== "pending")) && (
+              <PipelineProgress stages={pipeline} />
             )}
+
 
             <div className="space-y-2">
               {results.map((r, i) => (
