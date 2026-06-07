@@ -418,7 +418,7 @@ export const useCloudPreferences = () => {
       localStorage.removeItem('pp_active_profile');
     }
     localStorage.setItem('diarize_enabled', updated.diarize_enabled ? '1' : '0');
-    debugLog.info('CloudPreferences', 'saveToCloud invoked', {
+    debugLog.debug('CloudPreferences', 'saveToCloud invoked', {
       pp_enabled: updated.personal_pronunciation_enabled,
       hasUser: Boolean(user),
       immediate: opts?.immediate ?? false,
