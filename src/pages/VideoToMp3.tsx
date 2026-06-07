@@ -371,10 +371,10 @@ export default function VideoToMp3() {
 
   const toOutputFile = useCallback((job: ConversionJob): File | null => {
     if (!job.outputBlob) return null;
-    const meta = OUTPUT_FORMAT_META[job.outputFormat];
-    const outputName = getOutputFileName(job.fileName, job.outputFormat);
-    return new File([job.outputBlob], outputName, { type: meta.mime });
+    const outputName = getJobOutputName(job);
+    return new File([job.outputBlob], outputName, { type: getJobOutputMime(job) });
   }, []);
+
 
   const uploadMp3ToCloud = useCallback(async (file: File): Promise<string | null> => {
     if (!isAuthenticated || !user) return null;
