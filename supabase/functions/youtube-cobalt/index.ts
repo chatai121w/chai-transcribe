@@ -1,10 +1,13 @@
-// Cloud fallback for YouTube downloads using Cobalt API
-// https://github.com/imputnet/cobalt
+// Cloud YouTube fetch — multi-backend fallback chain
+//   1) Self-hosted Cobalt (COBALT_SELFHOST_URL)
+//   2) Piped instances (open source, REST, no key)
+//   3) Invidious instances (open source, REST, no key)
+//   4) Public Cobalt instances (best-effort, often rate-limited)
+// Name kept as `youtube-cobalt` for backwards-compat with existing callers.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 
-// Self-hosted Cobalt comes first when configured (Railway / Fly / etc).
-// Public instances are a best-effort last resort — they're often rate-limited or down.
 const SELFHOST = Deno.env.get('COBALT_SELFHOST_URL')?.trim();
+
 const COBALT_INSTANCES = [
   ...(SELFHOST ? [SELFHOST.replace(/\/$/, '')] : []),
   'https://api.cobalt.tools',
@@ -12,34 +15,158 @@ const COBALT_INSTANCES = [
   'https://cobalt-api.kwiatekmiki.com',
 ];
 
+// Piped — https://github.com/TeamPiped/Piped (public mirrors rotate)
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://pipedapi.r4fo.com',
+  'https://pipedapi.leptons.xyz',
+];
+
+// Invidious — https://github.com/iv-org/invidious
+const INVIDIOUS_INSTANCES = [
+  'https://invidious.nerdvpn.de',
+  'https://inv.nadeko.net',
+  'https://invidious.privacyredirect.com',
+];
+
 interface ReqBody {
   url: string;
-  mode?: 'audio' | 'video';        // default audio
+  mode?: 'audio' | 'video';
   audioFormat?: 'best' | 'mp3' | 'opus' | 'wav' | 'm4a';
   videoQuality?: '144' | '240' | '360' | '480' | '720' | '1080' | 'max';
-  action?: 'fetch' | 'info';       // 'info' returns minimal metadata only
+  action?: 'fetch' | 'info';
 }
 
 const YT_REGEX = /^https?:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/|live\/)|youtu\.be\/)[\w\-]+/;
 
-// Try to extract video ID for oEmbed metadata (works without API key)
 function extractVideoId(url: string): string | null {
   const m = url.match(/(?:v=|youtu\.be\/|shorts\/|live\/)([\w-]{11})/);
   return m?.[1] ?? null;
 }
 
-async function fetchOEmbed(url: string): Promise<{ title?: string; thumbnail?: string; author?: string } | null> {
+async function fetchOEmbed(url: string) {
   try {
-    const res = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+    const res = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`, {
+      signal: AbortSignal.timeout(4000),
+    });
     if (!res.ok) return null;
     const d = await res.json();
-    return { title: d.title, thumbnail: d.thumbnail_url, author: d.author_name };
+    return { title: d.title as string, thumbnail: d.thumbnail_url as string, author: d.author_name as string };
   } catch {
     return null;
   }
 }
 
-async function callCobalt(url: string, opts: ReqBody) {
+// ── Backend: Piped ──────────────────────────────────────────────────────────
+interface PipedStream {
+  url: string;
+  format?: string;
+  mimeType?: string;
+  bitrate?: number;
+  quality?: string;
+  videoOnly?: boolean;
+}
+interface PipedResponse {
+  title?: string;
+  uploader?: string;
+  thumbnailUrl?: string;
+  duration?: number;
+  audioStreams?: PipedStream[];
+  videoStreams?: PipedStream[];
+}
+
+async function tryPiped(videoId: string, opts: ReqBody): Promise<{ url: string; filename: string; title?: string; thumbnail?: string; author?: string; instance: string } | null> {
+  for (const base of PIPED_INSTANCES) {
+    try {
+      const res = await fetch(`${base}/streams/${videoId}`, {
+        headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
+        signal: AbortSignal.timeout(7000),
+      });
+      if (!res.ok) continue;
+      const data = (await res.json()) as PipedResponse;
+      let chosen: PipedStream | undefined;
+      if (opts.mode === 'video') {
+        const target = parseInt(opts.videoQuality ?? '720', 10);
+        const muxed = (data.videoStreams ?? []).filter((s) => !s.videoOnly);
+        chosen = muxed.sort((a, b) => {
+          const da = Math.abs(parseInt(a.quality ?? '0') - target);
+          const db = Math.abs(parseInt(b.quality ?? '0') - target);
+          return da - db;
+        })[0];
+      } else {
+        // audio
+        chosen = (data.audioStreams ?? []).sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
+      }
+      if (!chosen?.url) continue;
+      const ext = (chosen.mimeType?.split('/')[1] ?? chosen.format ?? (opts.mode === 'video' ? 'mp4' : 'm4a')).split(';')[0];
+      const safeTitle = (data.title ?? videoId).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
+      return {
+        url: chosen.url,
+        filename: `${safeTitle}.${ext}`,
+        title: data.title,
+        thumbnail: data.thumbnailUrl,
+        author: data.uploader,
+        instance: `piped:${new URL(base).host}`,
+      };
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+// ── Backend: Invidious ──────────────────────────────────────────────────────
+interface InvAdaptive { url: string; type?: string; bitrate?: string; container?: string; resolution?: string; encoding?: string; }
+interface InvFormat { url: string; type?: string; qualityLabel?: string; container?: string; }
+interface InvResponse {
+  title?: string;
+  author?: string;
+  videoThumbnails?: Array<{ url: string }>;
+  lengthSeconds?: number;
+  adaptiveFormats?: InvAdaptive[];
+  formatStreams?: InvFormat[];
+}
+
+async function tryInvidious(videoId: string, opts: ReqBody): Promise<{ url: string; filename: string; title?: string; thumbnail?: string; author?: string; instance: string } | null> {
+  for (const base of INVIDIOUS_INSTANCES) {
+    try {
+      const res = await fetch(`${base}/api/v1/videos/${videoId}`, {
+        headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
+        signal: AbortSignal.timeout(7000),
+      });
+      if (!res.ok) continue;
+      const data = (await res.json()) as InvResponse;
+      let chosen: { url: string; container?: string } | undefined;
+      if (opts.mode === 'video') {
+        // formatStreams are pre-muxed video+audio
+        const target = parseInt(opts.videoQuality ?? '720', 10);
+        chosen = (data.formatStreams ?? []).sort((a, b) => {
+          const da = Math.abs(parseInt(a.qualityLabel ?? '0') - target);
+          const db = Math.abs(parseInt(b.qualityLabel ?? '0') - target);
+          return da - db;
+        })[0];
+      } else {
+        const audios = (data.adaptiveFormats ?? []).filter((f) => f.type?.startsWith('audio/'));
+        chosen = audios.sort((a, b) => parseInt(b.bitrate ?? '0') - parseInt(a.bitrate ?? '0'))[0];
+      }
+      if (!chosen?.url) continue;
+      const ext = chosen.container ?? (opts.mode === 'video' ? 'mp4' : 'm4a');
+      const safeTitle = (data.title ?? videoId).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
+      const thumb = data.videoThumbnails?.[0]?.url;
+      return {
+        url: chosen.url,
+        filename: `${safeTitle}.${ext}`,
+        title: data.title,
+        thumbnail: thumb,
+        author: data.author,
+        instance: `invidious:${new URL(base).host}`,
+      };
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+// ── Backend: Cobalt ─────────────────────────────────────────────────────────
+async function tryCobalt(url: string, opts: ReqBody) {
   const payload = {
     url,
     downloadMode: opts.mode === 'video' ? 'auto' : 'audio',
@@ -55,22 +182,16 @@ async function callCobalt(url: string, opts: ReqBody) {
     try {
       const res = await fetch(`${base}/`, {
         method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'User-Agent': 'lovable-yt/1.0',
-        },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'lovable-yt/1.0' },
         body: JSON.stringify(payload),
-        // Self-host gets more time; public instances must fail fast so the user isn't stuck on a 502.
         signal: AbortSignal.timeout(base === SELFHOST ? 20_000 : 6_000),
       });
       const data = await res.json();
       if (res.ok && (data.status === 'tunnel' || data.status === 'redirect' || data.status === 'stream')) {
-        return { instance: base, ...data };
+        return { instance: `cobalt:${new URL(base).host}`, ...data };
       }
       if (data.error?.code) {
         lastErr = data.error.code;
-        // permanent errors — don't retry other instances
         if (['error.api.content.video.unavailable', 'error.api.content.post.unavailable', 'error.api.link.invalid'].includes(data.error.code)) {
           throw new Error(data.error.code);
         }
@@ -82,19 +203,57 @@ async function callCobalt(url: string, opts: ReqBody) {
   throw new Error(typeof lastErr === 'string' ? lastErr : 'all_cobalt_instances_failed');
 }
 
+// ── Orchestrator: try backends in order ─────────────────────────────────────
+async function fetchWithFallbacks(url: string, opts: ReqBody) {
+  const videoId = extractVideoId(url);
+  const attempts: string[] = [];
+
+  // 1) Self-hosted Cobalt first if configured
+  if (SELFHOST) {
+    try {
+      const r = await tryCobalt(url, opts);
+      return { ...r, attempts: [...attempts, 'cobalt-selfhost:ok'] };
+    } catch (e) {
+      attempts.push(`cobalt-selfhost:${e instanceof Error ? e.message : 'err'}`);
+    }
+  }
+
+  // 2) Piped
+  if (videoId) {
+    const piped = await tryPiped(videoId, opts);
+    if (piped) return { status: 'redirect', ...piped, attempts: [...attempts, 'piped:ok'] };
+    attempts.push('piped:fail');
+  }
+
+  // 3) Invidious
+  if (videoId) {
+    const inv = await tryInvidious(videoId, opts);
+    if (inv) return { status: 'redirect', ...inv, attempts: [...attempts, 'invidious:ok'] };
+    attempts.push('invidious:fail');
+  }
+
+  // 4) Public Cobalt instances (last resort)
+  try {
+    const r = await tryCobalt(url, opts);
+    return { ...r, attempts: [...attempts, 'cobalt-public:ok'] };
+  } catch (e) {
+    attempts.push(`cobalt-public:${e instanceof Error ? e.message : 'err'}`);
+    throw new Error(`all backends failed — ${attempts.join(' | ')}`);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
     const body = (await req.json()) as ReqBody;
     if (!body?.url || !YT_REGEX.test(body.url)) {
-      return new Response(
-        JSON.stringify({ error: 'invalid_youtube_url' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      );
+      return new Response(JSON.stringify({ error: 'invalid_youtube_url' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
-    // info-only: return oEmbed metadata
     if (body.action === 'info') {
       const meta = await fetchOEmbed(body.url);
       return new Response(
@@ -109,28 +268,28 @@ Deno.serve(async (req) => {
       );
     }
 
-    // fetch stream URL via Cobalt
-    const cobaltRes = await callCobalt(body.url, body);
+    const result = await fetchWithFallbacks(body.url, body);
     const meta = await fetchOEmbed(body.url);
 
     return new Response(
       JSON.stringify({
-        status: cobaltRes.status,         // tunnel | redirect | stream
-        url: cobaltRes.url,               // direct download URL
-        filename: cobaltRes.filename,
-        title: meta?.title ?? null,
-        thumbnail: meta?.thumbnail ?? null,
-        author: meta?.author ?? null,
+        status: result.status,
+        url: result.url,
+        filename: result.filename,
+        title: result.title ?? meta?.title ?? null,
+        thumbnail: result.thumbnail ?? meta?.thumbnail ?? null,
+        author: result.author ?? meta?.author ?? null,
         backend: 'cobalt',
-        instance: cobaltRes.instance,
+        instance: result.instance,
+        attempts: result.attempts,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return new Response(
-      JSON.stringify({ error: msg }),
-      { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-    );
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 502,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 });
