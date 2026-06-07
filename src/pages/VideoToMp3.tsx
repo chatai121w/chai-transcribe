@@ -595,7 +595,8 @@ export default function VideoToMp3() {
     for (const job of doneJobs) {
       const a = document.createElement("a");
       a.href = job.outputUrl!;
-      a.download = getOutputFileName(job.fileName, job.outputFormat);
+      a.download = getJobOutputName(job);
+
       a.click();
     }
   }, [jobs]);
