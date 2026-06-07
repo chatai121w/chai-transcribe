@@ -75,6 +75,7 @@ const BackgroundSyncLazy = lazy(() => import("./components/BackgroundSync").then
 const SWUpdateNotifierLazy = lazy(() => import("./components/SWUpdateNotifier").then(m => ({ default: m.SWUpdateNotifier })));
 const CloudKeySyncLazy = lazy(() => import("./components/CloudKeySync"));
 const DiarizationFloatingStatusLazy = lazy(() => import("./components/DiarizationFloatingStatus").then(m => ({ default: m.DiarizationFloatingStatus })));
+const JobsCenterLazy = lazy(() => import("./components/jobs/JobsCenter").then(m => ({ default: m.JobsCenter })));
 
 
 /** Mounts children only after the browser is idle / a delay — keeps them off the critical path. */
@@ -234,6 +235,7 @@ const App = () => {
           {devFloatingButtons.transcriptionAnalytics && <DeferredMount delay={1500}><TranscriptionAnalyticsLazy /></DeferredMount>}
           {devFloatingButtons.pwaInstall && <DeferredMount delay={2000}><PWAInstallButtonLazy /></DeferredMount>}
           {devFloatingButtons.diarizationStatus && <DeferredMount delay={500}><DiarizationFloatingStatusLazy /></DeferredMount>}
+          <DeferredMount delay={800}><JobsCenterLazy /></DeferredMount>
           
           <AppSidebar />
           <DeferredMount delay={200}><QuickCutDialogLazy /></DeferredMount>
