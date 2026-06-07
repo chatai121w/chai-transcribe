@@ -224,12 +224,27 @@ async function getFFmpeg(): Promise<FFmpeg> {
   if (!ffmpegSinglePromise) {
     ffmpegSinglePromise = (async () => {
       const ffmpeg = new FFmpeg();
-      const cdn = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
-      await ffmpeg.load({
-        coreURL: await toBlobURL(`${cdn}/ffmpeg-core.js`, "text/javascript"),
-        wasmURL: await toBlobURL(`${cdn}/ffmpeg-core.wasm`, "application/wasm"),
-      });
-      return ffmpeg;
+      const cdns = [
+        "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd",
+        "https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd",
+        "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd",
+      ];
+      let lastErr: unknown = null;
+      for (const cdn of cdns) {
+        try {
+          await ffmpeg.load({
+            coreURL: await toBlobURL(`${cdn}/ffmpeg-core.js`, "text/javascript"),
+            wasmURL: await toBlobURL(`${cdn}/ffmpeg-core.wasm`, "application/wasm"),
+          });
+          debugLog.info("TieredCut", `FFmpeg loaded from ${cdn}`);
+          return ffmpeg;
+        } catch (e) {
+          lastErr = e;
+          debugLog.warn("TieredCut", `FFmpeg load failed from ${cdn}`, e instanceof Error ? e.message : String(e));
+        }
+      }
+      ffmpegSinglePromise = null; // allow retry next time
+      throw new Error(`טעינת FFmpeg נכשלה מכל ה-CDNs: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
     })();
   }
   return ffmpegSinglePromise;
