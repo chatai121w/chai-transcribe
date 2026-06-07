@@ -554,7 +554,7 @@ export default function VideoToMp3() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const addFiles = useCallback((files: FileList | File[]) => {
+  const addFiles = useCallback((files: FileList | File[], mode: "convert" | "extract" = "convert") => {
     const fileArray = Array.from(files);
     const valid: File[] = [];
     const invalid: string[] = [];
@@ -577,9 +577,12 @@ export default function VideoToMp3() {
 
     if (valid.length === 0) return;
 
-    const newJobs = valid.map((f) => convertAudio(f, outputFormat));
+    const newJobs = valid.map((f) =>
+      mode === "extract" ? extractAudio(f) : convertAudio(f, outputFormat),
+    );
     setJobs((prev) => [...newJobs, ...prev]);
   }, [outputFormat]);
+
 
   const handleRemove = useCallback((id: string) => {
     setJobs((prev) => {
