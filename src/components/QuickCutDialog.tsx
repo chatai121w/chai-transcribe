@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pushCompletedFile } from "@/lib/completedFilesBus";
+import { trackJob, type JobTracker } from "@/lib/jobs/centralTracker";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
@@ -344,14 +345,33 @@ export default function QuickCutDialog() {
   const [mergedTranscriptId, setMergedTranscriptId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mergingBatchRef = useRef<string | null>(null);
+  const centralTrackerRef = useRef<JobTracker | null>(null);
 
   const { submitBatchJobs, jobs } = useTranscriptionJobs();
   const { preferences } = useCloudPreferences();
   const { saveTranscript } = useCloudTranscripts();
 
+  const mirrorToCentral = useCallback((key: StageKey, patch: Partial<PipelineStage>) => {
+    const t = centralTrackerRef.current;
+    if (!t) return;
+    const status =
+      patch.status === "done" ? "done" :
+      patch.status === "error" ? "failed" :
+      patch.status === "running" ? "running" :
+      undefined;
+    void t.stage(key, {
+      status,
+      percent: typeof patch.percent === "number" ? patch.percent : undefined,
+      detail: patch.detail,
+      error: patch.status === "error" ? patch.detail ?? "שגיאה" : undefined,
+    }).catch(() => { /* non-fatal */ });
+  }, []);
+
   const updateStage = useCallback((key: StageKey, patch: Partial<PipelineStage>) => {
     setPipeline((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
-  }, []);
+    mirrorToCentral(key, patch);
+  }, [mirrorToCentral]);
+
 
   const resetAll = useCallback(() => {
     setFile(null);
@@ -367,6 +387,7 @@ export default function QuickCutDialog() {
     setPipeline([]);
     setTrackedBatch(null);
     setMergedTranscriptId(null);
+    centralTrackerRef.current = null;
     setStep(1);
   }, []);
 
@@ -527,6 +548,21 @@ export default function QuickCutDialog() {
     setTierEvents([]);
     setTierUsed("");
     setProgress({ tier: "wav-slice", message: "מתחיל…", completed: 0, total: 1 });
+    // Create a central job so this whole cut + (optional) convert + transcribe flow
+    // shows up in the floating Jobs Center across pages.
+    try {
+      centralTrackerRef.current = await trackJob({
+        kind: "cut",
+        title: file.name,
+        mode: outputFormat === "none" ? "cut" : `cut+${outputFormat}`,
+        durationSec: duration ?? null,
+        stages: [
+          { key: "cut", label: "חיתוך", weight: 40 },
+          { key: "convert", label: "המרה", weight: 20 },
+          { key: "transcribe", label: "תמלול", weight: 40 },
+        ],
+      });
+    } catch { centralTrackerRef.current = null; }
     updateStage("cut", { status: "running", percent: 1, detail: "מתחיל…" });
     try {
       const outcome = await cutWithFallback(file, {
