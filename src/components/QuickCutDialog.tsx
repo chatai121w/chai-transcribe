@@ -387,6 +387,7 @@ export default function QuickCutDialog() {
         detail: `${completed.length}/${trackedBatch.total} הושלמו, ${failed.length} נכשלו`,
       });
       setSendingToTranscribe(false);
+      setTrackedBatch(null);
       return;
     }
 
