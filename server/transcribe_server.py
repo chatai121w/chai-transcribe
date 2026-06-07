@@ -1974,6 +1974,230 @@ def transcribe_live():
 
 # ─── YouTube URL Download + Transcribe ────────────────────────────────────────
 
+# ============================================================
+# YouTube Module — yt-dlp + ffmpeg job pipeline
+# ============================================================
+# Endpoints:
+#   POST /yt/info           → metadata (title, duration, thumbnail, hebrew subs?)
+#   POST /yt/job            → start async job: audio/video/transcribe/full
+#   GET  /yt/status/<id>    → poll progress + output files
+#   GET  /yt/file/<id>/<name> → download a produced file
+# ============================================================
+_YT_JOBS: dict = {}
+_YT_JOBS_LOCK = threading.Lock()
+_YT_ROOT = Path(tempfile.gettempdir()) / "lovable_yt"
+_YT_ROOT.mkdir(exist_ok=True)
+_YT_URL_RE = __import__("re").compile(
+    r"^https?://(www\.|m\.)?(youtube\.com/(watch\?v=|shorts/|live/)|youtu\.be/)[\w\-]+"
+)
+
+def _yt_update(job_id: str, **patch):
+    with _YT_JOBS_LOCK:
+        if job_id in _YT_JOBS:
+            _YT_JOBS[job_id].update(patch)
+            _YT_JOBS[job_id]["updated_at"] = time.time()
+
+def _yt_has_ytdlp() -> bool:
+    import subprocess
+    try:
+        subprocess.run(["yt-dlp", "--version"], capture_output=True, timeout=10, check=True)
+        return True
+    except Exception:
+        return False
+
+def _yt_audio_fmt_args(audio_format: str) -> list:
+    """Return yt-dlp -f / postprocess args for the requested audio format."""
+    if audio_format == "best":
+        # Native — no re-encode, fastest
+        return ["-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio"]
+    if audio_format in ("mp3", "wav", "opus", "m4a"):
+        return ["-f", "bestaudio", "--extract-audio", "--audio-format", audio_format, "--audio-quality", "0"]
+    return ["-f", "bestaudio"]
+
+def _yt_run_job(job_id: str, params: dict):
+    import subprocess, shutil, json as _json
+    job_dir = _YT_ROOT / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    url = params["url"]
+    mode = params.get("mode", "audio")
+    audio_format = params.get("audio_format", "best")
+    video_quality = params.get("video_quality", "720")
+    outputs: list = []
+
+    try:
+        _yt_update(job_id, status="downloading", progress_pct=10)
+
+        # AUDIO branch (audio/transcribe/full)
+        if mode in ("audio", "transcribe", "full"):
+            tmpl = str(job_dir / "audio.%(ext)s")
+            cmd = ["yt-dlp", "--no-playlist", "--no-progress", "-o", tmpl] + _yt_audio_fmt_args(audio_format) + [url]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            if r.returncode != 0:
+                raise RuntimeError(f"yt-dlp audio failed: {r.stderr[:400]}")
+            audio_file = next((p for p in job_dir.iterdir() if p.name.startswith("audio.")), None)
+            if not audio_file:
+                raise RuntimeError("Audio file not produced")
+            outputs.append({
+                "kind": "audio",
+                "url": f"/yt/file/{job_id}/{audio_file.name}",
+                "filename": audio_file.name,
+                "size": audio_file.stat().st_size,
+            })
+            _yt_update(job_id, progress_pct=45, output_files=outputs)
+
+        # VIDEO branch
+        if mode in ("video", "full"):
+            tmpl = str(job_dir / "video.%(ext)s")
+            fmt = f"bestvideo[height<={video_quality}]+bestaudio/best[height<={video_quality}]"
+            cmd = ["yt-dlp", "--no-playlist", "--no-progress", "-f", fmt, "--merge-output-format", "mp4", "-o", tmpl, url]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+            if r.returncode != 0:
+                raise RuntimeError(f"yt-dlp video failed: {r.stderr[:400]}")
+            video_file = next((p for p in job_dir.iterdir() if p.name.startswith("video.")), None)
+            if video_file:
+                outputs.append({
+                    "kind": "video",
+                    "url": f"/yt/file/{job_id}/{video_file.name}",
+                    "filename": video_file.name,
+                    "size": video_file.stat().st_size,
+                })
+                _yt_update(job_id, progress_pct=70, output_files=outputs)
+
+        # TRANSCRIBE branch
+        if mode in ("transcribe", "full"):
+            _yt_update(job_id, status="transcribing", progress_pct=75)
+            audio_file = next((p for p in job_dir.iterdir() if p.name.startswith("audio.")), None)
+            if not audio_file:
+                raise RuntimeError("No audio to transcribe")
+            target_model = _current_model_id or DEFAULT_MODEL
+            resolved = MODEL_REGISTRY.get(target_model, target_model)
+            model = load_model(resolved)
+            with _transcribe_lock:
+                from faster_whisper import BatchedInferencePipeline
+                pipeline = BatchedInferencePipeline(model=model)
+                segs_gen, info = pipeline.transcribe(
+                    str(audio_file),
+                    language="he",
+                    beam_size=3,
+                    word_timestamps=True,
+                    batch_size=auto_batch_size(),
+                    initial_prompt="תמלול שיחה בעברית.",
+                )
+                segments = list(segs_gen)
+
+            # Write TXT
+            txt_path = job_dir / "transcript.txt"
+            txt_path.write_text(
+                " ".join(s.text.strip() for s in segments if s.text.strip()),
+                encoding="utf-8",
+            )
+            # Write SRT
+            def _ts(t):
+                h = int(t // 3600); m = int((t % 3600) // 60); s = t % 60
+                return f"{h:02d}:{m:02d}:{int(s):02d},{int((s - int(s)) * 1000):03d}"
+            srt_lines = []
+            for i, seg in enumerate(segments, 1):
+                srt_lines.append(f"{i}\n{_ts(seg.start)} --> {_ts(seg.end)}\n{seg.text.strip()}\n")
+            (job_dir / "transcript.srt").write_text("\n".join(srt_lines), encoding="utf-8")
+            # Write JSON
+            (job_dir / "transcript.json").write_text(_json.dumps({
+                "language": info.language,
+                "duration": info.duration,
+                "segments": [{"start": s.start, "end": s.end, "text": s.text} for s in segments],
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            for kind, name in [("txt", "transcript.txt"), ("srt", "transcript.srt"), ("json", "transcript.json")]:
+                outputs.append({
+                    "kind": kind,
+                    "url": f"/yt/file/{job_id}/{name}",
+                    "filename": name,
+                    "size": (job_dir / name).stat().st_size,
+                })
+            _yt_update(job_id, progress_pct=95, output_files=outputs)
+
+        _yt_update(job_id, status="done", progress_pct=100, output_files=outputs)
+    except Exception as exc:
+        _yt_update(job_id, status="error", error=str(exc))
+
+
+@app.route("/yt/info", methods=["POST"])
+def yt_info():
+    import subprocess, json as _json
+    data = request.get_json(force=True) or {}
+    url = (data.get("url") or "").strip()
+    if not url or not _YT_URL_RE.match(url):
+        return jsonify({"error": "Invalid YouTube URL"}), 400
+    if not _yt_has_ytdlp():
+        return jsonify({"error": "yt-dlp not installed"}), 500
+    try:
+        r = subprocess.run(
+            ["yt-dlp", "--no-playlist", "--dump-single-json", "--skip-download", url],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode != 0:
+            return jsonify({"error": f"yt-dlp: {r.stderr[:300]}"}), 500
+        info = _json.loads(r.stdout)
+        subs = list((info.get("subtitles") or {}).keys()) + list((info.get("automatic_captions") or {}).keys())
+        return jsonify({
+            "id": info.get("id"),
+            "title": info.get("title"),
+            "thumbnail": info.get("thumbnail"),
+            "uploader": info.get("uploader"),
+            "duration": info.get("duration"),
+            "subtitles": subs,
+            "formats": [
+                {"format_id": f.get("format_id"), "ext": f.get("ext"), "abr": f.get("abr"), "vbr": f.get("vbr"), "filesize": f.get("filesize")}
+                for f in (info.get("formats") or [])[:50]
+            ],
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/yt/job", methods=["POST"])
+def yt_job_start():
+    import uuid
+    data = request.get_json(force=True) or {}
+    url = (data.get("url") or "").strip()
+    mode = data.get("mode", "audio")
+    if not url or not _YT_URL_RE.match(url):
+        return jsonify({"error": "Invalid YouTube URL"}), 400
+    if mode not in ("audio", "video", "transcribe", "full"):
+        return jsonify({"error": "Invalid mode"}), 400
+    if not _yt_has_ytdlp():
+        return jsonify({"error": "yt-dlp not installed"}), 500
+
+    job_id = uuid.uuid4().hex[:16]
+    with _YT_JOBS_LOCK:
+        _YT_JOBS[job_id] = {
+            "id": job_id, "status": "pending", "progress_pct": 0,
+            "output_files": [], "error": None,
+            "created_at": time.time(), "updated_at": time.time(),
+        }
+    t = threading.Thread(target=_yt_run_job, args=(job_id, data), daemon=True)
+    t.start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/yt/status/<job_id>", methods=["GET"])
+def yt_job_status(job_id):
+    with _YT_JOBS_LOCK:
+        job = _YT_JOBS.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        return jsonify(dict(job))
+
+
+@app.route("/yt/file/<job_id>/<path:name>", methods=["GET"])
+def yt_job_file(job_id, name):
+    from flask import send_file
+    safe = name.replace("..", "").lstrip("/\\")
+    fpath = _YT_ROOT / job_id / safe
+    if not fpath.is_file():
+        return jsonify({"error": "File not found"}), 404
+    return send_file(str(fpath), as_attachment=True, download_name=safe)
+
+
 @app.route("/youtube-transcribe", methods=["POST"])
 def youtube_transcribe():
     """Download audio from a YouTube URL using yt-dlp and transcribe it.
