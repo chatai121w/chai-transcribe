@@ -231,6 +231,26 @@ export default function YouTubePage() {
             <div className="space-y-2">
               <div className="text-sm font-semibold text-muted-foreground">התקדמות המשימה</div>
               <JobCard job={activeJob} />
+              {activeJob.status === "done" && (() => {
+                const audioFile = (activeJob.output_files ?? []).find((f: any) => f.kind === "audio");
+                if (!audioFile) return null;
+                return (
+                  <Card className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <Music className="w-4 h-4 text-primary" />
+                        <span className="text-sm font-semibold">נגן אודיו</span>
+                      </div>
+                      <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
+                        <a href={audioFile.url} download={audioFile.filename}>
+                          <Download className="w-3 h-3 ml-1" />הורד
+                        </a>
+                      </Button>
+                    </div>
+                    <WaveformPlayer audioSrc={audioFile.url} />
+                  </Card>
+                );
+              })()}
             </div>
           )}
         </TabsContent>
