@@ -367,7 +367,7 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
         });
         return;
       }
-      await updateStage(jobId, "transcribe", { status: "running", percent: pct, detail });
+      await updateStage(jobId, "transcribe", { status: "running", percent: pct });
     }
     await updateStage(jobId, "transcribe", {
       status: "failed",
