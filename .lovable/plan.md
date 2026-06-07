@@ -1,95 +1,138 @@
 
-# מודול תמלול מיוטיוב + מנהל הורדות
+# מערכת Jobs מרכזית + צינור YouTube מלא + Resume
 
-## ארכיטקטורה
+המטרה: כל פעולה (YouTube, המרה, חיתוך, תמלול) רצה דרך אותה מערכת Jobs אחת, עם תתי-שלבים, פס התקדמות כולל + פס לכל שלב, שמירת קובצי-ביניים בענן, ויכולת "המשך מהמקום שנתקעת".
+
+## ארכיטקטורה כללית
 
 ```text
-                    ┌─ Flask מקומי (מועדף) ─────────┐
-                    │  yt-dlp + ffmpeg + GPU          │
-   קישור YouTube ──▶│  - /yt/info                     │
-                    │  - /yt/download (audio/video)   │
-                    │  - /yt/extract                  │
-                    │  - /yt/captions                 │
-                    │  - /yt/attach-subs              │
-                    └───────────────┬────────────────┘
-                                    │ (fallback אם לא חי)
-                    ┌───────────────▼────────────────┐
-                    │ Edge Function: yt-cobalt        │
-                    │ → api.cobalt.tools (פתוח)       │
-                    │ מוגבל ל-audio/video בלבד        │
-                    └─────────────────────────────────┘
+                ┌──────────────────────────────────┐
+                │   JobOrchestrator (client)        │
+                │   - יוצר job + stages ב-DB        │
+                │   - מריץ pipeline שלב-אחר-שלב     │
+                │   - מעלה artifacts ל-Storage      │
+                │   - מעדכן progress (Realtime)     │
+                └──────────────┬───────────────────┘
+                               │
+        ┌──────────────────────┼──────────────────────┐
+        ▼                      ▼                      ▼
+   youtube_jobs           pipeline-artifacts     Realtime UI
+   (stages JSONB)         (Storage bucket)       <JobsCenter />
 ```
 
-## חוקי ברירת מחדל (לפי הבקשה)
+## מבנה נתונים — `youtube_jobs` (הרחבה)
 
-1. ברירת מחדל = `yt-dlp -f "bestaudio[ext=m4a]/bestaudio"` — m4a נתמך ב-Groq ישירות, אפס המרה.
-2. `ffprobe` לבדוק codec → מיפוי aac→m4a, opus→webm, mp3→mp3.
-3. המרה רק אם המשתמש מבקש WAV/MP3 במפורש, או אם הפורמט לא ב-Groq whitelist.
-4. אם הסרטון מכיל כתוביות עברית מובנות → להציע "השתמש בהן במקום לתמלל".
-5. חיבור כתוביות = `-c copy -c:s mov_text` (בלי קידוד). צריבה = אופציה מתקדמת בלבד עם אזהרה.
+עמודות חדשות:
+- `job_kind` text — `youtube` | `convert` | `cut` | `transcribe`
+- `stages` jsonb — מערך:
+  ```json
+  [{
+    "key": "probe", "label": "בדיקת קישור",
+    "status": "pending|running|done|failed|skipped",
+    "percent": 0, "weight": 5,
+    "started_at": null, "finished_at": null,
+    "error": null,
+    "artifact_path": null   // נתיב ב-pipeline-artifacts אם רלוונטי
+  }]
+  ```
+- `current_stage` text
+- `overall_percent` int (מחושב לפי weights)
+- `resume_token` jsonb — מה צריך כדי להמשיך
+- `last_error` text
 
-## שלבי בנייה
+## שלבים סטנדרטיים לפי job_kind
 
-### שלב 1 — Backend (Flask)
-ב-`server/transcribe_server.py` להוסיף endpoints:
-- `POST /yt/info` → `yt-dlp --dump-json` → כותרת, אורך, thumbnail, פורמטים זמינים, רשימת subtitles, גודל משוער.
-- `POST /yt/download` → מקבל `mode: audio|video|both` + `audio_format`. מחזיר job_id, מתחיל ברקע. SSE/polling להתקדמות.
-- `POST /yt/captions` → מוריד subtitles קיימים (`--write-sub --sub-lang he,iw,en --skip-download`).
-- `POST /yt/extract` → `ffprobe` + `-c:a copy` לפי codec.
-- `POST /yt/attach-subs` ו-`POST /yt/burn-subs`.
-- `GET /yt/status/<job_id>` ו-`GET /yt/file/<job_id>/<filename>` להורדה.
-תיקיית עבודה: `temp/yt/<job_id>/`. ניקוי אוטומטי אחרי 24 שעות.
+- **youtube**: `probe` → `download` → `extract_audio` → `upload_audio` → `transcribe`
+- **convert** (video→mp3): `probe` → `convert` → `upload`
+- **cut**: `probe` → `cut` → `upload`
+- **transcribe**: `prepare` → `chunk` → `transcribe` → `merge`
 
-### שלב 2 — Cloud fallback
-Edge Function חדש `youtube-cobalt`:
-- מקבל URL + mode.
-- קורא ל-`https://api.cobalt.tools/api/json` (instance ציבורי, ללא מפתח).
-- מחזיר stream URL זמני. הלקוח מוריד ישירות.
-- מוגבל לסרטונים < 2 שעות (מגבלת Cobalt).
+כל שלב שהצליח שומר `artifact_path` בענן. המשך = דילוג על שלבים `done` ושימוש ב-artifact הקיים.
 
-### שלב 3 — Database (מנהל הורדות)
-מיגרציה חדשה: טבלה `youtube_jobs`:
-```
-id, user_id, url, video_title, thumbnail_url, duration_sec,
-mode (audio/video/transcribe/full), status, progress_pct,
-backend (local/cobalt), 
-output_files jsonb [{kind, url, size}],
-transcript_id (FK ל-transcripts), created_at, completed_at, error
-```
-RLS: רק owner. GRANT לפי הסטנדרט שלך.
-Storage bucket `youtube-outputs` (פרטי, 500MB limit) לקבצים שמסונכרנים לענן.
+## פאזה 1 — תשתית + YouTube מלא
 
-### שלב 4 — Frontend
-**עמוד חדש** `src/pages/YouTube.tsx` (route `/youtube`):
-- Hero: input URL גדול + "בדוק קישור".
-- כרטיס פרטי סרטון: thumbnail, כותרת, אורך, תגיות פורמטים זמינים.
-- אם יש subs עבריות: באנר "🎯 קיימות כתוביות עברית מובנות — לחסוך תמלול?" [השתמש בהן | תמלל מחדש].
-- בחירת פעולות (checkboxes משולבות לפריסטים):
-  - 🎙️ "תמלל בלבד" (ברירת מחדל) — audio bestaudio + TXT/SRT/JSON
-  - 📥 "הורד אודיו"
-  - 🎬 "הורד וידאו"
-  - 📝 "תמלל + חבר כתוביות לווידאו"
-  - ⚙️ "מותאם אישית" — מציג את כל ה-checkboxes
-- פס התקדמות לפי שלבים (5-6 שלבים מסומנים, hebrew).
-- אזור תוצאות: כל קובץ עם איקון, גודל, כפתור הורדה.
-- אזהרה משפטית בתחתית.
+### 1.1 DB + Storage
+מיגרציה אחת:
+- `ALTER TABLE youtube_jobs ADD COLUMN job_kind text DEFAULT 'youtube', stages jsonb DEFAULT '[]', current_stage text, overall_percent int DEFAULT 0, resume_token jsonb, last_error text;`
+- Storage bucket `pipeline-artifacts` (פרטי) — מבנה: `{user_id}/{job_id}/{stage_key}/{filename}`
+- RLS על `storage.objects` לפי `auth.uid()::text = (storage.foldername(name))[1]`
+- אינדקס על `(user_id, status, created_at desc)`
 
-**מנהל הורדות** `src/components/YouTubeDownloadManager.tsx`:
-- טבלה/רשימה של כל ה-jobs של המשתמש.
-- סינון לפי סטטוס, חיפוש לפי כותרת.
-- פעולות: הורד מחדש, מחק, פתח תמלול ב-editor.
-- Realtime subscription ל-progress.
-- מוטמע כ-tab בעמוד `/youtube`.
+### 1.2 ליבת Orchestrator
+קבצים חדשים:
+- `src/lib/jobs/types.ts` — `JobStage`, `JobKind`, `JobRecord`
+- `src/lib/jobs/jobOrchestrator.ts` — `createJob()`, `runJob()`, `resumeJob()`, `cancelJob()`, `updateStage()`
+- `src/lib/jobs/artifactStorage.ts` — `uploadArtifact()`, `downloadArtifact()`, `getSignedUrl()`
+- `src/lib/jobs/pipelines/youtubePipeline.ts` — מימוש 5 השלבים
+- `src/hooks/useJobs.ts` — Realtime subscribe + רשימת jobs של המשתמש
+- `src/hooks/useJob.ts` — subscribe ל-job בודד
 
-**כניסה מ-/transcribe**: כפתור "📺 מ-YouTube" בכרטיס המקור (ליד "העלאת קובץ"). פותח dialog מהיר עם URL בלבד → אם נבחר "תמלל" → הולך לזרימה הרגילה של תמלול עם הקובץ.
+### 1.3 מנוע הורדת YouTube (2 אסטרטגיות)
+- **A) Local yt-dlp** דרך `localhost:3000/yt/*` (קיים בתוכנית) — מועדף כשהשרת חי
+- **B) Cobalt Self-Host** דרך משתנה סביבה `COBALT_SELFHOST_URL` ב-edge function — נוסף ל-`youtube-cobalt` הקיים כ-fallback ראשון לפני ה-public instances
+- מחיקת ה-public instances הלא-זמינים מהקוד; השארתם רק כ-best-effort אחרון
 
-### שלב 5 — Hook מרכזי
-`src/hooks/useYoutubeJobs.ts`:
-- `probeUrl(url)` → מנסה מקומי, נופל ל-Cobalt.
-- `startJob(url, options)` → יוצר רשומה ב-DB, מפעיל backend.
-- `subscribeToJob(jobId)` → Realtime updates.
-- `cancelJob(jobId)`.
-- `useYoutubeJobs()` → רשימת כל ה-jobs.
+עריכת `supabase/functions/youtube-cobalt/index.ts`:
+- קריאת `Deno.env.get('COBALT_SELFHOST_URL')` ושימוש בה ראשונה
+- timeout קצר יותר (8s) ל-public כדי למנוע 502 ארוך
 
-### שלב 6 — אינטגרציה לתמלול
-כשמשתמש בוחר "תמלל": אחרי הורדת אודיו, להזרים לאותו pipeline של `useTranscriptionJobs` (Groq Whisper large-v3 בעברית). תוצאה נשמרת כ-transcript רגיל + מקושרת ל-you
+### 1.4 UI — מרכז ה-Jobs
+קבצים חדשים:
+- `src/components/jobs/JobsCenter.tsx` — דרואר/פאנל floating גלובלי (כמו `CompletedFilesPanel`), רשימת כל ה-jobs
+- `src/components/jobs/JobCard.tsx` — כרטיס יחיד עם:
+  - שורה עליונה: שם, סטטוס, פס התקדמות כולל (`overall_percent`)
+  - מתחת: מחולק לשלבים (`JobStagesProgress`) — לכל שלב פס משלו עם אחוז
+  - פעולות לפי סטטוס: בטל / המשך / נסה שוב / פתח תוצאה / הורד artifact
+- `src/components/jobs/JobStagesProgress.tsx` — סטפר אופקי + פס per-stage
+- כפתור FAB גלובלי `JobsCenterTrigger` ב-`App.tsx` (badge עם מספר רצים)
+
+### 1.5 עמוד YouTube
+עדכון `src/pages/YouTube.tsx`:
+- שימוש ב-`useJobs` במקום מנהל הורדות נפרד
+- כפתור "הורד+תמלל" יוצר job דרך Orchestrator
+- הצגת JobCard בעמוד עצמו של ה-job הפעיל
+- אם תקוע: כפתור "המשך מהשלב שנפל" → `resumeJob(id)`
+
+## פאזה 2 — העברת תמלול ל-Jobs
+
+- עטיפת `useTranscriptionJobs` הקיים בתוך `transcribePipeline` עם שלבים: `prepare` (chunking) → `transcribe` (per-chunk progress) → `merge`
+- כל chunk שהצליח → נשמר כ-`partial_transcript.json` ב-`pipeline-artifacts`
+- אם נופל באמצע: `resumeJob` מדלג על chunks שכבר תומללו
+- עדכון `useTranscriptionJobs.ts` לקרוא ל-orchestrator במקום ניהול state נפרד (אדפטר תאימות לשמירה על קוד קיים)
+
+## פאזה 3 — העברת המרה/חיתוך ל-Jobs
+
+- `VideoToMp3.tsx`: כפתור "המרה" יוצר job מסוג `convert` במקום הזרימה הישנה. תוצאה עדיין נדחפת ל-`completedFilesBus` (תאימות) + נשמרת ב-bucket
+- `QuickCutDialog.tsx`: זהה — job מסוג `cut`
+- שמירה של `completedFilesBus` כשכבת תצוגה לקבצים מוכנים; `JobsCenter` מציג את התהליך עצמו
+
+## חוויית "המשך"
+
+לוגיקת `resumeJob(jobId)`:
+1. טוען את `youtube_jobs.stages`
+2. השלב הראשון שאינו `done` = `current_stage`
+3. אם השלב הקודם הוא `done` ויש לו `artifact_path` → מוריד מהענן ומזין כקלט לשלב הבא
+4. מריץ pipeline מהנקודה הזו והלאה
+5. אם המשתמש סוגר טאב באמצע — בעלייה הבאה `useJobs` מציע "ראיתי שיש job שנקטע, להמשיך?"
+
+## שינויים תמציתיים
+
+| קובץ | פעולה |
+|---|---|
+| migration חדש | ALTER youtube_jobs + bucket + RLS |
+| `youtube-cobalt/index.ts` | תמיכה ב-self-host env + timeout |
+| `src/lib/jobs/*` | חדש — orchestrator, artifacts, pipelines |
+| `src/hooks/useJobs.ts`, `useJob.ts` | חדש |
+| `src/components/jobs/*` | חדש — UI |
+| `src/App.tsx` | הוספת `<JobsCenterTrigger />` גלובלי |
+| `src/pages/YouTube.tsx` | מעבר ל-orchestrator |
+| `useTranscriptionJobs.ts` | adapter ל-orchestrator (פאזה 2) |
+| `VideoToMp3.tsx`, `QuickCutDialog.tsx` | מעבר ל-jobs (פאזה 3) |
+
+## פתיחת הביצוע
+
+מתחיל מפאזה 1 (תשתית מלאה + YouTube). פאזה 2 ו-3 בהמשך באותו loop אם נשאר זמן, אחרת בהודעות נפרדות.
+
+## הערה על Cobalt Self-Host
+
+אם תרצה שירוץ אצלך — אספק הוראות פריסה ל-Railway בסיום פאזה 1, ותגדיר את `COBALT_SELFHOST_URL` ב-Secrets. עד אז המערכת תיפול ל-`localhost:3000` כשהוא חי.
