@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react"
 import { useNavigate } from "react-router-dom";
 import {
   convertAudio,
+  extractAudio,
   retryJob,
   onJobUpdate,
   revokeJobUrl,
@@ -14,6 +15,7 @@ import {
   type ConversionJob,
   type OutputFormat,
 } from "@/lib/ffmpegConverter";
+
 import {
   clearEnhanceQueueCompleted,
   getEnhanceQueueJobs,
@@ -140,6 +142,17 @@ function getOutputFileName(fileName: string, outputFormat: OutputFormat): string
   return fileName.replace(/\.[^/.]+$/, "") + `.${ext}`;
 }
 
+/** Job-aware output name — honors `outputExt` (set by audio extraction). */
+function getJobOutputName(job: ConversionJob): string {
+  if (job.outputExt) return job.fileName.replace(/\.[^/.]+$/, "") + `.${job.outputExt}`;
+  return getOutputFileName(job.fileName, job.outputFormat);
+}
+
+function getJobOutputMime(job: ConversionJob): string {
+  return job.outputMime ?? OUTPUT_FORMAT_META[job.outputFormat].mime;
+}
+
+
 // ─── Status Badge ────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: ConversionJob["status"] }) {
@@ -186,7 +199,7 @@ function JobCard({
         ? formatDuration(Date.now() - job.startedAt)
         : null;
 
-  const outputFilename = getOutputFileName(job.fileName, job.outputFormat);
+  const outputFilename = getJobOutputName(job);
 
   return (
     <Card className="relative overflow-hidden" data-testid="job-card" data-status={job.status}>
@@ -338,7 +351,7 @@ export default function VideoToMp3() {
   const [enhanceQueueJobs, setEnhanceQueueJobs] = useState<EnhanceQueueJob[]>(() => getEnhanceQueueJobs());
   const [saveAndTranscribeBusyId, setSaveAndTranscribeBusyId] = useState<string | null>(null);
   const [autoTranscribe, setAutoTranscribe] = useState(false);
-  const [activeTab, setActiveTab] = useState<"convert" | "cut">("convert");
+  const [activeTab, setActiveTab] = useState<"convert" | "extract" | "cut">("convert");
   const [cutInitialFile, setCutInitialFile] = useState<File | null>(null);
   const [cutInitialLabel, setCutInitialLabel] = useState("");
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
@@ -358,10 +371,10 @@ export default function VideoToMp3() {
 
   const toOutputFile = useCallback((job: ConversionJob): File | null => {
     if (!job.outputBlob) return null;
-    const meta = OUTPUT_FORMAT_META[job.outputFormat];
-    const outputName = getOutputFileName(job.fileName, job.outputFormat);
-    return new File([job.outputBlob], outputName, { type: meta.mime });
+    const outputName = getJobOutputName(job);
+    return new File([job.outputBlob], outputName, { type: getJobOutputMime(job) });
   }, []);
+
 
   const uploadMp3ToCloud = useCallback(async (file: File): Promise<string | null> => {
     if (!isAuthenticated || !user) return null;
@@ -496,11 +509,12 @@ export default function VideoToMp3() {
         // Auto-save to conversion history (once per job)
         if (!savedJobIdsRef.current.has(updatedJob.id) && isAuthenticated) {
           savedJobIdsRef.current.add(updatedJob.id);
-          const outputName = getOutputFileName(updatedJob.fileName, updatedJob.outputFormat);
+          const outputName = getJobOutputName(updatedJob);
           history.addItem({
             file_name: outputName,
             original_name: updatedJob.fileName,
-            output_format: updatedJob.outputFormat,
+            output_format: (updatedJob.outputExt as OutputFormat) ?? updatedJob.outputFormat,
+
             file_size: updatedJob.fileSize,
             output_size: updatedJob.outputBlob?.size || 0,
             duration_ms: updatedJob.finishedAt && updatedJob.startedAt
@@ -540,7 +554,7 @@ export default function VideoToMp3() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const addFiles = useCallback((files: FileList | File[]) => {
+  const addFiles = useCallback((files: FileList | File[], mode: "convert" | "extract" = "convert") => {
     const fileArray = Array.from(files);
     const valid: File[] = [];
     const invalid: string[] = [];
@@ -563,9 +577,12 @@ export default function VideoToMp3() {
 
     if (valid.length === 0) return;
 
-    const newJobs = valid.map((f) => convertAudio(f, outputFormat));
+    const newJobs = valid.map((f) =>
+      mode === "extract" ? extractAudio(f) : convertAudio(f, outputFormat),
+    );
     setJobs((prev) => [...newJobs, ...prev]);
   }, [outputFormat]);
+
 
   const handleRemove = useCallback((id: string) => {
     setJobs((prev) => {
@@ -581,7 +598,8 @@ export default function VideoToMp3() {
     for (const job of doneJobs) {
       const a = document.createElement("a");
       a.href = job.outputUrl!;
-      a.download = getOutputFileName(job.fileName, job.outputFormat);
+      a.download = getJobOutputName(job);
+
       a.click();
     }
   }, [jobs]);
@@ -663,7 +681,7 @@ export default function VideoToMp3() {
     if (!job.outputUrl) return;
     const a = document.createElement("a");
     a.href = job.outputUrl;
-    a.download = getOutputFileName(job.fileName, job.outputFormat);
+    a.download = getJobOutputName(job);
     a.click();
     setPromptJob(null);
     toast({ title: "הקובץ נשמר ✓" });
@@ -806,17 +824,22 @@ export default function VideoToMp3() {
       </div>
 
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "convert" | "cut")} className="space-y-4" dir="rtl">
-        <TabsList className="grid w-full grid-cols-2 max-w-full sm:max-w-[360px] h-11 sm:h-10">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "convert" | "extract" | "cut")} className="space-y-4" dir="rtl">
+        <TabsList className="grid w-full grid-cols-3 max-w-full sm:max-w-[480px] h-11 sm:h-10">
           <TabsTrigger value="convert" className="gap-1.5">
             <Music className="w-4 h-4" />
             המרה
+          </TabsTrigger>
+          <TabsTrigger value="extract" className="gap-1.5">
+            <FileAudio className="w-4 h-4" />
+            חילוץ אודיו
           </TabsTrigger>
           <TabsTrigger value="cut" className="gap-1.5">
             <Scissors className="w-4 h-4" />
             חיתוך קבצים
           </TabsTrigger>
         </TabsList>
+
 
         <TabsContent value="convert" className="space-y-6">
           {/* Auto-transcribe toggle */}
@@ -939,10 +962,11 @@ export default function VideoToMp3() {
           )}
 
           {/* Job List */}
-          {jobs.length > 0 && (
+          {jobs.filter((j) => !j.extract).length > 0 && (
             <ScrollArea className="max-h-[calc(100vh-420px)]">
               <div className="space-y-2 pb-2">
-                {jobs.map((job) => (
+                {jobs.filter((j) => !j.extract).map((job) => (
+
                   <JobCard
                     key={job.id}
                     job={job}
@@ -1409,7 +1433,7 @@ export default function VideoToMp3() {
           )}
 
           {/* Empty State */}
-          {jobs.length === 0 && (
+          {jobs.filter((j) => !j.extract).length === 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base text-center text-muted-foreground">
@@ -1432,6 +1456,90 @@ export default function VideoToMp3() {
             </Card>
           )}
         </TabsContent>
+
+        <TabsContent value="extract" className="space-y-4">
+          <Card>
+            <CardContent className="pt-4 space-y-2">
+              <p className="font-medium flex items-center gap-2">
+                <FileAudio className="w-4 h-4 text-primary" />
+                חילוץ אודיו (ללא קידוד מחדש)
+              </p>
+              <p className="text-xs text-muted-foreground">
+                שולף את פס הקול ישירות מהמקור עם <span dir="ltr">-c:a copy</span> — מהיר וללא איבוד איכות.
+                המערכת מזהה את הקודק ועוטפת אותו בקונטיינר שגרוק יודע לקרוא (AAC → .m4a, Opus → .ogg וכו').
+              </p>
+            </CardContent>
+          </Card>
+
+          <div
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+            onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDragging(false);
+              if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files, "extract");
+            }}
+            onClick={() => {
+              const input = document.getElementById("extract-file-input") as HTMLInputElement | null;
+              input?.click();
+            }}
+            className={cn(
+              "border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all duration-200",
+              isDragging
+                ? "border-primary bg-primary/5 scale-[1.01]"
+                : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30",
+            )}
+          >
+            <Upload className={cn("w-10 h-10 mx-auto mb-3", isDragging ? "text-primary" : "text-muted-foreground")} />
+            <p className="font-medium text-lg">
+              {isDragging ? "שחרר כאן..." : "גרור וידאו או אודיו לחילוץ"}
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              נשמר במכל המתאים לקודק המקורי — בלי המרה
+            </p>
+            <input
+              id="extract-file-input"
+              type="file"
+              multiple
+              accept={ACCEPTED_MIME}
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) addFiles(e.target.files, "extract");
+                e.target.value = "";
+              }}
+            />
+          </div>
+
+          {jobs.filter((j) => j.extract).length > 0 && (
+            <ScrollArea className="max-h-[calc(100vh-420px)]">
+              <div className="space-y-2 pb-2">
+                {jobs.filter((j) => j.extract).map((job) => (
+                  <JobCard
+                    key={job.id}
+                    job={job}
+                    onRemove={handleRemove}
+                    onTranscribe={setPromptJob}
+                    onSaveAndTranscribe={(j) => void handleSaveAndTranscribe(j)}
+                    onRetry={handleRetry}
+                    onCut={handleCutFromConverted}
+                    onEnhance={setEnhanceTarget}
+                  />
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+
+          {jobs.filter((j) => j.extract).length === 0 && (
+            <Card>
+              <CardContent className="text-center py-8 text-sm text-muted-foreground">
+                אין קבצים לחילוץ — גרור וידאו כדי להתחיל
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+
 
         <TabsContent value="cut" className="space-y-4">
           <Suspense

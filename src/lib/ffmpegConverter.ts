@@ -52,6 +52,24 @@ function getOutputFfmpegArgs(outputFormat: OutputFormat): string[] {
   return OUTPUT_FORMAT_CONFIG[outputFormat].ffmpegArgs;
 }
 
+/**
+ * Choose a Groq-friendly container for a probed audio codec when doing
+ * a stream-copy extraction. Groq accepts flac, mp3, mp4, mpga, m4a, ogg,
+ * wav, webm — so we wrap each codec in its standard, supported container.
+ */
+function codecToContainer(codec: string): { ext: string; mime: string } {
+  const c = codec.toLowerCase();
+  if (c === "aac") return { ext: "m4a", mime: "audio/mp4" };
+  if (c === "mp3") return { ext: "mp3", mime: "audio/mpeg" };
+  if (c === "opus") return { ext: "ogg", mime: "audio/ogg" };
+  if (c === "vorbis") return { ext: "ogg", mime: "audio/ogg" };
+  if (c === "flac") return { ext: "flac", mime: "audio/flac" };
+  if (c.startsWith("pcm")) return { ext: "wav", mime: "audio/wav" };
+  // Unknown codec — fall back to .m4a, the extraction code will re-encode.
+  return { ext: "m4a", mime: "audio/mp4" };
+}
+
+
 export interface ConversionJob {
   id: string;
   fileName: string;
@@ -68,7 +86,15 @@ export interface ConversionJob {
   duration?: number;        // total duration in seconds (for real progress)
   retryCount: number;
   conversionPath?: "browser" | "server";  // which engine was used
+  // Audio extraction (stream copy, no re-encode). When true, codec is
+  // probed from the source and the output container is chosen to match
+  // (e.g. AAC → .m4a so Groq can read it). outputExt/outputMime hold
+  // the actual chosen container after probing.
+  extract?: boolean;
+  outputExt?: string;
+  outputMime?: string;
 }
+
 
 export type JobUpdateCallback = (job: ConversionJob) => void;
 
@@ -104,7 +130,11 @@ interface PersistedJob {
   finishedAt?: number;
   error?: string;
   retryCount: number;
+  extract?: boolean;
+  outputExt?: string;
+  outputMime?: string;
 }
+
 
 interface PersistedOutput {
   jobId: string;
@@ -162,6 +192,7 @@ async function persistJob(job: ConversionJob) {
     outputFormat: job.outputFormat,
     status: job.status, startedAt: job.startedAt,
     finishedAt: job.finishedAt, error: job.error, retryCount: job.retryCount,
+    extract: job.extract, outputExt: job.outputExt, outputMime: job.outputMime,
   };
   await dbPut(STORE_JOBS, pj).catch(() => {});
 }
@@ -186,6 +217,7 @@ export async function restorePersistedJobs(): Promise<ConversionJob[]> {
         status: pj.status, progress: pj.status === "done" ? 100 : 0,
         startedAt: pj.startedAt, finishedAt: pj.finishedAt,
         error: pj.error, retryCount: pj.retryCount,
+        extract: pj.extract, outputExt: pj.outputExt, outputMime: pj.outputMime,
       };
       if (output) {
         job.outputBlob = output.blob;
@@ -201,6 +233,7 @@ export async function restorePersistedJobs(): Promise<ConversionJob[]> {
   } catch {
     return [];
   }
+
 }
 
 /** Remove persisted data for a job */
@@ -394,11 +427,79 @@ async function runWasmConversion(job: ConversionJob): Promise<void> {
 
     const ext = file.name.split(".").pop()?.toLowerCase() ?? "mp4";
     const inputName = `in_${job.id}.${ext}`;
-    const outputExt = OUTPUT_FORMAT_CONFIG[job.outputFormat].ext;
-    const outputName = `out_${job.id}.${outputExt}`;
 
     const data = await fetchFile(file);
     await ffmpeg.writeFile(inputName, data);
+
+    // ── Extraction path: probe codec, then -c:a copy into a Groq-friendly container.
+    if (job.extract) {
+      job.status = "converting";
+      notifyAll(job);
+      await persistJob(job);
+
+      const probeLogs: string[] = [];
+      const onProbeLog = ({ message }: { message: string }) => probeLogs.push(message);
+      ffmpeg.on("log", onProbeLog);
+      try { await ffmpeg.exec(["-hide_banner", "-i", inputName, "-f", "null", "-"]); } catch { /* ok */ }
+      ffmpeg.off("log", onProbeLog);
+
+      let codec: string | null = null;
+      for (const msg of probeLogs) {
+        const m = msg.match(/Stream #\d+:\d+.*?:\s*Audio:\s*([a-zA-Z0-9_]+)/);
+        if (m) { codec = m[1].toLowerCase(); break; }
+      }
+      if (!codec) throw new Error("לא נמצא שמע בקובץ");
+
+      const { ext: outExt, mime: outMime } = codecToContainer(codec);
+      job.outputExt = outExt;
+      job.outputMime = outMime;
+      const outputName = `out_${job.id}.${outExt}`;
+
+      const baseInName = file.name.replace(/\.[^/.]+$/, "");
+      job.progress = 50; notifyAll(job);
+      let exitCode = await ffmpeg.exec(["-i", inputName, "-vn", "-c:a", "copy", outputName]);
+
+      // Fallback: if copy fails (rare container mismatch), re-encode to AAC/m4a.
+      if (exitCode !== 0) {
+        job.outputExt = "m4a";
+        job.outputMime = "audio/mp4";
+        const fbOut = `out_${job.id}.m4a`;
+        await ffmpeg.deleteFile(outputName).catch(() => {});
+        exitCode = await ffmpeg.exec(["-i", inputName, "-vn", "-c:a", "aac", "-b:a", "192k", fbOut]);
+        if (exitCode !== 0) throw new Error("חילוץ אודיו נכשל");
+        const outputData = await ffmpeg.readFile(fbOut);
+        const bytes = outputData instanceof Uint8Array ? outputData : new TextEncoder().encode(outputData as string);
+        const blob = new Blob([new Uint8Array(bytes)], { type: "audio/mp4" });
+        const url = URL.createObjectURL(blob);
+        await ffmpeg.deleteFile(inputName).catch(() => {});
+        await ffmpeg.deleteFile(fbOut).catch(() => {});
+        job.status = "done"; job.progress = 100;
+        job.outputBlob = blob; job.outputUrl = url; job.finishedAt = Date.now();
+        notifyAll(job);
+        await Promise.all([persistJob(job), persistOutput(job.id, blob, `${baseInName}.m4a`)]);
+        return;
+      }
+
+      const outputData = await ffmpeg.readFile(outputName);
+      const bytes = outputData instanceof Uint8Array ? outputData : new TextEncoder().encode(outputData as string);
+      const blob = new Blob([new Uint8Array(bytes)], { type: outMime });
+      const url = URL.createObjectURL(blob);
+      await ffmpeg.deleteFile(inputName).catch(() => {});
+      await ffmpeg.deleteFile(outputName).catch(() => {});
+      job.status = "done"; job.progress = 100;
+      job.outputBlob = blob; job.outputUrl = url; job.finishedAt = Date.now();
+      notifyAll(job);
+      debugLog.info("FFmpegConverter", "Audio extraction completed", {
+        jobId: job.id, codec, outExt, bytes: blob.size,
+      });
+      await Promise.all([persistJob(job), persistOutput(job.id, blob, `${baseInName}.${outExt}`)]);
+      return;
+    }
+
+    const outputExt = OUTPUT_FORMAT_CONFIG[job.outputFormat].ext;
+    const outputName = `out_${job.id}.${outputExt}`;
+
+
 
     job.status = "converting";
     notifyAll(job);
@@ -503,7 +604,15 @@ async function runConversion(job: ConversionJob) {
   }
 
   job.startedAt = Date.now();
+
+  // Extraction always runs through WASM (server endpoint re-encodes, doesn't extract).
+  if (job.extract) {
+    await runWasmConversion(job);
+    return;
+  }
+
   let path = await chooseConversionPath(file.size);
+
   debugLog.info("FFmpegConverter", "Initial conversion path selected", {
     jobId: job.id,
     path,
@@ -599,6 +708,28 @@ export function convertAudio(file: File, outputFormat: OutputFormat = "mp3"): Co
   enqueue(job);
   return job;
 }
+
+/**
+ * Extract the audio track from a video/audio file with `-c:a copy`
+ * (no re-encoding). Probes the source codec and chooses a Groq-compatible
+ * container automatically (AAC → .m4a, Opus → .ogg, etc).
+ */
+export function extractAudio(file: File): ConversionJob {
+  const job: ConversionJob = {
+    id: `extract_${++idCounter}_${Date.now()}`,
+    fileName: file.name,
+    fileSize: file.size,
+    outputFormat: "mp3", // placeholder; actual container comes from outputExt
+    file,
+    status: "queued",
+    progress: 0,
+    retryCount: 0,
+    extract: true,
+  };
+  enqueue(job);
+  return job;
+}
+
 
 /** Retry a failed job — requires the original File object */
 export function retryJob(job: ConversionJob, file: File): ConversionJob {
