@@ -592,18 +592,31 @@ export default function QuickCutDialog() {
     updateStage("transcribe", { status: "running", percent: 10, detail: `שולח ${files.length} מקטעים…` });
     try {
       const ids = await submitBatchJobs(files, onlineEngine, lang);
+      const validIds = ids.filter(Boolean);
+      if (validIds.length === 0) {
+        throw new Error("לא נשלחו עבודות לתמלול");
+      }
+      setTrackedBatch({
+        jobIds: validIds,
+        total: validIds.length,
+        sourceFile: file,
+        title: baseName(file?.name || "חיתוך מהיר"),
+        engine: onlineEngine,
+      });
       updateStage("transcribe", {
-        status: "done",
-        percent: 100,
-        detail: `${ids.length} בתור (${onlineEngine})`,
+        status: "running",
+        percent: 15,
+        detail: `${validIds.length} נשלחו · ממתין לעיבוד`,
       });
       toast({
         title: "נשלח לתור התמלול",
-        description: `${ids.length} מקטעים בתור (מנוע: ${onlineEngine})`,
+        description: `${validIds.length} מקטעים בתור (מנוע: ${onlineEngine})`,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       updateStage("transcribe", { status: "error", detail: msg });
+      setTrackedBatch(null);
+      setSendingToTranscribe(false);
       throw e;
     }
   };
