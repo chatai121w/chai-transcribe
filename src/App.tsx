@@ -10,6 +10,7 @@ import AppLayout from "./components/AppLayout";
 import { Loader2 } from "lucide-react";
 import { ThemeShortcutListener } from "./components/ThemeShortcutListener";
 import { DiarizationQueueProvider } from "./contexts/DiarizationQueueContext";
+import { CloudPreferencesProvider } from "./hooks/useCloudPreferences";
 import { useTheme } from "./hooks/useTheme";
 import { debugLog } from "./lib/debugLogger";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -217,6 +218,7 @@ const App = () => {
   <ErrorBoundary>
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
+      <CloudPreferencesProvider>
       <TooltipProvider>
         <Toaster />
         <Sonner />
@@ -265,6 +267,7 @@ const App = () => {
           </DiarizationQueueProvider>
         </BrowserRouter>
       </TooltipProvider>
+      </CloudPreferencesProvider>
     </AuthProvider>
   </QueryClientProvider>
   </ErrorBoundary>

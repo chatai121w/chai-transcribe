@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, createContext, useContext, ReactNode, createElement } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { db, isDbAvailable } from '@/lib/localDb';
@@ -75,7 +75,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   diarize_enabled: false,
 };
 
-export const useCloudPreferences = () => {
+const useCloudPreferencesImpl = () => {
   const { user } = useAuth();
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -568,4 +568,21 @@ export const useCloudPreferences = () => {
     updatePreference,
     updatePreferences,
   };
+};
+
+// ── Singleton via Context to prevent N duplicate state instances/realtime channels ──
+type CloudPrefsValue = ReturnType<typeof useCloudPreferencesImpl>;
+const CloudPreferencesContext = createContext<CloudPrefsValue | null>(null);
+
+export const CloudPreferencesProvider = ({ children }: { children: ReactNode }) => {
+  const value = useCloudPreferencesImpl();
+  return createElement(CloudPreferencesContext.Provider, { value }, children);
+};
+
+export const useCloudPreferences = (): CloudPrefsValue => {
+  const ctx = useContext(CloudPreferencesContext);
+  if (ctx) return ctx;
+  // Fallback (e.g., tests without provider) — runs an isolated instance
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return useCloudPreferencesImpl();
 };
