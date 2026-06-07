@@ -48,6 +48,7 @@ import {
 } from "@/lib/ffmpegConverter";
 import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
+import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
 import { formatTime } from "@/lib/audioCutEngine";
 
 type ConvFormat = "none" | OutputFormat;
@@ -77,6 +78,10 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function baseName(name: string): string {
+  return name.replace(/\.[^/.]+$/, "");
 }
 
 function labelForTier(tier: string): string {
@@ -241,6 +246,14 @@ interface PipelineStage {
   detail?: string;
 }
 
+interface TrackedTranscriptionBatch {
+  jobIds: string[];
+  total: number;
+  sourceFile: File | null;
+  title: string;
+  engine: string;
+}
+
 function PipelineProgress({ stages }: { stages: PipelineStage[] }) {
   const active = stages.filter((s) => s.status !== "pending");
   const overall = active.length
@@ -322,10 +335,14 @@ export default function QuickCutDialog() {
   const [convertedFiles, setConvertedFiles] = useState<File[]>([]);
   const [segConverting, setSegConverting] = useState<Record<number, boolean>>({});
   const [pipeline, setPipeline] = useState<PipelineStage[]>([]);
+  const [trackedBatch, setTrackedBatch] = useState<TrackedTranscriptionBatch | null>(null);
+  const [mergedTranscriptId, setMergedTranscriptId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mergingBatchRef = useRef<string | null>(null);
 
-  const { submitBatchJobs } = useTranscriptionJobs();
+  const { submitBatchJobs, jobs } = useTranscriptionJobs();
   const { preferences } = useCloudPreferences();
+  const { saveTranscript } = useCloudTranscripts();
 
   const updateStage = useCallback((key: StageKey, patch: Partial<PipelineStage>) => {
     setPipeline((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
@@ -342,8 +359,109 @@ export default function QuickCutDialog() {
     setConvProgress(null);
     setIsConverting(false);
     setPipeline([]);
+    setTrackedBatch(null);
+    setMergedTranscriptId(null);
     setStep(1);
   }, []);
+
+  useEffect(() => {
+    if (!trackedBatch || trackedBatch.jobIds.length === 0) return;
+
+    const trackedJobs = trackedBatch.jobIds
+      .map((id) => jobs.find((job) => job.id === id))
+      .filter(Boolean);
+
+    if (trackedJobs.length === 0) return;
+
+    const completed = trackedJobs.filter((job) => job?.status === "completed");
+    const failed = trackedJobs.filter((job) => job?.status === "failed");
+    const active = trackedJobs.filter((job) => job && job.status !== "completed" && job.status !== "failed");
+
+    const avgProgress = trackedJobs.reduce((sum, job) => sum + (job?.progress || 0), 0) / trackedBatch.total;
+    const pct = Math.max(completed.length > 0 ? Math.round((completed.length / trackedBatch.total) * 100) : 1, Math.round(avgProgress));
+
+    if (failed.length > 0) {
+      updateStage("transcribe", {
+        status: "error",
+        percent: pct,
+        detail: `${completed.length}/${trackedBatch.total} הושלמו, ${failed.length} נכשלו`,
+      });
+      setSendingToTranscribe(false);
+      setTrackedBatch(null);
+      return;
+    }
+
+    if (completed.length < trackedBatch.total) {
+      const nextDetail = active[0]?.file_name
+        ? `${completed.length}/${trackedBatch.total} הושלמו · מעבד ${active[0].file_name}`
+        : `${completed.length}/${trackedBatch.total} הושלמו`;
+      updateStage("transcribe", {
+        status: "running",
+        percent: Math.min(99, Math.max(10, pct)),
+        detail: nextDetail,
+      });
+      return;
+    }
+
+    const batchKey = trackedBatch.jobIds.join(",");
+    if (mergingBatchRef.current === batchKey) return;
+    mergingBatchRef.current = batchKey;
+
+    const merge = async () => {
+      const orderedTexts = trackedBatch.jobIds
+        .map((id) => jobs.find((job) => job.id === id))
+        .map((job) => job?.result_text?.trim() || "")
+        .filter(Boolean);
+
+      const combinedText = orderedTexts.join("\n\n").trim();
+      if (!combinedText) {
+        updateStage("transcribe", {
+          status: "done",
+          percent: 100,
+          detail: `${trackedBatch.total}/${trackedBatch.total} הושלמו`,
+        });
+        setSendingToTranscribe(false);
+        setTrackedBatch(null);
+        return;
+      }
+
+      try {
+        const saved = await saveTranscript(
+          combinedText,
+          trackedBatch.engine,
+          `${trackedBatch.title} — תמלול מאוחד`,
+          trackedBatch.sourceFile ?? undefined,
+        );
+        setMergedTranscriptId(saved?.id ?? null);
+        updateStage("transcribe", {
+          status: "done",
+          percent: 100,
+          detail: `${trackedBatch.total}/${trackedBatch.total} הושלמו · אוחד`,
+        });
+        toast({
+          title: "התמלול הושלם",
+          description: "כל החלקים נשלחו, הושלמו ואוחדו לתמלול אחד.",
+        });
+      } catch (e) {
+        updateStage("transcribe", {
+          status: "error",
+          percent: 100,
+          detail: e instanceof Error ? e.message : String(e),
+        });
+        toast({
+          title: "שגיאה באיחוד התמלול",
+          description: e instanceof Error ? e.message : String(e),
+          variant: "destructive",
+        });
+      } finally {
+        mergingBatchRef.current = null;
+        setSendingToTranscribe(false);
+        setTrackedBatch(null);
+      }
+    };
+
+    void merge();
+  }, [jobs, saveTranscript, trackedBatch, updateStage]);
 
   useEffect(() => {
     return onOpenQuickCut(async (detail: OpenQuickCutDetail) => {
@@ -475,18 +593,31 @@ export default function QuickCutDialog() {
     updateStage("transcribe", { status: "running", percent: 10, detail: `שולח ${files.length} מקטעים…` });
     try {
       const ids = await submitBatchJobs(files, onlineEngine, lang);
+      const validIds = ids.filter(Boolean);
+      if (validIds.length === 0) {
+        throw new Error("לא נשלחו עבודות לתמלול");
+      }
+      setTrackedBatch({
+        jobIds: validIds,
+        total: validIds.length,
+        sourceFile: file,
+        title: baseName(file?.name || "חיתוך מהיר"),
+        engine: onlineEngine,
+      });
       updateStage("transcribe", {
-        status: "done",
-        percent: 100,
-        detail: `${ids.length} בתור (${onlineEngine})`,
+        status: "running",
+        percent: 15,
+        detail: `${validIds.length} נשלחו · ממתין לעיבוד`,
       });
       toast({
         title: "נשלח לתור התמלול",
-        description: `${ids.length} מקטעים בתור (מנוע: ${onlineEngine})`,
+        description: `${validIds.length} מקטעים בתור (מנוע: ${onlineEngine})`,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       updateStage("transcribe", { status: "error", detail: msg });
+      setTrackedBatch(null);
+      setSendingToTranscribe(false);
       throw e;
     }
   };
@@ -797,6 +928,13 @@ export default function QuickCutDialog() {
                 </div>
               </div>
             </div>
+
+            {mergedTranscriptId && (
+              <div className="rounded-xl border bg-primary/5 p-3 text-sm" dir="rtl">
+                <div className="font-semibold">התמלול המאוחד נשמר</div>
+                <div className="text-xs text-muted-foreground">כל חלקי הקובץ אוחדו לרשומה אחת בהיסטוריית התמלולים.</div>
+              </div>
+            )}
 
             {/* Global actions — Convert (dropdown) + Transcribe-all icons */}
             <div className="flex items-center gap-2 px-1">
