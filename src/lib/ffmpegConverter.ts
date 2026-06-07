@@ -409,8 +409,78 @@ async function runWasmConversion(job: ConversionJob): Promise<void> {
 
     const ext = file.name.split(".").pop()?.toLowerCase() ?? "mp4";
     const inputName = `in_${job.id}.${ext}`;
+
+    const data = await fetchFile(file);
+    await ffmpeg.writeFile(inputName, data);
+
+    // ── Extraction path: probe codec, then -c:a copy into a Groq-friendly container.
+    if (job.extract) {
+      job.status = "converting";
+      notifyAll(job);
+      await persistJob(job);
+
+      const probeLogs: string[] = [];
+      const onProbeLog = ({ message }: { message: string }) => probeLogs.push(message);
+      ffmpeg.on("log", onProbeLog);
+      try { await ffmpeg.exec(["-hide_banner", "-i", inputName, "-f", "null", "-"]); } catch { /* ok */ }
+      ffmpeg.off("log", onProbeLog);
+
+      let codec: string | null = null;
+      for (const msg of probeLogs) {
+        const m = msg.match(/Stream #\d+:\d+.*?:\s*Audio:\s*([a-zA-Z0-9_]+)/);
+        if (m) { codec = m[1].toLowerCase(); break; }
+      }
+      if (!codec) throw new Error("לא נמצא שמע בקובץ");
+
+      const { ext: outExt, mime: outMime } = codecToContainer(codec);
+      job.outputExt = outExt;
+      job.outputMime = outMime;
+      const outputName = `out_${job.id}.${outExt}`;
+
+      const baseInName = file.name.replace(/\.[^/.]+$/, "");
+      job.progress = 50; notifyAll(job);
+      let exitCode = await ffmpeg.exec(["-i", inputName, "-vn", "-c:a", "copy", outputName]);
+
+      // Fallback: if copy fails (rare container mismatch), re-encode to AAC/m4a.
+      if (exitCode !== 0) {
+        job.outputExt = "m4a";
+        job.outputMime = "audio/mp4";
+        const fbOut = `out_${job.id}.m4a`;
+        await ffmpeg.deleteFile(outputName).catch(() => {});
+        exitCode = await ffmpeg.exec(["-i", inputName, "-vn", "-c:a", "aac", "-b:a", "192k", fbOut]);
+        if (exitCode !== 0) throw new Error("חילוץ אודיו נכשל");
+        const outputData = await ffmpeg.readFile(fbOut);
+        const bytes = outputData instanceof Uint8Array ? outputData : new TextEncoder().encode(outputData as string);
+        const blob = new Blob([new Uint8Array(bytes)], { type: "audio/mp4" });
+        const url = URL.createObjectURL(blob);
+        await ffmpeg.deleteFile(inputName).catch(() => {});
+        await ffmpeg.deleteFile(fbOut).catch(() => {});
+        job.status = "done"; job.progress = 100;
+        job.outputBlob = blob; job.outputUrl = url; job.finishedAt = Date.now();
+        notifyAll(job);
+        await Promise.all([persistJob(job), persistOutput(job.id, blob, `${baseInName}.m4a`)]);
+        return;
+      }
+
+      const outputData = await ffmpeg.readFile(outputName);
+      const bytes = outputData instanceof Uint8Array ? outputData : new TextEncoder().encode(outputData as string);
+      const blob = new Blob([new Uint8Array(bytes)], { type: outMime });
+      const url = URL.createObjectURL(blob);
+      await ffmpeg.deleteFile(inputName).catch(() => {});
+      await ffmpeg.deleteFile(outputName).catch(() => {});
+      job.status = "done"; job.progress = 100;
+      job.outputBlob = blob; job.outputUrl = url; job.finishedAt = Date.now();
+      notifyAll(job);
+      debugLog.info("FFmpegConverter", "Audio extraction completed", {
+        jobId: job.id, codec, outExt, bytes: blob.size,
+      });
+      await Promise.all([persistJob(job), persistOutput(job.id, blob, `${baseInName}.${outExt}`)]);
+      return;
+    }
+
     const outputExt = OUTPUT_FORMAT_CONFIG[job.outputFormat].ext;
     const outputName = `out_${job.id}.${outputExt}`;
+
 
     const data = await fetchFile(file);
     await ffmpeg.writeFile(inputName, data);
