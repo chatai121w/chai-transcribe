@@ -75,7 +75,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   diarize_enabled: false,
 };
 
-export const useCloudPreferences = () => {
+const useCloudPreferencesImpl = () => {
   const { user } = useAuth();
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   const [isLoaded, setIsLoaded] = useState(false);
