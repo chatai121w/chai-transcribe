@@ -134,7 +134,7 @@ export function useYoutubeJobs() {
 
   const probeUrl = useCallback(async (url: string): Promise<YtProbeResult> => {
     if (!isValidYoutubeUrl(url)) throw new Error("קישור YouTube לא תקין");
-    const serverUrl = await getLocalServerUrl().catch(() => null);
+    const serverUrl = ((): string | null => { try { return getServerUrl(); } catch { return null; } })();
     const local = await probeLocal(url, serverUrl);
     if (local) return local;
     return await probeCobalt(url);
@@ -265,7 +265,7 @@ async function runJobBackend(
   }
 
   // Local Flask path — call /yt/job to kick off, then poll.
-  const serverUrl = await getLocalServerUrl().catch(() => null);
+  const serverUrl = ((): string | null => { try { return getServerUrl(); } catch { return null; } })();
   if (!serverUrl) throw new Error("שרת מקומי לא זמין");
 
   const startRes = await fetch(`${serverUrl}/yt/job`, {
