@@ -32,6 +32,10 @@ export default function YouTubePage() {
   const [submitting, setSubmitting] = useState(false);
 
   const { jobs, loading, probeUrl, startJob, deleteJob } = useYoutubeJobs();
+  const { user } = useAuth();
+  const { jobs: centralJobs } = useJobs();
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const activeJob = centralJobs.find((j) => j.id === activeJobId) ?? null;
 
   const handleProbe = async () => {
     const trimmed = url.trim();
@@ -52,11 +56,18 @@ export default function YouTubePage() {
   };
 
   const handleStart = async () => {
-    if (!probe) return;
+    if (!probe || !user) return;
     setSubmitting(true);
     try {
-      await startJob({ url: url.trim(), mode, probe, audioFormat, videoQuality });
-      toast({ title: "המשימה התחילה", description: "ניתן לעקוב בלשונית 'מנהל הורדות'" });
+      const job = await startYoutubeJob({
+        userId: user.id,
+        url: url.trim(),
+        mode,
+        audioFormat,
+        videoQuality,
+      });
+      setActiveJobId(job.id);
+      toast({ title: "המשימה התחילה", description: "עקוב אחרי השלבים למטה או במרכז המשימות" });
     } catch (e) {
       toast({ title: "שגיאה", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
