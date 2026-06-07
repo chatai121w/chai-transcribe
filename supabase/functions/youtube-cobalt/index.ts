@@ -15,21 +15,45 @@ const COBALT_INSTANCES = [
   'https://api.cobalt.tools',
   'https://co.eepy.today',
   'https://cobalt-api.kwiatekmiki.com',
+  'https://cobalt.synzr.ru',
+  'https://dl01.yt-dl.click',
+  'https://co.wuk.sh',
 ];
 
-// Piped — https://github.com/TeamPiped/Piped (public mirrors rotate)
+// Piped — https://github.com/TeamPiped/Piped (public mirrors rotate often)
+// List expanded with known-working public instances; non-working ones fail fast.
 const PIPED_INSTANCES = [
   'https://pipedapi.kavin.rocks',
   'https://pipedapi.adminforge.de',
   'https://pipedapi.r4fo.com',
   'https://pipedapi.leptons.xyz',
+  'https://pipedapi.aeong.one',
+  'https://pipedapi.smnz.de',
+  'https://pipedapi.in.projectsegfau.lt',
+  'https://api.piped.private.coffee',
+  'https://pipedapi.darkness.services',
+  'https://pipedapi.reallyaweso.me',
+  'https://api.piped.yt',
+  'https://pipedapi.ducks.party',
+  'https://pipedapi.osphost.fi',
+  'https://pipedapi.us.projectsegfau.lt',
 ];
 
-// Invidious — https://github.com/iv-org/invidious
+// Invidious — https://github.com/iv-org/invidious (public registry rotates)
 const INVIDIOUS_INSTANCES = [
   'https://invidious.nerdvpn.de',
   'https://inv.nadeko.net',
   'https://invidious.privacyredirect.com',
+  'https://invidious.materialio.us',
+  'https://invidious.jing.rocks',
+  'https://invidious.flokinet.to',
+  'https://yewtu.be',
+  'https://inv.tux.pizza',
+  'https://invidious.protokolla.fi',
+  'https://invidious.fdn.fr',
+  'https://iv.melmac.space',
+  'https://inv.in.projectsegfau.lt',
+  'https://invidious.dhusch.de',
 ];
 
 interface ReqBody {
