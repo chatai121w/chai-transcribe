@@ -80,6 +80,7 @@ import {
   FolderOpen,
   History,
   Check,
+  ListChecks,
   X,
   Minus,
   Maximize2,
@@ -1058,6 +1059,18 @@ export default function VideoToMp3() {
                         <Trash2 className="w-3 h-3 ml-1" /> מחק נבחרים ({selectedHistoryIds.size})
                       </Button>
                     )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs text-primary"
+                      onClick={toggleSelectAllHistory}
+                    >
+                      {selectedHistoryIds.size === history.items.length ? (
+                        <><X className="w-3 h-3 ml-1" /> בטל בחירה</>
+                      ) : (
+                        <><ListChecks className="w-3 h-3 ml-1" /> בחר הכל</>
+                      )}
+                    </Button>
                     <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={() => history.refresh()}>
                       <RefreshCw className="w-3 h-3 ml-1" /> רענן
                     </Button>
