@@ -387,6 +387,7 @@ export default function QuickCutDialog() {
     setPipeline([]);
     setTrackedBatch(null);
     setMergedTranscriptId(null);
+    centralTrackerRef.current = null;
     setStep(1);
   }, []);
 
