@@ -33,9 +33,22 @@ export interface TieredCutProgress {
   total: number;
 }
 
+export type TierEventStatus = "started" | "skipped" | "success" | "failed" | "aborted";
+
+export interface TierEvent {
+  tier: CutTier;
+  status: TierEventStatus;
+  message: string;
+  /** Reason / error detail when status is "failed" or "skipped" */
+  reason?: string;
+  timestamp: number;
+}
+
 export interface TieredCutOptions {
   config: CutJobConfig;
   onProgress?: (p: TieredCutProgress) => void;
+  /** Fires for every tier transition — for UI surfacing */
+  onTierEvent?: (e: TierEvent) => void;
   /** When known (probed), saves a re-probe */
   knownDurationSec?: number;
 }
@@ -45,6 +58,7 @@ export interface TieredCutOutcome {
   results: CutResult[];
   durationSec: number;
 }
+
 
 // ───────────────────────── helpers ──────────────────────────────────────────
 
