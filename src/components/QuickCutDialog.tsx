@@ -586,6 +586,9 @@ export default function QuickCutDialog() {
         });
       }
       setConvertedFiles(out);
+      try {
+        for (const f of out) pushCompletedFile(f, "cut+convert", file?.name);
+      } catch { /* non-fatal */ }
       toast({
         title: "✅ המרה הושלמה",
         description: `${out.length} מקטעים הומרו ל-${(outputFormat as string).toUpperCase()}`,
