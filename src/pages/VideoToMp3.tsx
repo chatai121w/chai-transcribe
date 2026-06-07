@@ -24,6 +24,8 @@ import {
 } from "@/lib/audioEnhanceQueue";
 import { isServerAvailable } from "@/lib/conversionRouter";
 import { useConversionHistory, type ConversionHistoryItem } from "@/hooks/useConversionHistory";
+import { CompletedFilesPanel } from "@/components/CompletedFilesPanel";
+import { pushCompletedFile } from "@/lib/completedFilesBus";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
