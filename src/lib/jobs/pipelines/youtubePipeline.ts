@@ -8,7 +8,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getServerUrl } from "@/lib/serverConfig";
 import { createJob, patchJob, updateStage, nextResumableStage, fetchJob } from "../jobOrchestrator";
-import { uploadArtifact } from "../artifactStorage";
+import { uploadArtifact, downloadArtifact } from "../artifactStorage";
 import type { JobRecord } from "../types";
 
 const YT_REGEX = /^https?:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/|live\/)|youtu\.be\/)[\w-]+/;
@@ -248,14 +248,129 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
   if (job.stages.find((s) => s.key === "transcribe")?.status !== "done") {
     if (resume.mode !== "transcribe" && resume.mode !== "full") {
       await updateStage(jobId, "transcribe", { status: "skipped" });
-    } else {
-      // Cloud transcription wiring lives in the existing transcription pipeline.
-      // Phase 2 will route this stage through the orchestrator; for now we mark
-      // it skipped with a helpful note so the job completes cleanly.
-      await updateStage(jobId, "transcribe", {
-        status: "skipped",
-        error: "תמלול אוטומטי דרך מערכת ה-Jobs יתחבר בפאזה הבאה. השתמש בקובץ האודיו ידנית.",
-      });
+      return;
     }
+
+    if (backend !== "cobalt") {
+      // Local backend handles its own transcription via the Flask server
+      await updateStage(jobId, "transcribe", { status: "skipped" });
+      return;
+    }
+
+    await updateStage(jobId, "transcribe", { status: "running", percent: 5 });
+
+    // Source audio: prefer artifact mirrored in upload_audio; fall back to cobalt URL
+    const uploadStage = job.stages.find((s) => s.key === "upload_audio");
+    const cobaltUrl = job.stages.find((s) => s.key === "download")?.meta?.cobalt_url as string | undefined;
+    let audioBlob: Blob | null = null;
+    try {
+      if (uploadStage?.artifact_path) {
+        audioBlob = await downloadArtifact(uploadStage.artifact_path);
+      } else if (cobaltUrl) {
+        const r = await fetch(cobaltUrl);
+        audioBlob = await r.blob();
+      }
+    } catch (e) {
+      await updateStage(jobId, "transcribe", {
+        status: "failed",
+        error: `שגיאה בטעינת אודיו: ${e instanceof Error ? e.message : String(e)}`,
+      });
+      return;
+    }
+    if (!audioBlob) {
+      await updateStage(jobId, "transcribe", { status: "failed", error: "אין קובץ אודיו לתמלול" });
+      return;
+    }
+
+    // Upload to the `audio-files` bucket where `process-transcription` reads from
+    const ext = ((audioBlob.type.split("/")[1] || "m4a").split(";")[0] || "m4a").replace(/[^a-z0-9]/gi, "") || "m4a";
+    const audioPath = `${job.user_id}/${jobId}_yt.${ext}`;
+    const fileName = `${job.title || "youtube"}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from("audio-files")
+      .upload(audioPath, audioBlob, { upsert: true, contentType: audioBlob.type || "audio/mp4" });
+    if (upErr) {
+      await updateStage(jobId, "transcribe", { status: "failed", error: `העלאה לתמלול נכשלה: ${upErr.message}` });
+      return;
+    }
+    await updateStage(jobId, "transcribe", { percent: 12 });
+
+    // Create a transcription_jobs row (Groq default — fast Hebrew cloud engine)
+    const engine = "groq";
+    const { data: tj, error: tjErr } = await supabase
+      .from("transcription_jobs")
+      .insert({
+        user_id: job.user_id,
+        status: "pending",
+        engine,
+        file_name: fileName,
+        file_path: audioPath,
+        language: "he",
+        progress: 20,
+        total_chunks: 1,
+        completed_chunks: 0,
+        partial_result: "",
+      })
+      .select("id")
+      .single();
+    if (tjErr || !tj) {
+      await updateStage(jobId, "transcribe", {
+        status: "failed",
+        error: `יצירת עבודת תמלול נכשלה: ${tjErr?.message ?? "unknown"}`,
+      });
+      return;
+    }
+    await updateStage(jobId, "transcribe", {
+      percent: 15,
+      meta: { transcription_job_id: tj.id, engine },
+    });
+
+    // Trigger the edge function (fire-and-forget; row state drives polling)
+    supabase.functions.invoke("process-transcription", { body: { jobId: tj.id } }).catch(() => {});
+
+    // Poll the transcription_jobs row and mirror progress
+    let lastErr: string | null = null;
+    const startedAt = Date.now();
+    const timeoutMs = 60 * 60 * 1000; // 1h hard cap
+    while (Date.now() - startedAt < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const { data: row, error: rowErr } = await supabase
+        .from("transcription_jobs")
+        .select("status, progress, error_message, result_text, total_chunks, completed_chunks")
+        .eq("id", tj.id)
+        .single();
+      if (rowErr) { lastErr = rowErr.message; continue; }
+      if (!row) continue;
+      const pct = Math.max(15, Math.min(99, row.progress ?? 15));
+      const chunkInfo = row.total_chunks && row.total_chunks > 1
+        ? { total_chunks: row.total_chunks, completed_chunks: row.completed_chunks ?? 0 }
+        : {};
+
+      if (row.status === "completed") {
+        try {
+          if (row.result_text) {
+            await uploadArtifact(job.user_id, jobId, "transcribe", "transcript.txt", row.result_text);
+          }
+        } catch { /* non-fatal */ }
+        await updateStage(jobId, "transcribe", {
+          status: "done",
+          percent: 100,
+          meta: { transcription_job_id: tj.id, engine, chars: row.result_text?.length ?? 0, ...chunkInfo },
+        });
+        return;
+      }
+      if (row.status === "failed") {
+        await updateStage(jobId, "transcribe", {
+          status: "failed",
+          error: row.error_message ?? "תמלול נכשל",
+        });
+        return;
+      }
+      await updateStage(jobId, "transcribe", { status: "running", percent: pct });
+    }
+    await updateStage(jobId, "transcribe", {
+      status: "failed",
+      error: lastErr ?? "התמלול לקח יותר מדי זמן (timeout)",
+    });
   }
 }
