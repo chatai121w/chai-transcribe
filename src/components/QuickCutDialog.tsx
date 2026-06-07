@@ -523,6 +523,8 @@ export default function QuickCutDialog() {
     setIsCutting(true);
     setResults([]);
     setConvertedFiles([]);
+    setTierEvents([]);
+    setTierUsed("");
     setProgress({ tier: "wav-slice", message: "מתחיל…", completed: 0, total: 1 });
     updateStage("cut", { status: "running", percent: 1, detail: "מתחיל…" });
     try {
@@ -533,6 +535,9 @@ export default function QuickCutDialog() {
           setProgress(p);
           const pct = Math.max(1, Math.min(99, Math.round((p.completed / Math.max(1, p.total)) * 100)));
           updateStage("cut", { status: "running", percent: pct, detail: p.message });
+        },
+        onTierEvent: (ev) => {
+          setTierEvents((prev) => [...prev, ev]);
         },
       });
       setResults(outcome.results);
