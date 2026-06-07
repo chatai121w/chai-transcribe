@@ -174,6 +174,7 @@ async function persistJob(job: ConversionJob) {
     outputFormat: job.outputFormat,
     status: job.status, startedAt: job.startedAt,
     finishedAt: job.finishedAt, error: job.error, retryCount: job.retryCount,
+    extract: job.extract, outputExt: job.outputExt, outputMime: job.outputMime,
   };
   await dbPut(STORE_JOBS, pj).catch(() => {});
 }
@@ -198,6 +199,7 @@ export async function restorePersistedJobs(): Promise<ConversionJob[]> {
         status: pj.status, progress: pj.status === "done" ? 100 : 0,
         startedAt: pj.startedAt, finishedAt: pj.finishedAt,
         error: pj.error, retryCount: pj.retryCount,
+        extract: pj.extract, outputExt: pj.outputExt, outputMime: pj.outputMime,
       };
       if (output) {
         job.outputBlob = output.blob;
@@ -213,6 +215,7 @@ export async function restorePersistedJobs(): Promise<ConversionJob[]> {
   } catch {
     return [];
   }
+
 }
 
 /** Remove persisted data for a job */
