@@ -85,6 +85,7 @@ import {
   Maximize2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AudioEnhanceDialog from "@/components/AudioEnhanceDialog";
 
@@ -193,7 +194,7 @@ function JobCard({
         />
       )}
       <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-3" dir="rtl">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3" dir="rtl">
           {/* Info */}
           <div className="flex items-start gap-3 flex-1 min-w-0">
             <div className="rounded-lg bg-primary/10 p-2 shrink-0">
@@ -239,14 +240,14 @@ function JobCard({
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-1 flex-wrap justify-end w-full sm:w-auto sm:shrink-0">
             <StatusBadge status={job.status} />
             {job.status === "done" && job.outputUrl && (
               <>
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8 text-green-600 hover:text-green-700"
+                  className="h-9 w-9 text-green-600 hover:text-green-700"
                   title="שמור + תמלל + ענן"
                   onClick={() => onSaveAndTranscribe(job)}
                 >
@@ -255,7 +256,7 @@ function JobCard({
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8 text-primary hover:text-primary"
+                  className="h-9 w-9 text-primary hover:text-primary"
                   title="תמלול"
                   onClick={() => onTranscribe(job)}
                 >
@@ -264,7 +265,7 @@ function JobCard({
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8"
+                  className="h-9 w-9"
                   title="חתוך קובץ"
                   onClick={() => onCut(job)}
                 >
@@ -273,13 +274,13 @@ function JobCard({
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8"
+                  className="h-9 w-9"
                   title="שיפור איכות"
                   onClick={() => onEnhance(job)}
                 >
                   <Sparkles className="w-4 h-4" />
                 </Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8" asChild>
+                <Button size="icon" variant="ghost" className="h-9 w-9" asChild>
                   <a href={job.outputUrl} download={outputFilename}>
                     <Download className="w-4 h-4" />
                   </a>
@@ -290,7 +291,7 @@ function JobCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8 text-orange-500 hover:text-orange-600"
+                className="h-9 w-9 text-orange-500 hover:text-orange-600"
                 title="נסה שוב"
                 onClick={() => onRetry(job)}
               >
@@ -301,7 +302,7 @@ function JobCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                className="h-9 w-9 text-muted-foreground hover:text-destructive"
                 onClick={() => onRemove(job.id)}
               >
                 <Trash2 className="w-4 h-4" />
@@ -319,6 +320,7 @@ function JobCard({
 export default function VideoToMp3() {
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
+  const isMobile = useIsMobile();
   const [jobs, setJobs] = useState<ConversionJob[]>([]);
   const [outputFormat, setOutputFormat] = useState<OutputFormat>(() => {
     const saved = localStorage.getItem("video_to_audio_output_format");
@@ -763,7 +765,7 @@ export default function VideoToMp3() {
   };
 
   return (
-    <div className="container max-w-4xl mx-auto py-4 sm:py-6 px-3 sm:px-4 space-y-4 sm:space-y-6" dir="rtl">
+    <div className="container w-full max-w-4xl mx-auto py-4 sm:py-6 px-3 sm:px-4 space-y-4 sm:space-y-6 overflow-x-hidden" dir="rtl">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -798,7 +800,7 @@ export default function VideoToMp3() {
 
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "convert" | "cut")} className="space-y-4" dir="rtl">
-        <TabsList className="grid w-full grid-cols-2 max-w-[360px]">
+        <TabsList className="grid w-full grid-cols-2 max-w-full sm:max-w-[360px] h-11 sm:h-10">
           <TabsTrigger value="convert" className="gap-1.5">
             <Music className="w-4 h-4" />
             המרה
@@ -832,14 +834,14 @@ export default function VideoToMp3() {
                   <p className="font-medium">פורמט פלט</p>
                   <p className="text-xs text-muted-foreground">הבחירה תשפיע על כל ההמרות החדשות. מנוע FFmpeg נטען עצלית ועובד ברקע כמו המערכת הקיימת.</p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex w-full sm:w-auto gap-2">
                   {(["mp3", "opus", "aac"] as OutputFormat[]).map((fmt) => (
                     <Button
                       key={fmt}
                       size="sm"
                       variant={outputFormat === fmt ? "default" : "outline"}
                       onClick={() => setOutputFormat(fmt)}
-                      className="min-w-[96px]"
+                      className="flex-1 sm:flex-none h-11 sm:h-9 sm:min-w-[96px]"
                     >
                       {OUTPUT_FORMAT_META[fmt].label}
                     </Button>
@@ -906,7 +908,7 @@ export default function VideoToMp3() {
                   <Badge variant="destructive">{stats.errors} שגיאות</Badge>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {stats.done > 0 && (
                   <Button variant="secondary" size="sm" onClick={handleEnhanceAllConverted} className="gap-1">
                     <Sparkles className="w-4 h-4" />
@@ -1035,7 +1037,7 @@ export default function VideoToMp3() {
           {isAuthenticated && history.items.length > 0 && (
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center justify-between">
+                <CardTitle className="text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                   <span className="flex items-center gap-2">
                     <History className="w-4 h-4 text-primary" />
                     היסטוריית המרות ({history.items.length})
@@ -1045,7 +1047,7 @@ export default function VideoToMp3() {
                       </Badge>
                     )}
                   </span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 flex-wrap">
                     {selectedHistoryIds.size > 0 && (
                       <Button
                         variant="ghost"
@@ -1068,6 +1070,113 @@ export default function VideoToMp3() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
+                {isMobile ? (
+                  <div className="space-y-2">
+                    {history.items.map((item) => (
+                      <Card
+                        key={item.id}
+                        className={cn("border", selectedHistoryIds.has(item.id) && "ring-2 ring-primary")}
+                      >
+                        <CardContent className="p-3 space-y-2.5">
+                          {/* Row 1: select + name + format */}
+                          <div className="flex items-start gap-2">
+                            <Checkbox
+                              checked={selectedHistoryIds.has(item.id)}
+                              onCheckedChange={() => toggleSelectHistory(item.id)}
+                              aria-label={`בחר ${item.file_name}`}
+                              className="mt-1 shrink-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              {editingId === item.id ? (
+                                <div className="flex items-center gap-1">
+                                  <Input
+                                    value={editName}
+                                    onChange={(e) => setEditName(e.target.value)}
+                                    className="h-9 text-sm"
+                                    autoFocus
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') { history.updateName(item.id, editName); setEditingId(null); }
+                                      else if (e.key === 'Escape') setEditingId(null);
+                                    }}
+                                  />
+                                  <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={() => { history.updateName(item.id, editName); setEditingId(null); }}>
+                                    <Check className="w-4 h-4" />
+                                  </Button>
+                                  <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={() => setEditingId(null)}>
+                                    <X className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <p
+                                  className="font-medium text-sm truncate cursor-pointer hover:text-primary"
+                                  onClick={() => { setEditingId(item.id); setEditName(item.file_name); }}
+                                  title="לחץ לעריכה"
+                                >
+                                  {item.file_name}
+                                </p>
+                              )}
+                              <p className="text-xs text-muted-foreground truncate mt-0.5">{item.original_name}</p>
+                            </div>
+                            <Badge variant="outline" className="text-[10px] shrink-0">{item.output_format.toUpperCase()}</Badge>
+                          </div>
+
+                          {/* Row 2: meta */}
+                          <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
+                            <span>{item.output_size > 0 ? formatBytes(item.output_size) : '—'}</span>
+                            <span>•</span>
+                            <span className="whitespace-nowrap">
+                              {new Date(item.created_at).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <span>•</span>
+                            {folderEditId === item.id ? (
+                              <div className="flex items-center gap-1">
+                                <Input
+                                  value={folderName}
+                                  onChange={(e) => setFolderName(e.target.value)}
+                                  className="h-8 text-xs w-28"
+                                  placeholder="תיקייה"
+                                  autoFocus
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') { history.updateFolder(item.id, folderName); setFolderEditId(null); }
+                                    else if (e.key === 'Escape') setFolderEditId(null);
+                                  }}
+                                />
+                                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { history.updateFolder(item.id, folderName); setFolderEditId(null); }}>
+                                  <Check className="w-3.5 h-3.5" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <span
+                                className="inline-flex items-center gap-1 cursor-pointer hover:text-primary"
+                                onClick={() => { setFolderEditId(item.id); setFolderName(item.folder || ''); }}
+                                title="לחץ להגדרת תיקייה"
+                              >
+                                <FolderOpen className="w-3.5 h-3.5" />
+                                {item.folder || <span className="text-muted-foreground/50">ללא תיקייה</span>}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Row 3: actions */}
+                          <div className="grid grid-cols-4 gap-1.5">
+                            <Button variant="outline" size="sm" className="h-10" title="הורד קובץ" onClick={() => handleDownloadHistoryItem(item)}>
+                              <Download className="w-4 h-4" />
+                            </Button>
+                            <Button variant="outline" size="sm" className="h-10" title="שנה שם" onClick={() => { setEditingId(item.id); setEditName(item.file_name); }}>
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                            <Button variant="outline" size="sm" className="h-10" title="שלח לתמלול" onClick={() => navigate("/transcribe", { state: { fileName: item.file_name, filePath: item.file_path } })}>
+                              <Mic className="w-4 h-4" />
+                            </Button>
+                            <Button variant="outline" size="sm" className="h-10 text-muted-foreground hover:text-destructive" title="מחק" onClick={() => history.removeItem(item.id)}>
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
                 <ScrollArea className="max-h-[400px]">
                   <Table dir="rtl">
                     <TableHeader>
@@ -1275,6 +1384,7 @@ export default function VideoToMp3() {
                     </TableBody>
                   </Table>
                 </ScrollArea>
+                )}
               </CardContent>
             </Card>
           )}

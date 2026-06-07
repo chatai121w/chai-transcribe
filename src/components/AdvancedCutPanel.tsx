@@ -206,9 +206,9 @@ function SegmentPreviewList({
   if (segments.length === 0) return null;
 
   return (
-    <div className="border rounded-lg bg-muted/20 p-3 space-y-2">
+    <div className="border rounded-xl bg-muted/20 p-3 space-y-2" dir="rtl">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">
+        <span className="text-xs font-medium text-foreground">
           תצוגה מקדימה: {segments.length} קטעים
         </span>
         <span className="text-xs text-muted-foreground">
@@ -304,8 +304,8 @@ function CutResultRow({
   const displayFile = convertedFile ?? result.file;
 
   return (
-    <div className="border rounded-lg p-2.5 space-y-1.5 bg-card/50">
-      <div className="flex items-center gap-2">
+    <div className="border rounded-xl p-2.5 space-y-1.5 bg-card/50 hover:bg-card/80 transition-colors" dir="rtl">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
         <AudioPreview file={displayFile} />
         <div className="flex-1 min-w-0">
           {isEditing ? (
@@ -335,15 +335,18 @@ function CutResultRow({
               </Button>
             </div>
           )}
-          <div className="text-[11px] text-muted-foreground" dir="rtl">
-            {formatTime(result.startSec)} → {formatTime(result.endSec)} •{" "}
-            {formatTime(result.durationSec)} • {formatBytes(displayFile.size)}
+          <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 flex-wrap" dir="ltr" style={{ justifyContent: "flex-end" }}>
+            <span className="font-mono">{formatTime(result.startSec)} → {formatTime(result.endSec)}</span>
+            <span className="text-muted-foreground/50">•</span>
+            <span className="font-mono">{formatTime(result.durationSec)}</span>
+            <span className="text-muted-foreground/50">•</span>
+            <span>{formatBytes(displayFile.size)}</span>
           </div>
         </div>
-        <div className="flex items-center gap-0.5 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-0.5 flex-wrap justify-end w-full sm:w-auto sm:shrink-0">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button size="icon" variant="ghost" className="h-7 w-7" title="המר פורמט" disabled={isConverting}>
+              <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7" title="המר פורמט" disabled={isConverting}>
                 {isConverting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Music className="w-3.5 h-3.5" />}
               </Button>
             </DropdownMenuTrigger>
@@ -357,22 +360,22 @@ function CutResultRow({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button size="icon" variant="ghost" className="h-7 w-7" title="שמור להיסטוריה" onClick={handleSaveToHistory} disabled={saved}>
+          <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7" title="שמור להיסטוריה" onClick={handleSaveToHistory} disabled={saved}>
             {saved ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Save className="w-3.5 h-3.5" />}
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" title="תיקייה" onClick={() => setShowFolder(!showFolder)}>
+          <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7" title="תיקייה" onClick={() => setShowFolder(!showFolder)}>
             <FolderOpen className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" title="שפר איכות" onClick={onEnhance}>
+          <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7" title="שפר איכות" onClick={onEnhance}>
             <Sparkles className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" title="תמלל" onClick={onTranscribe}>
+          <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7" title="תמלל" onClick={onTranscribe}>
             <Mic className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" title="הורד" onClick={onDownload}>
+          <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7" title="הורד" onClick={onDownload}>
             <Download className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive" title="מחק" onClick={onDelete}>
+          <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7 text-muted-foreground hover:text-destructive" title="מחק" onClick={onDelete}>
             <Trash2 className="w-3.5 h-3.5" />
           </Button>
         </div>
@@ -438,7 +441,7 @@ function CutJobCard({
   const modeLabel = { manual: "ידני", time: "לפי זמן", count: "לפי מספר" }[job.config.mode];
 
   return (
-    <Card className="relative overflow-hidden">
+    <Card className="relative overflow-hidden border-border/60 hover:border-primary/30 transition-colors">
       {(job.status === "cutting" || job.status === "decoding") && (
         <div
           className="absolute bottom-0 left-0 h-1 bg-primary/60 transition-all duration-300"
@@ -446,23 +449,23 @@ function CutJobCard({
         />
       )}
       <CardContent className="p-3 space-y-2">
-        <div className="flex items-start justify-between gap-2" dir="rtl">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2" dir="rtl">
           <div className="flex items-start gap-2 flex-1 min-w-0">
             <div className="rounded-lg bg-primary/10 p-1.5 shrink-0 mt-0.5">
               <Scissors className="w-4 h-4 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-medium text-sm truncate">{job.sourceFileName}</p>
-              <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground flex-wrap">
-                <Badge variant="outline" className="text-[10px] h-4 px-1">
+              <div className="flex items-center gap-x-2 gap-y-0.5 mt-1 text-xs text-muted-foreground flex-wrap">
+                <Badge variant="outline" className="text-[10px] h-4 px-1.5">
                   {modeLabel}
                 </Badge>
-                <span>
+                <span className="whitespace-nowrap">
                   {job.completedSegments}/{job.totalSegments || "?"} קטעים
                 </span>
-                {elapsed && <span>• {elapsed}</span>}
+                {elapsed && <span className="whitespace-nowrap">• {elapsed}</span>}
                 {job.durationSec && (
-                  <span>• משך: {formatTime(job.durationSec)}</span>
+                  <span className="whitespace-nowrap">• משך: {formatTime(job.durationSec)}</span>
                 )}
               </div>
               {(job.status === "cutting" || job.status === "decoding") && (
@@ -478,7 +481,7 @@ function CutJobCard({
               )}
             </div>
           </div>
-          <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+          <div className="flex items-center gap-1 flex-wrap justify-end w-full sm:w-auto sm:shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0">
             <CutStatusBadge status={job.status} />
             {job.status === "done" && job.results.length > 0 && (
               <>
@@ -487,7 +490,7 @@ function CutJobCard({
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="h-7 w-7"
+                      className="h-9 w-9 sm:h-7 sm:w-7"
                       title="המר את כל הקטעים"
                       disabled={isConvertingAll}
                     >
@@ -509,7 +512,7 @@ function CutJobCard({
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-7 w-7"
+                  className="h-9 w-9 sm:h-7 sm:w-7"
                   title="תמלל את כל הקטעים"
                   onClick={() => onTranscribeAll(job)}
                   disabled={isTranscribingAll}
@@ -524,7 +527,7 @@ function CutJobCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-7 w-7"
+                className="h-9 w-9 sm:h-7 sm:w-7"
                 title="הורד הכל"
                 onClick={() => onDownloadAll(job)}
               >
@@ -535,7 +538,7 @@ function CutJobCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-7 w-7"
+                className="h-9 w-9 sm:h-7 sm:w-7"
                 title="שפר את כל הקטעים ברקע"
                 onClick={() => onEnhanceAll(job)}
               >
@@ -546,7 +549,7 @@ function CutJobCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-7 w-7"
+                className="h-9 w-9 sm:h-7 sm:w-7"
                 onClick={() => setExpanded(!expanded)}
               >
                 {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -556,7 +559,7 @@ function CutJobCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                className="h-9 w-9 sm:h-7 sm:w-7 text-muted-foreground hover:text-destructive"
                 onClick={() => onRemove(job.id)}
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -997,12 +1000,14 @@ export default function AdvancedCutPanel({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" dir="rtl">
       {/* Source selection */}
-      <Card>
-        <CardHeader className="pb-3">
+      <Card className="border-primary/15 shadow-sm overflow-hidden">
+        <CardHeader className="pb-3 bg-gradient-to-l from-primary/5 to-transparent">
           <CardTitle className="text-base flex items-center gap-2">
-            <Scissors className="w-4 h-4 text-primary" />
+            <span className="rounded-lg bg-primary/10 p-1.5">
+              <Scissors className="w-4 h-4 text-primary" />
+            </span>
             מערכת חיתוך מתקדמת
           </CardTitle>
         </CardHeader>
@@ -1012,7 +1017,7 @@ export default function AdvancedCutPanel({
             <Button
               variant="outline"
               size="sm"
-              className="gap-1"
+              className="gap-1.5 h-9 sm:h-9"
               onClick={() => fileInputRef.current?.click()}
             >
               <Upload className="w-4 h-4" />
@@ -1047,42 +1052,42 @@ export default function AdvancedCutPanel({
 
           {/* Source info */}
           {sourceFile && (
-            <div className="flex items-center gap-2 text-sm bg-muted/30 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2 text-sm bg-primary/5 border border-primary/15 rounded-xl px-3 py-2.5">
               <FileAudio className="w-4 h-4 text-primary shrink-0" />
               <span className="font-medium truncate">{sourceLabel}</span>
               {isProbing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               {sourceDuration !== null && (
-                <Badge variant="outline" className="text-[10px] shrink-0">
+                <Badge variant="secondary" className="text-[10px] shrink-0">
                   {formatTime(sourceDuration)}
                 </Badge>
               )}
-              <span className="text-xs text-muted-foreground">{formatBytes(sourceFile.size)}</span>
+              <span className="text-xs text-muted-foreground mr-auto shrink-0">{formatBytes(sourceFile.size)}</span>
             </div>
           )}
 
           {sourceFile && sourceDuration !== null && (
             <>
               {/* Quick actions */}
-              <div className="flex flex-wrap gap-1.5">
-                <span className="text-xs text-muted-foreground self-center ml-1">חלוקה מהירה:</span>
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <span className="text-xs font-medium text-muted-foreground self-center">חלוקה מהירה:</span>
                 {[2, 3, 4, 5, 10].map((n) => (
                   <Button
                     key={n}
                     variant={cutMode === "count" && partCount === String(n) ? "default" : "outline"}
                     size="sm"
-                    className="h-7 text-xs px-2"
+                    className="h-9 sm:h-7 text-xs px-3 sm:px-2.5 rounded-full"
                     onClick={() => quickSplitEqual(n)}
                   >
                     {n} חלקים
                   </Button>
                 ))}
-                <span className="text-xs text-muted-foreground self-center mr-2 ml-1">|</span>
+                <span className="text-muted-foreground/40 self-center mx-1">|</span>
                 {[1, 3, 5, 10, 15, 30].map((m) => (
                   <Button
                     key={m}
                     variant={cutMode === "time" && chunkMinutes === String(m) && chunkSeconds === "0" ? "default" : "outline"}
                     size="sm"
-                    className="h-7 text-xs px-2"
+                    className="h-9 sm:h-7 text-xs px-3 sm:px-2.5 rounded-full"
                     onClick={() => quickSplitByMinutes(m)}
                   >
                     כל {m} דק׳
@@ -1091,7 +1096,7 @@ export default function AdvancedCutPanel({
               </div>
 
               {/* Mode Tabs */}
-              <div className="flex gap-1 border rounded-lg p-1 bg-muted/20">
+              <div className="flex gap-1 border rounded-xl p-1 bg-muted/30">
                 {(
                   [
                     { mode: "manual" as CutMode, icon: ListOrdered, label: "ידני" },
@@ -1103,9 +1108,9 @@ export default function AdvancedCutPanel({
                     key={mode}
                     onClick={() => setCutMode(mode)}
                     className={cn(
-                      "flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                      "flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 sm:py-2 rounded-lg text-xs font-medium transition-all",
                       cutMode === mode
-                        ? "bg-background shadow-sm text-foreground"
+                        ? "bg-background shadow-sm text-primary ring-1 ring-primary/20"
                         : "text-muted-foreground hover:text-foreground hover:bg-background/50",
                     )}
                   >
@@ -1116,7 +1121,7 @@ export default function AdvancedCutPanel({
               </div>
 
               {/* Mode-specific config */}
-              <div className="border rounded-lg p-3 space-y-3">
+              <div className="border rounded-xl p-3 sm:p-4 space-y-3 bg-muted/10">
                 {cutMode === "manual" && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -1137,7 +1142,7 @@ export default function AdvancedCutPanel({
                               placeholder="0:00"
                               value={row.startInput}
                               onChange={(e) => updateManualRow(row.id, "startInput", e.target.value)}
-                              className="h-7 text-xs font-mono"
+                              className="h-9 sm:h-7 text-xs font-mono"
                             />
                           </div>
                           <div>
@@ -1145,7 +1150,7 @@ export default function AdvancedCutPanel({
                               placeholder={sourceDuration ? formatTime(sourceDuration) : "סוף"}
                               value={row.endInput}
                               onChange={(e) => updateManualRow(row.id, "endInput", e.target.value)}
-                              className="h-7 text-xs font-mono"
+                              className="h-9 sm:h-7 text-xs font-mono"
                             />
                           </div>
                           <div>
@@ -1153,14 +1158,14 @@ export default function AdvancedCutPanel({
                               placeholder={`חלק ${i + 1}`}
                               value={row.label}
                               onChange={(e) => updateManualRow(row.id, "label", e.target.value)}
-                              className="h-7 text-xs"
+                              className="h-9 sm:h-7 text-xs"
                             />
                           </div>
                         </div>
                         <Button
                           size="icon"
                           variant="ghost"
-                          className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
+                          className="h-9 w-9 sm:h-7 sm:w-7 text-muted-foreground hover:text-destructive shrink-0"
                           disabled={manualRows.length <= 1}
                           onClick={() => removeManualRow(row.id)}
                         >
@@ -1186,7 +1191,7 @@ export default function AdvancedCutPanel({
                           step="1"
                           value={chunkMinutes}
                           onChange={(e) => setChunkMinutes(e.target.value)}
-                          className="h-8"
+                          className="h-10 sm:h-8"
                         />
                       </div>
                       <span className="mt-4 text-muted-foreground">:</span>
@@ -1199,7 +1204,7 @@ export default function AdvancedCutPanel({
                           step="1"
                           value={chunkSeconds}
                           onChange={(e) => setChunkSeconds(e.target.value)}
-                          className="h-8"
+                          className="h-10 sm:h-8"
                         />
                       </div>
                     </div>
@@ -1237,7 +1242,7 @@ export default function AdvancedCutPanel({
                         max="100"
                         value={partCount}
                         onChange={(e) => setPartCount(e.target.value)}
-                        className="h-8 w-20"
+                        className="h-10 sm:h-8 w-20"
                       />
                     </div>
                     {sourceDuration && parseInt(partCount, 10) > 0 && (
@@ -1259,9 +1264,9 @@ export default function AdvancedCutPanel({
               />
 
               {/* Submit button */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                 <Button
-                  className="gap-2"
+                  className="gap-2 h-11 sm:h-10 w-full sm:w-auto shadow-sm"
                   disabled={!sourceFile || previewSegments.length === 0}
                   onClick={handleSubmitCut}
                 >
@@ -1269,7 +1274,7 @@ export default function AdvancedCutPanel({
                   חתוך {previewSegments.length} קטעים
                 </Button>
                 {previewSegments.length > 0 && (
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-muted-foreground text-center sm:text-right">
                     עיבוד מקבילי — עד {Math.min(4, previewSegments.length)} בו-זמנית
                   </span>
                 )}
@@ -1281,11 +1286,11 @@ export default function AdvancedCutPanel({
 
       {/* Jobs list */}
       {cutJobs.length > 0 && (
-        <Card>
+        <Card className="border-primary/15 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center justify-between">
               <span className="flex items-center gap-2">
-                <FileAudio className="w-4 h-4" />
+                <FileAudio className="w-4 h-4 text-primary" />
                 תוצאות חיתוך ({cutJobs.length})
               </span>
               <div className="flex items-center gap-2">
