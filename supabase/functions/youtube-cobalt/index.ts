@@ -15,21 +15,45 @@ const COBALT_INSTANCES = [
   'https://api.cobalt.tools',
   'https://co.eepy.today',
   'https://cobalt-api.kwiatekmiki.com',
+  'https://cobalt.synzr.ru',
+  'https://dl01.yt-dl.click',
+  'https://co.wuk.sh',
 ];
 
-// Piped — https://github.com/TeamPiped/Piped (public mirrors rotate)
+// Piped — https://github.com/TeamPiped/Piped (public mirrors rotate often)
+// List expanded with known-working public instances; non-working ones fail fast.
 const PIPED_INSTANCES = [
   'https://pipedapi.kavin.rocks',
   'https://pipedapi.adminforge.de',
   'https://pipedapi.r4fo.com',
   'https://pipedapi.leptons.xyz',
+  'https://pipedapi.aeong.one',
+  'https://pipedapi.smnz.de',
+  'https://pipedapi.in.projectsegfau.lt',
+  'https://api.piped.private.coffee',
+  'https://pipedapi.darkness.services',
+  'https://pipedapi.reallyaweso.me',
+  'https://api.piped.yt',
+  'https://pipedapi.ducks.party',
+  'https://pipedapi.osphost.fi',
+  'https://pipedapi.us.projectsegfau.lt',
 ];
 
-// Invidious — https://github.com/iv-org/invidious
+// Invidious — https://github.com/iv-org/invidious (public registry rotates)
 const INVIDIOUS_INSTANCES = [
   'https://invidious.nerdvpn.de',
   'https://inv.nadeko.net',
   'https://invidious.privacyredirect.com',
+  'https://invidious.materialio.us',
+  'https://invidious.jing.rocks',
+  'https://invidious.flokinet.to',
+  'https://yewtu.be',
+  'https://inv.tux.pizza',
+  'https://invidious.protokolla.fi',
+  'https://invidious.fdn.fr',
+  'https://iv.melmac.space',
+  'https://inv.in.projectsegfau.lt',
+  'https://invidious.dhusch.de',
 ];
 
 interface ReqBody {
@@ -78,42 +102,41 @@ interface PipedResponse {
   videoStreams?: PipedStream[];
 }
 
-async function tryPiped(videoId: string, opts: ReqBody): Promise<{ url: string; filename: string; title?: string; thumbnail?: string; author?: string; instance: string } | null> {
-  for (const base of PIPED_INSTANCES) {
-    try {
-      const res = await fetch(`${base}/streams/${videoId}`, {
-        headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
-        signal: AbortSignal.timeout(7000),
-      });
-      if (!res.ok) continue;
-      const data = (await res.json()) as PipedResponse;
-      let chosen: PipedStream | undefined;
-      if (opts.mode === 'video') {
-        const target = parseInt(opts.videoQuality ?? '720', 10);
-        const muxed = (data.videoStreams ?? []).filter((s) => !s.videoOnly);
-        chosen = muxed.sort((a, b) => {
-          const da = Math.abs(parseInt(a.quality ?? '0') - target);
-          const db = Math.abs(parseInt(b.quality ?? '0') - target);
-          return da - db;
-        })[0];
-      } else {
-        // audio
-        chosen = (data.audioStreams ?? []).sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
-      }
-      if (!chosen?.url) continue;
-      const ext = (chosen.mimeType?.split('/')[1] ?? chosen.format ?? (opts.mode === 'video' ? 'mp4' : 'm4a')).split(';')[0];
-      const safeTitle = (data.title ?? videoId).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
-      return {
-        url: chosen.url,
-        filename: `${safeTitle}.${ext}`,
-        title: data.title,
-        thumbnail: data.thumbnailUrl,
-        author: data.uploader,
-        instance: `piped:${new URL(base).host}`,
-      };
-    } catch { /* try next */ }
+async function tryPipedInstance(base: string, videoId: string, opts: ReqBody) {
+  const res = await fetch(`${base}/streams/${videoId}`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
+    signal: AbortSignal.timeout(6000),
+  });
+  if (!res.ok) throw new Error(`piped ${res.status}`);
+  const data = (await res.json()) as PipedResponse;
+  let chosen: PipedStream | undefined;
+  if (opts.mode === 'video') {
+    const target = parseInt(opts.videoQuality ?? '720', 10);
+    const muxed = (data.videoStreams ?? []).filter((s) => !s.videoOnly);
+    chosen = muxed.sort((a, b) => Math.abs(parseInt(a.quality ?? '0') - target) - Math.abs(parseInt(b.quality ?? '0') - target))[0];
+  } else {
+    chosen = (data.audioStreams ?? []).sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
   }
-  return null;
+  if (!chosen?.url) throw new Error('no stream');
+  const ext = (chosen.mimeType?.split('/')[1] ?? chosen.format ?? (opts.mode === 'video' ? 'mp4' : 'm4a')).split(';')[0];
+  const safeTitle = (data.title ?? videoId).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
+  return {
+    url: chosen.url,
+    filename: `${safeTitle}.${ext}`,
+    title: data.title,
+    thumbnail: data.thumbnailUrl,
+    author: data.uploader,
+    instance: `piped:${new URL(base).host}`,
+  };
+}
+
+async function tryPiped(videoId: string, opts: ReqBody) {
+  // Race all instances in parallel — first responder wins.
+  try {
+    return await Promise.any(PIPED_INSTANCES.map((b) => tryPipedInstance(b, videoId, opts)));
+  } catch {
+    return null;
+  }
 }
 
 // ── Backend: Invidious ──────────────────────────────────────────────────────
@@ -128,43 +151,40 @@ interface InvResponse {
   formatStreams?: InvFormat[];
 }
 
-async function tryInvidious(videoId: string, opts: ReqBody): Promise<{ url: string; filename: string; title?: string; thumbnail?: string; author?: string; instance: string } | null> {
-  for (const base of INVIDIOUS_INSTANCES) {
-    try {
-      const res = await fetch(`${base}/api/v1/videos/${videoId}`, {
-        headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
-        signal: AbortSignal.timeout(7000),
-      });
-      if (!res.ok) continue;
-      const data = (await res.json()) as InvResponse;
-      let chosen: { url: string; container?: string } | undefined;
-      if (opts.mode === 'video') {
-        // formatStreams are pre-muxed video+audio
-        const target = parseInt(opts.videoQuality ?? '720', 10);
-        chosen = (data.formatStreams ?? []).sort((a, b) => {
-          const da = Math.abs(parseInt(a.qualityLabel ?? '0') - target);
-          const db = Math.abs(parseInt(b.qualityLabel ?? '0') - target);
-          return da - db;
-        })[0];
-      } else {
-        const audios = (data.adaptiveFormats ?? []).filter((f) => f.type?.startsWith('audio/'));
-        chosen = audios.sort((a, b) => parseInt(b.bitrate ?? '0') - parseInt(a.bitrate ?? '0'))[0];
-      }
-      if (!chosen?.url) continue;
-      const ext = chosen.container ?? (opts.mode === 'video' ? 'mp4' : 'm4a');
-      const safeTitle = (data.title ?? videoId).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
-      const thumb = data.videoThumbnails?.[0]?.url;
-      return {
-        url: chosen.url,
-        filename: `${safeTitle}.${ext}`,
-        title: data.title,
-        thumbnail: thumb,
-        author: data.author,
-        instance: `invidious:${new URL(base).host}`,
-      };
-    } catch { /* try next */ }
+async function tryInvidiousInstance(base: string, videoId: string, opts: ReqBody) {
+  const res = await fetch(`${base}/api/v1/videos/${videoId}`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
+    signal: AbortSignal.timeout(6000),
+  });
+  if (!res.ok) throw new Error(`invidious ${res.status}`);
+  const data = (await res.json()) as InvResponse;
+  let chosen: { url: string; container?: string } | undefined;
+  if (opts.mode === 'video') {
+    const target = parseInt(opts.videoQuality ?? '720', 10);
+    chosen = (data.formatStreams ?? []).sort((a, b) => Math.abs(parseInt(a.qualityLabel ?? '0') - target) - Math.abs(parseInt(b.qualityLabel ?? '0') - target))[0];
+  } else {
+    const audios = (data.adaptiveFormats ?? []).filter((f) => f.type?.startsWith('audio/'));
+    chosen = audios.sort((a, b) => parseInt(b.bitrate ?? '0') - parseInt(a.bitrate ?? '0'))[0];
   }
-  return null;
+  if (!chosen?.url) throw new Error('no stream');
+  const ext = chosen.container ?? (opts.mode === 'video' ? 'mp4' : 'm4a');
+  const safeTitle = (data.title ?? videoId).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
+  return {
+    url: chosen.url,
+    filename: `${safeTitle}.${ext}`,
+    title: data.title,
+    thumbnail: data.videoThumbnails?.[0]?.url,
+    author: data.author,
+    instance: `invidious:${new URL(base).host}`,
+  };
+}
+
+async function tryInvidious(videoId: string, opts: ReqBody) {
+  try {
+    return await Promise.any(INVIDIOUS_INSTANCES.map((b) => tryInvidiousInstance(b, videoId, opts)));
+  } catch {
+    return null;
+  }
 }
 
 // ── Backend: Cobalt ─────────────────────────────────────────────────────────
