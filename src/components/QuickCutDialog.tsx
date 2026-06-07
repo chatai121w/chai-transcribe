@@ -942,6 +942,13 @@ export default function QuickCutDialog() {
               />
             </label>
 
+            {/* Tier engine live status */}
+            <TierStatusPanel
+              events={tierEvents}
+              activeProgress={isCutting ? progress : null}
+              finalTier={(tierUsed || null) as CutTier | null}
+            />
+
             {/* Unified pipeline progress */}
             {pipeline.length > 0 && (busy || pipeline.some((s) => s.status !== "pending")) && (
               <PipelineProgress stages={pipeline} />
