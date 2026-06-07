@@ -52,6 +52,24 @@ function getOutputFfmpegArgs(outputFormat: OutputFormat): string[] {
   return OUTPUT_FORMAT_CONFIG[outputFormat].ffmpegArgs;
 }
 
+/**
+ * Choose a Groq-friendly container for a probed audio codec when doing
+ * a stream-copy extraction. Groq accepts flac, mp3, mp4, mpga, m4a, ogg,
+ * wav, webm — so we wrap each codec in its standard, supported container.
+ */
+function codecToContainer(codec: string): { ext: string; mime: string } {
+  const c = codec.toLowerCase();
+  if (c === "aac") return { ext: "m4a", mime: "audio/mp4" };
+  if (c === "mp3") return { ext: "mp3", mime: "audio/mpeg" };
+  if (c === "opus") return { ext: "ogg", mime: "audio/ogg" };
+  if (c === "vorbis") return { ext: "ogg", mime: "audio/ogg" };
+  if (c === "flac") return { ext: "flac", mime: "audio/flac" };
+  if (c.startsWith("pcm")) return { ext: "wav", mime: "audio/wav" };
+  // Unknown codec — fall back to .m4a, the extraction code will re-encode.
+  return { ext: "m4a", mime: "audio/mp4" };
+}
+
+
 export interface ConversionJob {
   id: string;
   fileName: string;
