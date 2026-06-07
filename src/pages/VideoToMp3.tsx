@@ -142,6 +142,17 @@ function getOutputFileName(fileName: string, outputFormat: OutputFormat): string
   return fileName.replace(/\.[^/.]+$/, "") + `.${ext}`;
 }
 
+/** Job-aware output name — honors `outputExt` (set by audio extraction). */
+function getJobOutputName(job: ConversionJob): string {
+  if (job.outputExt) return job.fileName.replace(/\.[^/.]+$/, "") + `.${job.outputExt}`;
+  return getOutputFileName(job.fileName, job.outputFormat);
+}
+
+function getJobOutputMime(job: ConversionJob): string {
+  return job.outputMime ?? OUTPUT_FORMAT_META[job.outputFormat].mime;
+}
+
+
 // ─── Status Badge ────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: ConversionJob["status"] }) {
