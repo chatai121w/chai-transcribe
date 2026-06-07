@@ -77,6 +77,7 @@ const CloudKeySyncLazy = lazy(() => import("./components/CloudKeySync"));
 const DiarizationFloatingStatusLazy = lazy(() => import("./components/DiarizationFloatingStatus").then(m => ({ default: m.DiarizationFloatingStatus })));
 const JobsCenterLazy = lazy(() => import("./components/jobs/JobsCenter").then(m => ({ default: m.JobsCenter })));
 const ConversionJobsBridgeLazy = lazy(() => import("./components/jobs/ConversionJobsBridge").then(m => ({ default: m.ConversionJobsBridge })));
+const TranscriptionJobsBridgeLazy = lazy(() => import("./components/jobs/TranscriptionJobsBridge").then(m => ({ default: m.TranscriptionJobsBridge })));
 
 
 /** Mounts children only after the browser is idle / a delay — keeps them off the critical path. */
