@@ -39,6 +39,19 @@ export interface YoutubeJob {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  /** Stage list — populated by the job orchestrator (JSONB in DB) */
+  stages?: Array<{
+    key: string;
+    status: string;
+    percent: number;
+    meta?: {
+      server_job_id?: string;
+      dl_mb?: number;
+      total_mb?: number;
+      speed_mb?: number;
+      [k: string]: unknown;
+    } | null;
+  }>;
 }
 
 export interface YtProbeResult {

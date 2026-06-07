@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -29,6 +30,7 @@ export default function YouTubePage() {
   const [mode, setMode] = useState<YtMode>("transcribe");
   const [audioFormat, setAudioFormat] = useState<"best" | "mp3" | "wav">("best");
   const [videoQuality, setVideoQuality] = useState<"360" | "720" | "1080">("720");
+  const [saveToCloud, setSaveToCloud] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const { jobs, loading, probeUrl, startJob, deleteJob } = useYoutubeJobs();
@@ -65,6 +67,7 @@ export default function YouTubePage() {
         mode,
         audioFormat,
         videoQuality,
+        saveToCloud: probe?.backend === "local" ? saveToCloud : false,
       });
       setActiveJobId(job.id);
       toast({ title: "המשימה התחילה", description: "עקוב אחרי השלבים למטה או במרכז המשימות" });
@@ -196,6 +199,22 @@ export default function YouTubePage() {
                 </div>
               )}
 
+              {probe?.backend === "local" && (mode === "transcribe" || mode === "full") && (
+                <div className="flex items-center justify-between mt-3 p-3 bg-muted/40 rounded-lg border">
+                  <div className="min-w-0 ml-3">
+                    <Label htmlFor="save-cloud" className="text-sm font-medium cursor-pointer">שמור תמלול בענן ☁️</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      מעלה TXT/SRT/JSON ל-Supabase Storage — גישה מכל מקום
+                    </p>
+                  </div>
+                  <Switch
+                    id="save-cloud"
+                    checked={saveToCloud}
+                    onCheckedChange={setSaveToCloud}
+                  />
+                </div>
+              )}
+
               <Button onClick={handleStart} disabled={submitting} size="lg" className="w-full mt-4 bg-red-500 hover:bg-red-600 text-white">
                 {submitting ? <Loader2 className="w-5 h-5 animate-spin ml-2" /> : <Download className="w-5 h-5 ml-2" />}
                 התחל
@@ -266,6 +285,13 @@ function JobRow({ job, onDelete }: { job: YoutubeJob; onDelete: (id: string) => 
   };
   const isActive = !["done", "error", "cancelled"].includes(job.status);
 
+  // Real-time download stats from stage meta
+  const dlStage = job.stages?.find((s) => s.key === "download");
+  const dlMeta = dlStage?.meta;
+  const showDlStats = isActive &&
+    job.status !== "transcribing" &&
+    (dlMeta?.dl_mb ?? 0) > 0;
+
   return (
     <div className="flex gap-3 p-3 border rounded-lg hover:bg-muted/30 transition">
       {job.thumbnail_url ? (
@@ -286,6 +312,17 @@ function JobRow({ job, onDelete }: { job: YoutubeJob; onDelete: (id: string) => 
           <span className="text-xs text-muted-foreground">{new Date(job.created_at).toLocaleString("he-IL")}</span>
         </div>
         {isActive && <Progress value={job.progress_pct} className="mt-2 h-1.5" />}
+        {showDlStats && (
+          <div className="flex gap-3 mt-1 text-xs text-muted-foreground font-mono">
+            <span>⬇ {(dlMeta!.dl_mb ?? 0).toFixed(1)} MB</span>
+            {(dlMeta!.total_mb ?? 0) > 0 && (
+              <span className="text-muted-foreground/60">/ {(dlMeta!.total_mb!).toFixed(1)} MB</span>
+            )}
+            {(dlMeta!.speed_mb ?? 0) > 0 && (
+              <span className="text-blue-500">{(dlMeta!.speed_mb!).toFixed(2)} MB/s</span>
+            )}
+          </div>
+        )}
         {job.error && <p className="text-xs text-destructive mt-1">{job.error}</p>}
         {job.output_files?.length > 0 && (
           <div className="flex gap-1 mt-2 flex-wrap">

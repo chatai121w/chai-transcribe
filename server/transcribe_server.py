@@ -1991,6 +1991,20 @@ _YT_URL_RE = __import__("re").compile(
     r"^https?://(www\.|m\.)?(youtube\.com/(watch\?v=|shorts/|live/)|youtu\.be/)[\w\-]+"
 )
 
+# Parses yt-dlp progress lines:
+# [download]  35.4% of  123.45MiB at    2.34MiB/s ETA 00:45
+_YT_PROGRESS_RE = __import__("re").compile(
+    r'\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+)(KiB|MiB|GiB)(?:.*?at\s+([\d.]+)(KiB|MiB|GiB)/s)?',
+    __import__("re").IGNORECASE,
+)
+
+def _mb(val: float, unit: str) -> float:
+    """Convert KiB/MiB/GiB value to MiB."""
+    u = unit.lower()
+    if u == "kib": return val / 1024.0
+    if u == "gib": return val * 1024.0
+    return float(val)
+
 def _yt_update(job_id: str, **patch):
     with _YT_JOBS_LOCK:
         if job_id in _YT_JOBS:
@@ -2005,6 +2019,70 @@ def _yt_has_ytdlp() -> bool:
     except Exception:
         return False
 
+def _run_ytdlp(cmd: list, job_id: str, track_key: str = "dl", timeout: int = 900,
+               progress_range: tuple = (10, 48)) -> None:
+    """
+    Run yt-dlp, stream output line-by-line, parse progress and update
+    _YT_JOBS[job_id] in real-time with download speed + progress fields.
+
+    Fields written to the job dict (prefixed by track_key):
+        {key}_pct          — % complete (0–100)
+        {key}_dl_mb        — MB downloaded so far
+        {key}_total_mb     — total file size in MB
+        {key}_speed_mb     — current speed in MB/s
+
+    Also updates progress_pct (overall 0–100) mapped to progress_range.
+    """
+    import subprocess, threading
+    stderr_lines: list = []
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+
+    def _read_stderr():
+        for line in proc.stderr:
+            stderr_lines.append(line.rstrip())
+
+    stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+    stderr_thread.start()
+
+    p_start, p_end = progress_range
+    for raw_line in proc.stdout:
+        line = raw_line.rstrip()
+        m = _YT_PROGRESS_RE.search(line)
+        if m:
+            pct = float(m.group(1))
+            total_mb = _mb(float(m.group(2)), m.group(3))
+            dl_mb = round(total_mb * pct / 100.0, 2)
+            overall_pct = round(p_start + (pct / 100.0) * (p_end - p_start), 1)
+            patch: dict = {
+                f"{track_key}_pct": pct,
+                f"{track_key}_dl_mb": dl_mb,
+                f"{track_key}_total_mb": round(total_mb, 2),
+                "progress_pct": overall_pct,
+            }
+            if m.group(4):
+                patch[f"{track_key}_speed_mb"] = round(_mb(float(m.group(4)), m.group(5)), 2)
+            _yt_update(job_id, **patch)
+
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stderr_thread.join(2)
+        raise RuntimeError(f"yt-dlp timed out after {timeout}s")
+
+    stderr_thread.join(5)
+
+    if proc.returncode != 0:
+        err_tail = "\n".join(stderr_lines[-5:]) or "unknown error"
+        raise RuntimeError(f"yt-dlp failed (rc={proc.returncode}): {err_tail[:400]}")
+
 def _yt_audio_fmt_args(audio_format: str) -> list:
     """Return yt-dlp -f / postprocess args for the requested audio format."""
     if audio_format == "best":
@@ -2014,8 +2092,19 @@ def _yt_audio_fmt_args(audio_format: str) -> list:
         return ["-f", "bestaudio", "--extract-audio", "--audio-format", audio_format, "--audio-quality", "0"]
     return ["-f", "bestaudio"]
 
+# Speed + reliability flags shared by all yt-dlp invocations
+_YT_SPEED_FLAGS = [
+    "--concurrent-fragments", "4",  # parallel fragment download
+    "--buffer-size", "65536",       # 64KB read buffer
+    "--retries", "10",              # retry failed downloads
+    "--fragment-retries", "10",     # retry failed fragments
+    "--continue",                   # resume interrupted downloads
+    "--newline",                    # one progress line per newline (for parsing)
+]
+
 def _yt_run_job(job_id: str, params: dict):
     import subprocess, shutil, json as _json
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     job_dir = _YT_ROOT / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     url = params["url"]
@@ -2027,41 +2116,66 @@ def _yt_run_job(job_id: str, params: dict):
     try:
         _yt_update(job_id, status="downloading", progress_pct=10)
 
-        # AUDIO branch (audio/transcribe/full)
-        if mode in ("audio", "transcribe", "full"):
+        def _download_audio(prog_range=(10, 48)):
             tmpl = str(job_dir / "audio.%(ext)s")
-            cmd = ["yt-dlp", "--no-playlist", "--no-progress", "-o", tmpl] + _yt_audio_fmt_args(audio_format) + [url]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
-            if r.returncode != 0:
-                raise RuntimeError(f"yt-dlp audio failed: {r.stderr[:400]}")
-            audio_file = next((p for p in job_dir.iterdir() if p.name.startswith("audio.")), None)
-            if not audio_file:
+            cmd = (["yt-dlp", "--no-playlist", "-o", tmpl]
+                   + _YT_SPEED_FLAGS
+                   + _yt_audio_fmt_args(audio_format)
+                   + [url])
+            _run_ytdlp(cmd, job_id, track_key="audio", timeout=900,
+                       progress_range=prog_range)
+            af = next((p for p in job_dir.iterdir()
+                       if p.name.startswith("audio.") and not p.suffix == ".part"), None)
+            if not af:
                 raise RuntimeError("Audio file not produced")
+            return af
+
+        def _download_video(prog_range=(10, 48)):
+            tmpl = str(job_dir / "video.%(ext)s")
+            fmt = f"bestvideo[height<={video_quality}]+bestaudio/best[height<={video_quality}]"
+            cmd = (["yt-dlp", "--no-playlist", "-f", fmt,
+                    "--merge-output-format", "mp4", "-o", tmpl]
+                   + _YT_SPEED_FLAGS
+                   + [url])
+            _run_ytdlp(cmd, job_id, track_key="video", timeout=1800,
+                       progress_range=prog_range)
+            return next((p for p in job_dir.iterdir()
+                         if p.name.startswith("video.") and not p.suffix == ".part"), None)
+
+        # AUDIO branch (audio/transcribe/full)
+        need_audio = mode in ("audio", "transcribe", "full")
+        need_video = mode in ("video", "full")
+
+        audio_file = None
+        video_file = None
+
+        if need_audio and need_video:
+            # Download audio + video in parallel; split overall progress range
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                fut_audio = ex.submit(_download_audio, (10, 30))
+                fut_video = ex.submit(_download_video, (30, 48))
+                audio_file = fut_audio.result()
+                video_file = fut_video.result()
+        elif need_audio:
+            audio_file = _download_audio()
+        elif need_video:
+            video_file = _download_video()
+
+        if audio_file:
             outputs.append({
                 "kind": "audio",
                 "url": f"/yt/file/{job_id}/{audio_file.name}",
                 "filename": audio_file.name,
                 "size": audio_file.stat().st_size,
             })
-            _yt_update(job_id, progress_pct=45, output_files=outputs)
-
-        # VIDEO branch
-        if mode in ("video", "full"):
-            tmpl = str(job_dir / "video.%(ext)s")
-            fmt = f"bestvideo[height<={video_quality}]+bestaudio/best[height<={video_quality}]"
-            cmd = ["yt-dlp", "--no-playlist", "--no-progress", "-f", fmt, "--merge-output-format", "mp4", "-o", tmpl, url]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-            if r.returncode != 0:
-                raise RuntimeError(f"yt-dlp video failed: {r.stderr[:400]}")
-            video_file = next((p for p in job_dir.iterdir() if p.name.startswith("video.")), None)
-            if video_file:
-                outputs.append({
-                    "kind": "video",
-                    "url": f"/yt/file/{job_id}/{video_file.name}",
-                    "filename": video_file.name,
-                    "size": video_file.stat().st_size,
-                })
-                _yt_update(job_id, progress_pct=70, output_files=outputs)
+        if video_file:
+            outputs.append({
+                "kind": "video",
+                "url": f"/yt/file/{job_id}/{video_file.name}",
+                "filename": video_file.name,
+                "size": video_file.stat().st_size,
+            })
+        _yt_update(job_id, progress_pct=50, output_files=outputs)
 
         # TRANSCRIBE branch
         if mode in ("transcribe", "full"):
@@ -2172,6 +2286,9 @@ def yt_job_start():
         _YT_JOBS[job_id] = {
             "id": job_id, "status": "pending", "progress_pct": 0,
             "output_files": [], "error": None,
+            # real-time download metrics (updated during download)
+            "audio_pct": 0, "audio_dl_mb": 0, "audio_total_mb": 0, "audio_speed_mb": 0,
+            "video_pct": 0, "video_dl_mb": 0, "video_total_mb": 0, "video_speed_mb": 0,
             "created_at": time.time(), "updated_at": time.time(),
         }
     t = threading.Thread(target=_yt_run_job, args=(job_id, data), daemon=True)
@@ -3650,16 +3767,20 @@ def main():
     print("    POST /shutdown          — Gracefully stop the server")
     print()
 
-    # Use waitress production server with multi-threading (4 threads)
+    # Use waitress production server with multi-threading (8 threads)
     # Falls back to Flask dev server if waitress is not installed
     try:
         from waitress import serve
-        print(f"  Server: waitress (4 threads, timeout={WAITRESS_CHANNEL_TIMEOUT}s)")
+        import os as _os
+        _threads = int(_os.environ.get("SERVER_THREADS", "8"))
+        print(f"  Server: waitress ({_threads} threads, timeout={WAITRESS_CHANNEL_TIMEOUT}s)")
         print()
-        serve(app, listen=f'0.0.0.0:{args.port} [::1]:{args.port}', threads=4,
+        serve(app, listen=f'0.0.0.0:{args.port} [::1]:{args.port}', threads=_threads,
               channel_timeout=WAITRESS_CHANNEL_TIMEOUT,
               recv_bytes=WAITRESS_RECV_BYTES,
-              send_bytes=4096, url_scheme='http')
+              send_bytes=65536, url_scheme='http',
+              connection_limit=200,
+              cleanup_interval=30)
     except ImportError:
         print("  Server: Flask dev server (install waitress for production)")
         print("  Tip: pip install waitress")
