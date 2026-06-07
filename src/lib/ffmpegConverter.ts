@@ -709,6 +709,28 @@ export function convertAudio(file: File, outputFormat: OutputFormat = "mp3"): Co
   return job;
 }
 
+/**
+ * Extract the audio track from a video/audio file with `-c:a copy`
+ * (no re-encoding). Probes the source codec and chooses a Groq-compatible
+ * container automatically (AAC → .m4a, Opus → .ogg, etc).
+ */
+export function extractAudio(file: File): ConversionJob {
+  const job: ConversionJob = {
+    id: `extract_${++idCounter}_${Date.now()}`,
+    fileName: file.name,
+    fileSize: file.size,
+    outputFormat: "mp3", // placeholder; actual container comes from outputExt
+    file,
+    status: "queued",
+    progress: 0,
+    retryCount: 0,
+    extract: true,
+  };
+  enqueue(job);
+  return job;
+}
+
+
 /** Retry a failed job — requires the original File object */
 export function retryJob(job: ConversionJob, file: File): ConversionJob {
   job.file = file;
