@@ -516,6 +516,10 @@ export default function VideoToMp3() {
             return;
           }
         }
+        const outFile = toOutputFile(updatedJob);
+        if (outFile) {
+          pushCompletedFile(outFile, "convert", updatedJob.fileName);
+        }
         setPromptJob(updatedJob);
       }
     });
