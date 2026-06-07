@@ -102,42 +102,41 @@ interface PipedResponse {
   videoStreams?: PipedStream[];
 }
 
-async function tryPiped(videoId: string, opts: ReqBody): Promise<{ url: string; filename: string; title?: string; thumbnail?: string; author?: string; instance: string } | null> {
-  for (const base of PIPED_INSTANCES) {
-    try {
-      const res = await fetch(`${base}/streams/${videoId}`, {
-        headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
-        signal: AbortSignal.timeout(7000),
-      });
-      if (!res.ok) continue;
-      const data = (await res.json()) as PipedResponse;
-      let chosen: PipedStream | undefined;
-      if (opts.mode === 'video') {
-        const target = parseInt(opts.videoQuality ?? '720', 10);
-        const muxed = (data.videoStreams ?? []).filter((s) => !s.videoOnly);
-        chosen = muxed.sort((a, b) => {
-          const da = Math.abs(parseInt(a.quality ?? '0') - target);
-          const db = Math.abs(parseInt(b.quality ?? '0') - target);
-          return da - db;
-        })[0];
-      } else {
-        // audio
-        chosen = (data.audioStreams ?? []).sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
-      }
-      if (!chosen?.url) continue;
-      const ext = (chosen.mimeType?.split('/')[1] ?? chosen.format ?? (opts.mode === 'video' ? 'mp4' : 'm4a')).split(';')[0];
-      const safeTitle = (data.title ?? videoId).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
-      return {
-        url: chosen.url,
-        filename: `${safeTitle}.${ext}`,
-        title: data.title,
-        thumbnail: data.thumbnailUrl,
-        author: data.uploader,
-        instance: `piped:${new URL(base).host}`,
-      };
-    } catch { /* try next */ }
+async function tryPipedInstance(base: string, videoId: string, opts: ReqBody) {
+  const res = await fetch(`${base}/streams/${videoId}`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
+    signal: AbortSignal.timeout(6000),
+  });
+  if (!res.ok) throw new Error(`piped ${res.status}`);
+  const data = (await res.json()) as PipedResponse;
+  let chosen: PipedStream | undefined;
+  if (opts.mode === 'video') {
+    const target = parseInt(opts.videoQuality ?? '720', 10);
+    const muxed = (data.videoStreams ?? []).filter((s) => !s.videoOnly);
+    chosen = muxed.sort((a, b) => Math.abs(parseInt(a.quality ?? '0') - target) - Math.abs(parseInt(b.quality ?? '0') - target))[0];
+  } else {
+    chosen = (data.audioStreams ?? []).sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
   }
-  return null;
+  if (!chosen?.url) throw new Error('no stream');
+  const ext = (chosen.mimeType?.split('/')[1] ?? chosen.format ?? (opts.mode === 'video' ? 'mp4' : 'm4a')).split(';')[0];
+  const safeTitle = (data.title ?? videoId).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
+  return {
+    url: chosen.url,
+    filename: `${safeTitle}.${ext}`,
+    title: data.title,
+    thumbnail: data.thumbnailUrl,
+    author: data.uploader,
+    instance: `piped:${new URL(base).host}`,
+  };
+}
+
+async function tryPiped(videoId: string, opts: ReqBody) {
+  // Race all instances in parallel — first responder wins.
+  try {
+    return await Promise.any(PIPED_INSTANCES.map((b) => tryPipedInstance(b, videoId, opts)));
+  } catch {
+    return null;
+  }
 }
 
 // ── Backend: Invidious ──────────────────────────────────────────────────────
