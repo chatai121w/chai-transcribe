@@ -199,7 +199,7 @@ function JobCard({
         ? formatDuration(Date.now() - job.startedAt)
         : null;
 
-  const outputFilename = getOutputFileName(job.fileName, job.outputFormat);
+  const outputFilename = getJobOutputName(job);
 
   return (
     <Card className="relative overflow-hidden" data-testid="job-card" data-status={job.status}>
