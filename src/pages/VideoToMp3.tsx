@@ -1433,7 +1433,7 @@ export default function VideoToMp3() {
           )}
 
           {/* Empty State */}
-          {jobs.length === 0 && (
+          {jobs.filter((j) => !j.extract).length === 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base text-center text-muted-foreground">
