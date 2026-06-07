@@ -1,49 +1,95 @@
 
-## מה נבנה
+# מודול תמלול מיוטיוב + מנהל הורדות
 
-### 1. מנוע חיתוך מדורג חדש — `src/lib/tieredCutEngine.ts`
-הבעיה הקיימת: `audioCutEngine` מפענח את כל הקובץ ל-`AudioBuffer` בזיכרון (76MB דחוס ≈ 800MB RAM) → קורס בשקט במובייל. אין fallback ואין הודעת שגיאה ברורה.
+## ארכיטקטורה
 
-הפתרון — ניסיון אוטומטי במדרג, מהיר → איכותי:
+```text
+                    ┌─ Flask מקומי (מועדף) ─────────┐
+                    │  yt-dlp + ffmpeg + GPU          │
+   קישור YouTube ──▶│  - /yt/info                     │
+                    │  - /yt/download (audio/video)   │
+                    │  - /yt/extract                  │
+                    │  - /yt/captions                 │
+                    │  - /yt/attach-subs              │
+                    └───────────────┬────────────────┘
+                                    │ (fallback אם לא חי)
+                    ┌───────────────▼────────────────┐
+                    │ Edge Function: yt-cobalt        │
+                    │ → api.cobalt.tools (פתוח)       │
+                    │ מוגבל ל-audio/video בלבד        │
+                    └─────────────────────────────────┘
+```
 
-**Tier 1 — Byte-slice מהיר (ל-WAV/PCM בלבד)**
-פיענוח כותרת WAV → חיתוך לפי offset בייטים → File חדש. ללא decode כלל. ~50ms לקובץ 76MB.
+## חוקי ברירת מחדל (לפי הבקשה)
 
-**Tier 2 — ffmpeg.wasm stream-copy**
-שימוש ב-`ffmpegConverter.ts` הקיים עם `-ss/-to -c copy` (ללא re-encode). עובד על mp3/m4a/webm/wav. ~2-5s לקובץ 76MB. מטפל ב-cut count/time/manual.
+1. ברירת מחדל = `yt-dlp -f "bestaudio[ext=m4a]/bestaudio"` — m4a נתמך ב-Groq ישירות, אפס המרה.
+2. `ffprobe` לבדוק codec → מיפוי aac→m4a, opus→webm, mp3→mp3.
+3. המרה רק אם המשתמש מבקש WAV/MP3 במפורש, או אם הפורמט לא ב-Groq whitelist.
+4. אם הסרטון מכיל כתוביות עברית מובנות → להציע "השתמש בהן במקום לתמלל".
+5. חיבור כתוביות = `-c copy -c:s mov_text` (בלי קידוד). צריבה = אופציה מתקדמת בלבד עם אזהרה.
 
-**Tier 3 — AudioBuffer המקורי (נשאר fallback אחרון)**
-המנוע הקיים, רק לקבצים קטנים או כשהשניים הקודמים נכשלו.
+## שלבי בנייה
 
-הלוגיקה: try Tier 1 → catch → Tier 2 → catch → Tier 3 → catch → toast שגיאה עם הסבר.
-לכל שלב toast התקדמות ("מנסה חיתוך מהיר…", "נופל לחזרה ל-ffmpeg…").
+### שלב 1 — Backend (Flask)
+ב-`server/transcribe_server.py` להוסיף endpoints:
+- `POST /yt/info` → `yt-dlp --dump-json` → כותרת, אורך, thumbnail, פורמטים זמינים, רשימת subtitles, גודל משוער.
+- `POST /yt/download` → מקבל `mode: audio|video|both` + `audio_format`. מחזיר job_id, מתחיל ברקע. SSE/polling להתקדמות.
+- `POST /yt/captions` → מוריד subtitles קיימים (`--write-sub --sub-lang he,iw,en --skip-download`).
+- `POST /yt/extract` → `ffprobe` + `-c:a copy` לפי codec.
+- `POST /yt/attach-subs` ו-`POST /yt/burn-subs`.
+- `GET /yt/status/<job_id>` ו-`GET /yt/file/<job_id>/<filename>` להורדה.
+תיקיית עבודה: `temp/yt/<job_id>/`. ניקוי אוטומטי אחרי 24 שעות.
 
-### 2. רכיב `QuickCutDialog.tsx` משותף
-דיאלוג קטן: בחירת קובץ + 3 כפתורי חיתוך מהיר (`לחצי`, `3 חלקים`, `כל 5 דק'`) + "מותאם אישית" שפותח את `AdvancedCutPanel`.
-מציג רשימת מקטעים שנוצרו + שני כפתורים:
-- **תמלל הכל** — מוסיף את כל המקטעים ל-`transcription_jobs` (תור הרקע הקיים)
-- **הורד הכל** — zip להורדה
+### שלב 2 — Cloud fallback
+Edge Function חדש `youtube-cobalt`:
+- מקבל URL + mode.
+- קורא ל-`https://api.cobalt.tools/api/json` (instance ציבורי, ללא מפתח).
+- מחזיר stream URL זמני. הלקוח מוריד ישירות.
+- מוגבל לסרטונים < 2 שעות (מגבלת Cobalt).
 
-### 3. שילוב בשני מקומות
-- **AppSidebar**: פריט תפריט חדש "✂️ חיתוך מהיר" שפותח את הדיאלוג
-- **Index**: כפתור צף/חלק מסרגל הפעולות שפותח את אותו דיאלוג
+### שלב 3 — Database (מנהל הורדות)
+מיגרציה חדשה: טבלה `youtube_jobs`:
+```
+id, user_id, url, video_title, thumbnail_url, duration_sec,
+mode (audio/video/transcribe/full), status, progress_pct,
+backend (local/cobalt), 
+output_files jsonb [{kind, url, size}],
+transcript_id (FK ל-transcripts), created_at, completed_at, error
+```
+RLS: רק owner. GRANT לפי הסטנדרט שלך.
+Storage bucket `youtube-outputs` (פרטי, 500MB limit) לקבצים שמסונכרנים לענן.
 
-### 4. חיבור לתור התמלול
-אחרי חיתוך, "תמלל הכל" קורא ל-hook הקיים `useTranscriptionJobs` (או `useBackgroundTask`) ומעלה כל File ל-`audio-files` bucket + יוצר רשומה ב-`transcription_jobs`. רשימת התמלולים מתעדכנת בזמן אמת.
+### שלב 4 — Frontend
+**עמוד חדש** `src/pages/YouTube.tsx` (route `/youtube`):
+- Hero: input URL גדול + "בדוק קישור".
+- כרטיס פרטי סרטון: thumbnail, כותרת, אורך, תגיות פורמטים זמינים.
+- אם יש subs עבריות: באנר "🎯 קיימות כתוביות עברית מובנות — לחסוך תמלול?" [השתמש בהן | תמלל מחדש].
+- בחירת פעולות (checkboxes משולבות לפריסטים):
+  - 🎙️ "תמלל בלבד" (ברירת מחדל) — audio bestaudio + TXT/SRT/JSON
+  - 📥 "הורד אודיו"
+  - 🎬 "הורד וידאו"
+  - 📝 "תמלל + חבר כתוביות לווידאו"
+  - ⚙️ "מותאם אישית" — מציג את כל ה-checkboxes
+- פס התקדמות לפי שלבים (5-6 שלבים מסומנים, hebrew).
+- אזור תוצאות: כל קובץ עם איקון, גודל, כפתור הורדה.
+- אזהרה משפטית בתחתית.
 
-## שינויי קוד
+**מנהל הורדות** `src/components/YouTubeDownloadManager.tsx`:
+- טבלה/רשימה של כל ה-jobs של המשתמש.
+- סינון לפי סטטוס, חיפוש לפי כותרת.
+- פעולות: הורד מחדש, מחק, פתח תמלול ב-editor.
+- Realtime subscription ל-progress.
+- מוטמע כ-tab בעמוד `/youtube`.
 
-| קובץ | פעולה |
-|---|---|
-| `src/lib/tieredCutEngine.ts` | חדש — מנוע מדורג + WAV slicer |
-| `src/components/QuickCutDialog.tsx` | חדש — UI דיאלוג |
-| `src/components/AppSidebar.tsx` | להוסיף פריט "חיתוך מהיר" |
-| `src/pages/Index.tsx` | להוסיף כפתור פתיחה |
-| `src/components/AdvancedCutPanel.tsx` | להפנות את `submitCutJob` למנוע המדורג + להוסיף "תמלל הכל" |
+**כניסה מ-/transcribe**: כפתור "📺 מ-YouTube" בכרטיס המקור (ליד "העלאת קובץ"). פותח dialog מהיר עם URL בלבד → אם נבחר "תמלל" → הולך לזרימה הרגילה של תמלול עם הקובץ.
 
-## מה לא נוגעים
-- `audioCutEngine.ts` נשאר כ-Tier 3 fallback
-- מערכת התמלול הקיימת — רק קוראים לתור
-- שום שינוי schema
+### שלב 5 — Hook מרכזי
+`src/hooks/useYoutubeJobs.ts`:
+- `probeUrl(url)` → מנסה מקומי, נופל ל-Cobalt.
+- `startJob(url, options)` → יוצר רשומה ב-DB, מפעיל backend.
+- `subscribeToJob(jobId)` → Realtime updates.
+- `cancelJob(jobId)`.
+- `useYoutubeJobs()` → רשימת כל ה-jobs.
 
-מוכן לבנות?
+### שלב 6 — אינטגרציה לתמלול
+כשמשתמש בוחר "תמלל": אחרי הורדת אודיו, להזרים לאותו pipeline של `useTranscriptionJobs` (Groq Whisper large-v3 בעברית). תוצאה נשמרת כ-transcript רגיל + מקושרת ל-you
