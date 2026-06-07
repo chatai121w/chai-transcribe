@@ -604,7 +604,15 @@ async function runConversion(job: ConversionJob) {
   }
 
   job.startedAt = Date.now();
+
+  // Extraction always runs through WASM (server endpoint re-encodes, doesn't extract).
+  if (job.extract) {
+    await runWasmConversion(job);
+    return;
+  }
+
   let path = await chooseConversionPath(file.size);
+
   debugLog.info("FFmpegConverter", "Initial conversion path selected", {
     jobId: job.id,
     path,
