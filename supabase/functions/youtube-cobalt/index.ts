@@ -2,8 +2,11 @@
 // https://github.com/imputnet/cobalt
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 
-// Try multiple public Cobalt instances (fallback chain)
+// Self-hosted Cobalt comes first when configured (Railway / Fly / etc).
+// Public instances are a best-effort last resort — they're often rate-limited or down.
+const SELFHOST = Deno.env.get('COBALT_SELFHOST_URL')?.trim();
 const COBALT_INSTANCES = [
+  ...(SELFHOST ? [SELFHOST.replace(/\/$/, '')] : []),
   'https://api.cobalt.tools',
   'https://co.eepy.today',
   'https://cobalt-api.kwiatekmiki.com',
@@ -58,7 +61,8 @@ async function callCobalt(url: string, opts: ReqBody) {
           'User-Agent': 'lovable-yt/1.0',
         },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(15_000),
+        // Self-host gets more time; public instances must fail fast so the user isn't stuck on a 502.
+        signal: AbortSignal.timeout(base === SELFHOST ? 20_000 : 6_000),
       });
       const data = await res.json();
       if (res.ok && (data.status === 'tunnel' || data.status === 'redirect' || data.status === 'stream')) {

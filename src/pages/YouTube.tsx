@@ -17,6 +17,10 @@ import {
   useYoutubeJobs, isValidYoutubeUrl,
   type YtProbeResult, type YtMode, type YoutubeJob,
 } from "@/hooks/useYoutubeJobs";
+import { startYoutubeJob } from "@/lib/jobs/pipelines/youtubePipeline";
+import { useAuth } from "@/contexts/AuthContext";
+import { useJobs } from "@/hooks/useJobs";
+import { JobCard } from "@/components/jobs/JobCard";
 
 export default function YouTubePage() {
   const [url, setUrl] = useState("");
@@ -28,6 +32,10 @@ export default function YouTubePage() {
   const [submitting, setSubmitting] = useState(false);
 
   const { jobs, loading, probeUrl, startJob, deleteJob } = useYoutubeJobs();
+  const { user } = useAuth();
+  const { jobs: centralJobs } = useJobs();
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const activeJob = centralJobs.find((j) => j.id === activeJobId) ?? null;
 
   const handleProbe = async () => {
     const trimmed = url.trim();
@@ -48,11 +56,18 @@ export default function YouTubePage() {
   };
 
   const handleStart = async () => {
-    if (!probe) return;
+    if (!probe || !user) return;
     setSubmitting(true);
     try {
-      await startJob({ url: url.trim(), mode, probe, audioFormat, videoQuality });
-      toast({ title: "המשימה התחילה", description: "ניתן לעקוב בלשונית 'מנהל הורדות'" });
+      const job = await startYoutubeJob({
+        userId: user.id,
+        url: url.trim(),
+        mode,
+        audioFormat,
+        videoQuality,
+      });
+      setActiveJobId(job.id);
+      toast({ title: "המשימה התחילה", description: "עקוב אחרי השלבים למטה או במרכז המשימות" });
     } catch (e) {
       toast({ title: "שגיאה", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
     } finally {
@@ -190,6 +205,13 @@ export default function YouTubePage() {
                 ⚖️ יש להשתמש רק בתוכן שיש לך זכות להוריד, לעבד או לתמלל.
               </p>
             </Card>
+          )}
+
+          {activeJob && (
+            <div className="space-y-2">
+              <div className="text-sm font-semibold text-muted-foreground">התקדמות המשימה</div>
+              <JobCard job={activeJob} />
+            </div>
           )}
         </TabsContent>
 
