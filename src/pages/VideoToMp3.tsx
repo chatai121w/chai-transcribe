@@ -962,10 +962,11 @@ export default function VideoToMp3() {
           )}
 
           {/* Job List */}
-          {jobs.length > 0 && (
+          {jobs.filter((j) => !j.extract).length > 0 && (
             <ScrollArea className="max-h-[calc(100vh-420px)]">
               <div className="space-y-2 pb-2">
-                {jobs.map((job) => (
+                {jobs.filter((j) => !j.extract).map((job) => (
+
                   <JobCard
                     key={job.id}
                     job={job}
