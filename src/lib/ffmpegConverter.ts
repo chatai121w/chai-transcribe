@@ -68,7 +68,15 @@ export interface ConversionJob {
   duration?: number;        // total duration in seconds (for real progress)
   retryCount: number;
   conversionPath?: "browser" | "server";  // which engine was used
+  // Audio extraction (stream copy, no re-encode). When true, codec is
+  // probed from the source and the output container is chosen to match
+  // (e.g. AAC → .m4a so Groq can read it). outputExt/outputMime hold
+  // the actual chosen container after probing.
+  extract?: boolean;
+  outputExt?: string;
+  outputMime?: string;
 }
+
 
 export type JobUpdateCallback = (job: ConversionJob) => void;
 
