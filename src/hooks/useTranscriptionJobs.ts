@@ -168,10 +168,14 @@ export const useTranscriptionJobs = () => {
         .upload(filePath, file);
 
       if (uploadError) {
+        const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+        const msg = /exceeded|too large|maximum/i.test(uploadError.message)
+          ? `הקובץ גדול מדי להעלאה (${sizeMB}MB). מומלץ להמיר ל-MP3/Opus לפני התמלול.`
+          : `שגיאה בהעלאת הקובץ: ${uploadError.message}`;
         await supabase.from('transcription_jobs')
-          .update({ status: 'failed', error_message: 'שגיאה בהעלאת הקובץ' })
+          .update({ status: 'failed', error_message: msg })
           .eq('id', job.id);
-        throw new Error('Failed to upload file');
+        throw new Error(msg);
       }
 
       await supabase.from('transcription_jobs')
