@@ -509,11 +509,12 @@ export default function VideoToMp3() {
         // Auto-save to conversion history (once per job)
         if (!savedJobIdsRef.current.has(updatedJob.id) && isAuthenticated) {
           savedJobIdsRef.current.add(updatedJob.id);
-          const outputName = getOutputFileName(updatedJob.fileName, updatedJob.outputFormat);
+          const outputName = getJobOutputName(updatedJob);
           history.addItem({
             file_name: outputName,
             original_name: updatedJob.fileName,
-            output_format: updatedJob.outputFormat,
+            output_format: (updatedJob.outputExt as OutputFormat) ?? updatedJob.outputFormat,
+
             file_size: updatedJob.fileSize,
             output_size: updatedJob.outputBlob?.size || 0,
             duration_ms: updatedJob.finishedAt && updatedJob.startedAt
