@@ -328,7 +328,7 @@ export default function QuickCutDialog() {
   const [tierUsed, setTierUsed] = useState<string>("");
 
   const [sendingToTranscribe, setSendingToTranscribe] = useState(false);
-  const [outputFormat, setOutputFormat] = useState<ConvFormat>("mp3");
+  const [outputFormat, setOutputFormat] = useState<ConvFormat>("none");
   const [autoTranscribe, setAutoTranscribe] = useState(true);
   const [isConverting, setIsConverting] = useState(false);
   const [convProgress, setConvProgress] = useState<{ done: number; total: number } | null>(null);
