@@ -218,6 +218,7 @@ const App = () => {
   <ErrorBoundary>
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
+      <CloudPreferencesProvider>
       <TooltipProvider>
         <Toaster />
         <Sonner />
