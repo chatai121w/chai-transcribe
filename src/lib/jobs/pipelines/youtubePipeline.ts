@@ -8,7 +8,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getServerUrl } from "@/lib/serverConfig";
 import { createJob, patchJob, updateStage, nextResumableStage, fetchJob } from "../jobOrchestrator";
-import { uploadArtifact } from "../artifactStorage";
+import { uploadArtifact, downloadArtifact } from "../artifactStorage";
 import type { JobRecord } from "../types";
 
 const YT_REGEX = /^https?:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/|live\/)|youtu\.be\/)[\w-]+/;
