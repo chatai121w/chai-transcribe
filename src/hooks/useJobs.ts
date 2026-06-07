@@ -28,7 +28,7 @@ export function useJobs() {
     fetchJobs();
     if (!user) return;
     const channel = supabase
-      .channel(`jobs_center_${user.id}`)
+      .channel(`jobs_center_${user.id}_${Math.random().toString(36).slice(2, 10)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "youtube_jobs", filter: `user_id=eq.${user.id}` },
@@ -61,7 +61,7 @@ export function useJob(jobId: string | null) {
     fetchOne();
     if (!jobId) return;
     const channel = supabase
-      .channel(`job_${jobId}`)
+      .channel(`job_${jobId}_${Math.random().toString(36).slice(2, 10)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "youtube_jobs", filter: `id=eq.${jobId}` },
