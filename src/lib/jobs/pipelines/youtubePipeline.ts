@@ -342,9 +342,9 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
       if (rowErr) { lastErr = rowErr.message; continue; }
       if (!row) continue;
       const pct = Math.max(15, Math.min(99, row.progress ?? 15));
-      const detail = row.total_chunks && row.total_chunks > 1
-        ? `${row.completed_chunks ?? 0}/${row.total_chunks} חלקים`
-        : undefined;
+      const chunkInfo = row.total_chunks && row.total_chunks > 1
+        ? { total_chunks: row.total_chunks, completed_chunks: row.completed_chunks ?? 0 }
+        : {};
 
       if (row.status === "completed") {
         try {
@@ -355,8 +355,7 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
         await updateStage(jobId, "transcribe", {
           status: "done",
           percent: 100,
-          detail,
-          meta: { transcription_job_id: tj.id, engine, chars: row.result_text?.length ?? 0 },
+          meta: { transcription_job_id: tj.id, engine, chars: row.result_text?.length ?? 0, ...chunkInfo },
         });
         return;
       }
