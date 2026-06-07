@@ -824,17 +824,22 @@ export default function VideoToMp3() {
       </div>
 
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "convert" | "cut")} className="space-y-4" dir="rtl">
-        <TabsList className="grid w-full grid-cols-2 max-w-full sm:max-w-[360px] h-11 sm:h-10">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "convert" | "extract" | "cut")} className="space-y-4" dir="rtl">
+        <TabsList className="grid w-full grid-cols-3 max-w-full sm:max-w-[480px] h-11 sm:h-10">
           <TabsTrigger value="convert" className="gap-1.5">
             <Music className="w-4 h-4" />
             המרה
+          </TabsTrigger>
+          <TabsTrigger value="extract" className="gap-1.5">
+            <FileAudio className="w-4 h-4" />
+            חילוץ אודיו
           </TabsTrigger>
           <TabsTrigger value="cut" className="gap-1.5">
             <Scissors className="w-4 h-4" />
             חיתוך קבצים
           </TabsTrigger>
         </TabsList>
+
 
         <TabsContent value="convert" className="space-y-6">
           {/* Auto-transcribe toggle */}
