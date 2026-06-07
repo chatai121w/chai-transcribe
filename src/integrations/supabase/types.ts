@@ -721,14 +721,21 @@ export type Database = {
           backend: string | null
           completed_at: string | null
           created_at: string
+          current_stage: string | null
           duration_sec: number | null
           error: string | null
           id: string
+          job_kind: string
+          last_error: string | null
           mode: string
           output_files: Json
+          overall_percent: number
           progress_pct: number
+          resume_token: Json | null
+          stages: Json
           status: string
           thumbnail_url: string | null
+          title: string | null
           transcript_id: string | null
           updated_at: string
           url: string
@@ -739,14 +746,21 @@ export type Database = {
           backend?: string | null
           completed_at?: string | null
           created_at?: string
+          current_stage?: string | null
           duration_sec?: number | null
           error?: string | null
           id?: string
+          job_kind?: string
+          last_error?: string | null
           mode?: string
           output_files?: Json
+          overall_percent?: number
           progress_pct?: number
+          resume_token?: Json | null
+          stages?: Json
           status?: string
           thumbnail_url?: string | null
+          title?: string | null
           transcript_id?: string | null
           updated_at?: string
           url: string
@@ -757,14 +771,21 @@ export type Database = {
           backend?: string | null
           completed_at?: string | null
           created_at?: string
+          current_stage?: string | null
           duration_sec?: number | null
           error?: string | null
           id?: string
+          job_kind?: string
+          last_error?: string | null
           mode?: string
           output_files?: Json
+          overall_percent?: number
           progress_pct?: number
+          resume_token?: Json | null
+          stages?: Json
           status?: string
           thumbnail_url?: string | null
+          title?: string | null
           transcript_id?: string | null
           updated_at?: string
           url?: string
