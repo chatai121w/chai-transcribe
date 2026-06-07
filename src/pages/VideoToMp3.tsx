@@ -1456,6 +1456,90 @@ export default function VideoToMp3() {
           )}
         </TabsContent>
 
+        <TabsContent value="extract" className="space-y-4">
+          <Card>
+            <CardContent className="pt-4 space-y-2">
+              <p className="font-medium flex items-center gap-2">
+                <FileAudio className="w-4 h-4 text-primary" />
+                חילוץ אודיו (ללא קידוד מחדש)
+              </p>
+              <p className="text-xs text-muted-foreground">
+                שולף את פס הקול ישירות מהמקור עם <span dir="ltr">-c:a copy</span> — מהיר וללא איבוד איכות.
+                המערכת מזהה את הקודק ועוטפת אותו בקונטיינר שגרוק יודע לקרוא (AAC → .m4a, Opus → .ogg וכו').
+              </p>
+            </CardContent>
+          </Card>
+
+          <div
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+            onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDragging(false);
+              if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files, "extract");
+            }}
+            onClick={() => {
+              const input = document.getElementById("extract-file-input") as HTMLInputElement | null;
+              input?.click();
+            }}
+            className={cn(
+              "border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all duration-200",
+              isDragging
+                ? "border-primary bg-primary/5 scale-[1.01]"
+                : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30",
+            )}
+          >
+            <Upload className={cn("w-10 h-10 mx-auto mb-3", isDragging ? "text-primary" : "text-muted-foreground")} />
+            <p className="font-medium text-lg">
+              {isDragging ? "שחרר כאן..." : "גרור וידאו או אודיו לחילוץ"}
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              נשמר במכל המתאים לקודק המקורי — בלי המרה
+            </p>
+            <input
+              id="extract-file-input"
+              type="file"
+              multiple
+              accept={ACCEPTED_MIME}
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) addFiles(e.target.files, "extract");
+                e.target.value = "";
+              }}
+            />
+          </div>
+
+          {jobs.filter((j) => j.extract).length > 0 && (
+            <ScrollArea className="max-h-[calc(100vh-420px)]">
+              <div className="space-y-2 pb-2">
+                {jobs.filter((j) => j.extract).map((job) => (
+                  <JobCard
+                    key={job.id}
+                    job={job}
+                    onRemove={handleRemove}
+                    onTranscribe={setPromptJob}
+                    onSaveAndTranscribe={(j) => void handleSaveAndTranscribe(j)}
+                    onRetry={handleRetry}
+                    onCut={handleCutFromConverted}
+                    onEnhance={setEnhanceTarget}
+                  />
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+
+          {jobs.filter((j) => j.extract).length === 0 && (
+            <Card>
+              <CardContent className="text-center py-8 text-sm text-muted-foreground">
+                אין קבצים לחילוץ — גרור וידאו כדי להתחיל
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+
+
         <TabsContent value="cut" className="space-y-4">
           <Suspense
             fallback={
