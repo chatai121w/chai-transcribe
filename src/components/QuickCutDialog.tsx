@@ -38,8 +38,11 @@ import {
   probeDurationFast,
   type CutJobConfig,
   type CutResult,
+  type CutTier,
   type TieredCutProgress,
+  type TierEvent,
 } from "@/lib/tieredCutEngine";
+import { TierStatusPanel } from "@/components/TierStatusPanel";
 import {
   convertAudio,
   onJobUpdate,
@@ -326,6 +329,7 @@ export default function QuickCutDialog() {
   const [progress, setProgress] = useState<TieredCutProgress | null>(null);
   const [results, setResults] = useState<CutResult[]>([]);
   const [tierUsed, setTierUsed] = useState<string>("");
+  const [tierEvents, setTierEvents] = useState<TierEvent[]>([]);
 
   const [sendingToTranscribe, setSendingToTranscribe] = useState(false);
   const [outputFormat, setOutputFormat] = useState<ConvFormat>("none");
@@ -354,6 +358,7 @@ export default function QuickCutDialog() {
     setResults([]);
     setProgress(null);
     setTierUsed("");
+    setTierEvents([]);
     setIsCutting(false);
     setConvertedFiles([]);
     setConvProgress(null);
@@ -518,6 +523,8 @@ export default function QuickCutDialog() {
     setIsCutting(true);
     setResults([]);
     setConvertedFiles([]);
+    setTierEvents([]);
+    setTierUsed("");
     setProgress({ tier: "wav-slice", message: "מתחיל…", completed: 0, total: 1 });
     updateStage("cut", { status: "running", percent: 1, detail: "מתחיל…" });
     try {
@@ -528,6 +535,9 @@ export default function QuickCutDialog() {
           setProgress(p);
           const pct = Math.max(1, Math.min(99, Math.round((p.completed / Math.max(1, p.total)) * 100)));
           updateStage("cut", { status: "running", percent: pct, detail: p.message });
+        },
+        onTierEvent: (ev) => {
+          setTierEvents((prev) => [...prev, ev]);
         },
       });
       setResults(outcome.results);
@@ -932,6 +942,13 @@ export default function QuickCutDialog() {
               />
             </label>
 
+            {/* Tier engine live status */}
+            <TierStatusPanel
+              events={tierEvents}
+              activeProgress={isCutting ? progress : null}
+              finalTier={(tierUsed || null) as CutTier | null}
+            />
+
             {/* Unified pipeline progress */}
             {pipeline.length > 0 && (busy || pipeline.some((s) => s.status !== "pending")) && (
               <PipelineProgress stages={pipeline} />
@@ -957,6 +974,15 @@ export default function QuickCutDialog() {
                 </div>
               </div>
             </div>
+
+            {/* Tier engine summary (post-cut) */}
+            {tierEvents.length > 0 && (
+              <TierStatusPanel
+                events={tierEvents}
+                activeProgress={null}
+                finalTier={(tierUsed || null) as CutTier | null}
+              />
+            )}
 
             {mergedTranscriptId && (
               <div className="rounded-xl border bg-primary/5 p-3 text-sm" dir="rtl">
