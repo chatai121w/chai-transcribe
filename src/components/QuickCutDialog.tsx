@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pushCompletedFile } from "@/lib/completedFilesBus";
+import { trackJob, type JobTracker } from "@/lib/jobs/centralTracker";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
@@ -344,14 +345,33 @@ export default function QuickCutDialog() {
   const [mergedTranscriptId, setMergedTranscriptId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mergingBatchRef = useRef<string | null>(null);
+  const centralTrackerRef = useRef<JobTracker | null>(null);
 
   const { submitBatchJobs, jobs } = useTranscriptionJobs();
   const { preferences } = useCloudPreferences();
   const { saveTranscript } = useCloudTranscripts();
 
+  const mirrorToCentral = useCallback((key: StageKey, patch: Partial<PipelineStage>) => {
+    const t = centralTrackerRef.current;
+    if (!t) return;
+    const status =
+      patch.status === "done" ? "done" :
+      patch.status === "error" ? "failed" :
+      patch.status === "running" ? "running" :
+      undefined;
+    void t.stage(key, {
+      status,
+      percent: typeof patch.percent === "number" ? patch.percent : undefined,
+      detail: patch.detail,
+      error: patch.status === "error" ? patch.detail ?? "שגיאה" : undefined,
+    }).catch(() => { /* non-fatal */ });
+  }, []);
+
   const updateStage = useCallback((key: StageKey, patch: Partial<PipelineStage>) => {
     setPipeline((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
-  }, []);
+    mirrorToCentral(key, patch);
+  }, [mirrorToCentral]);
+
 
   const resetAll = useCallback(() => {
     setFile(null);
