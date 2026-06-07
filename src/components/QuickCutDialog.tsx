@@ -401,14 +401,20 @@ export default function QuickCutDialog() {
     setResults([]);
     setConvertedFiles([]);
     setProgress({ tier: "wav-slice", message: "מתחיל…", completed: 0, total: 1 });
+    updateStage("cut", { status: "running", percent: 1, detail: "מתחיל…" });
     try {
       const outcome = await cutWithFallback(file, {
         config,
         knownDurationSec: duration ?? undefined,
-        onProgress: (p) => setProgress(p),
+        onProgress: (p) => {
+          setProgress(p);
+          const pct = Math.max(1, Math.min(99, Math.round((p.completed / Math.max(1, p.total)) * 100)));
+          updateStage("cut", { status: "running", percent: pct, detail: p.message });
+        },
       });
       setResults(outcome.results);
       setTierUsed(outcome.tier);
+      updateStage("cut", { status: "done", percent: 100, detail: `${outcome.results.length} מקטעים` });
       setStep(3);
       toast({
         title: "✂️ חיתוך הושלם",
@@ -417,6 +423,7 @@ export default function QuickCutDialog() {
       return outcome.results;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      updateStage("cut", { status: "error", detail: msg });
       toast({ title: "שגיאת חיתוך", description: msg, variant: "destructive" });
       return null;
     } finally {
@@ -431,12 +438,19 @@ export default function QuickCutDialog() {
     }
     setIsConverting(true);
     setConvProgress({ done: 0, total: segments.length });
+    updateStage("convert", { status: "running", percent: 1, detail: `0/${segments.length}` });
     const out: File[] = [];
     try {
       for (let i = 0; i < segments.length; i++) {
         const converted = await convertOne(segments[i].file, outputFormat as OutputFormat);
         out.push(converted);
         setConvProgress({ done: i + 1, total: segments.length });
+        const pct = Math.round(((i + 1) / segments.length) * 100);
+        updateStage("convert", {
+          status: i + 1 === segments.length ? "done" : "running",
+          percent: pct,
+          detail: `${i + 1}/${segments.length}`,
+        });
       }
       setConvertedFiles(out);
       toast({
@@ -446,6 +460,7 @@ export default function QuickCutDialog() {
       return out;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      updateStage("convert", { status: "error", detail: msg });
       toast({ title: "שגיאת המרה", description: msg, variant: "destructive" });
       throw e;
     } finally {
@@ -457,12 +472,25 @@ export default function QuickCutDialog() {
     const engine = (preferences as { engine?: string }).engine || "groq";
     const lang = (preferences as { source_language?: string }).source_language || "he";
     const onlineEngine = (engine === "local" || engine === "local-server") ? "groq" : engine;
-    const ids = await submitBatchJobs(files, onlineEngine, lang);
-    toast({
-      title: "נשלח לתור התמלול",
-      description: `${ids.length} מקטעים בתור (מנוע: ${onlineEngine})`,
-    });
+    updateStage("transcribe", { status: "running", percent: 10, detail: `שולח ${files.length} מקטעים…` });
+    try {
+      const ids = await submitBatchJobs(files, onlineEngine, lang);
+      updateStage("transcribe", {
+        status: "done",
+        percent: 100,
+        detail: `${ids.length} בתור (${onlineEngine})`,
+      });
+      toast({
+        title: "נשלח לתור התמלול",
+        description: `${ids.length} מקטעים בתור (מנוע: ${onlineEngine})`,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      updateStage("transcribe", { status: "error", detail: msg });
+      throw e;
+    }
   };
+
 
   const convertSegmentTo = async (idx: number, fmt: OutputFormat) => {
     const seg = results[idx];
