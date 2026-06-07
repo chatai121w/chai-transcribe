@@ -151,43 +151,40 @@ interface InvResponse {
   formatStreams?: InvFormat[];
 }
 
-async function tryInvidious(videoId: string, opts: ReqBody): Promise<{ url: string; filename: string; title?: string; thumbnail?: string; author?: string; instance: string } | null> {
-  for (const base of INVIDIOUS_INSTANCES) {
-    try {
-      const res = await fetch(`${base}/api/v1/videos/${videoId}`, {
-        headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
-        signal: AbortSignal.timeout(7000),
-      });
-      if (!res.ok) continue;
-      const data = (await res.json()) as InvResponse;
-      let chosen: { url: string; container?: string } | undefined;
-      if (opts.mode === 'video') {
-        // formatStreams are pre-muxed video+audio
-        const target = parseInt(opts.videoQuality ?? '720', 10);
-        chosen = (data.formatStreams ?? []).sort((a, b) => {
-          const da = Math.abs(parseInt(a.qualityLabel ?? '0') - target);
-          const db = Math.abs(parseInt(b.qualityLabel ?? '0') - target);
-          return da - db;
-        })[0];
-      } else {
-        const audios = (data.adaptiveFormats ?? []).filter((f) => f.type?.startsWith('audio/'));
-        chosen = audios.sort((a, b) => parseInt(b.bitrate ?? '0') - parseInt(a.bitrate ?? '0'))[0];
-      }
-      if (!chosen?.url) continue;
-      const ext = chosen.container ?? (opts.mode === 'video' ? 'mp4' : 'm4a');
-      const safeTitle = (data.title ?? videoId).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
-      const thumb = data.videoThumbnails?.[0]?.url;
-      return {
-        url: chosen.url,
-        filename: `${safeTitle}.${ext}`,
-        title: data.title,
-        thumbnail: thumb,
-        author: data.author,
-        instance: `invidious:${new URL(base).host}`,
-      };
-    } catch { /* try next */ }
+async function tryInvidiousInstance(base: string, videoId: string, opts: ReqBody) {
+  const res = await fetch(`${base}/api/v1/videos/${videoId}`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
+    signal: AbortSignal.timeout(6000),
+  });
+  if (!res.ok) throw new Error(`invidious ${res.status}`);
+  const data = (await res.json()) as InvResponse;
+  let chosen: { url: string; container?: string } | undefined;
+  if (opts.mode === 'video') {
+    const target = parseInt(opts.videoQuality ?? '720', 10);
+    chosen = (data.formatStreams ?? []).sort((a, b) => Math.abs(parseInt(a.qualityLabel ?? '0') - target) - Math.abs(parseInt(b.qualityLabel ?? '0') - target))[0];
+  } else {
+    const audios = (data.adaptiveFormats ?? []).filter((f) => f.type?.startsWith('audio/'));
+    chosen = audios.sort((a, b) => parseInt(b.bitrate ?? '0') - parseInt(a.bitrate ?? '0'))[0];
   }
-  return null;
+  if (!chosen?.url) throw new Error('no stream');
+  const ext = chosen.container ?? (opts.mode === 'video' ? 'mp4' : 'm4a');
+  const safeTitle = (data.title ?? videoId).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
+  return {
+    url: chosen.url,
+    filename: `${safeTitle}.${ext}`,
+    title: data.title,
+    thumbnail: data.videoThumbnails?.[0]?.url,
+    author: data.author,
+    instance: `invidious:${new URL(base).host}`,
+  };
+}
+
+async function tryInvidious(videoId: string, opts: ReqBody) {
+  try {
+    return await Promise.any(INVIDIOUS_INSTANCES.map((b) => tryInvidiousInstance(b, videoId, opts)));
+  } catch {
+    return null;
+  }
 }
 
 // ── Backend: Cobalt ─────────────────────────────────────────────────────────
