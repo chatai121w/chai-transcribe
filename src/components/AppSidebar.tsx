@@ -126,19 +126,24 @@ const AppSidebar = () => {
   };
   const { preferences, updatePreference } = useCloudPreferences();
   const [isPinned, setIsPinned] = useState(preferences.sidebar_pinned);
+  const lastPinnedRef = useRef(preferences.sidebar_pinned);
 
   useEffect(() => {
-    setIsPinned(preferences.sidebar_pinned);
+    if (preferences.sidebar_pinned !== isPinned) {
+      setIsPinned(preferences.sidebar_pinned);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preferences.sidebar_pinned]);
 
   useEffect(() => {
-    // Only write back when the value actually changed from cloud preferences,
-    // to avoid an echo-write on every mount (which caused redundant cloud upserts).
+    if (lastPinnedRef.current === isPinned) return;
+    lastPinnedRef.current = isPinned;
     if (isPinned !== preferences.sidebar_pinned) {
       updatePreference('sidebar_pinned', isPinned);
     }
     window.dispatchEvent(new CustomEvent("sidebar-pin-change", { detail: isPinned }));
-  }, [isPinned, preferences.sidebar_pinned, updatePreference]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPinned]);
 
   useEffect(() => {
     if (isPinned) setIsOpen(true);
