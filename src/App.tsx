@@ -239,6 +239,7 @@ const App = () => {
           {devFloatingButtons.diarizationStatus && <DeferredMount delay={500}><DiarizationFloatingStatusLazy /></DeferredMount>}
           <DeferredMount delay={800}><JobsCenterLazy /></DeferredMount>
           <DeferredMount delay={1200}><ConversionJobsBridgeLazy /></DeferredMount>
+          <DeferredMount delay={1400}><TranscriptionJobsBridgeLazy /></DeferredMount>
           
           <AppSidebar />
           <DeferredMount delay={200}><QuickCutDialogLazy /></DeferredMount>
