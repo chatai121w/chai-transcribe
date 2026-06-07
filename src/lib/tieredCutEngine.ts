@@ -466,39 +466,55 @@ export async function cutWithFallback(
   options: TieredCutOptions,
 ): Promise<TieredCutOutcome> {
   const errors: string[] = [];
+  const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+  console.info(`%c[TieredCut]%c Starting cut: ${file.name} (${sizeMB}MB, ext=${fileExt(file.name)})`, "color:#eab308;font-weight:bold", "color:inherit");
 
   // Tier 1 — WAV byte-slice
   try {
     const out = await tierWavSlice(file, options);
-    if (out) return out;
+    if (out) {
+      console.info(`%c[TieredCut]%c ✅ Tier 1 (WAV byte-slice) succeeded — ${out.results.length} segments`, "color:#22c55e;font-weight:bold", "color:inherit");
+      return out;
+    }
+    console.info(`%c[TieredCut]%c ⏭️ Tier 1 skipped (not a WAV file)`, "color:#94a3b8", "color:inherit");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     errors.push(`WAV: ${msg}`);
+    console.warn(`%c[TieredCut]%c ❌ Tier 1 (WAV) failed: ${msg}`, "color:#ef4444;font-weight:bold", "color:inherit");
     debugLog.warn("TieredCut", "Tier 1 failed", msg);
   }
 
   // Tier 2 — ffmpeg stream copy
   try {
     const out = await tierFFmpegCopy(file, options);
-    if (out) return out;
+    if (out) {
+      console.info(`%c[TieredCut]%c ✅ Tier 2 (FFmpeg -c copy) succeeded — ${out.results.length} segments, original codec preserved`, "color:#22c55e;font-weight:bold", "color:inherit");
+      return out;
+    }
+    console.info(`%c[TieredCut]%c ⏭️ Tier 2 skipped (extension not supported by FFmpeg copy)`, "color:#94a3b8", "color:inherit");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     errors.push(`FFmpeg: ${msg}`);
+    console.warn(`%c[TieredCut]%c ❌ Tier 2 (FFmpeg) failed — THIS is why output became WAV. Reason: ${msg}`, "color:#ef4444;font-weight:bold", "color:inherit");
     debugLog.warn("TieredCut", "Tier 2 failed", msg);
   }
 
   // Tier 3 — legacy full decode (skip for large non-WAV to prevent OOM crash)
   const LARGE_FILE_LIMIT = 25 * 1024 * 1024; // 25MB
   if (file.size > LARGE_FILE_LIMIT && !["wav", "wave"].includes(fileExt(file.name))) {
+    console.error(`%c[TieredCut]%c 🛑 Aborting — file too large for Tier 3 fallback`, "color:#ef4444;font-weight:bold", "color:inherit");
     throw new Error(
       `לא ניתן לחתוך את הקובץ — מנוע FFmpeg לא נטען (${errors.join(" | ")}). ` +
-      `הקובץ גדול מדי (${(file.size / 1024 / 1024).toFixed(1)}MB) לפענוח מלא בדפדפן. ` +
+      `הקובץ גדול מדי (${sizeMB}MB) לפענוח מלא בדפדפן. ` +
       `נסה לרענן את הדף או בדוק חיבור אינטרנט (נדרש לטעינת FFmpeg).`,
     );
   }
 
+  console.warn(`%c[TieredCut]%c ⚠️ Falling back to Tier 3 (AudioBuffer → WAV re-encode). Output will be LARGE uncompressed WAV.`, "color:#f59e0b;font-weight:bold", "color:inherit");
   try {
-    return await tierAudioBuffer(file, options);
+    const out = await tierAudioBuffer(file, options);
+    console.info(`%c[TieredCut]%c ✅ Tier 3 (AudioBuffer/WAV) succeeded — ${out.results.length} WAV segments`, "color:#22c55e;font-weight:bold", "color:inherit");
+    return out;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     errors.push(`AudioBuffer: ${msg}`);
