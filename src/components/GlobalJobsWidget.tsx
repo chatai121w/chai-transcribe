@@ -328,7 +328,7 @@ export const GlobalJobsWidget = () => {
                   <SlidersHorizontal className="w-3.5 h-3.5" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="text-right" dir="rtl">
+              <DropdownMenuContent align="start" className="text-right [&]:rtl">
                 <DropdownMenuItem onClick={() => setViewMode("comfortable")}>
                   <span className="ml-2 w-4 inline-block">{viewMode === "comfortable" ? "✓" : ""}</span>
                   תצוגה נוחה
@@ -386,7 +386,7 @@ export const GlobalJobsWidget = () => {
                   מיון
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" dir="rtl" className="text-right">
+              <DropdownMenuContent align="start" className="text-right [&]:rtl">
                 <DropdownMenuItem onClick={() => setSortMode("newest")}>
                   <span className="ml-2 w-4 inline-block">{sortMode === "newest" ? "✓" : ""}</span>
                   מהחדש לישן
