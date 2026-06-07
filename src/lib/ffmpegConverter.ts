@@ -482,8 +482,6 @@ async function runWasmConversion(job: ConversionJob): Promise<void> {
     const outputName = `out_${job.id}.${outputExt}`;
 
 
-    const data = await fetchFile(file);
-    await ffmpeg.writeFile(inputName, data);
 
     job.status = "converting";
     notifyAll(job);
