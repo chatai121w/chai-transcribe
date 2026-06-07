@@ -321,10 +321,15 @@ export default function QuickCutDialog() {
   const [convProgress, setConvProgress] = useState<{ done: number; total: number } | null>(null);
   const [convertedFiles, setConvertedFiles] = useState<File[]>([]);
   const [segConverting, setSegConverting] = useState<Record<number, boolean>>({});
+  const [pipeline, setPipeline] = useState<PipelineStage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { submitBatchJobs } = useTranscriptionJobs();
   const { preferences } = useCloudPreferences();
+
+  const updateStage = useCallback((key: StageKey, patch: Partial<PipelineStage>) => {
+    setPipeline((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
+  }, []);
 
   const resetAll = useCallback(() => {
     setFile(null);
@@ -336,6 +341,7 @@ export default function QuickCutDialog() {
     setConvertedFiles([]);
     setConvProgress(null);
     setIsConverting(false);
+    setPipeline([]);
     setStep(1);
   }, []);
 
