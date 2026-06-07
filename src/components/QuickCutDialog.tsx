@@ -230,6 +230,71 @@ function SegmentCard({
   );
 }
 
+// ─── Pipeline Progress ─────────────────────────────────────────────────────
+type StageKey = "cut" | "convert" | "transcribe";
+type StageStatus = "pending" | "running" | "done" | "error";
+interface PipelineStage {
+  key: StageKey;
+  label: string;
+  status: StageStatus;
+  percent: number; // 0-100
+  detail?: string;
+}
+
+function PipelineProgress({ stages }: { stages: PipelineStage[] }) {
+  const active = stages.filter((s) => s.status !== "pending");
+  const overall = active.length
+    ? Math.round(active.reduce((a, s) => a + (s.status === "done" ? 100 : s.percent), 0) / active.length)
+    : 0;
+  const allDone = stages.length > 0 && stages.every((s) => s.status === "done");
+  return (
+    <div className="space-y-2.5 rounded-xl border bg-yellow-50 dark:bg-yellow-950/20 p-3" dir="rtl">
+      <div className="flex items-center gap-2 text-sm">
+        {allDone ? (
+          <Check className="w-4 h-4 text-green-600" />
+        ) : (
+          <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
+        )}
+        <span className="font-semibold">התקדמות כללית</span>
+        <span className="mr-auto text-sm font-bold tabular-nums">{overall}%</span>
+      </div>
+      <Progress value={overall} className="h-2" />
+      <div className="space-y-1.5 pt-1">
+        {stages.map((s) => {
+          const pct = s.status === "done" ? 100 : Math.round(s.percent);
+          return (
+            <div key={s.key} className="space-y-0.5">
+              <div className="flex items-center gap-2 text-xs">
+                {s.status === "done" ? (
+                  <Check className="w-3.5 h-3.5 text-green-600 shrink-0" />
+                ) : s.status === "running" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-yellow-600 shrink-0" />
+                ) : s.status === "error" ? (
+                  <X className="w-3.5 h-3.5 text-destructive shrink-0" />
+                ) : (
+                  <div className="w-3.5 h-3.5 rounded-full border border-muted-foreground/30 shrink-0" />
+                )}
+                <span className={cn(
+                  "font-medium",
+                  s.status === "pending" && "text-muted-foreground",
+                  s.status === "done" && "text-green-700 dark:text-green-500"
+                )}>
+                  {s.label}
+                </span>
+                {s.detail && (
+                  <span className="text-muted-foreground truncate">— {s.detail}</span>
+                )}
+                <span className="mr-auto tabular-nums font-semibold">{pct}%</span>
+              </div>
+              <Progress value={pct} className="h-1" />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Dialog ────────────────────────────────────────────────────────────
 export default function QuickCutDialog() {
   const isMobile = useIsMobile();
