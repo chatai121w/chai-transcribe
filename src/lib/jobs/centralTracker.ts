@@ -48,7 +48,7 @@ export interface JobTracker {
 
 function buildStages(defs: TrackerStageDef[]): JobStage[] {
   const totalDefined = defs.reduce((s, d) => s + (d.weight ?? 0), 0);
-  return defs.map((d) => ({
+  return defs.map((d): JobStage => ({
     key: d.key,
     label: d.label,
     status: "pending",
