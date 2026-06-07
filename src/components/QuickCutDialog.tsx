@@ -48,6 +48,7 @@ import {
 } from "@/lib/ffmpegConverter";
 import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
+import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
 import { formatTime } from "@/lib/audioCutEngine";
 
 type ConvFormat = "none" | OutputFormat;
@@ -77,6 +78,10 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function baseName(name: string): string {
+  return name.replace(/\.[^/.]+$/, "");
 }
 
 function labelForTier(tier: string): string {
@@ -239,6 +244,14 @@ interface PipelineStage {
   status: StageStatus;
   percent: number; // 0-100
   detail?: string;
+}
+
+interface TrackedTranscriptionBatch {
+  jobIds: string[];
+  total: number;
+  sourceFile: File | null;
+  title: string;
+  engine: string;
 }
 
 function PipelineProgress({ stages }: { stages: PipelineStage[] }) {
