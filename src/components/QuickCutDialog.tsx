@@ -335,10 +335,13 @@ export default function QuickCutDialog() {
   const [convertedFiles, setConvertedFiles] = useState<File[]>([]);
   const [segConverting, setSegConverting] = useState<Record<number, boolean>>({});
   const [pipeline, setPipeline] = useState<PipelineStage[]>([]);
+  const [trackedBatch, setTrackedBatch] = useState<TrackedTranscriptionBatch | null>(null);
+  const [mergedTranscriptId, setMergedTranscriptId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { submitBatchJobs } = useTranscriptionJobs();
+  const { submitBatchJobs, jobs } = useTranscriptionJobs();
   const { preferences } = useCloudPreferences();
+  const { saveTranscript } = useCloudTranscripts();
 
   const updateStage = useCallback((key: StageKey, patch: Partial<PipelineStage>) => {
     setPipeline((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
@@ -355,8 +358,103 @@ export default function QuickCutDialog() {
     setConvProgress(null);
     setIsConverting(false);
     setPipeline([]);
+    setTrackedBatch(null);
+    setMergedTranscriptId(null);
     setStep(1);
   }, []);
+
+  useEffect(() => {
+    if (!trackedBatch || trackedBatch.jobIds.length === 0) return;
+
+    const trackedJobs = trackedBatch.jobIds
+      .map((id) => jobs.find((job) => job.id === id))
+      .filter(Boolean);
+
+    if (trackedJobs.length === 0) return;
+
+    const completed = trackedJobs.filter((job) => job?.status === "completed");
+    const failed = trackedJobs.filter((job) => job?.status === "failed");
+    const active = trackedJobs.filter((job) => job && job.status !== "completed" && job.status !== "failed");
+
+    const avgProgress = trackedJobs.reduce((sum, job) => sum + (job?.progress || 0), 0) / trackedBatch.total;
+    const pct = Math.max(completed.length > 0 ? Math.round((completed.length / trackedBatch.total) * 100) : 1, Math.round(avgProgress));
+
+    if (failed.length > 0) {
+      updateStage("transcribe", {
+        status: "error",
+        percent: pct,
+        detail: `${completed.length}/${trackedBatch.total} הושלמו, ${failed.length} נכשלו`,
+      });
+      setSendingToTranscribe(false);
+      return;
+    }
+
+    if (completed.length < trackedBatch.total) {
+      const nextDetail = active[0]?.file_name
+        ? `${completed.length}/${trackedBatch.total} הושלמו · מעבד ${active[0].file_name}`
+        : `${completed.length}/${trackedBatch.total} הושלמו`;
+      updateStage("transcribe", {
+        status: "running",
+        percent: Math.min(99, Math.max(10, pct)),
+        detail: nextDetail,
+      });
+      return;
+    }
+
+    const merge = async () => {
+      const orderedTexts = trackedBatch.jobIds
+        .map((id) => jobs.find((job) => job.id === id))
+        .map((job) => job?.result_text?.trim() || "")
+        .filter(Boolean);
+
+      const combinedText = orderedTexts.join("\n\n").trim();
+      if (!combinedText) {
+        updateStage("transcribe", {
+          status: "done",
+          percent: 100,
+          detail: `${trackedBatch.total}/${trackedBatch.total} הושלמו`,
+        });
+        setSendingToTranscribe(false);
+        setTrackedBatch(null);
+        return;
+      }
+
+      try {
+        const saved = await saveTranscript(
+          combinedText,
+          trackedBatch.engine,
+          `${trackedBatch.title} — תמלול מאוחד`,
+          trackedBatch.sourceFile ?? undefined,
+        );
+        setMergedTranscriptId(saved?.id ?? null);
+        updateStage("transcribe", {
+          status: "done",
+          percent: 100,
+          detail: `${trackedBatch.total}/${trackedBatch.total} הושלמו · אוחד`,
+        });
+        toast({
+          title: "התמלול הושלם",
+          description: "כל החלקים נשלחו, הושלמו ואוחדו לתמלול אחד.",
+        });
+      } catch (e) {
+        updateStage("transcribe", {
+          status: "error",
+          percent: 100,
+          detail: e instanceof Error ? e.message : String(e),
+        });
+        toast({
+          title: "שגיאה באיחוד התמלול",
+          description: e instanceof Error ? e.message : String(e),
+          variant: "destructive",
+        });
+      } finally {
+        setSendingToTranscribe(false);
+        setTrackedBatch(null);
+      }
+    };
+
+    void merge();
+  }, [jobs, saveTranscript, trackedBatch, updateStage]);
 
   useEffect(() => {
     return onOpenQuickCut(async (detail: OpenQuickCutDetail) => {
