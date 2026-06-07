@@ -52,6 +52,13 @@ const Dashboard = () => {
 
   const estimateWords = (chars: number) => Math.round(chars / 5);
 
+  const getSafeTranscriptText = (transcript: { title?: string | null; text?: string | null; edited_text?: string | null }) => {
+    const content = (transcript.edited_text ?? transcript.text ?? "").trim();
+    const title = transcript.title?.trim() || content.substring(0, 50) || "ללא טקסט";
+    const preview = content || transcript.title?.trim() || "ללא טקסט";
+    return { title, preview };
+  };
+
   return (
     <div className="min-h-screen bg-background p-4 md:p-8" dir="rtl">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -220,49 +227,55 @@ const Dashboard = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {recentTranscripts.map((t) => (
-                        <tr
-                          key={t.id}
-                          className="border-t hover:bg-accent/30 cursor-pointer"
-                          onClick={() => navigate('/text-editor', { state: { text: t.edited_text || t.text, transcriptId: t.id, audioFilePath: t.audio_file_path } })}
-                        >
-                          <td className="px-3 py-2 text-right truncate max-w-[280px]">{t.title || t.text.substring(0, 50)}</td>
-                          <td className="px-3 py-2 text-right">{t.engine}</td>
-                          <td className="px-3 py-2 text-right">{formatDate(t.created_at)}</td>
-                          <td className="px-3 py-2 text-right">{t.tags?.length || 0}</td>
-                        </tr>
-                      ))}
+                      {recentTranscripts.map((t) => {
+                        const { title, preview } = getSafeTranscriptText(t);
+                        return (
+                          <tr
+                            key={t.id}
+                            className="border-t hover:bg-accent/30 cursor-pointer"
+                            onClick={() => navigate('/text-editor', { state: { text: t.edited_text ?? t.text ?? preview, transcriptId: t.id, audioFilePath: t.audio_file_path } })}
+                          >
+                            <td className="px-3 py-2 text-right truncate max-w-[280px]">{title}</td>
+                            <td className="px-3 py-2 text-right">{t.engine}</td>
+                            <td className="px-3 py-2 text-right">{formatDate(t.created_at)}</td>
+                            <td className="px-3 py-2 text-right">{t.tags?.length || 0}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               ) : (
                 <div className={recentViewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 gap-2' : 'space-y-2'}>
-                  {recentTranscripts.map((t) => (
-                    <div
-                      key={t.id}
-                      className={`flex items-center justify-between rounded-lg border hover:bg-accent/50 transition-colors cursor-pointer ${
-                        recentViewMode === 'rectangles' ? 'p-2' : 'p-3'
-                      }`}
-                      onClick={() => navigate('/text-editor', { state: { text: t.edited_text || t.text, transcriptId: t.id, audioFilePath: t.audio_file_path } })}
-                    >
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate">{t.title || t.text.substring(0, 50)}</p>
-                          <p className="text-xs text-muted-foreground">{formatDate(t.created_at)}</p>
-                          {recentViewMode !== 'rectangles' && (
-                            <p className="text-xs text-muted-foreground truncate mt-1">{(t.edited_text || t.text).substring(0, 90)}</p>
+                  {recentTranscripts.map((t) => {
+                    const { title, preview } = getSafeTranscriptText(t);
+                    return (
+                      <div
+                        key={t.id}
+                        className={`flex items-center justify-between rounded-lg border hover:bg-accent/50 transition-colors cursor-pointer ${
+                          recentViewMode === 'rectangles' ? 'p-2' : 'p-3'
+                        }`}
+                        onClick={() => navigate('/text-editor', { state: { text: t.edited_text ?? t.text ?? preview, transcriptId: t.id, audioFilePath: t.audio_file_path } })}
+                      >
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium truncate">{title}</p>
+                            <p className="text-xs text-muted-foreground">{formatDate(t.created_at)}</p>
+                            {recentViewMode !== 'rectangles' && (
+                              <p className="text-xs text-muted-foreground truncate mt-1">{preview.substring(0, 90)}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs">{t.engine}</Badge>
+                          {t.tags && t.tags.length > 0 && (
+                            <Badge variant="secondary" className="text-xs">{t.tags.length} תגיות</Badge>
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">{t.engine}</Badge>
-                        {t.tags && t.tags.length > 0 && (
-                          <Badge variant="secondary" className="text-xs">{t.tags.length} תגיות</Badge>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

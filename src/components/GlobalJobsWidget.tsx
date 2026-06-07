@@ -5,11 +5,18 @@ import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Loader2, CheckCircle2, XCircle, RefreshCw, Trash2, FileText,
-  Clock, ChevronUp, ChevronDown, X, ListChecks
+  Clock, ChevronUp, ChevronDown, X, ListChecks, SlidersHorizontal, ArrowUpDown
 } from "lucide-react";
 
 const statusConfig: Record<string, { label: string; icon: React.ElementType; className: string }> = {
@@ -29,6 +36,8 @@ const MIN_HEIGHT = 220;
 const MAX_HEIGHT = 680;
 
 type WidgetState = "expanded" | "collapsed" | "hidden";
+type JobsViewMode = "comfortable" | "compact" | "filename" | "multiline";
+type JobsSortMode = "newest" | "oldest" | "status" | "name";
 
 export const GlobalJobsWidget = () => {
   const { user } = useAuth();
@@ -44,6 +53,21 @@ export const GlobalJobsWidget = () => {
       return "expanded";
     }
   });
+  const [viewMode, setViewMode] = useState<JobsViewMode>(() => {
+    try {
+      return (localStorage.getItem("global-jobs-widget-view") as JobsViewMode) || "comfortable";
+    } catch {
+      return "comfortable";
+    }
+  });
+  const [sortMode, setSortMode] = useState<JobsSortMode>(() => {
+    try {
+      return (localStorage.getItem("global-jobs-widget-sort") as JobsSortMode) || "newest";
+    } catch {
+      return "newest";
+    }
+  });
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [size, setSize] = useState<{ width: number; height: number }>(() => {
     try {
@@ -88,6 +112,14 @@ export const GlobalJobsWidget = () => {
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, state); } catch { /* noop */ }
   }, [state]);
+
+  useEffect(() => {
+    try { localStorage.setItem("global-jobs-widget-view", viewMode); } catch { /* noop */ }
+  }, [viewMode]);
+
+  useEffect(() => {
+    try { localStorage.setItem("global-jobs-widget-sort", sortMode); } catch { /* noop */ }
+  }, [sortMode]);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_SIZE_KEY, JSON.stringify(size)); } catch { /* noop */ }
@@ -178,6 +210,38 @@ export const GlobalJobsWidget = () => {
   // Hide on the main /transcribe page (full panel already shown there) and on auth/login
   const isHiddenRoute = location.pathname === "/transcribe" || location.pathname === "/login" || location.pathname === "/reset-password";
 
+  const visibleJobs = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const filtered = q
+      ? jobs.filter((job) => (job.file_name || "קובץ אודיו").toLowerCase().includes(q))
+      : jobs;
+
+    const statusRank: Record<string, number> = {
+      uploading: 0,
+      processing: 1,
+      pending: 2,
+      failed: 3,
+      completed: 4,
+    };
+
+    const sorted = [...filtered].sort((a, b) => {
+      if (sortMode === "name") {
+        return (a.file_name || "").localeCompare(b.file_name || "", "he");
+      }
+      if (sortMode === "oldest") {
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      }
+      if (sortMode === "status") {
+        const rankDiff = (statusRank[a.status] ?? 99) - (statusRank[b.status] ?? 99);
+        if (rankDiff !== 0) return rankDiff;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      }
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+
+    return sorted.slice(0, 10);
+  }, [jobs, searchQuery, sortMode]);
+
   if (!user || jobs.length === 0 || isHiddenRoute) return null;
 
   const formatTime = (dateStr: string) => {
@@ -252,6 +316,38 @@ export const GlobalJobsWidget = () => {
           )}
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
+          {state === "expanded" && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 w-6 p-0"
+                  title="אפשרויות תצוגה"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="text-right" dir="rtl">
+                <DropdownMenuItem onClick={() => setViewMode("comfortable")}>
+                  <span className="ml-2 w-4 inline-block">{viewMode === "comfortable" ? "✓" : ""}</span>
+                  תצוגה נוחה
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setViewMode("compact")}>
+                  <span className="ml-2 w-4 inline-block">{viewMode === "compact" ? "✓" : ""}</span>
+                  תצוגה קומפקטית
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setViewMode("filename")}>
+                  <span className="ml-2 w-4 inline-block">{viewMode === "filename" ? "✓" : ""}</span>
+                  שם קובץ בלבד
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setViewMode("multiline")}>
+                  <span className="ml-2 w-4 inline-block">{viewMode === "multiline" ? "✓" : ""}</span>
+                  שתי שורות
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <Button
             size="sm"
             variant="ghost"
@@ -276,8 +372,42 @@ export const GlobalJobsWidget = () => {
       {/* Body — only when expanded */}
       {state === "expanded" && (
         <ScrollArea style={{ height: `${bodyHeight}px` }}>
+          <div className="px-2 pt-2 pb-1 flex items-center gap-1.5">
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="חיפוש קובץ..."
+              className="h-7 text-[11px]"
+            />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-7 px-2 text-[11px]">
+                  <ArrowUpDown className="w-3 h-3 ml-1" />
+                  מיון
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" dir="rtl" className="text-right">
+                <DropdownMenuItem onClick={() => setSortMode("newest")}>
+                  <span className="ml-2 w-4 inline-block">{sortMode === "newest" ? "✓" : ""}</span>
+                  מהחדש לישן
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortMode("oldest")}>
+                  <span className="ml-2 w-4 inline-block">{sortMode === "oldest" ? "✓" : ""}</span>
+                  מהישן לחדש
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortMode("status")}>
+                  <span className="ml-2 w-4 inline-block">{sortMode === "status" ? "✓" : ""}</span>
+                  לפי סטטוס
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortMode("name")}>
+                  <span className="ml-2 w-4 inline-block">{sortMode === "name" ? "✓" : ""}</span>
+                  לפי שם
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
           <div className="p-2 space-y-1.5">
-            {jobs.slice(0, 10).map(job => {
+            {visibleJobs.map(job => {
               const config = statusConfig[job.status] || statusConfig.pending;
               const StatusIcon = config.icon;
               const isActive = ['uploading', 'pending', 'processing'].includes(job.status);
@@ -285,30 +415,40 @@ export const GlobalJobsWidget = () => {
               return (
                 <div
                   key={job.id}
-                  className="flex flex-row-reverse items-start gap-2 p-2 rounded-md border border-border bg-card hover:bg-muted/40 transition-colors"
+                  className={`flex flex-row-reverse items-start gap-2 rounded-md border border-border bg-card hover:bg-muted/40 transition-colors ${
+                    viewMode === "comfortable" ? "p-2" : viewMode === "multiline" ? "p-2" : "p-1.5"
+                  }`}
                 >
                   <StatusIcon
                     className={`w-4 h-4 shrink-0 mt-0.5 ${config.className} ${isActive ? 'animate-spin' : ''}`}
                   />
                   <div className="flex-1 min-w-0 text-right">
-                    <p className="text-xs font-medium truncate">
+                    <p className={`${viewMode === "compact" ? "text-[11px]" : "text-xs"} font-medium ${viewMode === "multiline" ? "whitespace-normal break-words leading-4" : "truncate"}`}>
                       {job.file_name || 'קובץ אודיו'}
                     </p>
-                    <div className="flex flex-row-reverse items-center gap-1.5 mt-0.5 text-[10px] text-muted-foreground">
-                      <Badge variant="outline" className="text-[9px] py-0 px-1 h-4">{job.engine}</Badge>
-                      <span>{config.label}</span>
-                      <span>·</span>
-                      <span>{formatTime(job.created_at)}</span>
-                    </div>
-                    {isActive && (
-                      <div className="mt-1">
-                        <Progress value={job.progress} className="h-1" />
-                      </div>
-                    )}
-                    {job.status === 'failed' && job.error_message && (
-                      <p className="text-[10px] text-destructive mt-0.5 truncate" title={job.error_message}>
-                        {job.error_message}
-                      </p>
+                    {viewMode !== "filename" && (
+                      <>
+                        <div className="flex flex-row-reverse items-center gap-1.5 mt-0.5 text-[10px] text-muted-foreground">
+                          <Badge variant="outline" className="text-[9px] py-0 px-1 h-4">{job.engine}</Badge>
+                          <span>{config.label}</span>
+                          {(viewMode === "comfortable" || viewMode === "multiline") && (
+                            <>
+                              <span>·</span>
+                              <span>{formatTime(job.created_at)}</span>
+                            </>
+                          )}
+                        </div>
+                        {isActive && (
+                          <div className={`${viewMode === "compact" ? "mt-0.5" : "mt-1"}`}>
+                            <Progress value={job.progress} className="h-1" />
+                          </div>
+                        )}
+                        {(viewMode === "comfortable" || viewMode === "multiline") && job.status === 'failed' && job.error_message && (
+                          <p className="text-[10px] text-destructive mt-0.5 truncate" title={job.error_message}>
+                            {job.error_message}
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                   <div className="flex flex-col items-center gap-0.5 shrink-0">

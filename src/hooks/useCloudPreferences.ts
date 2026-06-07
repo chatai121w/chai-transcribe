@@ -539,7 +539,9 @@ const useCloudPreferencesImpl = () => {
     value: UserPreferences[K]
   ) => {
     setPreferences(prev => {
-      if (prev[key] === value) return prev; // No-op: avoids redundant re-renders & cloud writes
+      if (Object.is(prev[key], value)) {
+        return prev;
+      }
       const updated = { ...prev, [key]: value };
       saveToCloud(updated, { immediate: IMMEDIATE_KEYS.includes(key) });
       return updated;
@@ -548,15 +550,16 @@ const useCloudPreferencesImpl = () => {
 
   const updatePreferences = useCallback((partial: Partial<UserPreferences>) => {
     setPreferences(prev => {
-      const changed: Partial<UserPreferences> = {};
-      for (const k of Object.keys(partial) as Array<keyof UserPreferences>) {
-        if (partial[k] !== undefined && prev[k] !== partial[k]) {
-          (changed as any)[k] = partial[k];
-        }
+      const keys = Object.keys(partial) as Array<keyof UserPreferences>;
+      if (keys.length === 0) return prev;
+
+      const hasActualChange = keys.some((k) => !Object.is(prev[k], partial[k] as UserPreferences[typeof k]));
+      if (!hasActualChange) {
+        return prev;
       }
-      if (Object.keys(changed).length === 0) return prev; // No-op
-      const updated = { ...prev, ...changed };
-      const hasImmediate = Object.keys(changed).some(k => IMMEDIATE_KEYS.includes(k as keyof UserPreferences));
+
+      const updated = { ...prev, ...partial };
+      const hasImmediate = Object.keys(partial).some(k => IMMEDIATE_KEYS.includes(k as keyof UserPreferences));
       saveToCloud(updated, { immediate: hasImmediate });
       return updated;
     });

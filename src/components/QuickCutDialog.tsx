@@ -725,6 +725,17 @@ export default function QuickCutDialog() {
 
   const busy = isCutting || isConverting || sendingToTranscribe;
 
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
   const primaryCtaLabel = useMemo(() => {
     if (outputFormat !== "none" && autoTranscribe) return "חתוך, המר ותמלל";
     if (outputFormat !== "none") return "חתוך והמר";
@@ -1132,9 +1143,10 @@ export default function QuickCutDialog() {
   // Mobile: full-height bottom sheet
   if (isMobile) {
     return (
-      <Sheet open={open} onOpenChange={(o) => { setOpen(o); if (!o) resetAll(); }}>
+      <Sheet modal={false} open={open} onOpenChange={(o) => { setOpen(o); if (!o) resetAll(); }}>
         <SheetContent
           side="bottom"
+          hideOverlay
           className="h-[100dvh] max-h-[100dvh] p-0 flex flex-col rounded-t-2xl"
           dir="rtl"
         >
@@ -1152,8 +1164,8 @@ export default function QuickCutDialog() {
 
   // Desktop: classic dialog
   return (
-    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) resetAll(); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col" dir="rtl">
+    <Dialog modal={false} open={open} onOpenChange={(o) => { setOpen(o); if (!o) resetAll(); }}>
+      <DialogContent hideOverlay className="max-w-2xl max-h-[90vh] flex flex-col" dir="rtl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
