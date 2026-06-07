@@ -358,6 +358,7 @@ export default function QuickCutDialog() {
     setResults([]);
     setProgress(null);
     setTierUsed("");
+    setTierEvents([]);
     setIsCutting(false);
     setConvertedFiles([]);
     setConvProgress(null);
