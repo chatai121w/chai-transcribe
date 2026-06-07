@@ -547,6 +547,21 @@ export default function QuickCutDialog() {
     setTierEvents([]);
     setTierUsed("");
     setProgress({ tier: "wav-slice", message: "מתחיל…", completed: 0, total: 1 });
+    // Create a central job so this whole cut + (optional) convert + transcribe flow
+    // shows up in the floating Jobs Center across pages.
+    try {
+      centralTrackerRef.current = await trackJob({
+        kind: "cut",
+        title: file.name,
+        mode: outputFormat === "none" ? "cut" : `cut+${outputFormat}`,
+        durationSec: duration ?? null,
+        stages: [
+          { key: "cut", label: "חיתוך", weight: 40 },
+          { key: "convert", label: "המרה", weight: 20 },
+          { key: "transcribe", label: "תמלול", weight: 40 },
+        ],
+      });
+    } catch { centralTrackerRef.current = null; }
     updateStage("cut", { status: "running", percent: 1, detail: "מתחיל…" });
     try {
       const outcome = await cutWithFallback(file, {
