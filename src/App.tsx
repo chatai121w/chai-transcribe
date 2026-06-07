@@ -57,6 +57,7 @@ const AudacityLab = lazyWithLog('AudacityLab', () => import("./pages/AudacityLab
 const NotFound = lazyWithLog('NotFound', () => import("./pages/NotFound"));
 const ResetPassword = lazyWithLog('ResetPassword', () => import("./pages/ResetPassword"));
 const VideoToMp3 = lazyWithLog('VideoToMp3', () => import("./pages/VideoToMp3"));
+const YouTube = lazyWithLog('YouTube', () => import("./pages/YouTube"));
 const AudioCleanLab = lazyWithLog('AudioCleanLab', () => import("./pages/AudioCleanLab"));
 const Harmonika = lazyWithLog('Harmonika', () => import("./pages/Harmonika"));
 const MeetingRecorder = lazyWithLog('MeetingRecorder', () => import("./pages/MeetingRecorder"));
