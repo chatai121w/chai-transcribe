@@ -542,6 +542,10 @@ export default function QuickCutDialog() {
         },
       });
       setResults(outcome.results);
+      // Feed the global completed-files panel.
+      try {
+        for (const r of outcome.results) pushCompletedFile(r.file, "cut", file?.name);
+      } catch { /* non-fatal */ }
       setTierUsed(outcome.tier);
       updateStage("cut", { status: "done", percent: 100, detail: `${outcome.results.length} מקטעים` });
       setStep(3);
