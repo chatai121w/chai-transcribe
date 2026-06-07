@@ -22,6 +22,7 @@ import { startYoutubeJob } from "@/lib/jobs/pipelines/youtubePipeline";
 import { useAuth } from "@/contexts/AuthContext";
 import { useJobs } from "@/hooks/useJobs";
 import { JobCard } from "@/components/jobs/JobCard";
+import { WaveformPlayer } from "@/components/WaveformPlayer";
 
 export default function YouTubePage() {
   const [url, setUrl] = useState("");
