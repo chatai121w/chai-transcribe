@@ -338,6 +338,7 @@ export default function QuickCutDialog() {
   const [trackedBatch, setTrackedBatch] = useState<TrackedTranscriptionBatch | null>(null);
   const [mergedTranscriptId, setMergedTranscriptId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mergingBatchRef = useRef<string | null>(null);
 
   const { submitBatchJobs, jobs } = useTranscriptionJobs();
   const { preferences } = useCloudPreferences();
@@ -401,6 +402,10 @@ export default function QuickCutDialog() {
       return;
     }
 
+    const batchKey = trackedBatch.jobIds.join(",");
+    if (mergingBatchRef.current === batchKey) return;
+    mergingBatchRef.current = batchKey;
+
     const merge = async () => {
       const orderedTexts = trackedBatch.jobIds
         .map((id) => jobs.find((job) => job.id === id))
@@ -448,6 +453,7 @@ export default function QuickCutDialog() {
           variant: "destructive",
         });
       } finally {
+        mergingBatchRef.current = null;
         setSendingToTranscribe(false);
         setTrackedBatch(null);
       }
