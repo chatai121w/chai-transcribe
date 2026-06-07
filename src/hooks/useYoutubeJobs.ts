@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { getLocalServerUrl } from "@/lib/serverConfig";
+import { getServerUrl } from "@/lib/serverConfig";
 
 export type YtMode = "transcribe" | "audio" | "video" | "full";
 export type YtStatus = "pending" | "downloading" | "extracting" | "converting" | "transcribing" | "finalizing" | "done" | "error" | "cancelled";
