@@ -1,10 +1,12 @@
 // Cloud YouTube fetch — multi-backend fallback chain
-//   1) Self-hosted Cobalt (COBALT_SELFHOST_URL)
-//   2) Piped instances (open source, REST, no key)
-//   3) Invidious instances (open source, REST, no key)
-//   4) Public Cobalt instances (best-effort, often rate-limited)
+//   1) Innertube (youtubei.js, iOS client) — direct YouTube internal API, no key
+//   2) Self-hosted Cobalt (COBALT_SELFHOST_URL)
+//   3) Piped instances (open source, REST, no key)
+//   4) Invidious instances (open source, REST, no key)
+//   5) Public Cobalt instances (best-effort, often rate-limited)
 // Name kept as `youtube-cobalt` for backwards-compat with existing callers.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
+import { Innertube } from 'npm:youtubei.js@13.4.0';
 
 const SELFHOST = Deno.env.get('COBALT_SELFHOST_URL')?.trim();
 
