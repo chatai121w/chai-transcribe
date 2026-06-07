@@ -153,10 +153,10 @@ export default function YouTubePage() {
               )}
 
               {probe.backend === "cobalt" && (mode === "transcribe" || mode === "full") && (
-                <Alert className="mt-3 border-amber-500/30 bg-amber-500/5">
-                  <AlertTriangle className="h-4 w-4" />
+                <Alert className="mt-3 border-green-500/30 bg-green-500/5">
+                  <Captions className="h-4 w-4" />
                   <AlertDescription>
-                    תמלול דרך הענן עדיין לא זמין — האודיו יורד וצריך להעלות אותו ידנית למסך התמלול. הפעל את השרת המקומי לתמלול אוטומטי.
+                    תמלול אוטומטי בענן פעיל — האודיו יורד, נשמר ב-Storage ומתומלל ב-Groq (עברית). ההתקדמות נצפית במרכז ה-Jobs.
                   </AlertDescription>
                 </Alert>
               )}
