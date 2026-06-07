@@ -61,7 +61,10 @@ export function CompletedFilesPanel({ onTranscribe, onSaveAndTranscribe }: Props
   const rectRef = useRef(rect);
   rectRef.current = rect;
 
-  useEffect(() => completedFilesBus.subscribe(setItems), []);
+  useEffect(() => {
+    const unsub = completedFilesBus.subscribe(setItems);
+    return () => { unsub(); };
+  }, []);
 
   // persist position/size
   useEffect(() => {
