@@ -424,6 +424,45 @@ Deno.serve(async (req) => {
       );
     }
 
+    if (body.action === 'store_audio') {
+      if (!body.jobId?.trim()) {
+        return new Response(JSON.stringify({ error: 'jobId is required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const { user, admin } = await requireUser(req);
+      const result = await fetchWithFallbacks(body.url, { ...body, mode: 'audio' });
+      const mediaRes = await fetch(result.url, {
+        headers: { 'Accept-Encoding': 'identity', 'User-Agent': 'lovable-yt/1.0' },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!mediaRes.ok) throw new Error(`audio_fetch_${mediaRes.status}`);
+      const audioBlob = await mediaRes.blob();
+      const ext = pickAudioExtension(result.filename, mediaRes.headers.get('content-type'));
+      const path = `${user.id}/${body.jobId.trim()}_yt.${ext}`;
+      const { error: uploadError } = await admin.storage
+        .from('audio-files')
+        .upload(path, audioBlob, {
+          upsert: true,
+          contentType: mediaRes.headers.get('content-type') || audioBlob.type || 'audio/webm',
+        });
+      if (uploadError) throw new Error(`audio_upload_${uploadError.message}`);
+
+      return new Response(JSON.stringify({
+        status: 'stored',
+        path,
+        fileName: `${result.title ?? 'youtube'}.${ext}`,
+        mimeType: mediaRes.headers.get('content-type') || audioBlob.type || 'audio/webm',
+        sourceUrl: result.url,
+        filename: result.filename,
+        attempts: result.attempts,
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const result = await fetchWithFallbacks(body.url, body);
     const meta = await fetchOEmbed(body.url) ?? await tryNoembed(body.url);
 
