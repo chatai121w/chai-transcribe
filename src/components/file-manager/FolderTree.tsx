@@ -121,7 +121,7 @@ const FolderRow = ({ node, selectedId, expanded, onToggleExpand, onSelect, onCre
         />
       </div>
       {isExpanded && node.children.map(child => (
-        <FolderRow key={child.id} {...{ node: child, selectedId, expanded, onToggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive }} />
+        <FolderRow key={child.id} {...{ node: child, selectedId, expanded, onToggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive, onDropDriveFolder, onDropDriveFile }} />
       ))}
     </>
   );
@@ -138,10 +138,13 @@ interface TreeProps {
   onTogglePin: (id: string) => void;
   onUpdateStyle: (id: string, patch: { color?: string | null; emoji?: string | null }) => void;
   onLinkDrive: (node: FolderNode) => void;
+  onDropDriveFolder?: (targetLocalParentId: string | null, drive: DriveFolderPayload) => void;
+  onDropDriveFile?: (targetLocalParentId: string | null, drive: DriveFilePayload) => void;
 }
 
-export const FolderTree = ({ tree, pinned, selectedId, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive }: TreeProps) => {
+export const FolderTree = ({ tree, pinned, selectedId, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive, onDropDriveFolder, onDropDriveFile }: TreeProps) => {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [rootDriveOver, setRootDriveOver] = useState(false);
   const toggleExpand = (id: string) => {
     setExpanded(prev => {
       const next = new Set(prev);
@@ -169,7 +172,7 @@ export const FolderTree = ({ tree, pinned, selectedId, onSelect, onCreateChild, 
             </div>
             {pinned.map(n => (
               <FolderRow key={`p-${n.id}`} node={{ ...n, depth: 0, children: [] }}
-                {...{ selectedId, expanded, onToggleExpand: toggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive }} />
+                {...{ selectedId, expanded, onToggleExpand: toggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive, onDropDriveFolder, onDropDriveFile }} />
             ))}
             <div className="my-1 mx-3 border-t border-border/50" />
           </>
@@ -178,10 +181,30 @@ export const FolderTree = ({ tree, pinned, selectedId, onSelect, onCreateChild, 
         <div
           ref={rootDropRef}
           onClick={() => onSelect(null)}
+          onDragOver={(e) => {
+            const t = e.dataTransfer.types;
+            if (t.includes('application/x-sht-drive-folder') || t.includes('application/x-sht-drive-file')) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+              setRootDriveOver(true);
+            }
+          }}
+          onDragLeave={() => setRootDriveOver(false)}
+          onDrop={(e) => {
+            setRootDriveOver(false);
+            const rawFolder = e.dataTransfer.getData('application/x-sht-drive-folder');
+            const rawFile = e.dataTransfer.getData('application/x-sht-drive-file');
+            if (!rawFolder && !rawFile) return;
+            e.preventDefault();
+            try {
+              if (rawFolder && onDropDriveFolder) onDropDriveFolder(null, JSON.parse(rawFolder));
+              else if (rawFile && onDropDriveFile) onDropDriveFile(null, JSON.parse(rawFile));
+            } catch { /* ignore */ }
+          }}
           className={cn(
             'flex items-center gap-2 px-3 py-1.5 mx-1 rounded text-sm cursor-pointer hover:bg-muted',
             selectedId === null && 'bg-yellow-500/20',
-            rootOver && 'ring-2 ring-yellow-500',
+            (rootOver || rootDriveOver) && 'ring-2 ring-yellow-500',
           )}
         >
           <Folder className="w-4 h-4 text-yellow-600" />
@@ -189,9 +212,10 @@ export const FolderTree = ({ tree, pinned, selectedId, onSelect, onCreateChild, 
         </div>
 
         {tree.map(n => (
-          <FolderRow key={n.id} node={n} {...{ selectedId, expanded, onToggleExpand: toggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive }} />
+          <FolderRow key={n.id} node={n} {...{ selectedId, expanded, onToggleExpand: toggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive, onDropDriveFolder, onDropDriveFile }} />
         ))}
       </div>
     </div>
   );
 };
+
