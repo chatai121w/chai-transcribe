@@ -787,7 +787,7 @@ const Index = () => {
     try {
       debugLog.info('OpenAI', `Starting transcription: ${file.name} (${file.size} bytes)`);
       
-      const keyPool = getProviderApiKeyPool('openai');
+      const keyPool = await getProviderApiKeyPool('openai');
       if (keyPool.length === 0) {
         debugLog.error('OpenAI', 'No API key found in localStorage');
         toast({
@@ -904,7 +904,7 @@ const Index = () => {
     setIsUploading(true);
 
     try {
-      const keyPool = getProviderApiKeyPool('groq');
+      const keyPool = await getProviderApiKeyPool('groq');
 
       if (keyPool.length === 0) {
         debugLog.error('Groq', 'No API key found in localStorage');
@@ -1039,7 +1039,7 @@ const Index = () => {
     setIsUploading(true);
 
     try {
-      const keyPool = getProviderApiKeyPool('google');
+      const keyPool = await getProviderApiKeyPool('google');
 
       if (keyPool.length === 0) {
         debugLog.error('Google', 'No API key found in localStorage');
@@ -1421,7 +1421,7 @@ const Index = () => {
     setIsUploading(true);
     
     try {
-      const keyPool = getProviderApiKeyPool('assemblyai');
+      const keyPool = await getProviderApiKeyPool('assemblyai');
 
       if (keyPool.length === 0) {
         toast({
@@ -1529,7 +1529,7 @@ const Index = () => {
     setIsUploading(true);
     
     try {
-      const keyPool = getProviderApiKeyPool('deepgram');
+      const keyPool = await getProviderApiKeyPool('deepgram');
 
       if (keyPool.length === 0) {
         toast({
@@ -1788,7 +1788,7 @@ const Index = () => {
     }
 
     if (engine === 'google') {
-      const keyPool = getProviderApiKeyPool('google');
+      const keyPool = await getProviderApiKeyPool('google');
       if (keyPool.length === 0) throw new Error('נדרש מפתח API - הגדר בהגדרות');
 
       const base64 = await new Promise<string>((resolve, reject) => {
@@ -1826,7 +1826,7 @@ const Index = () => {
 
     if (engine === 'openai' || engine === 'groq' || engine === 'assemblyai' || engine === 'deepgram') {
       const provider = engine as CloudProvider;
-      const keyPool = getProviderApiKeyPool(provider);
+      const keyPool = await getProviderApiKeyPool(provider);
       if (keyPool.length === 0) throw new Error('נדרש מפתח API - הגדר בהגדרות');
 
       const safeStartIndex = getProviderStartIndex(provider, keyPool.length);
