@@ -1311,6 +1311,26 @@ const TextEditor = () => {
         </Tabs>
 
         <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+        <DriveFolderPicker
+          open={drivePickerOpen}
+          onOpenChange={setDrivePickerOpen}
+          title="בחר תיקייה ב-Drive לשמירת התמליל"
+          onPick={async (folder) => {
+            try {
+              toast({ title: '☁️ מעלה ל-Google Drive...', description: `יעד: ${folder.name}` });
+              const name = `transcript-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.txt`;
+              const res = await uploadToDrive({
+                name,
+                content: text,
+                mimeType: 'text/plain',
+                parents: folder.id ? [folder.id] : undefined,
+              });
+              toast({ title: '✅ הועלה ל-Drive', description: `${res.name} → ${folder.name}` });
+            } catch (e: any) {
+              toast({ title: 'שגיאה בהעלאה ל-Drive', description: e.message, variant: 'destructive' });
+            }
+          }}
+        />
       </div>
     </div>
     </Suspense>
