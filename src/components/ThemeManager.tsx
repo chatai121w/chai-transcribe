@@ -245,11 +245,12 @@ function ThemePreview({ theme, isActive, onClick }: { theme: AppTheme; isActive:
   );
 }
 
-function ThemeLivePreview({ colors, style, name, variant }: {
+function ThemeLivePreview({ colors, style, name, variant, highlightKey }: {
   colors: ThemeColors;
   style: ThemeStyleOptions;
   name: string;
   variant: 'light' | 'dark';
+  highlightKey?: keyof ThemeColors | null;
 }) {
   const shadowMap: Record<string, string> = {
     none: 'none',
@@ -257,40 +258,112 @@ function ThemeLivePreview({ colors, style, name, variant }: {
     medium: '0 4px 6px -1px rgb(0 0 0 / 0.10)',
     strong: '0 20px 25px -5px rgb(0 0 0 / 0.18)',
   };
+  const radius = typeof style.radius === 'number' ? `${style.radius}px` : '8px';
+  const innerRadius = typeof style.radius === 'number' ? `${Math.max(0, style.radius - 2)}px` : '6px';
+  const densityPad = style.density === 'compact' ? '0.5rem' : style.density === 'spacious' ? '1rem' : '0.75rem';
+
+  // Region wrapper: pulses + outlines when its color key matches highlightKey
+  const ringClass = (k: keyof ThemeColors | string) =>
+    highlightKey === k
+      ? 'outline outline-2 outline-offset-2 outline-yellow-500 animate-pulse'
+      : 'transition-all';
+
   return (
     <div
-      className="rounded-xl p-5 space-y-3"
+      data-color-key="background"
+      className={`rounded-xl p-4 space-y-3 ${ringClass('background')}`}
       style={{
         backgroundColor: `hsl(${colors.background})`,
         border: `2px solid hsl(${colors.border})`,
-        borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : undefined,
+        borderRadius: radius,
         fontFamily: style.fontFamily || undefined,
         fontSize: typeof style.fontSize === 'number' ? `${style.fontSize}px` : undefined,
         fontWeight: style.fontWeight || undefined,
         boxShadow: shadowMap[style.shadow || 'soft'],
+        padding: densityPad,
       }}
     >
-      <div className="font-bold flex items-center justify-between" style={{ color: `hsl(${colors.foreground})`, fontSize: '1.05em' }}>
+      {/* Header with foreground text */}
+      <div
+        data-color-key="foreground"
+        className={`font-bold flex items-center justify-between ${ringClass('foreground')}`}
+        style={{ color: `hsl(${colors.foreground})`, fontSize: '1.05em' }}
+      >
         <span>{name}</span>
         {variant === 'dark' && <span className="text-[10px] opacity-60">🌙</span>}
         {variant === 'light' && <span className="text-[10px] opacity-60">☀️</span>}
       </div>
-      <div
-        className="p-3 space-y-2"
-        style={{
-          backgroundColor: `hsl(${colors.card})`,
-          border: `1px solid hsl(${colors.border})`,
-          borderRadius: typeof style.radius === 'number' ? `${Math.max(0, style.radius - 2)}px` : undefined,
-        }}
-      >
-        <div className="text-xs" style={{ color: `hsl(${colors.cardForeground})` }}>כרטיס לדוגמה — כך הטקסט שלך ייראה</div>
-        <div className="flex gap-2 flex-wrap">
-          <div className="text-xs px-3 py-1.5" style={{ backgroundColor: `hsl(${colors.primary})`, color: `hsl(${colors.primaryForeground})`, borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : '6px' }}>כפתור ראשי</div>
-          <div className="text-xs px-3 py-1.5" style={{ backgroundColor: `hsl(${colors.accent})`, color: `hsl(${colors.accentForeground})`, borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : '6px' }}>הדגשה</div>
-          <div className="text-xs px-3 py-1.5" style={{ backgroundColor: `hsl(${colors.secondary})`, color: `hsl(${colors.secondaryForeground})`, borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : '6px' }}>משני</div>
-          <div className="text-xs px-3 py-1.5" style={{ backgroundColor: `hsl(${colors.destructive})`, color: `hsl(${colors.destructiveForeground})`, borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : '6px' }}>שגיאה</div>
+
+      {/* Mini sidebar + main split */}
+      <div className="grid grid-cols-[1fr_2.5fr] gap-2">
+        {/* Sidebar */}
+        <div
+          data-color-key="sidebarBackground"
+          className={`p-2 space-y-1 text-[10px] ${ringClass('sidebarBackground')}`}
+          style={{
+            backgroundColor: `hsl(${colors.sidebarBackground})`,
+            border: `1px solid hsl(${colors.sidebarBorder})`,
+            borderRadius: innerRadius,
+          }}
+        >
+          <div data-color-key="sidebarForeground" className={ringClass('sidebarForeground')} style={{ color: `hsl(${colors.sidebarForeground})` }}>תפריט</div>
+          <div data-color-key="sidebarPrimary" className={`px-1.5 py-0.5 ${ringClass('sidebarPrimary')}`} style={{ backgroundColor: `hsl(${colors.sidebarPrimary})`, color: `hsl(${colors.sidebarPrimaryForeground})`, borderRadius: innerRadius }}>פעיל</div>
+          <div data-color-key="sidebarBorder" className={`h-px ${ringClass('sidebarBorder')}`} style={{ backgroundColor: `hsl(${colors.sidebarBorder})` }} />
+          <div style={{ color: `hsl(${colors.sidebarForeground})`, opacity: 0.7 }}>פריט</div>
+        </div>
+
+        {/* Card area */}
+        <div
+          data-color-key="card"
+          className={`p-3 space-y-2 ${ringClass('card')}`}
+          style={{
+            backgroundColor: `hsl(${colors.card})`,
+            border: `1px solid hsl(${colors.border})`,
+            borderRadius: innerRadius,
+          }}
+        >
+          <div data-color-key="cardForeground" className={`text-xs ${ringClass('cardForeground')}`} style={{ color: `hsl(${colors.cardForeground})` }}>טקסט בכרטיס לדוגמה</div>
+          <div data-color-key="mutedForeground" className={`text-[10px] ${ringClass('mutedForeground')}`} style={{ color: `hsl(${colors.mutedForeground})` }}>טקסט משני / placeholder</div>
+
+          {/* Input field */}
+          <div
+            data-color-key="input"
+            className={`text-[10px] px-2 py-1 ${ringClass('input')}`}
+            style={{
+              backgroundColor: `hsl(${colors.input})`,
+              border: `1px solid hsl(${colors.border})`,
+              borderRadius: innerRadius,
+              color: `hsl(${colors.foreground})`,
+              boxShadow: highlightKey === 'ring' ? `0 0 0 2px hsl(${colors.ring})` : undefined,
+            }}
+          >
+            <span data-color-key="ring">שדה קלט {highlightKey === 'ring' ? '(בפוקוס)' : ''}</span>
+          </div>
+
+          {/* Button row */}
+          <div className="flex gap-1 flex-wrap">
+            <div data-color-key="primary" className={`text-[10px] px-2 py-1 ${ringClass('primary')}`} style={{ backgroundColor: `hsl(${colors.primary})`, color: `hsl(${colors.primaryForeground})`, borderRadius: innerRadius }}>
+              <span data-color-key="primaryForeground" className={ringClass('primaryForeground')}>ראשי</span>
+            </div>
+            <div data-color-key="accent" className={`text-[10px] px-2 py-1 ${ringClass('accent')}`} style={{ backgroundColor: `hsl(${colors.accent})`, color: `hsl(${colors.accentForeground})`, borderRadius: innerRadius }}>
+              <span data-color-key="accentForeground" className={ringClass('accentForeground')}>הדגשה</span>
+            </div>
+            <div data-color-key="secondary" className={`text-[10px] px-2 py-1 ${ringClass('secondary')}`} style={{ backgroundColor: `hsl(${colors.secondary})`, color: `hsl(${colors.secondaryForeground})`, borderRadius: innerRadius }}>
+              <span data-color-key="secondaryForeground" className={ringClass('secondaryForeground')}>משני</span>
+            </div>
+            <div data-color-key="destructive" className={`text-[10px] px-2 py-1 ${ringClass('destructive')}`} style={{ backgroundColor: `hsl(${colors.destructive})`, color: `hsl(${colors.destructiveForeground})`, borderRadius: innerRadius }}>שגיאה</div>
+          </div>
+
+          {/* Muted badge row */}
+          <div className="flex gap-1 items-center">
+            <span data-color-key="muted" className={`text-[10px] px-2 py-0.5 ${ringClass('muted')}`} style={{ backgroundColor: `hsl(${colors.muted})`, color: `hsl(${colors.mutedForeground})`, borderRadius: innerRadius }}>badge</span>
+            <span data-color-key="iconColor" className={`text-[10px] ${ringClass('iconColor')}`} style={{ color: colors.iconColor || `hsl(${colors.foreground})` }}>★ אייקון</span>
+          </div>
         </div>
       </div>
+
+      {/* Border bottom strip */}
+      <div data-color-key="border" className={`h-px ${ringClass('border')}`} style={{ backgroundColor: `hsl(${colors.border})` }} />
     </div>
   );
 }
