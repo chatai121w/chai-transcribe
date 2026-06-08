@@ -155,10 +155,24 @@ export const FileManager = () => {
     const a = active.data.current as any; const o = over.data.current as any;
     if (!a || !o || o.kind !== 'folder') return;
     const targetId = o.id as string | null;
+    const targetFolder = folders.find((f) => f.id === targetId);
     try {
       if (a.kind === 'transcript') {
         await updateTranscript(a.id, { folder_id: targetId } as any);
         toast({ title: '✅ הועבר' });
+        // If target folder is linked to Drive — also upload there with confirmation flow
+        if (targetFolder?.drive_folder_id !== undefined && targetFolder?.drive_folder_id !== null) {
+          const tr: any = transcripts.find((t: any) => t.id === a.id);
+          if (tr) {
+            driveUploadQueue.enqueue([{
+              transcriptId: tr.id,
+              title: tr.title || 'תמלול',
+              text: tr.text || '',
+              driveFolderId: targetFolder.drive_folder_id,
+              driveFolderName: targetFolder.drive_folder_name || targetFolder.name,
+            }]);
+          }
+        }
       } else if (a.kind === 'folder') {
         if (a.id === targetId) return;
         await moveFolder(a.id, targetId);
