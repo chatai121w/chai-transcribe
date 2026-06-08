@@ -27,7 +27,7 @@ interface RowProps {
 }
 
 
-const FolderRow = ({ node, selectedId, expanded, onToggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive }: RowProps) => {
+const FolderRow = ({ node, selectedId, expanded, onToggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive, onDropDriveFolder, onDropDriveFile }: RowProps) => {
   const hasChildren = node.children.length > 0;
   const isExpanded = expanded.has(node.id);
   const isSelected = selectedId === node.id;
