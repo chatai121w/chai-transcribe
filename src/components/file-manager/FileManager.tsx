@@ -258,8 +258,8 @@ export const FileManager = () => {
       const bin = Uint8Array.from(atob(data.base64), c => c.charCodeAt(0));
       const importedFile = new File([bin], file.name, { type: data.contentType || file.mimeType });
 
-      setDriveBrowserOpen(false);
       navigate('/', { state: { file: importedFile } });
+
       toast({ title: '✅ ייבוא מ-Drive', description: file.name });
     } catch (e: any) {
       toast({ title: 'שגיאת ייבוא מ-Drive', description: e.message, variant: 'destructive' });
