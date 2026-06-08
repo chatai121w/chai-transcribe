@@ -320,16 +320,9 @@ async function fetchWithFallbacks(url: string, opts: ReqBody) {
   const videoId = extractVideoId(url);
   const attempts: string[] = [];
 
-  // 1) Innertube (most reliable cloud path, no infra)
-  if (videoId) {
-    try {
-      const it = await tryInnertube(videoId, opts);
-      if (it) return { status: 'redirect', ...it, attempts: [...attempts, 'innertube:ok'] };
-      attempts.push('innertube:fail');
-    } catch (e) {
-      attempts.push(`innertube:${e instanceof Error ? e.message.slice(0, 60) : 'err'}`);
-    }
-  }
+  // 1) Innertube temporarily disabled — it currently crashes the edge runtime
+  // with Brotli decompression errors on this project's workload.
+  attempts.push('innertube:disabled');
 
   // 2) Self-hosted Cobalt if configured
   if (SELFHOST) {
