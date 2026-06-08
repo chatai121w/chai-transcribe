@@ -1153,18 +1153,22 @@ const TextEditor = () => {
           </TabsContent>
 
           <TabsContent value="speakers" className="flex flex-col gap-3">
-            <LazyErrorBoundary label="זיהוי דוברים">
-              <SpeakerDiarization serverUrl="/whisper" initialAudioBlob={audioBlob} initialAudioName={audioFileName} initialText={text} />
-            </LazyErrorBoundary>
+            <CollapsibleWidget title="זיהוי דוברים" storageKey="te_speakers">
+              <LazyErrorBoundary label="זיהוי דוברים">
+                <SpeakerDiarization serverUrl="/whisper" initialAudioBlob={audioBlob} initialAudioName={audioFileName} initialText={text} />
+              </LazyErrorBoundary>
+            </CollapsibleWidget>
           </TabsContent>
 
           <TabsContent value="templates" className="flex flex-col gap-3">
-            <LazyErrorBoundary label="תבניות עריכה"><EditingTemplates
-              text={text}
-              onApply={(newText, templateName) => {
-                addVersion(newText, 'ai-custom', templateName);
-              }}
-            /></LazyErrorBoundary>
+            <CollapsibleWidget title="תבניות עריכה" storageKey="te_templates">
+              <LazyErrorBoundary label="תבניות עריכה"><EditingTemplates
+                text={text}
+                onApply={(newText, templateName) => {
+                  addVersion(newText, 'ai-custom', templateName);
+                }}
+              /></LazyErrorBoundary>
+            </CollapsibleWidget>
           </TabsContent>
 
           <TabsContent value="ai" className="flex flex-col gap-3">
