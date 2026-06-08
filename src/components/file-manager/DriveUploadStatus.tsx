@@ -45,7 +45,11 @@ export const DriveUploadStatus = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [applyAll, setApplyAll] = useState(false);
 
-  useEffect(() => { const unsub = driveUploadQueue.subscribe(() => force((n) => n + 1)); return () => { unsub(); }; }, []);
+  useEffect(() => {
+    void driveUploadQueue.restoreFromDb();
+    const unsub = driveUploadQueue.subscribe(() => force((n) => n + 1));
+    return () => { unsub(); };
+  }, []);
 
   const jobs = driveUploadQueue.jobs;
   if (jobs.length === 0) return null;
