@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
-import { Search, Plus, Copy, Scissors, Clipboard, Trash2, Pin, Cloud, Loader2, X } from 'lucide-react';
+import { Search, Plus, Copy, Scissors, Clipboard, Trash2, Pin, Cloud, Loader2, X, Columns2 } from 'lucide-react';
 import { useFolderTree, type FolderNode } from '@/hooks/useFolderTree';
 import { useCloudTranscripts, type CloudTranscript } from '@/hooks/useCloudTranscripts';
 import { FolderTree } from './FolderTree';
@@ -44,6 +44,13 @@ export const FileManager = () => {
   const [driveLinkOpen, setDriveLinkOpen] = useState<FolderNode | null>(null);
   const [driveBrowserOpen, setDriveBrowserOpen] = useState(false);
   const [driveSplitView, setDriveSplitView] = useState(true);
+  const [inlineDriveSplit, setInlineDriveSplit] = useState<boolean>(() => {
+    try { return localStorage.getItem('fm_inline_drive_split') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('fm_inline_drive_split', inlineDriveSplit ? '1' : '0'); } catch {}
+  }, [inlineDriveSplit]);
+
 
   useEffect(() => {
     if (!driveBrowserOpen) return;
@@ -301,13 +308,24 @@ export const FileManager = () => {
             <Trash2 className="w-4 h-4 ml-1" /> מחק
           </Button>
           <div className="h-6 w-px bg-border mx-1" />
+          <Button
+            size="sm"
+            variant={inlineDriveSplit ? 'default' : 'outline'}
+            onClick={() => setInlineDriveSplit(v => !v)}
+            title="תצוגה מפוצלת — מקומי לצד Google Drive עם גרירה בין העמודות"
+          >
+            <Columns2 className="w-4 h-4 ml-1" />
+            {inlineDriveSplit ? 'סגור תצוגה מפוצלת' : 'תצוגה מפוצלת + Drive'}
+          </Button>
           <Button size="sm" variant="outline" onClick={() => setDriveBrowserOpen(true)}>
             <Cloud className="w-4 h-4 ml-1" /> דפדף ב-Drive
           </Button>
         </div>
 
-        {/* Body: tree + grid */}
-        <div className="grid grid-cols-[260px_1fr] min-h-[600px]">
+        {/* Body: tree + grid (+ optional Drive column) */}
+        <div
+          className={`grid ${inlineDriveSplit ? 'grid-cols-[240px_1fr_minmax(360px,1fr)]' : 'grid-cols-[260px_1fr]'} min-h-[600px]`}
+        >
           <div className="border-l bg-muted/10">
             <FolderTree
               tree={tree}
@@ -323,7 +341,26 @@ export const FileManager = () => {
             />
           </div>
 
-          <div className="flex flex-col">
+          <div
+            className="flex flex-col border-l"
+            onDragOver={(e) => {
+              if (!inlineDriveSplit) return;
+              if (e.dataTransfer.types.includes('application/x-sht-drive-file')) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+              }
+            }}
+            onDrop={(e) => {
+              if (!inlineDriveSplit) return;
+              const raw = e.dataTransfer.getData('application/x-sht-drive-file');
+              if (!raw) return;
+              e.preventDefault();
+              try {
+                const file = JSON.parse(raw) as DriveDropFile;
+                void handleDropDriveFileToLocal(file);
+              } catch { /* ignore */ }
+            }}
+          >
             <div className="px-4 py-2 border-b flex items-center justify-between">
               <Breadcrumbs path={path} onNavigate={setCurrentFolderId} />
               {selected.size > 0 && (
@@ -333,6 +370,11 @@ export const FileManager = () => {
                 </div>
               )}
             </div>
+            {inlineDriveSplit && (
+              <div className="px-4 py-1.5 text-[11px] text-muted-foreground bg-yellow-50/40 dark:bg-yellow-950/10 border-b">
+                גרור תמלול ימינה ל-Drive להעלאה (העתקה) · גרור קובץ Drive שמאלה לכאן לייבוא לתמלול
+              </div>
+            )}
             <div className="flex-1 p-4 overflow-y-auto">
               <FileGrid
                 items={itemsInCurrent}
@@ -348,8 +390,22 @@ export const FileManager = () => {
               />
             </div>
           </div>
+
+          {inlineDriveSplit && (
+            <div className="bg-muted/5 p-3 overflow-y-auto">
+              <GoogleDriveBrowser
+                onDropLocalTranscriptToFolder={(folder, transcriptId) =>
+                  void handleUploadTranscriptToDriveFolder(folder, transcriptId)
+                }
+                onImportAudio={(file) => {
+                  navigate('/', { state: { file } });
+                }}
+              />
+            </div>
+          )}
         </div>
       </Card>
+
 
       {/* New folder */}
       <Dialog open={!!newFolderOpen} onOpenChange={(o) => !o && setNewFolderOpen(null)}>

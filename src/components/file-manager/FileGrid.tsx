@@ -82,7 +82,19 @@ const TranscriptCard = ({ t, isSel, isCut, onClick, onDelete, onFav }: any) => {
         isCut && 'opacity-50',
       )}
     >
-      <div ref={dragRef} {...listeners} {...attributes} className="flex items-center gap-3 flex-1 min-w-0">
+      <div
+        ref={dragRef}
+        {...listeners}
+        {...attributes}
+        draggable
+        onDragStart={(e) => {
+          // Native HTML5 payload so the card can be dropped on the Drive column
+          e.dataTransfer.setData('application/x-sht-local-transcript-id', t.id);
+          e.dataTransfer.effectAllowed = 'copyMove';
+        }}
+        className="flex items-center gap-3 flex-1 min-w-0"
+      >
+
         {isAudio ? <FileAudio className="w-6 h-6 text-yellow-700 shrink-0" /> : <FileText className="w-6 h-6 text-muted-foreground shrink-0" />}
         <div className="flex-1 min-w-0">
           <div className="font-medium truncate">{t.title || 'ללא שם'}</div>
