@@ -1040,6 +1040,8 @@ export function ThemeManager() {
   const [aiName, setAiName] = useState('');
   const [aiPreview, setAiPreview] = useState<AppTheme | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'saved'>('idle');
+  const syncTimerRef = useRef<number | null>(null);
 
   const openFloatingEditor = (initial: AppTheme, title: string, isBuiltIn = false) => {
     setThemeBeforeEditing(activeThemeId);
@@ -1057,9 +1059,17 @@ export function ThemeManager() {
     setThemeBeforeEditing(null);
   };
 
-  const syncThemeToCloud = (themeId: string) => {
-    const customJson = localStorage.getItem('app_custom_themes') || '[]';
-    updatePreferences({ theme: themeId, custom_themes: customJson });
+  const syncThemeToCloud = async (themeId: string) => {
+    setSyncStatus('syncing');
+    if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
+    try {
+      const customJson = localStorage.getItem('app_custom_themes') || '[]';
+      await updatePreferences({ theme: themeId, custom_themes: customJson });
+      setSyncStatus('saved');
+      syncTimerRef.current = window.setTimeout(() => setSyncStatus('idle'), 2500);
+    } catch {
+      setSyncStatus('idle');
+    }
   };
 
   // Toast on cross-device theme update from realtime
