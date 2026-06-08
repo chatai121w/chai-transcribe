@@ -139,6 +139,43 @@ Deno.serve(async (req) => {
         });
       }
 
+      case 'findByName': {
+        const { name, parentId } = params;
+        if (!name) return json({ error: 'name required' }, 400);
+        const safeName = String(name).replace(/'/g, "\\'");
+        const qParts = [`name = '${safeName}'`, 'trashed = false'];
+        if (parentId) qParts.push(`'${parentId}' in parents`);
+        const url = new URL(`${GATEWAY}/drive/v3/files`);
+        url.searchParams.set('q', qParts.join(' and '));
+        url.searchParams.set('fields', 'files(id,name,mimeType,modifiedTime,size,webViewLink)');
+        url.searchParams.set('pageSize', '20');
+        const res = await fetch(url, { headers: authHeaders() });
+        const body = await res.text();
+        if (!res.ok) return json({ error: 'find failed', status: res.status, body }, 500);
+        return new Response(body, {
+          headers: { ...extraCors, 'Content-Type': 'application/json' },
+        });
+      }
+
+      case 'updateContent': {
+        const { fileId, mimeType = 'text/plain', base64 } = params;
+        if (!fileId || !base64) return json({ error: 'fileId & base64 required' }, 400);
+        const bin = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        const res = await fetch(
+          `${GATEWAY}/upload/drive/v3/files/${fileId}?uploadType=media&fields=id,name,webViewLink`,
+          {
+            method: 'PATCH',
+            headers: { ...authHeaders(), 'Content-Type': mimeType },
+            body: bin,
+          }
+        );
+        const txt = await res.text();
+        if (!res.ok) return json({ error: 'update failed', status: res.status, body: txt }, 500);
+        return new Response(txt, {
+          headers: { ...extraCors, 'Content-Type': 'application/json' },
+        });
+      }
+
       default:
         return json({ error: `unknown action: ${action}` }, 400);
     }
