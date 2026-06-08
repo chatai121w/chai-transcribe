@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useMemo, useSyncExternalStore, useRef } from 'react';
+import { useEffect, useCallback, useMemo, useSyncExternalStore } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
@@ -9,10 +9,8 @@ import {
   saveTranscriptLocally,
   updateTranscriptLocally,
   deleteTranscriptLocally,
-  syncTranscriptsDown,
   reconcileDeletedTranscripts,
 } from '@/lib/syncEngine';
-
 
 export interface CloudTranscript {
   id: string;
@@ -34,23 +32,67 @@ export interface CloudTranscript {
   updated_at: string;
 }
 
-export const useCloudTranscripts = () => {
-  const { user, isAuthenticated } = useAuth();
-  const [transcripts, setTranscripts] = useState<CloudTranscript[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+// ─────────────────────────────────────────────────────────────────────────
+// Singleton store — shared across every component that calls useCloudTranscripts.
+// Prevents duplicate fetches, duplicate realtime subscriptions, and duplicate
+// re-renders that previously caused the "multiple spinners / refreshes" issue.
+// ─────────────────────────────────────────────────────────────────────────
 
-  const fetchTranscripts = useCallback(async () => {
-    if (!user) return;
-    setIsLoading(true);
+type StoreState = {
+  transcripts: CloudTranscript[];
+  isLoading: boolean;
+};
+
+let state: StoreState = { transcripts: [], isLoading: false };
+const listeners = new Set<() => void>();
+
+function setState(next: Partial<StoreState>) {
+  state = { ...state, ...next };
+  listeners.forEach(l => l());
+}
+
+function subscribe(l: () => void) {
+  listeners.add(l);
+  return () => { listeners.delete(l); };
+}
+
+function getSnapshot() {
+  return state;
+}
+
+// Fetch dedup & cooldown
+let activeUserId: string | null = null;
+let inflightFetch: Promise<void> | null = null;
+let lastFetchAt = 0;
+const FETCH_COOLDOWN_MS = 4000;
+
+function transcriptsEqual(a: CloudTranscript[], b: CloudTranscript[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].updated_at !== b[i].updated_at) return false;
+  }
+  return true;
+}
+
+async function doFetch(userId: string, force = false) {
+  const now = Date.now();
+  if (!force && now - lastFetchAt < FETCH_COOLDOWN_MS) return;
+  if (inflightFetch) return inflightFetch;
+
+  lastFetchAt = now;
+  setState({ isLoading: true });
+
+  inflightFetch = (async () => {
     try {
-      // 1) Load from local DB first (instant)
-      const local = await getLocalTranscripts(user.id);
-      if (local.length > 0) {
-        setTranscripts(local as CloudTranscript[]);
+      // 1) Local DB first (instant)
+      const local = await getLocalTranscripts(userId);
+      if (local.length > 0 && !transcriptsEqual(state.transcripts, local as CloudTranscript[])) {
+        setState({ transcripts: local as CloudTranscript[] });
         debugLog.info('Cloud', `Loaded ${local.length} transcripts from local DB`);
       }
 
-      // 2) Fetch from cloud in background
+      // 2) Cloud
       const { data, error } = await supabase
         .from('transcripts')
         .select('*')
@@ -59,15 +101,16 @@ export const useCloudTranscripts = () => {
 
       if (error) throw error;
       const cloud = (data as CloudTranscript[]) || [];
-      setTranscripts(cloud);
 
-      // 3) Write cloud data to local DB for next time
+      if (!transcriptsEqual(state.transcripts, cloud)) {
+        setState({ transcripts: cloud });
+      }
+
+      // 3) Mirror cloud → local DB
       if (await isDbAvailable()) {
         const cloudIds = new Set(cloud.map(t => t.id));
-        // Get dirty local records to skip overwriting
         const dirtyIds = new Set(
-          (await db.transcripts.where('_dirty').equals(1).primaryKeys())
-            .map(String)
+          (await db.transcripts.where('_dirty').equals(1).primaryKeys()).map(String)
         );
         const toSync = cloud
           .filter(t => !dirtyIds.has(t.id))
@@ -85,81 +128,109 @@ export const useCloudTranscripts = () => {
         if (toSync.length > 0) {
           await db.transcripts.bulkPut(toSync);
         }
-        await reconcileDeletedTranscripts(user.id, cloudIds);
+        await reconcileDeletedTranscripts(userId, cloudIds);
         debugLog.info('Cloud', `Synced ${cloud.length} transcripts to local DB`);
       }
-    } catch (error) {
-      debugLog.error('Cloud', 'Error fetching transcripts', error instanceof Error ? error.message : String(error));
-      // On cloud failure, local data is already shown — no need to clear
+    } catch (err) {
+      debugLog.error('Cloud', 'Error fetching transcripts', err instanceof Error ? err.message : String(err));
     } finally {
-      setIsLoading(false);
+      setState({ isLoading: false });
+      inflightFetch = null;
     }
-  }, [user]);
+  })();
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchTranscripts();
-    }
-  }, [isAuthenticated, fetchTranscripts]);
+  return inflightFetch;
+}
 
-  // Realtime subscription
-  useEffect(() => {
-    if (!isAuthenticated) return;
+// Single realtime channel for the active user
+let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
 
-    const channel = supabase
-      .channel(`transcripts-changes-${Math.random().toString(36).slice(2)}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'transcripts' },
-        async (payload) => {
-          const newItem = payload.new as CloudTranscript;
-          setTranscripts(prev => [newItem, ...prev]);
-          // Sync to local DB
-          if (await isDbAvailable()) {
+function startRealtime(userId: string) {
+  if (realtimeChannel && activeUserId === userId) return;
+  stopRealtime();
+  activeUserId = userId;
+
+  realtimeChannel = supabase
+    .channel(`transcripts-changes-${userId}`)
+    .on('postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'transcripts' },
+      async (payload) => {
+        const newItem = payload.new as CloudTranscript;
+        if (state.transcripts.some(t => t.id === newItem.id)) return;
+        setState({ transcripts: [newItem, ...state.transcripts] });
+        if (await isDbAvailable()) {
+          await db.transcripts.put({
+            ...newItem, tags: newItem.tags || [], notes: newItem.notes || '',
+            title: newItem.title || '', folder: newItem.folder || '',
+            category: newItem.category || '', is_favorite: newItem.is_favorite || false,
+            _dirty: false, _deleted: false,
+          });
+        }
+      })
+    .on('postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'transcripts' },
+      async (payload) => {
+        const updated = payload.new as CloudTranscript;
+        const cur = state.transcripts.find(t => t.id === updated.id);
+        if (cur && cur.updated_at === updated.updated_at) return;
+        setState({ transcripts: state.transcripts.map(t => t.id === updated.id ? updated : t) });
+        if (await isDbAvailable()) {
+          const existing = await db.transcripts.get(updated.id);
+          if (!existing?._dirty) {
             await db.transcripts.put({
-              ...newItem, tags: newItem.tags || [], notes: newItem.notes || '',
-              title: newItem.title || '', folder: newItem.folder || '',
-              category: newItem.category || '', is_favorite: newItem.is_favorite || false,
+              ...updated, tags: updated.tags || [], notes: updated.notes || '',
+              title: updated.title || '', folder: updated.folder || '',
+              category: updated.category || '', is_favorite: updated.is_favorite || false,
               _dirty: false, _deleted: false,
             });
           }
         }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'transcripts' },
-        async (payload) => {
-          const updated = payload.new as CloudTranscript;
-          setTranscripts(prev => prev.map(t => t.id === updated.id ? updated : t));
-          if (await isDbAvailable()) {
-            const existing = await db.transcripts.get(updated.id);
-            if (!existing?._dirty) {
-              await db.transcripts.put({
-                ...updated, tags: updated.tags || [], notes: updated.notes || '',
-                title: updated.title || '', folder: updated.folder || '',
-                category: updated.category || '', is_favorite: updated.is_favorite || false,
-                _dirty: false, _deleted: false,
-              });
-            }
-          }
+      })
+    .on('postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'transcripts' },
+      async (payload) => {
+        setState({ transcripts: state.transcripts.filter(t => t.id !== (payload.old as any).id) });
+        if (await isDbAvailable()) {
+          await db.transcripts.delete((payload.old as any).id);
         }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'transcripts' },
-        async (payload) => {
-          setTranscripts(prev => prev.filter(t => t.id !== payload.old.id));
-          if (await isDbAvailable()) {
-            await db.transcripts.delete(payload.old.id);
-          }
-        }
-      )
-      .subscribe();
+      })
+    .subscribe();
+}
 
+function stopRealtime() {
+  if (realtimeChannel) {
+    supabase.removeChannel(realtimeChannel);
+    realtimeChannel = null;
+  }
+  activeUserId = null;
+}
+
+// Track how many React consumers are mounted — tear down realtime only when none remain.
+let mountedCount = 0;
+
+export const useCloudTranscripts = () => {
+  const { user, isAuthenticated } = useAuth();
+  const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
+  // Mount/unmount tracking + bootstrap fetch + realtime
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    mountedCount++;
+    doFetch(user.id);
+    startRealtime(user.id);
     return () => {
-      supabase.removeChannel(channel);
+      mountedCount--;
+      if (mountedCount <= 0) {
+        mountedCount = 0;
+        stopRealtime();
+      }
     };
-  }, [isAuthenticated, fetchTranscripts]);
+  }, [isAuthenticated, user]);
+
+  const fetchTranscripts = useCallback(async () => {
+    if (!user) return;
+    await doFetch(user.id, true);
+  }, [user]);
 
   const uploadAudioFile = useCallback(async (file: File): Promise<string | null> => {
     if (!user) return null;
@@ -181,7 +252,7 @@ export const useCloudTranscripts = () => {
     try {
       const { data, error } = await supabase.storage
         .from('permanent-audio')
-        .createSignedUrl(filePath, 3600); // 1 hour
+        .createSignedUrl(filePath, 3600);
       if (error) throw error;
       return data.signedUrl;
     } catch (error) {
@@ -226,14 +297,11 @@ export const useCloudTranscripts = () => {
         edited_text: null as string | null,
         created_at: now,
         updated_at: now,
-        // Cache audio blob locally for offline playback
         audio_blob: audioFile || undefined,
       };
 
-      // ① Save to local DB INSTANTLY (text + wordTimings + audio blob)
       await saveTranscriptLocally(localRecord);
 
-      // ② Insert text + wordTimings to Supabase (NO audio upload — instant)
       const { data, error } = await supabase
         .from('transcripts')
         .insert({
@@ -251,7 +319,6 @@ export const useCloudTranscripts = () => {
 
       if (error) throw error;
 
-      // Update local DB with cloud ID
       if (data) {
         await db.transcripts.delete(localId);
         await saveTranscriptLocally({
@@ -262,16 +329,18 @@ export const useCloudTranscripts = () => {
           audio_blob: audioFile || undefined,
         });
         await db.transcripts.update(data.id, { _dirty: false });
+
+        // Optimistic insert into the store (realtime will dedupe)
+        if (!state.transcripts.some(t => t.id === data.id)) {
+          setState({ transcripts: [data as CloudTranscript, ...state.transcripts] });
+        }
       }
 
-      // ③ BACKGROUND: upload audio file, then update audio_file_path
       if (audioFile && data) {
         const cloudId = data.id;
         uploadAudioFile(audioFile).then(async (audioPath) => {
           if (!audioPath) return;
-          // Update Supabase
           await supabase.from('transcripts').update({ audio_file_path: audioPath }).eq('id', cloudId);
-          // Update local DB
           if (await isDbAvailable()) {
             await db.transcripts.update(cloudId, { audio_file_path: audioPath });
           }
@@ -298,8 +367,14 @@ export const useCloudTranscripts = () => {
     updates: Partial<Pick<CloudTranscript, 'text' | 'tags' | 'notes' | 'title' | 'folder' | 'category' | 'is_favorite' | 'edited_text' | 'word_timings'>>
   ) => {
     try {
-      // Update local DB first
       await updateTranscriptLocally(id, updates);
+
+      // Optimistic update in store
+      setState({
+        transcripts: state.transcripts.map(t =>
+          t.id === id ? { ...t, ...updates, updated_at: new Date().toISOString() } as CloudTranscript : t
+        ),
+      });
 
       const { error } = await supabase
         .from('transcripts')
@@ -307,7 +382,6 @@ export const useCloudTranscripts = () => {
         .eq('id', id);
 
       if (!error) {
-        // Cloud succeeded — clear dirty flag
         await db.transcripts.update(id, { _dirty: false });
       }
       if (error) throw error;
@@ -318,14 +392,15 @@ export const useCloudTranscripts = () => {
 
   const deleteTranscript = useCallback(async (id: string) => {
     try {
-      // Mark deleted locally first
       await deleteTranscriptLocally(id);
 
-      // Delete associated audio file if exists
-      const transcript = transcripts.find(t => t.id === id);
+      const transcript = state.transcripts.find(t => t.id === id);
       if (transcript?.audio_file_path) {
         await supabase.storage.from('permanent-audio').remove([transcript.audio_file_path]);
       }
+
+      // Optimistic
+      setState({ transcripts: state.transcripts.filter(t => t.id !== id) });
 
       const { error } = await supabase
         .from('transcripts')
@@ -333,7 +408,6 @@ export const useCloudTranscripts = () => {
         .eq('id', id);
 
       if (!error) {
-        // Cloud delete succeeded — remove from local DB entirely
         await db.transcripts.delete(id);
       }
       if (error) throw error;
@@ -345,13 +419,12 @@ export const useCloudTranscripts = () => {
         variant: 'destructive',
       });
     }
-  }, [transcripts]);
+  }, []);
 
   const deleteAll = useCallback(async () => {
     if (!user) return;
     try {
-      // Collect audio file paths before deleting records
-      const audioPaths = transcripts
+      const audioPaths = state.transcripts
         .filter(t => t.audio_file_path)
         .map(t => t.audio_file_path!);
 
@@ -362,32 +435,29 @@ export const useCloudTranscripts = () => {
 
       if (error) throw error;
 
-      // Delete audio files from storage
       if (audioPaths.length > 0) {
         await supabase.storage.from('permanent-audio').remove(audioPaths);
       }
 
-      // Clear local DB too
       if (await isDbAvailable()) {
         await db.transcripts.where('user_id').equals(user.id).delete();
       }
 
-      setTranscripts([]);
+      setState({ transcripts: [] });
     } catch (error) {
       debugLog.error('Cloud', 'Error deleting all transcripts', error instanceof Error ? error.message : String(error));
     }
-  }, [user, transcripts]);
+  }, [user]);
 
-  // Stats (memoized to prevent unnecessary re-renders)
   const stats = useMemo(() => ({
-    total: transcripts.length,
-    engines: [...new Set(transcripts.map(t => t.engine))],
-    totalChars: transcripts.reduce((sum, t) => sum + (t.text?.length ?? 0), 0),
-  }), [transcripts]);
+    total: snap.transcripts.length,
+    engines: [...new Set(snap.transcripts.map(t => t.engine))],
+    totalChars: snap.transcripts.reduce((sum, t) => sum + (t.text?.length ?? 0), 0),
+  }), [snap.transcripts]);
 
   return {
-    transcripts,
-    isLoading,
+    transcripts: snap.transcripts,
+    isLoading: snap.isLoading,
     saveTranscript,
     updateTranscript,
     deleteTranscript,
