@@ -81,19 +81,21 @@
     display: none !important;
   }
 
-  /* טאבים — כפתורים גבוהים, נוחים לאצבע */
+  /* טאבים — כפתורים גבוהים, נוחים לאצבע, אריזה טבעית מימין לשמאל */
   .text-editor-page [role="tablist"] {
     padding: 6px !important;
     border-radius: 14px !important;
     gap: 6px !important;
+    justify-content: flex-start !important; /* ב-RTL = מימין */
+    direction: rtl !important;
   }
   .text-editor-page [role="tab"] {
     min-height: 44px !important;
     font-size: 14px !important;
-    padding: 8px 12px !important;
+    padding: 8px 14px !important;
     border-radius: 10px !important;
-    flex: 1 1 calc(50% - 6px) !important;
-    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    min-width: max-content !important;
   }
 
   /* כרטיסי תוכן — שוליים מעוגלים יותר וריווח פנימי נוח */
