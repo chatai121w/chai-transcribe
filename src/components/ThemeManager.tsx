@@ -368,6 +368,124 @@ function ThemeLivePreview({ colors, style, name, variant, highlightKey }: {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Real-site iframe preview — shows the actual app pages with the theme
+// applied live, so users see EXACTLY how their changes look.
+// ─────────────────────────────────────────────────────────────────────
+const SITE_PREVIEW_ROUTES: { path: string; label: string }[] = [
+  { path: '/dashboard', label: '📊 דשבורד' },
+  { path: '/folders', label: '📁 תיקיות' },
+  { path: '/settings', label: '⚙️ הגדרות' },
+  { path: '/', label: '🏠 דף ראשי' },
+  { path: '/text-editor', label: '✏️ עורך טקסט' },
+  { path: '/login', label: '🔐 התחברות' },
+];
+
+const SITE_PREVIEW_CSS_MAP: Record<keyof ThemeColors, string> = {
+  background: '--background',
+  foreground: '--foreground',
+  card: '--card',
+  cardForeground: '--card-foreground',
+  popover: '--popover',
+  popoverForeground: '--popover-foreground',
+  primary: '--primary',
+  primaryForeground: '--primary-foreground',
+  secondary: '--secondary',
+  secondaryForeground: '--secondary-foreground',
+  muted: '--muted',
+  mutedForeground: '--muted-foreground',
+  accent: '--accent',
+  accentForeground: '--accent-foreground',
+  destructive: '--destructive',
+  destructiveForeground: '--destructive-foreground',
+  border: '--border',
+  input: '--input',
+  ring: '--ring',
+  sidebarBackground: '--sidebar-background',
+  sidebarForeground: '--sidebar-foreground',
+  sidebarPrimary: '--sidebar-primary',
+  sidebarPrimaryForeground: '--sidebar-primary-foreground',
+  sidebarAccent: '--sidebar-accent',
+  sidebarAccentForeground: '--sidebar-accent-foreground',
+  sidebarBorder: '--sidebar-border',
+  sidebarRing: '--sidebar-ring',
+  iconColor: '--icon-color',
+};
+
+function applyThemeToIframe(doc: Document, colors: ThemeColors, style: ThemeStyleOptions) {
+  const root = doc.documentElement;
+  for (const [k, v] of Object.entries(SITE_PREVIEW_CSS_MAP)) {
+    const val = colors[k as keyof ThemeColors];
+    root.style.setProperty(v, v === '--icon-color' ? (val || 'inherit') : val);
+  }
+  if (typeof style.radius === 'number') root.style.setProperty('--radius', `${style.radius}px`);
+  const density = style.density || 'comfortable';
+  root.style.setProperty('--density-scale', density === 'compact' ? '0.85' : density === 'spacious' ? '1.15' : '1');
+  root.dataset.density = density;
+  if (style.fontFamily) root.style.setProperty('--app-font-family', style.fontFamily);
+  if (typeof style.fontSize === 'number') root.style.setProperty('--app-font-size', `${style.fontSize}px`);
+  if (typeof style.fontWeight === 'number') root.style.setProperty('--app-font-weight', String(style.fontWeight));
+  const shadowMap: Record<string, string> = {
+    none: 'none',
+    soft: '0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06)',
+    medium: '0 4px 6px -1px rgb(0 0 0 / 0.10), 0 2px 4px -2px rgb(0 0 0 / 0.10)',
+    strong: '0 20px 25px -5px rgb(0 0 0 / 0.18), 0 8px 10px -6px rgb(0 0 0 / 0.18)',
+  };
+  root.style.setProperty('--app-shadow', shadowMap[style.shadow || 'soft']);
+}
+
+function ThemeSitePreview({ colors, style }: { colors: ThemeColors; style: ThemeStyleOptions }) {
+  const [route, setRoute] = useState<string>('/dashboard');
+  const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
+  const [loading, setLoading] = useState(true);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  const reapply = useCallback(() => {
+    const doc = iframeRef.current?.contentDocument;
+    if (doc) applyThemeToIframe(doc, colors, style);
+  }, [colors, style]);
+
+  useEffect(() => { reapply(); }, [reapply]);
+
+  const width = device === 'mobile' ? 390 : '100%';
+  const height = device === 'mobile' ? 700 : 600;
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border/60 bg-muted/10 p-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Label className="text-xs text-muted-foreground">עמוד:</Label>
+        <Select value={route} onValueChange={(v) => { setLoading(true); setRoute(v); }}>
+          <SelectTrigger className="h-7 w-40 text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {SITE_PREVIEW_ROUTES.map(r => (
+              <SelectItem key={r.path} value={r.path} className="text-xs">{r.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="flex rounded-md border border-border/50 overflow-hidden">
+          <button type="button" onClick={() => setDevice('desktop')} className={`px-2 py-1 text-[11px] ${device === 'desktop' ? 'bg-primary text-primary-foreground' : ''}`}>🖥️ דסקטופ</button>
+          <button type="button" onClick={() => setDevice('mobile')} className={`px-2 py-1 text-[11px] ${device === 'mobile' ? 'bg-primary text-primary-foreground' : ''}`}>📱 מובייל</button>
+        </div>
+        <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setLoading(true); iframeRef.current?.contentWindow?.location.reload(); }}>
+          <RotateCcw className="h-3 w-3 ml-1" /> רענן
+        </Button>
+        {loading && <span className="text-[10px] text-muted-foreground animate-pulse">טוען...</span>}
+      </div>
+      <div className="flex justify-center bg-background/50 rounded overflow-hidden">
+        <iframe
+          ref={iframeRef}
+          key={route}
+          src={route}
+          title="תצוגה מקדימה של האתר"
+          onLoad={() => { setLoading(false); reapply(); }}
+          style={{ width, height, border: 'none', maxWidth: '100%' }}
+        />
+      </div>
+      <div className="text-[10px] text-muted-foreground">💡 זו תצוגה אמיתית של עמוד באתר עם הצבעים והסגנון הנוכחיים. לא יישמר עד שתלחץ "שמור".</div>
+    </div>
+  );
+}
+
 /** Build an approximated dark variant of given colors for side-by-side preview. */
 function invertColorsForPreview(colors: ThemeColors): ThemeColors {
   const flip = (hsl: string): string => {
