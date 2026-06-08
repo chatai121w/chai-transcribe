@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTheme, BUILT_IN_THEMES, type AppTheme, type ThemeColors, type ThemeStyleOptions } from "@/hooks/useTheme";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { Button } from "@/components/ui/button";
@@ -83,6 +83,53 @@ const COLOR_GROUPS: { label: string; keys: { key: keyof ThemeColors; label: stri
       { key: 'destructive', label: 'שגיאה' },
     ],
   },
+];
+
+/** Plain-language description of what each color controls in the UI. */
+const COLOR_DESCRIPTIONS: Partial<Record<keyof ThemeColors, string>> = {
+  background: 'הרקע הראשי של כל האפליקציה',
+  foreground: 'צבע הטקסט הראשי על הרקע',
+  primary: 'כפתורים ראשיים, קישורים פעילים, סרגלי התקדמות',
+  primaryForeground: 'טקסט על כפתור ראשי',
+  accent: 'הדגשות, hover, רקע של פריט פעיל',
+  accentForeground: 'טקסט על אזור הדגשה',
+  card: 'רקע של כרטיסים, דיאלוגים וחלונות',
+  cardForeground: 'טקסט בתוך כרטיסים',
+  border: 'קווי מסגרת סביב כרטיסים ושדות',
+  input: 'רקע ומסגרת של שדות קלט',
+  ring: 'טבעת המסגרת סביב שדה בפוקוס',
+  secondary: 'כפתורים משניים, רקע tabs',
+  secondaryForeground: 'טקסט בכפתורים משניים',
+  muted: 'רקע אזורים שקטים, badges, סטטוס',
+  mutedForeground: 'טקסט משני, placeholder, תיאורים',
+  sidebarBackground: 'רקע התפריט הצדדי',
+  sidebarForeground: 'טקסט בתפריט הצדדי',
+  sidebarPrimary: 'פריט פעיל בתפריט הצדדי',
+  sidebarBorder: 'קו מפריד בתפריט הצדדי',
+  iconColor: 'צבע אייקונים גלובלי באפליקציה',
+  destructive: 'כפתורי מחיקה והודעות שגיאה',
+};
+
+/** Plain-language description for each style option. */
+const STYLE_DESCRIPTIONS = {
+  radius: 'משפיע על: כפתורים, כרטיסים, שדות קלט, badges',
+  density: 'משפיע על: רווחים פנימיים בכל הרכיבים',
+  fontFamily: 'משפיע על: כל הטקסט באפליקציה',
+  fontSize: 'משפיע על: גודל הטקסט הבסיסי בכל המסכים',
+  fontWeight: 'משפיע על: עובי כל הטקסטים',
+  shadow: 'משפיע על: כרטיסים, dropdowns, dialogs',
+} as const;
+
+/** Quick palette presets — apply only the 4 primary colors, the rest stays. */
+const PALETTE_PRESETS: { name: string; emoji: string; colors: Partial<ThemeColors> }[] = [
+  { name: 'זהב מלכותי', emoji: '👑', colors: { background: '0 0% 100%', foreground: '220 60% 18%', primary: '43 74% 49%', primaryForeground: '0 0% 100%', accent: '43 74% 49%', accentForeground: '0 0% 100%' } },
+  { name: 'אוקיינוס כחול', emoji: '🌊', colors: { background: '210 30% 98%', foreground: '215 50% 15%', primary: '210 80% 45%', primaryForeground: '0 0% 100%', accent: '195 75% 50%', accentForeground: '0 0% 100%' } },
+  { name: 'יער עמוק', emoji: '🌲', colors: { background: '120 10% 98%', foreground: '140 30% 15%', primary: '142 55% 35%', primaryForeground: '0 0% 100%', accent: '160 50% 40%', accentForeground: '0 0% 100%' } },
+  { name: 'אדמה חמה', emoji: '🔥', colors: { background: '30 30% 97%', foreground: '20 35% 15%', primary: '20 80% 45%', primaryForeground: '0 0% 100%', accent: '35 75% 55%', accentForeground: '20 60% 15%' } },
+  { name: 'לילה כהה', emoji: '🌙', colors: { background: '220 20% 10%', foreground: '210 20% 95%', primary: '210 80% 60%', primaryForeground: '220 30% 10%', accent: '260 70% 65%', accentForeground: '0 0% 100%' } },
+  { name: 'פסטל רך', emoji: '🌸', colors: { background: '340 30% 98%', foreground: '320 30% 20%', primary: '320 50% 60%', primaryForeground: '0 0% 100%', accent: '280 50% 65%', accentForeground: '0 0% 100%' } },
+  { name: 'מינימליסט שחור-לבן', emoji: '⚫', colors: { background: '0 0% 100%', foreground: '0 0% 5%', primary: '0 0% 10%', primaryForeground: '0 0% 100%', accent: '0 0% 20%', accentForeground: '0 0% 100%' } },
+  { name: 'תורני קלאסי', emoji: '📜', colors: { background: '40 25% 96%', foreground: '20 50% 12%', primary: '15 65% 35%', primaryForeground: '40 30% 98%', accent: '40 70% 45%', accentForeground: '20 60% 12%' } },
 ];
 
 const FLOATING_EDITOR_LAYOUT_KEY = 'theme_editor_floating_layout_v1';
@@ -198,11 +245,12 @@ function ThemePreview({ theme, isActive, onClick }: { theme: AppTheme; isActive:
   );
 }
 
-function ThemeLivePreview({ colors, style, name, variant }: {
+function ThemeLivePreview({ colors, style, name, variant, highlightKey }: {
   colors: ThemeColors;
   style: ThemeStyleOptions;
   name: string;
   variant: 'light' | 'dark';
+  highlightKey?: keyof ThemeColors | null;
 }) {
   const shadowMap: Record<string, string> = {
     none: 'none',
@@ -210,40 +258,112 @@ function ThemeLivePreview({ colors, style, name, variant }: {
     medium: '0 4px 6px -1px rgb(0 0 0 / 0.10)',
     strong: '0 20px 25px -5px rgb(0 0 0 / 0.18)',
   };
+  const radius = typeof style.radius === 'number' ? `${style.radius}px` : '8px';
+  const innerRadius = typeof style.radius === 'number' ? `${Math.max(0, style.radius - 2)}px` : '6px';
+  const densityPad = style.density === 'compact' ? '0.5rem' : style.density === 'spacious' ? '1rem' : '0.75rem';
+
+  // Region wrapper: pulses + outlines when its color key matches highlightKey
+  const ringClass = (k: keyof ThemeColors | string) =>
+    highlightKey === k
+      ? 'outline outline-2 outline-offset-2 outline-yellow-500 animate-pulse'
+      : 'transition-all';
+
   return (
     <div
-      className="rounded-xl p-5 space-y-3"
+      data-color-key="background"
+      className={`rounded-xl p-4 space-y-3 ${ringClass('background')}`}
       style={{
         backgroundColor: `hsl(${colors.background})`,
         border: `2px solid hsl(${colors.border})`,
-        borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : undefined,
+        borderRadius: radius,
         fontFamily: style.fontFamily || undefined,
         fontSize: typeof style.fontSize === 'number' ? `${style.fontSize}px` : undefined,
         fontWeight: style.fontWeight || undefined,
         boxShadow: shadowMap[style.shadow || 'soft'],
+        padding: densityPad,
       }}
     >
-      <div className="font-bold flex items-center justify-between" style={{ color: `hsl(${colors.foreground})`, fontSize: '1.05em' }}>
+      {/* Header with foreground text */}
+      <div
+        data-color-key="foreground"
+        className={`font-bold flex items-center justify-between ${ringClass('foreground')}`}
+        style={{ color: `hsl(${colors.foreground})`, fontSize: '1.05em' }}
+      >
         <span>{name}</span>
         {variant === 'dark' && <span className="text-[10px] opacity-60">🌙</span>}
         {variant === 'light' && <span className="text-[10px] opacity-60">☀️</span>}
       </div>
-      <div
-        className="p-3 space-y-2"
-        style={{
-          backgroundColor: `hsl(${colors.card})`,
-          border: `1px solid hsl(${colors.border})`,
-          borderRadius: typeof style.radius === 'number' ? `${Math.max(0, style.radius - 2)}px` : undefined,
-        }}
-      >
-        <div className="text-xs" style={{ color: `hsl(${colors.cardForeground})` }}>כרטיס לדוגמה — כך הטקסט שלך ייראה</div>
-        <div className="flex gap-2 flex-wrap">
-          <div className="text-xs px-3 py-1.5" style={{ backgroundColor: `hsl(${colors.primary})`, color: `hsl(${colors.primaryForeground})`, borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : '6px' }}>כפתור ראשי</div>
-          <div className="text-xs px-3 py-1.5" style={{ backgroundColor: `hsl(${colors.accent})`, color: `hsl(${colors.accentForeground})`, borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : '6px' }}>הדגשה</div>
-          <div className="text-xs px-3 py-1.5" style={{ backgroundColor: `hsl(${colors.secondary})`, color: `hsl(${colors.secondaryForeground})`, borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : '6px' }}>משני</div>
-          <div className="text-xs px-3 py-1.5" style={{ backgroundColor: `hsl(${colors.destructive})`, color: `hsl(${colors.destructiveForeground})`, borderRadius: typeof style.radius === 'number' ? `${style.radius}px` : '6px' }}>שגיאה</div>
+
+      {/* Mini sidebar + main split */}
+      <div className="grid grid-cols-[1fr_2.5fr] gap-2">
+        {/* Sidebar */}
+        <div
+          data-color-key="sidebarBackground"
+          className={`p-2 space-y-1 text-[10px] ${ringClass('sidebarBackground')}`}
+          style={{
+            backgroundColor: `hsl(${colors.sidebarBackground})`,
+            border: `1px solid hsl(${colors.sidebarBorder})`,
+            borderRadius: innerRadius,
+          }}
+        >
+          <div data-color-key="sidebarForeground" className={ringClass('sidebarForeground')} style={{ color: `hsl(${colors.sidebarForeground})` }}>תפריט</div>
+          <div data-color-key="sidebarPrimary" className={`px-1.5 py-0.5 ${ringClass('sidebarPrimary')}`} style={{ backgroundColor: `hsl(${colors.sidebarPrimary})`, color: `hsl(${colors.sidebarPrimaryForeground})`, borderRadius: innerRadius }}>פעיל</div>
+          <div data-color-key="sidebarBorder" className={`h-px ${ringClass('sidebarBorder')}`} style={{ backgroundColor: `hsl(${colors.sidebarBorder})` }} />
+          <div style={{ color: `hsl(${colors.sidebarForeground})`, opacity: 0.7 }}>פריט</div>
+        </div>
+
+        {/* Card area */}
+        <div
+          data-color-key="card"
+          className={`p-3 space-y-2 ${ringClass('card')}`}
+          style={{
+            backgroundColor: `hsl(${colors.card})`,
+            border: `1px solid hsl(${colors.border})`,
+            borderRadius: innerRadius,
+          }}
+        >
+          <div data-color-key="cardForeground" className={`text-xs ${ringClass('cardForeground')}`} style={{ color: `hsl(${colors.cardForeground})` }}>טקסט בכרטיס לדוגמה</div>
+          <div data-color-key="mutedForeground" className={`text-[10px] ${ringClass('mutedForeground')}`} style={{ color: `hsl(${colors.mutedForeground})` }}>טקסט משני / placeholder</div>
+
+          {/* Input field */}
+          <div
+            data-color-key="input"
+            className={`text-[10px] px-2 py-1 ${ringClass('input')}`}
+            style={{
+              backgroundColor: `hsl(${colors.input})`,
+              border: `1px solid hsl(${colors.border})`,
+              borderRadius: innerRadius,
+              color: `hsl(${colors.foreground})`,
+              boxShadow: highlightKey === 'ring' ? `0 0 0 2px hsl(${colors.ring})` : undefined,
+            }}
+          >
+            <span data-color-key="ring">שדה קלט {highlightKey === 'ring' ? '(בפוקוס)' : ''}</span>
+          </div>
+
+          {/* Button row */}
+          <div className="flex gap-1 flex-wrap">
+            <div data-color-key="primary" className={`text-[10px] px-2 py-1 ${ringClass('primary')}`} style={{ backgroundColor: `hsl(${colors.primary})`, color: `hsl(${colors.primaryForeground})`, borderRadius: innerRadius }}>
+              <span data-color-key="primaryForeground" className={ringClass('primaryForeground')}>ראשי</span>
+            </div>
+            <div data-color-key="accent" className={`text-[10px] px-2 py-1 ${ringClass('accent')}`} style={{ backgroundColor: `hsl(${colors.accent})`, color: `hsl(${colors.accentForeground})`, borderRadius: innerRadius }}>
+              <span data-color-key="accentForeground" className={ringClass('accentForeground')}>הדגשה</span>
+            </div>
+            <div data-color-key="secondary" className={`text-[10px] px-2 py-1 ${ringClass('secondary')}`} style={{ backgroundColor: `hsl(${colors.secondary})`, color: `hsl(${colors.secondaryForeground})`, borderRadius: innerRadius }}>
+              <span data-color-key="secondaryForeground" className={ringClass('secondaryForeground')}>משני</span>
+            </div>
+            <div data-color-key="destructive" className={`text-[10px] px-2 py-1 ${ringClass('destructive')}`} style={{ backgroundColor: `hsl(${colors.destructive})`, color: `hsl(${colors.destructiveForeground})`, borderRadius: innerRadius }}>שגיאה</div>
+          </div>
+
+          {/* Muted badge row */}
+          <div className="flex gap-1 items-center">
+            <span data-color-key="muted" className={`text-[10px] px-2 py-0.5 ${ringClass('muted')}`} style={{ backgroundColor: `hsl(${colors.muted})`, color: `hsl(${colors.mutedForeground})`, borderRadius: innerRadius }}>badge</span>
+            <span data-color-key="iconColor" className={`text-[10px] ${ringClass('iconColor')}`} style={{ color: colors.iconColor || `hsl(${colors.foreground})` }}>★ אייקון</span>
+          </div>
         </div>
       </div>
+
+      {/* Border bottom strip */}
+      <div data-color-key="border" className={`h-px ${ringClass('border')}`} style={{ backgroundColor: `hsl(${colors.border})` }} />
     </div>
   );
 }
@@ -299,6 +419,12 @@ function ContrastBadge({ fg, bg }: { fg: string; bg: string }) {
   );
 }
 
+interface EditorSnapshot {
+  name: string;
+  colors: ThemeColors;
+  style: ThemeStyleOptions;
+}
+
 function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPreviewChange, onDirtyChange }: {
   initial?: AppTheme;
   onSave: (theme: AppTheme) => void;
@@ -313,12 +439,69 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
   const [style, setStyle] = useState<ThemeStyleOptions>(initial?.style || { ...DEFAULT_STYLE });
   const [showDarkPreview, setShowDarkPreview] = useState(false);
 
+  // What the user is currently hovering / changed — drives highlight ring in preview
+  const [highlightKey, setHighlightKey] = useState<keyof ThemeColors | null>(null);
+  const [flashKey, setFlashKey] = useState<keyof ThemeColors | null>(null);
+  const flashTimer = useRef<number | null>(null);
+  const showHighlight = highlightKey ?? flashKey;
+
+  // Undo / Redo history
+  const historyRef = useRef<EditorSnapshot[]>([]);
+  const redoRef = useRef<EditorSnapshot[]>([]);
+  const skipHistoryRef = useRef(false);
+  const [historyVersion, setHistoryVersion] = useState(0); // re-render trigger for can-undo state
+
+  // push current to history before changing
+  const pushHistory = useCallback(() => {
+    historyRef.current.push({ name, colors: { ...colors }, style: { ...style } });
+    if (historyRef.current.length > 50) historyRef.current.shift();
+    redoRef.current = [];
+    setHistoryVersion(v => v + 1);
+  }, [name, colors, style]);
+
+  const undo = useCallback(() => {
+    const prev = historyRef.current.pop();
+    if (!prev) return;
+    redoRef.current.push({ name, colors: { ...colors }, style: { ...style } });
+    skipHistoryRef.current = true;
+    setName(prev.name);
+    setColors(prev.colors);
+    setStyle(prev.style);
+    setHistoryVersion(v => v + 1);
+    toast.info('בוטל הצעד האחרון');
+  }, [name, colors, style]);
+
+  const redo = useCallback(() => {
+    const next = redoRef.current.pop();
+    if (!next) return;
+    historyRef.current.push({ name, colors: { ...colors }, style: { ...style } });
+    skipHistoryRef.current = true;
+    setName(next.name);
+    setColors(next.colors);
+    setStyle(next.style);
+    setHistoryVersion(v => v + 1);
+    toast.info('הצעד שוחזר');
+  }, [name, colors, style]);
+
+  // Flash the changed region in preview for 1.5s
+  const triggerFlash = (key: keyof ThemeColors) => {
+    setFlashKey(key);
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlashKey(null), 1500);
+  };
+
   const resetStyleField = <K extends keyof ThemeStyleOptions>(key: K) => {
+    pushHistory();
     setStyle(prev => ({ ...prev, [key]: DEFAULT_STYLE[key] }));
   };
-  const resetAllStyle = () => setStyle({ ...DEFAULT_STYLE });
+  const resetAllStyle = () => {
+    pushHistory();
+    setStyle({ ...DEFAULT_STYLE });
+  };
 
   const updateColor = (key: keyof ThemeColors, hex: string) => {
+    pushHistory();
+    triggerFlash(key);
     if (key === 'iconColor') {
       setColors(prev => ({ ...prev, [key]: hex ? `hsl(${hexToHsl(hex)})` : '' }));
     } else {
@@ -327,7 +510,15 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
   };
 
   const updateStyle = <K extends keyof ThemeStyleOptions>(key: K, value: ThemeStyleOptions[K]) => {
+    pushHistory();
     setStyle(prev => ({ ...prev, [key]: value }));
+  };
+
+  // Apply a quick palette preset: overrides only the keys in the preset
+  const applyPalette = (preset: typeof PALETTE_PRESETS[number]) => {
+    pushHistory();
+    setColors(prev => ({ ...prev, ...preset.colors } as ThemeColors));
+    toast.success(`הוחלה פלטה: ${preset.emoji} ${preset.name}`);
   };
 
   useEffect(() => {
@@ -352,6 +543,18 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
       JSON.stringify(style) !== JSON.stringify(initialStyle);
     onDirtyChange?.(dirty);
   }, [name, colors, style, initial, onDirtyChange]);
+
+  // Keyboard: Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if ((k === 'y') || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo]);
 
   const getHex = (key: keyof ThemeColors) => {
     const val = colors[key];
@@ -387,26 +590,78 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
     (onDuplicate || onSave)(newTheme);
   };
 
+  // Listen for Ctrl+S dispatched from the floating window header
+  useEffect(() => {
+    const onSaveEvent = () => { if (!isBuiltIn) handleOverwrite(); else handleDuplicate(); };
+    window.addEventListener('theme-editor-save', onSaveEvent);
+    return () => window.removeEventListener('theme-editor-save', onSaveEvent);
+  });
+
+  const canUndo = historyRef.current.length > 0;
+  const canRedo = redoRef.current.length > 0;
+
   return (
     <div className="space-y-5 max-h-[75vh] overflow-y-auto pr-1" dir="rtl">
       <div className="space-y-2">
-        <Label>שם ערכת הנושא</Label>
-        <Input value={name} onChange={e => setName(e.target.value)} placeholder="שם הערכה..." />
+        <div className="flex items-center justify-between">
+          <Label>שם ערכת הנושא</Label>
+          <div className="flex items-center gap-1">
+            <Button size="icon" variant="ghost" className="h-7 w-7" disabled={!canUndo} onClick={undo} title="בטל (Ctrl+Z)">
+              <RotateCcw className="h-3.5 w-3.5" />
+            </Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7" disabled={!canRedo} onClick={redo} title="בצע שוב (Ctrl+Y)">
+              <RotateCcw className="h-3.5 w-3.5 scale-x-[-1]" />
+            </Button>
+            <span className="text-[10px] text-muted-foreground tabular-nums px-1">
+              {historyRef.current.length}/{historyRef.current.length + redoRef.current.length} צעדים
+            </span>
+          </div>
+        </div>
+        <Input value={name} onChange={e => { if (!skipHistoryRef.current) pushHistory(); skipHistoryRef.current = false; setName(e.target.value); }} placeholder="שם הערכה..." />
+      </div>
+
+      {/* Quick palette presets */}
+      <div className="space-y-2 rounded-lg border border-border/40 p-3 bg-muted/10">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-muted-foreground">פלטות מוכנות — לחיצה מחילה ארבעת הצבעים הראשיים</Label>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {PALETTE_PRESETS.map(p => (
+            <button
+              key={p.name}
+              type="button"
+              onClick={() => applyPalette(p)}
+              className="group flex items-center gap-1.5 rounded-md border border-border/50 px-2 py-1 text-[11px] hover:bg-accent hover:text-accent-foreground transition-colors"
+              title={`החל פלטה: ${p.name}`}
+            >
+              <span>{p.emoji}</span>
+              <span>{p.name}</span>
+              <span className="flex gap-0.5">
+                {(['primary', 'accent', 'background', 'foreground'] as const).map(k => (
+                  <span key={k} className="h-2 w-2 rounded-full border border-border/40" style={{ backgroundColor: p.colors[k] ? `hsl(${p.colors[k]})` : 'transparent' }} />
+                ))}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Live preview — single or dual */}
-      <div className="space-y-2">
+      <div className="space-y-2 sticky top-0 z-10 bg-background pt-2 pb-1 -mt-2">
         <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">תצוגה מקדימה חיה</Label>
+          <Label className="text-xs text-muted-foreground">
+            תצוגה מקדימה חיה {showHighlight && <span className="text-yellow-600 font-semibold">· מסומן: {COLOR_DESCRIPTIONS[showHighlight] || showHighlight}</span>}
+          </Label>
           <div className="flex items-center gap-2">
             <Label className="text-xs text-muted-foreground" htmlFor="dual-preview">השוואת בהיר/כהה</Label>
             <Switch id="dual-preview" checked={showDarkPreview} onCheckedChange={setShowDarkPreview} />
           </div>
         </div>
         <div className={showDarkPreview ? 'grid grid-cols-2 gap-3' : ''}>
-          <ThemeLivePreview colors={colors} style={style} name={name || 'תצוגה מקדימה חיה'} variant="light" />
-          {showDarkPreview && <ThemeLivePreview colors={invertColorsForPreview(colors)} style={style} name={`${name || 'תצוגה מקדימה'} (כהה)`} variant="dark" />}
+          <ThemeLivePreview colors={colors} style={style} name={name || 'תצוגה מקדימה חיה'} variant="light" highlightKey={showHighlight} />
+          {showDarkPreview && <ThemeLivePreview colors={invertColorsForPreview(colors)} style={style} name={`${name || 'תצוגה מקדימה'} (כהה)`} variant="dark" highlightKey={showHighlight} />}
         </div>
+        <div className="text-[10px] text-muted-foreground">💡 רחף מעל פקד כדי לראות מה הוא משנה בתצוגה למעלה. שינוי יבליט את האזור המושפע למשך 1.5 שניות.</div>
       </div>
 
       <Tabs defaultValue="colors" className="w-full">
@@ -443,18 +698,33 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
           {COLOR_GROUPS.map(group => (
             <div key={group.label} className="space-y-2.5">
               <h4 className="text-sm font-semibold text-muted-foreground">{group.label}</h4>
-              <div className="grid grid-cols-2 gap-3">
-                {group.keys.map(({ key, label }) => (
-                  <div key={key} className="flex items-center gap-2.5 rounded-md border border-border/40 p-2 bg-muted/20">
-                    <input
-                      type="color"
-                      value={getHex(key) || '#daa520'}
-                      onChange={e => updateColor(key, e.target.value)}
-                      className="w-9 h-9 rounded border cursor-pointer shrink-0"
-                    />
-                    <span className="text-xs flex-1">{label}</span>
-                  </div>
-                ))}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {group.keys.map(({ key, label }) => {
+                  const desc = COLOR_DESCRIPTIONS[key];
+                  const isHi = showHighlight === key;
+                  return (
+                    <div
+                      key={key}
+                      onMouseEnter={() => setHighlightKey(key)}
+                      onMouseLeave={() => setHighlightKey(null)}
+                      onFocus={() => setHighlightKey(key)}
+                      onBlur={() => setHighlightKey(null)}
+                      className={`flex items-start gap-2.5 rounded-md border p-2 transition-colors cursor-help ${isHi ? 'border-yellow-500 bg-yellow-500/5' : 'border-border/40 bg-muted/20 hover:border-yellow-500/50'}`}
+                      title={desc || label}
+                    >
+                      <input
+                        type="color"
+                        value={getHex(key) || '#daa520'}
+                        onChange={e => updateColor(key, e.target.value)}
+                        className="w-9 h-9 rounded border cursor-pointer shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-medium">{label}</div>
+                        {desc && <div className="text-[10px] text-muted-foreground leading-tight mt-0.5">{desc}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -474,14 +744,22 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
             <div className="flex items-center justify-between">
               <Label className="text-sm">עיגול פינות</Label>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground tabular-nums">{style.radius ?? 8}px</span>
+                <Input
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={style.radius ?? 8}
+                  onChange={e => updateStyle('radius', Math.max(0, Math.min(20, Number(e.target.value) || 0)))}
+                  className="h-6 w-14 text-xs text-center px-1"
+                />
+                <span className="text-[10px] text-muted-foreground">px</span>
                 <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => resetStyleField('radius')} title="אפס">
                   <RotateCcw className="h-3 w-3" />
                 </Button>
               </div>
             </div>
             <Slider min={0} max={20} step={1} value={[style.radius ?? 8]} onValueChange={(v) => updateStyle('radius', v[0])} />
-            <div className="text-[10px] text-muted-foreground">0 = פינות חדות · 20 = עגול מאוד</div>
+            <div className="text-[10px] text-muted-foreground">{STYLE_DESCRIPTIONS.radius} · 0 = פינות חדות · 20 = עגול מאוד</div>
           </div>
 
           {/* Density */}
@@ -500,6 +778,7 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
                 <SelectItem value="spacious">מרווח — נוח לעין</SelectItem>
               </SelectContent>
             </Select>
+            <div className="text-[10px] text-muted-foreground">{STYLE_DESCRIPTIONS.density}</div>
           </div>
 
           {/* Font family */}
@@ -523,6 +802,7 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
                 <SelectItem value="system-ui, sans-serif">מערכת</SelectItem>
               </SelectContent>
             </Select>
+            <div className="text-[10px] text-muted-foreground">{STYLE_DESCRIPTIONS.fontFamily}</div>
           </div>
 
           {/* Font size + weight */}
@@ -531,25 +811,43 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
               <div className="flex items-center justify-between">
                 <Label className="text-sm">גודל גופן</Label>
                 <div className="flex items-center gap-1">
-                  <span className="text-xs text-muted-foreground tabular-nums">{style.fontSize ?? 14}px</span>
+                  <Input
+                    type="number"
+                    min={11}
+                    max={20}
+                    value={style.fontSize ?? 14}
+                    onChange={e => updateStyle('fontSize', Math.max(11, Math.min(20, Number(e.target.value) || 14)))}
+                    className="h-6 w-12 text-xs text-center px-1"
+                  />
+                  <span className="text-[10px] text-muted-foreground">px</span>
                   <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => resetStyleField('fontSize')} title="אפס">
                     <RotateCcw className="h-3 w-3" />
                   </Button>
                 </div>
               </div>
               <Slider min={11} max={20} step={1} value={[style.fontSize ?? 14]} onValueChange={(v) => updateStyle('fontSize', v[0])} />
+              <div className="text-[9px] text-muted-foreground">{STYLE_DESCRIPTIONS.fontSize}</div>
             </div>
             <div className="space-y-2 rounded-lg border border-border/40 p-3 bg-muted/20">
               <div className="flex items-center justify-between">
                 <Label className="text-sm">עובי גופן</Label>
                 <div className="flex items-center gap-1">
-                  <span className="text-xs text-muted-foreground tabular-nums">{style.fontWeight ?? 400}</span>
+                  <Input
+                    type="number"
+                    min={300}
+                    max={800}
+                    step={100}
+                    value={style.fontWeight ?? 400}
+                    onChange={e => updateStyle('fontWeight', Math.max(300, Math.min(800, Number(e.target.value) || 400)))}
+                    className="h-6 w-14 text-xs text-center px-1"
+                  />
                   <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => resetStyleField('fontWeight')} title="אפס">
                     <RotateCcw className="h-3 w-3" />
                   </Button>
                 </div>
               </div>
               <Slider min={300} max={800} step={100} value={[style.fontWeight ?? 400]} onValueChange={(v) => updateStyle('fontWeight', v[0])} />
+              <div className="text-[9px] text-muted-foreground">{STYLE_DESCRIPTIONS.fontWeight}</div>
             </div>
           </div>
 
@@ -570,16 +868,16 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
                 <SelectItem value="strong">חזק — תלת-ממד</SelectItem>
               </SelectContent>
             </Select>
+            <div className="text-[10px] text-muted-foreground">{STYLE_DESCRIPTIONS.shadow}</div>
           </div>
         </TabsContent>
       </Tabs>
 
       <div className="flex gap-2 sticky bottom-0 bg-background border-t border-border/40 -mx-1 px-1 pt-3">
-        {/* For custom themes: overwrite + duplicate. For built-in: duplicate only */}
         {!isBuiltIn && (
-          <Button onClick={handleOverwrite} className="flex-1 gap-2">
+          <Button onClick={handleOverwrite} className="flex-1 gap-2" title="Ctrl+S">
             <Save className="h-4 w-4" />
-            שמור
+            שמור <span className="text-[10px] opacity-70">(Ctrl+S)</span>
           </Button>
         )}
         <Button onClick={handleDuplicate} variant={isBuiltIn ? "default" : "outline"} className="flex-1 gap-2">
@@ -620,6 +918,9 @@ function FloatingThemeEditorWindow({
       if (e.key === 'Escape') {
         const ok = !isDirty || window.confirm('יש שינויים שלא נשמרו. לסגור בלי לשמור?');
         if (ok) onClose();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('theme-editor-save'));
       }
     };
     window.addEventListener('keydown', onKey);
@@ -739,6 +1040,8 @@ export function ThemeManager() {
   const [aiName, setAiName] = useState('');
   const [aiPreview, setAiPreview] = useState<AppTheme | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'saved'>('idle');
+  const syncTimerRef = useRef<number | null>(null);
 
   const openFloatingEditor = (initial: AppTheme, title: string, isBuiltIn = false) => {
     setThemeBeforeEditing(activeThemeId);
@@ -756,9 +1059,17 @@ export function ThemeManager() {
     setThemeBeforeEditing(null);
   };
 
-  const syncThemeToCloud = (themeId: string) => {
-    const customJson = localStorage.getItem('app_custom_themes') || '[]';
-    updatePreferences({ theme: themeId, custom_themes: customJson });
+  const syncThemeToCloud = async (themeId: string) => {
+    setSyncStatus('syncing');
+    if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
+    try {
+      const customJson = localStorage.getItem('app_custom_themes') || '[]';
+      await updatePreferences({ theme: themeId, custom_themes: customJson });
+      setSyncStatus('saved');
+      syncTimerRef.current = window.setTimeout(() => setSyncStatus('idle'), 2500);
+    } catch {
+      setSyncStatus('idle');
+    }
   };
 
   // Toast on cross-device theme update from realtime
@@ -861,6 +1172,8 @@ export function ThemeManager() {
           <h3 className="text-lg font-semibold flex items-center gap-2">
             <Palette className="h-5 w-5" />
             ערכות נושא
+            {syncStatus === 'syncing' && <span className="text-[10px] font-normal text-muted-foreground animate-pulse">⟳ מסנכרן...</span>}
+            {syncStatus === 'saved' && <span className="text-[10px] font-normal text-emerald-600 dark:text-emerald-400">✓ סונכרן לענן</span>}
           </h3>
           <p className="text-sm text-muted-foreground">בחר ערכת נושא, ערוך צבעים וסגנון — הכל מסתנכרן אוטומטית בין מכשירים <kbd className="px-1.5 py-0.5 text-[10px] rounded bg-muted border ml-1">Ctrl+Shift+T</kbd></p>
         </div>
@@ -1028,7 +1341,13 @@ export function ThemeManager() {
                     size="icon"
                     variant="ghost"
                     className="h-6 w-6 text-destructive"
-                    onClick={e => { e.stopPropagation(); deleteCustomTheme(theme.id); setTimeout(() => syncThemeToCloud(activeThemeId), 0); toast.success('ערכת הנושא נמחקה'); }}
+                    onClick={e => {
+                      e.stopPropagation();
+                      if (!window.confirm(`למחוק לצמיתות את ערכת הנושא "${theme.nameHe}"? פעולה זו אינה הפיכה.`)) return;
+                      deleteCustomTheme(theme.id);
+                      setTimeout(() => syncThemeToCloud(activeThemeId), 0);
+                      toast.success('ערכת הנושא נמחקה');
+                    }}
                   >
                     <Trash2 className="h-3 w-3" />
                   </Button>
