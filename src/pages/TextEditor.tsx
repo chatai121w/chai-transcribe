@@ -36,6 +36,7 @@ const FloatingPlayerPortal = lazy(() => import("@/components/FloatingPlayerPorta
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })));
 import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud } from "lucide-react";
 import { uploadToDrive } from "@/components/GoogleDriveBrowser";
+import { DriveFolderPicker } from "@/components/DriveFolderPicker";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
 import { supabase } from "@/integrations/supabase/client";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
@@ -530,6 +531,7 @@ const TextEditor = () => {
   
 
   const [aiAction, setAiAction] = useState<string | null>(null);
+  const [drivePickerOpen, setDrivePickerOpen] = useState(false);
   const [showCompareAi, setShowCompareAi] = useState(false);
 
   const compareVersions = useMemo<TextVersion[]>(() => {
@@ -907,16 +909,7 @@ const TextEditor = () => {
               variant="outline"
               size="sm"
               className="h-7 text-xs gap-1 border-yellow-500/50 hover:bg-yellow-500/10"
-              onClick={async () => {
-                try {
-                  toast({ title: '☁️ מעלה ל-Google Drive...' });
-                  const name = `transcript-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.txt`;
-                  const res = await uploadToDrive({ name, content: text, mimeType: 'text/plain' });
-                  toast({ title: '✅ הועלה ל-Drive', description: res.name });
-                } catch (e: any) {
-                  toast({ title: 'שגיאה בהעלאה ל-Drive', description: e.message, variant: 'destructive' });
-                }
-              }}
+              onClick={() => setDrivePickerOpen(true)}
             >
               <Cloud className="w-3.5 h-3.5 text-yellow-600" />
               ייצא ל-Drive
@@ -1318,6 +1311,26 @@ const TextEditor = () => {
         </Tabs>
 
         <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+        <DriveFolderPicker
+          open={drivePickerOpen}
+          onOpenChange={setDrivePickerOpen}
+          title="בחר תיקייה ב-Drive לשמירת התמליל"
+          onPick={async (folder) => {
+            try {
+              toast({ title: '☁️ מעלה ל-Google Drive...', description: `יעד: ${folder.name}` });
+              const name = `transcript-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.txt`;
+              const res = await uploadToDrive({
+                name,
+                content: text,
+                mimeType: 'text/plain',
+                parents: folder.id ? [folder.id] : undefined,
+              });
+              toast({ title: '✅ הועלה ל-Drive', description: `${res.name} → ${folder.name}` });
+            } catch (e: any) {
+              toast({ title: 'שגיאה בהעלאה ל-Drive', description: e.message, variant: 'destructive' });
+            }
+          }}
+        />
       </div>
     </div>
     </Suspense>
