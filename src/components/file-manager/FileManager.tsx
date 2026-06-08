@@ -281,6 +281,66 @@ export const FileManager = () => {
     }
   };
 
+  // Drop a Drive file onto a specific local folder in the tree → import for transcription, pre-selecting folder
+  const handleDropDriveFileToTreeFolder = async (parentLocalId: string | null, file: { id: string; name: string; mimeType: string }) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('google-drive', {
+        body: { action: 'download', fileId: file.id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const bin = Uint8Array.from(atob(data.base64), c => c.charCodeAt(0));
+      const importedFile = new File([bin], file.name, { type: data.contentType || file.mimeType });
+      navigate('/', { state: { file: importedFile, targetFolderId: parentLocalId } });
+      toast({ title: '✅ ייבוא מ-Drive', description: file.name });
+    } catch (e: any) {
+      toast({ title: 'שגיאת ייבוא מ-Drive', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  // Recursively mirror a Drive folder tree under a local parent folder.
+  // Creates local folders with the same names, links each to its Drive folder,
+  // and counts audio files found (which the user can later drag individually to transcribe).
+  const handleDropDriveFolderToTree = async (parentLocalId: string | null, drive: { id: string; name: string }) => {
+    let createdFolders = 0;
+    let audioFilesFound = 0;
+    const tInfo = toast({ title: '⏳ מייבא מבנה תיקיות מ-Drive…', description: drive.name });
+    const mirror = async (driveFolderId: string, driveFolderName: string, localParentId: string | null) => {
+      const created = await createFolder({
+        name: driveFolderName,
+        parent_id: localParentId,
+        drive_folder_id: driveFolderId,
+        drive_folder_name: driveFolderName,
+        drive_synced_at: new Date().toISOString(),
+      } as any);
+      createdFolders++;
+      const { data, error } = await supabase.functions.invoke('google-drive', {
+        body: { action: 'list', folderId: driveFolderId, audioOnly: false, pageSize: 200 },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const children = (data?.files || []) as Array<{ id: string; name: string; mimeType: string }>;
+      for (const c of children) {
+        if (c.mimeType === 'application/vnd.google-apps.folder') {
+          await mirror(c.id, c.name, created.id);
+        } else if (/^audio\//.test(c.mimeType) || /\.(mp3|wav|m4a|ogg|flac|webm|aac)$/i.test(c.name)) {
+          audioFilesFound++;
+        }
+      }
+    };
+    try {
+      await mirror(drive.id, drive.name, parentLocalId);
+      try { (tInfo as any)?.dismiss?.(); } catch {}
+      toast({
+        title: '✅ מבנה תיקיות יובא',
+        description: `${createdFolders} תיקיות נוצרו · ${audioFilesFound} קובצי אודיו זוהו (גרור פרטנית לתמלול)`,
+      });
+    } catch (e: any) {
+      toast({ title: 'שגיאת ייבוא מבנה', description: e.message, variant: 'destructive' });
+    }
+  };
+
+
   return (
     <DndContext sensors={sensors} onDragEnd={onDragEnd}>
       <Card className="overflow-hidden border-yellow-500/30" dir="rtl">
