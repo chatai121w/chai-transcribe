@@ -158,3 +158,26 @@
     font-size: 14px !important;
   }
 }
+
+/* ── אכיפת RTL גורפת בתוך עמוד עריכת טקסט ─────────────────────── */
+.text-editor-page,
+.text-editor-page [role="tablist"],
+.text-editor-page [role="tabpanel"],
+.text-editor-page .flex {
+  direction: rtl;
+}
+/* שורות flex אופקיות — להתחיל מימין */
+@media (max-width: 767px) {
+  .text-editor-page .flex.items-center:not(.justify-between):not(.justify-center):not(.justify-end) {
+    justify-content: flex-start !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+  }
+  /* סרגלי כלים של עורך טקסט (RichTextEditor) — אריזה עם יישור מימין */
+  .text-editor-page .flex.items-center.gap-1,
+  .text-editor-page .flex.items-center.gap-2,
+  .text-editor-page .flex.items-center.gap-1\.5 {
+    flex-wrap: wrap !important;
+    justify-content: flex-start !important;
+  }
+}
