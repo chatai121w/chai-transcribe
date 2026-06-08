@@ -764,23 +764,35 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
         </div>
       </div>
 
-      {/* Live preview — single or dual */}
+      {/* Live preview — mock components OR real site pages */}
       <div className="space-y-2 sticky top-0 z-10 bg-background pt-2 pb-1 -mt-2">
-        <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">
-            תצוגה מקדימה חיה {showHighlight && <span className="text-yellow-600 font-semibold">· מסומן: {COLOR_DESCRIPTIONS[showHighlight] || showHighlight}</span>}
-          </Label>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground" htmlFor="dual-preview">השוואת בהיר/כהה</Label>
-            <Switch id="dual-preview" checked={showDarkPreview} onCheckedChange={setShowDarkPreview} />
+        <Tabs defaultValue="site" className="w-full">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <TabsList className="h-8">
+              <TabsTrigger value="site" className="text-xs">🌐 עמודי האתר</TabsTrigger>
+              <TabsTrigger value="mock" className="text-xs">🧩 מרכיבים</TabsTrigger>
+            </TabsList>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground" htmlFor="dual-preview">בהיר/כהה</Label>
+              <Switch id="dual-preview" checked={showDarkPreview} onCheckedChange={setShowDarkPreview} />
+            </div>
           </div>
-        </div>
-        <div className={showDarkPreview ? 'grid grid-cols-2 gap-3' : ''}>
-          <ThemeLivePreview colors={colors} style={style} name={name || 'תצוגה מקדימה חיה'} variant="light" highlightKey={showHighlight} />
-          {showDarkPreview && <ThemeLivePreview colors={invertColorsForPreview(colors)} style={style} name={`${name || 'תצוגה מקדימה'} (כהה)`} variant="dark" highlightKey={showHighlight} />}
-        </div>
-        <div className="text-[10px] text-muted-foreground">💡 רחף מעל פקד כדי לראות מה הוא משנה בתצוגה למעלה. שינוי יבליט את האזור המושפע למשך 1.5 שניות.</div>
+          <TabsContent value="site" className="mt-2">
+            <ThemeSitePreview colors={colors} style={style} />
+          </TabsContent>
+          <TabsContent value="mock" className="mt-2 space-y-2">
+            <Label className="text-xs text-muted-foreground">
+              {showHighlight && <span className="text-yellow-600 font-semibold">· מסומן: {COLOR_DESCRIPTIONS[showHighlight] || showHighlight}</span>}
+            </Label>
+            <div className={showDarkPreview ? 'grid grid-cols-2 gap-3' : ''}>
+              <ThemeLivePreview colors={colors} style={style} name={name || 'תצוגה מקדימה חיה'} variant="light" highlightKey={showHighlight} />
+              {showDarkPreview && <ThemeLivePreview colors={invertColorsForPreview(colors)} style={style} name={`${name || 'תצוגה מקדימה'} (כהה)`} variant="dark" highlightKey={showHighlight} />}
+            </div>
+            <div className="text-[10px] text-muted-foreground">💡 רחף מעל פקד כדי לראות מה הוא משנה. שינוי יבליט את האזור המושפע למשך 1.5 שניות.</div>
+          </TabsContent>
+        </Tabs>
       </div>
+
 
       <Tabs defaultValue="colors" className="w-full">
         <TabsList className="grid w-full grid-cols-2">
