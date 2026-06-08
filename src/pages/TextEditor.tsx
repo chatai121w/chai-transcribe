@@ -34,7 +34,8 @@ const AnalyticsDashboard = lazy(() => import("@/components/AnalyticsDashboard").
 const SpeakerDiarization = lazy(() => import("@/components/SpeakerDiarization").then(m => ({ default: m.SpeakerDiarization })));
 const FloatingPlayerPortal = lazy(() => import("@/components/FloatingPlayerPortal").then(m => ({ default: m.FloatingPlayerPortal })));
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })));
-import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard } from "lucide-react";
+import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud } from "lucide-react";
+import { uploadToDrive } from "@/components/GoogleDriveBrowser";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
 import { supabase } from "@/integrations/supabase/client";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
@@ -901,6 +902,24 @@ const TextEditor = () => {
             >
               <Copy className="w-3.5 h-3.5" />
               שכפל ושמור
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1 border-yellow-500/50 hover:bg-yellow-500/10"
+              onClick={async () => {
+                try {
+                  toast({ title: '☁️ מעלה ל-Google Drive...' });
+                  const name = `transcript-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.txt`;
+                  const res = await uploadToDrive({ name, content: text, mimeType: 'text/plain' });
+                  toast({ title: '✅ הועלה ל-Drive', description: res.name });
+                } catch (e: any) {
+                  toast({ title: 'שגיאה בהעלאה ל-Drive', description: e.message, variant: 'destructive' });
+                }
+              }}
+            >
+              <Cloud className="w-3.5 h-3.5 text-yellow-600" />
+              ייצא ל-Drive
             </Button>
           </div>
         )}
