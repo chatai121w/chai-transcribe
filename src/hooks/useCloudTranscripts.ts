@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useEffect, useCallback, useMemo, useSyncExternalStore, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
@@ -12,6 +12,7 @@ import {
   syncTranscriptsDown,
   reconcileDeletedTranscripts,
 } from '@/lib/syncEngine';
+
 
 export interface CloudTranscript {
   id: string;
