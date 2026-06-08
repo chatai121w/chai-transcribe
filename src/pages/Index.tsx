@@ -33,7 +33,7 @@ import { extractAudioSegment, probeAudioDurationSec } from "@/lib/audioSegment";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
-import { getApiKey } from "@/lib/keyCrypto";
+import { getApiKey, getEncryptedKey } from "@/lib/keyCrypto";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
 import { isLoshonKodeshEnabled, setLoshonKodeshEnabled } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
@@ -517,8 +517,10 @@ const Index = () => {
     deepgram: 'Deepgram',
   };
 
-  const getProviderApiKeyPool = (provider: CloudProvider): string[] => {
-    const single = getApiKey(providerSingleKeyStorage[provider])?.trim();
+  const getProviderApiKeyPool = async (provider: CloudProvider): Promise<string[]> => {
+    // Use async decrypt so keys are available even if CloudKeySync hasn't
+    // populated the in-memory cache yet (race on first transcription after refresh).
+    const single = (await getEncryptedKey(providerSingleKeyStorage[provider]))?.trim();
     const raw = localStorage.getItem(providerPoolStorage[provider]);
     let pooled: string[] = [];
 
@@ -785,7 +787,7 @@ const Index = () => {
     try {
       debugLog.info('OpenAI', `Starting transcription: ${file.name} (${file.size} bytes)`);
       
-      const keyPool = getProviderApiKeyPool('openai');
+      const keyPool = await getProviderApiKeyPool('openai');
       if (keyPool.length === 0) {
         debugLog.error('OpenAI', 'No API key found in localStorage');
         toast({
@@ -902,7 +904,7 @@ const Index = () => {
     setIsUploading(true);
 
     try {
-      const keyPool = getProviderApiKeyPool('groq');
+      const keyPool = await getProviderApiKeyPool('groq');
 
       if (keyPool.length === 0) {
         debugLog.error('Groq', 'No API key found in localStorage');
@@ -1037,7 +1039,7 @@ const Index = () => {
     setIsUploading(true);
 
     try {
-      const keyPool = getProviderApiKeyPool('google');
+      const keyPool = await getProviderApiKeyPool('google');
 
       if (keyPool.length === 0) {
         debugLog.error('Google', 'No API key found in localStorage');
@@ -1419,7 +1421,7 @@ const Index = () => {
     setIsUploading(true);
     
     try {
-      const keyPool = getProviderApiKeyPool('assemblyai');
+      const keyPool = await getProviderApiKeyPool('assemblyai');
 
       if (keyPool.length === 0) {
         toast({
@@ -1527,7 +1529,7 @@ const Index = () => {
     setIsUploading(true);
     
     try {
-      const keyPool = getProviderApiKeyPool('deepgram');
+      const keyPool = await getProviderApiKeyPool('deepgram');
 
       if (keyPool.length === 0) {
         toast({
@@ -1786,7 +1788,7 @@ const Index = () => {
     }
 
     if (engine === 'google') {
-      const keyPool = getProviderApiKeyPool('google');
+      const keyPool = await getProviderApiKeyPool('google');
       if (keyPool.length === 0) throw new Error('נדרש מפתח API - הגדר בהגדרות');
 
       const base64 = await new Promise<string>((resolve, reject) => {
@@ -1824,7 +1826,7 @@ const Index = () => {
 
     if (engine === 'openai' || engine === 'groq' || engine === 'assemblyai' || engine === 'deepgram') {
       const provider = engine as CloudProvider;
-      const keyPool = getProviderApiKeyPool(provider);
+      const keyPool = await getProviderApiKeyPool(provider);
       if (keyPool.length === 0) throw new Error('נדרש מפתח API - הגדר בהגדרות');
 
       const safeStartIndex = getProviderStartIndex(provider, keyPool.length);
