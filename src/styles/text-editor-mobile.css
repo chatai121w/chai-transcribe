@@ -87,15 +87,15 @@
     border-radius: 14px !important;
     gap: 6px !important;
     justify-content: flex-start !important; /* ב-RTL = מימין */
-    direction: rtl !important;
   }
   .text-editor-page [role="tab"] {
     min-height: 44px !important;
-    font-size: 14px !important;
-    padding: 8px 14px !important;
+    font-size: 13.5px !important;
+    padding: 8px 10px !important;
     border-radius: 10px !important;
-    flex: 1 1 auto !important;
-    min-width: max-content !important;
+    flex: 1 1 calc(33.333% - 6px) !important;
+    min-width: 0 !important;
+    white-space: nowrap;
   }
 
   /* כרטיסי תוכן — שוליים מעוגלים יותר וריווח פנימי נוח */
