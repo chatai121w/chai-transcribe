@@ -2,9 +2,11 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
 import { FolderManager } from "@/components/FolderManager";
+import { GoogleDriveBrowser } from "@/components/GoogleDriveBrowser";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ArrowRight, Cloud, FolderOpen, Loader2, LogIn } from "lucide-react";
+
 
 const Folders = () => {
   const navigate = useNavigate();
@@ -41,12 +43,36 @@ const Folders = () => {
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
           </div>
         ) : isAuthenticated ? (
-          <FolderManager
-            transcripts={transcripts}
-            onUpdate={(id, updates) => updateTranscript(id, updates)}
-            onDelete={deleteTranscript}
-            onGetAudioUrl={getAudioUrl}
-          />
+          <>
+            <GoogleDriveBrowser
+              onImportAudio={(file) => {
+                // Stash file in sessionStorage handoff and navigate to home for transcription
+                const reader = new FileReader();
+                reader.onload = () => {
+                  try {
+                    sessionStorage.setItem(
+                      "drive_import_file",
+                      JSON.stringify({
+                        name: file.name,
+                        type: file.type,
+                        dataUrl: reader.result,
+                      })
+                    );
+                    navigate("/?source=drive");
+                  } catch (e) {
+                    console.error("drive import handoff failed", e);
+                  }
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
+            <FolderManager
+              transcripts={transcripts}
+              onUpdate={(id, updates) => updateTranscript(id, updates)}
+              onDelete={deleteTranscript}
+              onGetAudioUrl={getAudioUrl}
+            />
+          </>
         ) : (
           <Card className="border-dashed">
             <CardContent className="flex flex-col items-center justify-center py-16 text-center">
