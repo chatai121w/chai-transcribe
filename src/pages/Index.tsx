@@ -1864,7 +1864,7 @@ const Index = () => {
 
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>}>
-    <div className="min-h-screen bg-background p-4 md:p-8" dir="rtl">
+    <div className="mobile-optimized-page transcription-page min-h-screen bg-background p-4 md:p-8" dir="rtl">
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Header with Tabs */}
         <div className="flex items-center justify-between mb-6">
