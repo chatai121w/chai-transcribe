@@ -23,7 +23,7 @@ type LiveMode = "browser" | "cuda" | "groq";
 const DEFAULT_CHUNK_SEC = 5;
 const LIVE_RECORDING_TIMESLICE_MS = 150;
 const LIVE_MIN_BLOB_BYTES = 800;
-const SILENCE_THRESHOLD = 5;          // Skip chunks below this audio level (averaged over chunk window)
+const SILENCE_THRESHOLD = 2;          // Skip chunks below this audio level (averaged over chunk window) — lowered so quiet mics still register speech
 const LIVE_CONTEXT_WORDS = 10;        // Last N words carried as context into next chunk (initial_prompt)
 const MAX_CONSECUTIVE_ERRORS = 5;
 const SEND_TIMEOUT_MS = 18000;        // 18s timeout — allows for larger accumulated chunks
@@ -81,7 +81,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   // Save settings
   const [fileName, setFileName] = useState("");
   const [saveFormat, setSaveFormat] = useState<SaveFormat>('txt');
-  const [micGain, setMicGain] = useState(2.0); // sensitivity boost: 1x=normal, 4x=max
+  const [micGain, setMicGain] = useState(3.5); // sensitivity boost: 1x=normal, 4x=max — default raised so soft speech registers
   const gainNodeRef = useRef<GainNode | null>(null);
   const processedStreamRef = useRef<MediaStream | null>(null);
 
@@ -1018,7 +1018,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         <div className="mb-3 space-y-2">
           {/* Waveform-style VU meter */}
           <div className="flex items-center gap-2">
-            <Volume2 className={`w-4 h-4 shrink-0 ${audioLevel > 5 ? 'text-green-500' : 'text-muted-foreground'}`} />
+            <Volume2 className={`w-4 h-4 shrink-0 ${audioLevel > 2 ? 'text-green-500 animate-pulse' : 'text-muted-foreground'}`} />
             <div className="flex-1 h-3 bg-muted/50 rounded-full overflow-hidden relative">
               <div
                 className="h-full rounded-full transition-all duration-100"
