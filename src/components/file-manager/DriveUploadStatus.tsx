@@ -18,6 +18,8 @@ const StatusIcon = ({ status }: { status: DriveUploadJob['status'] }) => {
       return <Loader2 className="w-3.5 h-3.5 animate-spin text-yellow-600" />;
     case 'awaiting-confirm':
       return <AlertCircle className="w-3.5 h-3.5 text-orange-500" />;
+    case 'waiting-network':
+      return <Cloud className="w-3.5 h-3.5 text-yellow-600 animate-pulse" />;
     case 'done':
       return <Check className="w-3.5 h-3.5 text-green-600" />;
     case 'skipped':
@@ -32,6 +34,7 @@ const statusLabel: Record<DriveUploadJob['status'], string> = {
   checking: 'בודק קיים...',
   'awaiting-confirm': 'דרוש אישור',
   uploading: 'מעלה...',
+  'waiting-network': 'ממתין לחיבור',
   done: 'הועלה',
   skipped: 'דולג',
   error: 'שגיאה',
