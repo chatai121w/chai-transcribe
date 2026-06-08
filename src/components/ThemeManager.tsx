@@ -1172,6 +1172,8 @@ export function ThemeManager() {
           <h3 className="text-lg font-semibold flex items-center gap-2">
             <Palette className="h-5 w-5" />
             ערכות נושא
+            {syncStatus === 'syncing' && <span className="text-[10px] font-normal text-muted-foreground animate-pulse">⟳ מסנכרן...</span>}
+            {syncStatus === 'saved' && <span className="text-[10px] font-normal text-emerald-600 dark:text-emerald-400">✓ סונכרן לענן</span>}
           </h3>
           <p className="text-sm text-muted-foreground">בחר ערכת נושא, ערוך צבעים וסגנון — הכל מסתנכרן אוטומטית בין מכשירים <kbd className="px-1.5 py-0.5 text-[10px] rounded bg-muted border ml-1">Ctrl+Shift+T</kbd></p>
         </div>
