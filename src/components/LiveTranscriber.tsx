@@ -81,7 +81,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   // Save settings
   const [fileName, setFileName] = useState("");
   const [saveFormat, setSaveFormat] = useState<SaveFormat>('txt');
-  const [micGain, setMicGain] = useState(2.0); // sensitivity boost: 1x=normal, 4x=max
+  const [micGain, setMicGain] = useState(3.5); // sensitivity boost: 1x=normal, 4x=max — default raised so soft speech registers
   const gainNodeRef = useRef<GainNode | null>(null);
   const processedStreamRef = useRef<MediaStream | null>(null);
 
