@@ -1247,67 +1247,89 @@ const TextEditor = () => {
             )}
           </TabsContent>
 
-          <TabsContent value="pipeline" className="space-y-4">
-            <LazyErrorBoundary label="צינור עריכה"><EditPipeline
-              text={text}
-              onTextChange={(newText, source, customPrompt) => {
-                setText(newText);
-                addVersion(newText, source as TextVersion['source'], customPrompt);
-              }}
-            /></LazyErrorBoundary>
-          </TabsContent>
-
-          <TabsContent value="prompts" className="space-y-4">
-            <LazyErrorBoundary label="ספריית פרומפטים"><PromptLibrary
-              text={text}
-              onTextChange={(newText, source, customPrompt) => {
-                setText(newText);
-                addVersion(newText, source as TextVersion['source'], customPrompt);
-              }}
-            /></LazyErrorBoundary>
-          </TabsContent>
-
-          <TabsContent value="ollama" className="space-y-4">
-            <LazyErrorBoundary label="Ollama"><OllamaManager /></LazyErrorBoundary>
-          </TabsContent>
-
-          <TabsContent value="learning" className="space-y-4">
-            <LazyErrorBoundary label="למידת תיקונים"><CorrectionLearningPanel /></LazyErrorBoundary>
-          </TabsContent>
-          <TabsContent value="vocab" className="space-y-4">
-            <LazyErrorBoundary label="בדיקת מילון">
-              <DictionaryValidator text={text} onApplyFix={(original, fixed) => {
-                const newText = text.replace(new RegExp(`\\b${original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`), fixed);
-                if (newText !== text) {
+          <TabsContent value="pipeline" className="flex flex-col gap-3">
+            <CollapsibleWidget title="צינור עריכה" storageKey="te_pipeline">
+              <LazyErrorBoundary label="צינור עריכה"><EditPipeline
+                text={text}
+                onTextChange={(newText, source, customPrompt) => {
                   setText(newText);
-                  toast({ title: "תוקן", description: `"${original}" → "${fixed}"` });
-                }
-              }} />
-            </LazyErrorBoundary>
-            <LazyErrorBoundary label="אוצר מילים"><VocabularyPanel /></LazyErrorBoundary>
+                  addVersion(newText, source as TextVersion['source'], customPrompt);
+                }}
+              /></LazyErrorBoundary>
+            </CollapsibleWidget>
           </TabsContent>
 
-          <TabsContent value="summary" className="space-y-4">
-            <LazyErrorBoundary label="סיכום"><AutoSummaryCard text={text} /></LazyErrorBoundary>
-            <LazyErrorBoundary label="סיכום AI"><TranscriptSummary transcript={text} /></LazyErrorBoundary>
+          <TabsContent value="prompts" className="flex flex-col gap-3">
+            <CollapsibleWidget title="ספריית פרומפטים" storageKey="te_prompts">
+              <LazyErrorBoundary label="ספריית פרומפטים"><PromptLibrary
+                text={text}
+                onTextChange={(newText, source, customPrompt) => {
+                  setText(newText);
+                  addVersion(newText, source as TextVersion['source'], customPrompt);
+                }}
+              /></LazyErrorBoundary>
+            </CollapsibleWidget>
           </TabsContent>
 
-          <TabsContent value="ab" className="space-y-4">
-            <LazyErrorBoundary label="השוואת מנועים"><EngineCompare text={text} /></LazyErrorBoundary>
+          <TabsContent value="ollama" className="flex flex-col gap-3">
+            <CollapsibleWidget title="Ollama" storageKey="te_ollama">
+              <LazyErrorBoundary label="Ollama"><OllamaManager /></LazyErrorBoundary>
+            </CollapsibleWidget>
           </TabsContent>
 
-          <TabsContent value="analytics" className="space-y-4">
-            <LazyErrorBoundary label="אנליטיקס"><AnalyticsDashboard /></LazyErrorBoundary>
+          <TabsContent value="learning" className="flex flex-col gap-3">
+            <CollapsibleWidget title="למידת תיקונים" storageKey="te_learning">
+              <LazyErrorBoundary label="למידת תיקונים"><CorrectionLearningPanel /></LazyErrorBoundary>
+            </CollapsibleWidget>
           </TabsContent>
-          <TabsContent value="history" className="space-y-4">
-            <LazyErrorBoundary label="היסטוריית עריכה"><TextEditHistory 
-              versions={versions}
-              onSelectVersion={handleVersionSelect}
-              selectedVersionId={selectedVersionId}
-              cloudVersions={cloudVersions}
-              cloudLoading={cloudVersionsLoading}
-              onRestoreVersion={handleRestoreVersion}
-            /></LazyErrorBoundary>
+          <TabsContent value="vocab" className="flex flex-col gap-3">
+            <CollapsibleWidget title="בדיקת מילון" storageKey="te_dict_validator">
+              <LazyErrorBoundary label="בדיקת מילון">
+                <DictionaryValidator text={text} onApplyFix={(original, fixed) => {
+                  const newText = text.replace(new RegExp(`\\b${original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`), fixed);
+                  if (newText !== text) {
+                    setText(newText);
+                    toast({ title: "תוקן", description: `"${original}" → "${fixed}"` });
+                  }
+                }} />
+              </LazyErrorBoundary>
+            </CollapsibleWidget>
+            <CollapsibleWidget title="אוצר מילים" storageKey="te_vocab">
+              <LazyErrorBoundary label="אוצר מילים"><VocabularyPanel /></LazyErrorBoundary>
+            </CollapsibleWidget>
+          </TabsContent>
+
+          <TabsContent value="summary" className="flex flex-col gap-3">
+            <CollapsibleWidget title="סיכום אוטומטי" storageKey="te_auto_summary">
+              <LazyErrorBoundary label="סיכום"><AutoSummaryCard text={text} /></LazyErrorBoundary>
+            </CollapsibleWidget>
+            <CollapsibleWidget title="סיכום AI" storageKey="te_ai_summary">
+              <LazyErrorBoundary label="סיכום AI"><TranscriptSummary transcript={text} /></LazyErrorBoundary>
+            </CollapsibleWidget>
+          </TabsContent>
+
+          <TabsContent value="ab" className="flex flex-col gap-3">
+            <CollapsibleWidget title="השוואת מנועים" storageKey="te_ab_compare">
+              <LazyErrorBoundary label="השוואת מנועים"><EngineCompare text={text} /></LazyErrorBoundary>
+            </CollapsibleWidget>
+          </TabsContent>
+
+          <TabsContent value="analytics" className="flex flex-col gap-3">
+            <CollapsibleWidget title="אנליטיקס" storageKey="te_analytics">
+              <LazyErrorBoundary label="אנליטיקס"><AnalyticsDashboard /></LazyErrorBoundary>
+            </CollapsibleWidget>
+          </TabsContent>
+          <TabsContent value="history" className="flex flex-col gap-3">
+            <CollapsibleWidget title="היסטוריית עריכה" storageKey="te_history">
+              <LazyErrorBoundary label="היסטוריית עריכה"><TextEditHistory 
+                versions={versions}
+                onSelectVersion={handleVersionSelect}
+                selectedVersionId={selectedVersionId}
+                cloudVersions={cloudVersions}
+                cloudLoading={cloudVersionsLoading}
+                onRestoreVersion={handleRestoreVersion}
+              /></LazyErrorBoundary>
+            </CollapsibleWidget>
           </TabsContent>
         </Tabs>
 
