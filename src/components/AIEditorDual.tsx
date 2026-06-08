@@ -14,7 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import {
   Wand2, Loader2, Sparkles, MessageSquare, BookOpen, FileText,
-  Languages, Users, List, Heading, Maximize2, Minimize2,
+  Languages, Users, List, Heading, Maximize2, Minimize2, ChevronUp, ChevronDown,
   CheckCheck, Volume2, AlignJustify, Quote, Cpu, Save, Gauge, Trophy,
   Eye, EyeOff, GitCompareArrows, Download, PlayCircle, StopCircle, RotateCcw, Trash2,
   Pencil, Plus, LayoutGrid, LayoutList, Rows3, RotateCw, ShieldCheck, Star, Settings, GripVertical, Filter, ArrowUpDown, Plug,
@@ -1908,7 +1908,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
               onClick={() => setShowSourceEditor(v => !v)}
               title={showSourceEditor ? 'מזער' : 'הצג'}
             >
-              {showSourceEditor ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              {showSourceEditor ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </Button>
           </div>
         </div>

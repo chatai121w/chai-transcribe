@@ -1,75 +1,41 @@
-# תוכנית: שיפור ביצועים ואמינות העלאות
-
 ## מטרה
-1. שחרור ה-UI מקיפאון בזמן עיבוד כבד (תמלול ארוך / diarization / spell check).
-2. השלמה אוטומטית של העלאות Drive שנכשלו עקב נפילת רשת, גם כשהלשונית סגורה.
+כיום בעורך הטקסט יש הרבה "וויידג'טים" (כרטיסים מקופלים) — חלקם עם איקון מזעור משמאל, חלקם מימין, חלקם בכלל ללא. כשממזערים, נשאר `space-y-4` / `mb-4` של ההורה ויוצר חורים ענקיים בין הכרטיסים. נסדר את זה בצורה גלובלית.
 
-ללא שינוי בהתנהגות תצוגה/עיצוב.
+## מה נבנה
 
----
+### 1. רכיב אחיד `CollapsibleWidget`
+קובץ חדש: `src/components/ui/CollapsibleWidget.tsx`
 
-## חלק א׳ — Web Worker לעיבוד כבד (ללא SW, בטוח לחלוטין)
+- כותרת עליונה עם:
+  - **מימין (RTL):** אייקון + שם הוויידג'ט + תגיות אופציונליות.
+  - **משמאל קבוע:** כפתור מזעור/הרחבה (`ChevronUp`/`ChevronDown`) — תמיד באותו מקום, אותו גודל (`h-7 w-7`), אותו variant.
+- כשהוויידג'ט מזוער: גובה הכרטיס = רק הכותרת (header), הגוף ב-`hidden`.
+- שומר state ב-`localStorage` לפי `storageKey` כך שהמצב נשמר בין רענונים.
+- מקבל `defaultOpen`, `title`, `icon`, `badge`, `actions` (לכפתורי שמירה/שחזור בכותרת).
+- מחזיר אותו `rounded-2xl border bg-card` בכל מקום — מראה אחיד.
 
-קובץ חדש: `src/workers/heavyProcessing.worker.ts`
-- מטפל ב: נירמול טקסט תמלול, מיזוג סגמנטים, חישובי diarization בצד לקוח, פירוק טקסט ארוך ל-chunks ל-spell check.
-- תקשורת דרך `postMessage` עם טיפוסים משותפים.
+### 2. עטיפת ה-Widgets הקיימים
+לעטוף את הוויידג'טים שמופיעים בטאבים של `TextEditor.tsx`:
+- "טקסט לעריכה" (`AIEditorDual` שורות 1880–1924) — להחליף את ה-toggle הידני ב-`CollapsibleWidget`.
+- "שמירה מהירה לתוצאות" (`AIEditorDual` ~1926).
+- כרטיסי `SyncAudioPlayer`, `SyncMirrorLayout` בטאב נגן.
+- `CorrectionLearningPanel`, `VocabularyPanel`, `DictionaryValidator`, `AutoSummaryCard`, `TranscriptSummary`, `EngineCompare`, `AnalyticsDashboard`, `TextEditHistory` — כל אחד יישב בתוך `CollapsibleWidget` עם שם וטייטל מתאימים.
 
-קובץ חדש: `src/lib/heavyProcessingClient.ts`
-- מנהל יחיד של ה-Worker (singleton), עם API מבוסס Promise (`runTask(name, payload)`).
-- מטפל ב-fallback: אם Worker נכשל לעלות, מריץ את אותה לוגיקה ב-main thread (ללא שבירה).
+### 3. תיקון רווחים בין וויידג'טים
+- בכל ה-`TabsContent` ב-`TextEditor.tsx` נחליף `space-y-4` ב-`flex flex-col gap-3` כך שגם כשוויידג'ט מזוער הרווח קבוע ולא כפול.
+- להסיר `mb-4`/`mt-4` מהקצוות הפנימיים של הוויידג'טים — הרווח מנוהל רק על ידי ההורה.
+- כל כרטיס מקבל אותו `rounded-2xl border-border/50 bg-card shadow-sm`.
 
-שילוב במקומות הקיימים:
-- `src/lib/personalPronunciationModel.ts` / spell check pipeline — להעביר את הנירמול הכבד ל-Worker.
-- `src/lib/whisperAlignment.ts` — חישובי alignment כבדים.
-
-יתרון: אין שום מגע עם Service Worker → אפס סיכון לחוויית פיתוח.
-
----
-
-## חלק ב׳ — Background Sync להעלאות Drive (SW, עם הגנות)
-
-### עקרונות בטיחות SW (לא לפגוע בפיתוח)
-- ה-SW הקיים ב-`public/sw.js` נשאר רשום **רק ב-production** (כפי שכבר מוגדר ב-`index.html`).
-- **לא** מוסיפים cache של navigation/HTML — רק רישום `sync` event.
-- ב-dev/preview/iframe ה-SW לא נרשם בכלל, ולכן Background Sync פשוט יקפוץ ל-fallback מיידי (retry בזיכרון של ה-tab).
-- kill switch קיים (`?sw=off`) ממשיך לעבוד.
-
-### שינויים
-עדכון `public/sw.js`:
-- הוספת `self.addEventListener('sync', ...)` לתג `drive-upload-retry`.
-- ב-handler: קריאה ל-IndexedDB (store חדש `pending-drive-uploads`), שליפת ג׳ובים, ניסיון POST חוזר ל-edge function `google-drive`.
-- אם מצליח — מסיר מה-store ושולח `postMessage` ל-clients (אם פתוחים) לעדכון UI.
-- אם נכשל — משאיר ב-store, ה-browser ינסה שוב.
-- **לא** מוסיף `fetch` listener כללי — רק `sync`. כך אין שום ערבוב גרסאות chunks.
-
-עדכון `src/lib/driveUploadQueue.ts`:
-- בכשל רשת (network error, לא 4xx) — שמירת הג׳וב ב-IndexedDB (`localDb` הקיים, store חדש).
-- רישום `registration.sync.register('drive-upload-retry')` אם זמין.
-- האזנה ל-`navigator.serviceWorker` messages לעדכון סטטוס הג׳וב ב-UI.
-
-עדכון `src/components/file-manager/DriveUploadStatus.tsx`:
-- הצגת סטטוס "ממתין להתחברות מחדש" לג׳ובים שעברו ל-background sync.
-
-### Fallback ידני (לכל הסביבות כולל preview)
-- `online` event listener ב-`driveUploadQueue.ts` — בעת חזרת רשת, ניסיון אוטומטי לכל ג׳וב במצב `error` שנכשל ברשת.
-- כך גם בלי SW (dev/preview) המשתמש מקבל retry אוטומטי כשהלשונית פתוחה.
-
----
+### 4. עקביות חזותית
+- כל איקוני המזעור: `Minimize2`/`Maximize2` יוחלפו ב-`ChevronUp`/`ChevronDown` (יותר ברור בעברית/RTL).
+- מיקום קבוע: למעלה משמאל, padding זהה (`px-3 py-2`).
+- צבעי hover אחידים (gold לפי memory: `hover:text-yellow-600`).
 
 ## פרטים טכניים
+- אין שינוי לוגיקה עסקית — רק עטיפה ויזואלית.
+- אין מיגרציית DB.
+- בדיקה: מעבר בין כל הטאבים, מזעור/הרחבה של כל וויידג'ט, וידוא שאין קפיצות פריסה ושהאיקון נשאר באותו מקום.
 
-- IndexedDB: שימוש ב-`localDb.ts` הקיים, הוספת store `drive_pending` עם {id, request, attempts, lastError}.
-- ה-edge function `google-drive` כבר מטפל ב-overwrite/duplicate — אין שינוי שם.
-- אין שינוי בעיצוב או ב-flows קיימים מעבר לתוספת סטטוס.
-
-## מה לא נעשה
-- אין הפעלת cache של נכסים/HTML ב-SW.
-- אין `vite-plugin-pwa`.
-- אין רישום SW בפיתוח/preview.
-- אין נגיעה ב-firebase-messaging-sw אם קיים.
-
-## בדיקות
-1. preview: העלאה רגילה ל-Drive עובדת, ניתוק רשת → סטטוס "ממתין", החזרת רשת → השלמה אוטומטית (fallback online event).
-2. production: אותו תרחיש + סגירת tab → פתיחה מחדש מאוחר יותר → הקובץ כבר ב-Drive (SW sync).
-3. עיבוד תמלול ארוך — ה-UI נשאר רספונסיבי (Web Worker).
-4. `?sw=off` מבטל את ה-SW לחלוטין ללא שבירה.
+## מחוץ לתחום
+- לא נוגעים בטאב "ערכות נושא" (כבר עברנו שדרוג).
+- לא משנים את התוכן הפונקציונלי של הוויידג'טים —
