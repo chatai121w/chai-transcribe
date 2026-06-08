@@ -772,7 +772,7 @@ const TextEditor = () => {
 
   return (
     <Suspense fallback={null}>
-    <div className="min-h-screen bg-background p-2 md:p-4" dir="rtl">
+    <div className="text-editor-page min-h-screen bg-background p-2 md:p-4" dir="rtl">
       <div className="max-w-full mx-auto space-y-3">
         {/* Compact Header */}
         <div className="flex items-center justify-between py-1 border-b border-border/30">
