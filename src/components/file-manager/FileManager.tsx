@@ -335,6 +335,9 @@ export const FileManager = () => {
           }} />
         </DialogContent>
       </Dialog>
+
+      {/* Floating upload status panel */}
+      <DriveUploadStatus />
     </DndContext>
   );
 };
