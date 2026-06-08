@@ -1,3 +1,4 @@
+import "@/styles/mobile-pages.css";
 import { useState, useEffect, useRef, lazy, Suspense, useCallback, type ChangeEvent } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { TranscriptionEngine } from "@/components/TranscriptionEngine";
