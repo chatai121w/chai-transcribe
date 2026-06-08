@@ -65,11 +65,50 @@
     </script>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(() => {});
-        });
-      }
+      // Service Worker: register ONLY in production on the real app host.
+      // In dev/preview/iframe/localhost we actively unregister + clear caches
+      // to avoid stale chunks causing "Invalid hook call" / "Failed to fetch
+      // dynamically imported module" errors from mixed old/new bundles.
+      (function () {
+        if (!('serviceWorker' in navigator)) return;
+
+        var host = location.hostname;
+        var inIframe = window.self !== window.top;
+        var isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+        var isLovablePreview =
+          host.startsWith('id-preview--') ||
+          host.startsWith('preview--') ||
+          host.endsWith('.lovableproject.com') ||
+          host.endsWith('.lovableproject-dev.com') ||
+          host.endsWith('.beta.lovable.dev');
+        var killSwitch = location.search.indexOf('sw=off') !== -1;
+        var isDev = location.port === '5000' || location.port === '8080';
+
+        var shouldRegister = !inIframe && !isLocalhost && !isLovablePreview && !killSwitch && !isDev;
+
+        if (shouldRegister) {
+          window.addEventListener('load', function () {
+            navigator.serviceWorker.register('/sw.js').catch(function () {});
+          });
+        } else {
+          // Clean up any previously-registered SW + its caches so dev/preview
+          // never serves stale bundles.
+          navigator.serviceWorker.getRegistrations().then(function (regs) {
+            regs.forEach(function (r) {
+              // Don't touch messaging workers (firebase-messaging-sw.js etc.)
+              var url = (r.active && r.active.scriptURL) || '';
+              if (url.indexOf('/sw.js') !== -1) r.unregister();
+            });
+          }).catch(function () {});
+          if (window.caches && caches.keys) {
+            caches.keys().then(function (keys) {
+              keys.forEach(function (k) {
+                if (k.indexOf('transcriber-') === 0) caches.delete(k);
+              });
+            }).catch(function () {});
+          }
+        }
+      })();
     </script>
   </body>
 </html>
