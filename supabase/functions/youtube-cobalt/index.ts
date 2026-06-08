@@ -284,6 +284,37 @@ async function tryInnertube(videoId: string, opts: ReqBody): Promise<{ url: stri
   return null;
 }
 
+async function fetchJsonWithIdentity(url: string, timeoutMs: number) {
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      'Accept-Encoding': 'identity',
+      'User-Agent': 'lovable-yt/1.0',
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`http ${res.status}`);
+  if (!looksLikeJson(res.headers.get('content-type'))) throw new Error('non-json');
+  return await res.json();
+}
+
+async function tryNoembed(url: string) {
+  try {
+    const data = await fetchJsonWithIdentity(`https://noembed.com/embed?url=${encodeURIComponent(url)}`, 4000) as {
+      title?: string;
+      thumbnail_url?: string;
+      author_name?: string;
+    };
+    return {
+      title: data.title ?? null,
+      thumbnail: data.thumbnail_url ?? null,
+      author: data.author_name ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ── Orchestrator: try backends in order ─────────────────────────────────────
 async function fetchWithFallbacks(url: string, opts: ReqBody) {
   const videoId = extractVideoId(url);
@@ -347,7 +378,7 @@ Deno.serve(async (req) => {
     }
 
     if (body.action === 'info') {
-      const meta = await fetchOEmbed(body.url);
+      const meta = await fetchOEmbed(body.url) ?? await tryNoembed(body.url);
       return new Response(
         JSON.stringify({
           videoId: extractVideoId(body.url),
@@ -361,7 +392,7 @@ Deno.serve(async (req) => {
     }
 
     const result = await fetchWithFallbacks(body.url, body);
-    const meta = await fetchOEmbed(body.url);
+    const meta = await fetchOEmbed(body.url) ?? await tryNoembed(body.url);
 
     return new Response(
       JSON.stringify({
