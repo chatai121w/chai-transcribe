@@ -88,34 +88,42 @@ Deno.serve(async (req) => {
         const metadata: Record<string, unknown> = { name, mimeType };
         if (parents?.length) metadata.parents = parents;
 
-        const boundary = '----lovable' + crypto.randomUUID();
-        const bin = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-        const encoder = new TextEncoder();
-        const head = encoder.encode(
-          `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(
-            metadata
-          )}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\nContent-Transfer-Encoding: binary\r\n\r\n`
-        );
-        const tail = encoder.encode(`\r\n--${boundary}--`);
-        const body = new Uint8Array(head.length + bin.length + tail.length);
-        body.set(head, 0);
-        body.set(bin, head.length);
-        body.set(tail, head.length + bin.length);
-
-        const res = await fetch(
-          `${GATEWAY}/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink`,
+        // More reliable flow with the connector gateway:
+        // 1) create metadata-only file, 2) upload media bytes via PATCH.
+        const createRes = await fetch(
+          `${GATEWAY}/drive/v3/files?fields=id,name,webViewLink`,
           {
             method: 'POST',
-            headers: {
-              ...authHeaders(),
-              'Content-Type': `multipart/related; boundary=${boundary}`,
-            },
-            body,
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify(metadata),
           }
         );
-        const txt = await res.text();
-        if (!res.ok) return json({ error: 'upload failed', status: res.status, body: txt }, 500);
-        return new Response(txt, {
+        const createTxt = await createRes.text();
+        if (!createRes.ok) {
+          return json({ error: 'upload create failed', status: createRes.status, body: createTxt }, 500);
+        }
+
+        const created = JSON.parse(createTxt);
+        const fileId = created?.id;
+        if (!fileId) {
+          return json({ error: 'upload create missing file id', body: createTxt }, 500);
+        }
+
+        const bin = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        const mediaRes = await fetch(
+          `${GATEWAY}/upload/drive/v3/files/${fileId}?uploadType=media&fields=id,name,webViewLink`,
+          {
+            method: 'PATCH',
+            headers: { ...authHeaders(), 'Content-Type': mimeType },
+            body: bin,
+          }
+        );
+        const mediaTxt = await mediaRes.text();
+        if (!mediaRes.ok) {
+          return json({ error: 'upload media failed', status: mediaRes.status, body: mediaTxt, fileId }, 500);
+        }
+
+        return new Response(mediaTxt, {
           headers: { ...extraCors, 'Content-Type': 'application/json' },
         });
       }

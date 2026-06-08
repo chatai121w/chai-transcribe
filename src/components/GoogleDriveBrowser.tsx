@@ -26,15 +26,18 @@ interface CrumbItem { id: string | null; name: string; }
 interface Props {
   /** Called with downloaded audio File ready to transcribe */
   onImportAudio?: (file: File) => void;
+  /** Called when local transcript is dropped onto a Drive folder */
+  onDropLocalTranscriptToFolder?: (folder: { id: string | null; name: string }, transcriptId: string) => void;
 }
 
-export const GoogleDriveBrowser = ({ onImportAudio }: Props) => {
+export const GoogleDriveBrowser = ({ onImportAudio, onDropLocalTranscriptToFolder }: Props) => {
   const [files, setFiles] = useState<DriveFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [audioOnly, setAudioOnly] = useState(true);
   const [crumbs, setCrumbs] = useState<CrumbItem[]>([{ id: null, name: "הדרייב שלי" }]);
+  const [dragTargetFolderId, setDragTargetFolderId] = useState<string | null>(null);
 
   const currentFolder = crumbs[crumbs.length - 1];
 
@@ -168,7 +171,36 @@ export const GoogleDriveBrowser = ({ onImportAudio }: Props) => {
                 return (
                   <div
                     key={f.id}
-                    className="flex items-center gap-2 p-2 rounded hover:bg-muted group"
+                    className={`flex items-center gap-2 p-2 rounded hover:bg-muted group ${dragTargetFolderId === f.id ? 'ring-1 ring-yellow-500 bg-yellow-50/40' : ''}`}
+                    draggable={!folder}
+                    onDragStart={(e) => {
+                      if (folder) return;
+                      e.dataTransfer.setData('application/x-sht-drive-file', JSON.stringify({
+                        id: f.id,
+                        name: f.name,
+                        mimeType: f.mimeType,
+                      }));
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    onDragOver={(e) => {
+                      if (!folder || !onDropLocalTranscriptToFolder) return;
+                      if (e.dataTransfer.types.includes('application/x-sht-local-transcript-id')) {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'copy';
+                        setDragTargetFolderId(f.id);
+                      }
+                    }}
+                    onDragLeave={() => {
+                      if (dragTargetFolderId === f.id) setDragTargetFolderId(null);
+                    }}
+                    onDrop={(e) => {
+                      if (!folder || !onDropLocalTranscriptToFolder) return;
+                      e.preventDefault();
+                      setDragTargetFolderId(null);
+                      const transcriptId = e.dataTransfer.getData('application/x-sht-local-transcript-id');
+                      if (!transcriptId) return;
+                      onDropLocalTranscriptToFolder({ id: f.id, name: f.name }, transcriptId);
+                    }}
                   >
                     {folder ? (
                       <Folder className="w-5 h-5 text-yellow-600 shrink-0" />

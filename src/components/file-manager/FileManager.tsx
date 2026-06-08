@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
 import { Search, Plus, Copy, Scissors, Clipboard, Trash2, Pin, Cloud, Loader2, X } from 'lucide-react';
 import { useFolderTree, type FolderNode } from '@/hooks/useFolderTree';
@@ -13,11 +13,17 @@ import { FolderTree } from './FolderTree';
 import { FileGrid } from './FileGrid';
 import { Breadcrumbs } from './Breadcrumbs';
 import { fileClipboard } from '@/lib/clipboard';
-import { GoogleDriveBrowser } from '@/components/GoogleDriveBrowser';
+import { GoogleDriveBrowser, uploadToDrive } from '@/components/GoogleDriveBrowser';
 import { DriveFolderPicker } from '@/components/DriveFolderPicker';
 import { DriveUploadStatus } from './DriveUploadStatus';
 import { driveUploadQueue } from '@/lib/driveUploadQueue';
 import { supabase } from '@/integrations/supabase/client';
+
+type DriveDropFile = {
+  id: string;
+  name: string;
+  mimeType: string;
+};
 
 export const FileManager = () => {
   const navigate = useNavigate();
@@ -37,6 +43,20 @@ export const FileManager = () => {
   const [renameValue, setRenameValue] = useState('');
   const [driveLinkOpen, setDriveLinkOpen] = useState<FolderNode | null>(null);
   const [driveBrowserOpen, setDriveBrowserOpen] = useState(false);
+  const [driveSplitView, setDriveSplitView] = useState(true);
+
+  useEffect(() => {
+    if (!driveBrowserOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setDriveBrowserOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [driveBrowserOpen]);
 
   const pinned = useMemo(() => folders.filter(f => f.pinned), [folders]);
   const path = useMemo(() => getPath(currentFolderId), [currentFolderId, getPath]);
@@ -55,6 +75,11 @@ export const FileManager = () => {
       'parent_id' in x ? { kind: 'folder' as const, data: x } : { kind: 'transcript' as const, data: x as CloudTranscript }
     );
   }, [folders, transcripts, currentFolderId, search]);
+
+  const localTranscriptsInCurrent = useMemo(
+    () => transcripts.filter((t: any) => (t.folder_id || null) === currentFolderId),
+    [transcripts, currentFolderId],
+  );
 
   // ── Selection ──
   const onSelect = useCallback((id: string, _kind: 'folder' | 'transcript', mod: { shift: boolean; ctrl: boolean }) => {
@@ -209,6 +234,46 @@ export const FileManager = () => {
     setDriveLinkOpen(null);
   };
 
+  const handleUploadTranscriptToDriveFolder = async (
+    targetFolder: { id: string | null; name: string },
+    transcriptId: string,
+  ) => {
+    const tr = transcripts.find((t: any) => t.id === transcriptId);
+    if (!tr) return;
+
+    try {
+      const safeTitle = (tr.title || 'transcript').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'transcript';
+      await uploadToDrive({
+        name: `${safeTitle}.txt`,
+        mimeType: 'text/plain;charset=utf-8',
+        content: tr.text || '',
+        parents: targetFolder.id ? [targetFolder.id] : undefined,
+      });
+      toast({ title: '☁️ הועלה ל-Drive', description: `${tr.title || 'תמלול'} -> ${targetFolder.name}` });
+    } catch (e: any) {
+      toast({ title: 'שגיאת העלאה ל-Drive', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleDropDriveFileToLocal = async (file: DriveDropFile) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('google-drive', {
+        body: { action: 'download', fileId: file.id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const bin = Uint8Array.from(atob(data.base64), c => c.charCodeAt(0));
+      const importedFile = new File([bin], file.name, { type: data.contentType || file.mimeType });
+
+      setDriveBrowserOpen(false);
+      navigate('/', { state: { file: importedFile } });
+      toast({ title: '✅ ייבוא מ-Drive', description: file.name });
+    } catch (e: any) {
+      toast({ title: 'שגיאת ייבוא מ-Drive', description: e.message, variant: 'destructive' });
+    }
+  };
+
   return (
     <DndContext sensors={sensors} onDragEnd={onDragEnd}>
       <Card className="overflow-hidden border-yellow-500/30" dir="rtl">
@@ -289,7 +354,10 @@ export const FileManager = () => {
       {/* New folder */}
       <Dialog open={!!newFolderOpen} onOpenChange={(o) => !o && setNewFolderOpen(null)}>
         <DialogContent dir="rtl" className="max-w-sm">
-          <DialogHeader><DialogTitle>תיקייה חדשה</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>תיקייה חדשה</DialogTitle>
+            <DialogDescription>יצירת תיקייה חדשה בתוך עץ התיקיות המקומי.</DialogDescription>
+          </DialogHeader>
           <Input
             value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)}
             placeholder="שם תיקייה" autoFocus
@@ -306,7 +374,10 @@ export const FileManager = () => {
       {/* Rename */}
       <Dialog open={!!renameOpen} onOpenChange={(o) => !o && setRenameOpen(null)}>
         <DialogContent dir="rtl" className="max-w-sm">
-          <DialogHeader><DialogTitle>שינוי שם</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>שינוי שם</DialogTitle>
+            <DialogDescription>עדכון שם התיקייה הנוכחית.</DialogDescription>
+          </DialogHeader>
           <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} autoFocus
             onKeyDown={(e) => e.key === 'Enter' && handleRename()} className="text-right" />
           <DialogFooter>
@@ -326,13 +397,93 @@ export const FileManager = () => {
       )}
 
       {/* Drive browser */}
-      <Dialog open={driveBrowserOpen} onOpenChange={setDriveBrowserOpen}>
-        <DialogContent dir="rtl" className="max-w-3xl">
-          <DialogHeader><DialogTitle>Google Drive</DialogTitle></DialogHeader>
-          <GoogleDriveBrowser onImportAudio={(file) => {
-            setDriveBrowserOpen(false);
-            navigate('/', { state: { file } });
-          }} />
+      <Dialog open={driveBrowserOpen} onOpenChange={setDriveBrowserOpen} modal={false}>
+        <DialogContent
+          dir="rtl"
+          hideOverlay
+          className={driveSplitView ? 'max-w-6xl' : 'max-w-3xl'}
+          onKeyDownCapture={(event) => {
+            if (event.key === 'Escape') {
+              setDriveBrowserOpen(false);
+            }
+          }}
+          onEscapeKeyDown={() => setDriveBrowserOpen(false)}
+        >
+          <DialogHeader>
+            <DialogTitle>Google Drive</DialogTitle>
+            <DialogDescription>
+              תצוגה מפוצלת: מקומי מול Drive. גרור תמלול מקומי לתיקיית Drive כדי להעלות, או גרור קובץ מ-Drive לאזור המקומי כדי לייבא.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-muted-foreground">מצב תצוגה</div>
+            <Button size="sm" variant="outline" onClick={() => setDriveSplitView(v => !v)}>
+              {driveSplitView ? 'מצב רגיל' : 'תצוגה מפוצלת'}
+            </Button>
+          </div>
+
+          {driveSplitView ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card
+                className="border-yellow-500/30"
+                onDragOver={(e) => {
+                  if (e.dataTransfer.types.includes('application/x-sht-drive-file')) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const raw = e.dataTransfer.getData('application/x-sht-drive-file');
+                  if (!raw) return;
+                  try {
+                    const file = JSON.parse(raw) as DriveDropFile;
+                    void handleDropDriveFileToLocal(file);
+                  } catch {
+                    // ignore malformed drag payload
+                  }
+                }}
+              >
+                <div className="p-4 border-b">
+                  <div className="font-semibold">קבצים מקומיים (תיקייה נוכחית)</div>
+                  <div className="text-xs text-muted-foreground mt-1">גרור מכאן לתיקייה ב-Drive או גרור קובץ מ-Drive לאזור זה.</div>
+                </div>
+                <div className="p-2 max-h-[430px] overflow-auto space-y-1">
+                  {localTranscriptsInCurrent.length === 0 ? (
+                    <div className="text-sm text-muted-foreground p-3">אין תמלולים בתיקייה הנוכחית.</div>
+                  ) : localTranscriptsInCurrent.map((t: any) => (
+                    <div
+                      key={t.id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('application/x-sht-local-transcript-id', t.id);
+                        e.dataTransfer.effectAllowed = 'copy';
+                      }}
+                      className="p-2 rounded border bg-background hover:bg-muted cursor-grab active:cursor-grabbing"
+                      title={t.title || 'ללא כותרת'}
+                    >
+                      <div className="text-sm font-medium truncate">{t.title || 'ללא כותרת'}</div>
+                      <div className="text-xs text-muted-foreground truncate">{(t.text || '').slice(0, 100) || 'ללא תוכן'}</div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              <GoogleDriveBrowser
+                onDropLocalTranscriptToFolder={(folder, transcriptId) => void handleUploadTranscriptToDriveFolder(folder, transcriptId)}
+                onImportAudio={(file) => {
+                  setDriveBrowserOpen(false);
+                  navigate('/', { state: { file } });
+                }}
+              />
+            </div>
+          ) : (
+            <GoogleDriveBrowser onImportAudio={(file) => {
+              setDriveBrowserOpen(false);
+              navigate('/', { state: { file } });
+            }} />
+          )}
         </DialogContent>
       </Dialog>
 
