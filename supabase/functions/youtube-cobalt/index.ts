@@ -104,7 +104,11 @@ interface PipedResponse {
 
 async function tryPipedInstance(base: string, videoId: string, opts: ReqBody) {
   const res = await fetch(`${base}/streams/${videoId}`, {
-    headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
+    headers: {
+      Accept: 'application/json',
+      'Accept-Encoding': 'identity',
+      'User-Agent': 'lovable-yt/1.0',
+    },
     signal: AbortSignal.timeout(6000),
   });
   if (!res.ok) throw new Error(`piped ${res.status}`);
@@ -153,7 +157,11 @@ interface InvResponse {
 
 async function tryInvidiousInstance(base: string, videoId: string, opts: ReqBody) {
   const res = await fetch(`${base}/api/v1/videos/${videoId}`, {
-    headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
+    headers: {
+      Accept: 'application/json',
+      'Accept-Encoding': 'identity',
+      'User-Agent': 'lovable-yt/1.0',
+    },
     signal: AbortSignal.timeout(6000),
   });
   if (!res.ok) throw new Error(`invidious ${res.status}`);
@@ -204,7 +212,12 @@ async function tryCobalt(url: string, opts: ReqBody) {
     try {
       const res = await fetch(`${base}/`, {
         method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'lovable-yt/1.0' },
+        headers: {
+          Accept: 'application/json',
+          'Accept-Encoding': 'identity',
+          'Content-Type': 'application/json',
+          'User-Agent': 'lovable-yt/1.0',
+        },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(base === SELFHOST ? 20_000 : 6_000),
       });
