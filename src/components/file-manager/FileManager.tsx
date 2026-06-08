@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
-import { Search, Plus, Copy, Scissors, Clipboard, Trash2, Pin, Cloud, Loader2, X } from 'lucide-react';
+import { Search, Plus, Copy, Scissors, Clipboard, Trash2, Pin, Cloud, Loader2, X, Columns2 } from 'lucide-react';
 import { useFolderTree, type FolderNode } from '@/hooks/useFolderTree';
 import { useCloudTranscripts, type CloudTranscript } from '@/hooks/useCloudTranscripts';
 import { FolderTree } from './FolderTree';
