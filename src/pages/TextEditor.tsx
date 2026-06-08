@@ -531,6 +531,7 @@ const TextEditor = () => {
   
 
   const [aiAction, setAiAction] = useState<string | null>(null);
+  const [drivePickerOpen, setDrivePickerOpen] = useState(false);
   const [showCompareAi, setShowCompareAi] = useState(false);
 
   const compareVersions = useMemo<TextVersion[]>(() => {
