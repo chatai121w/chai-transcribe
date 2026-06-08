@@ -1,138 +1,136 @@
 
-# מערכת Jobs מרכזית + צינור YouTube מלא + Resume
+# מנהל קבצים מתקדם לתיקיות
 
-המטרה: כל פעולה (YouTube, המרה, חיתוך, תמלול) רצה דרך אותה מערכת Jobs אחת, עם תתי-שלבים, פס התקדמות כולל + פס לכל שלב, שמירת קובצי-ביניים בענן, ויכולת "המשך מהמקום שנתקעת".
+הופך את `/folders` ממסך פשוט ל-Explorer אמיתי בסגנון macOS Finder / Windows Explorer, מותאם RTL מלא, עם תיקיות היררכיות, גרירה, פעולות מרובות, הצמדה, וסנכרון אופציונלי ל-Google Drive.
 
-## ארכיטקטורה כללית
+---
+
+## 1. מבנה נתונים (Database)
+
+טבלה חדשה `folders` בענן:
+
+| שדה | תיאור |
+|---|---|
+| `id` | מזהה ייחודי |
+| `user_id` | בעלים |
+| `parent_id` | תיקיית אב (NULL = שורש) — מאפשר תתי-תיקיות לעומק לא מוגבל |
+| `name` | שם התיקייה |
+| `color` | צבע מותאם (אופציונלי) |
+| `emoji` | אמוג'י תווית (אופציונלי) |
+| `pinned` | האם נעוצה למעלה |
+| `position` | סדר ידני (לגרירה) |
+| `drive_folder_id` | מזהה תיקייה תואמת ב-Google Drive (לסנכרון) |
+| `drive_synced_at` | מתי סונכרן לאחרונה |
+
+`transcripts.folder` (טקסטואלי קיים) ייהפך לעבוד יחד עם **`folder_id`** חדש שמפנה ל-folders.id. שמירה לאחור תקפה — נשמר גם השם המלא.
+
+RLS: כל משתמש רואה/עורך רק את התיקיות שלו.
+
+---
+
+## 2. תצוגה — Explorer RTL מותאם
+
+Layout בסגנון Explorer (מותאם RTL — סייד-בר מימין):
 
 ```text
-                ┌──────────────────────────────────┐
-                │   JobOrchestrator (client)        │
-                │   - יוצר job + stages ב-DB        │
-                │   - מריץ pipeline שלב-אחר-שלב     │
-                │   - מעלה artifacts ל-Storage      │
-                │   - מעדכן progress (Realtime)     │
-                └──────────────┬───────────────────┘
-                               │
-        ┌──────────────────────┼──────────────────────┐
-        ▼                      ▼                      ▼
-   youtube_jobs           pipeline-artifacts     Realtime UI
-   (stages JSONB)         (Storage bucket)       <JobsCenter />
+┌────────────────────────────────────────────────────────────────┐
+│  📁 ניהול תיקיות           [🔍 חיפוש]  [+ חדש] [≡ תצוגה]      │
+├──────────────────────┬─────────────────────────────────────────┤
+│  ⭐ מועדפים           │  📍 בית › עבודה › 2026                │
+│  📌 נעוצות            │  ┌─────────────────────────────────┐  │
+│  ─────────            │  │ 📁  לקוחות      (12)  ⋮         │  │
+│  🏠 הבית              │  │ 📁  פגישות     (3)   ⋮         │  │
+│  ▸ 📁 עבודה          │  │ 🎵  שיחה_15.mp3      ⋮         │  │
+│    ▾ 📁 2026         │  │ 📄  סיכום.txt        ⋮         │  │
+│      📁 לקוחות        │  └─────────────────────────────────┘  │
+│      📁 פגישות        │                                         │
+│  ▸ 📁 אישי           │  3 פריטים נבחרו · 24MB                 │
+│  ─────────            │                                         │
+│  ☁️ Google Drive      │                                         │
+│    ▸ My Drive         │                                         │
+└──────────────────────┴─────────────────────────────────────────┘
 ```
 
-## מבנה נתונים — `youtube_jobs` (הרחבה)
+— **סייד-בר מימין** (RTL): עץ תיקיות מתקפל, נעוצות למעלה, Drive בתחתית
+— **אזור ראשי**: Breadcrumbs + רשימה/grid של תוכן התיקייה הנוכחית
+— **שורת מצב**: כמה נבחרו, גודל, פעולות
 
-עמודות חדשות:
-- `job_kind` text — `youtube` | `convert` | `cut` | `transcribe`
-- `stages` jsonb — מערך:
-  ```json
-  [{
-    "key": "probe", "label": "בדיקת קישור",
-    "status": "pending|running|done|failed|skipped",
-    "percent": 0, "weight": 5,
-    "started_at": null, "finished_at": null,
-    "error": null,
-    "artifact_path": null   // נתיב ב-pipeline-artifacts אם רלוונטי
-  }]
-  ```
-- `current_stage` text
-- `overall_percent` int (מחושב לפי weights)
-- `resume_token` jsonb — מה צריך כדי להמשיך
-- `last_error` text
+---
 
-## שלבים סטנדרטיים לפי job_kind
+## 3. פעולות (כפי שאישרת)
 
-- **youtube**: `probe` → `download` → `extract_audio` → `upload_audio` → `transcribe`
-- **convert** (video→mp3): `probe` → `convert` → `upload`
-- **cut**: `probe` → `cut` → `upload`
-- **transcribe**: `prepare` → `chunk` → `transcribe` → `merge`
+### גרירה (Drag & Drop)
+- גרירת תמלולים בין תיקיות בעץ או בין תיקיות באזור הראשי
+- גרירת תיקייה לתוך תיקייה אחרת (העברה בהיררכיה)
+- גרירה לתיקיית Drive = העלאה אוטומטית ל-Drive
+- אינדיקציית drop-zone ויזואלית (גבול צהוב מודגש)
 
-כל שלב שהצליח שומר `artifact_path` בענן. המשך = דילוג על שלבים `done` ושימוש ב-artifact הקיים.
+### העתק / גזור / הדבק
+- כפתורי כלים + תפריט קליק-ימני
+- קיצורי מקלדת: **Ctrl+C / Ctrl+X / Ctrl+V** (מותאם RTL — פועלים נכון)
+- העתקה = שכפול הרשומה; גזירה = העברה
 
-## פאזה 1 — תשתית + YouTube מלא
+### הצמדה (Pin)
+- כפתור 📌 לכל תיקייה — עולה לראש העץ ולקבוצה "נעוצות"
+- צבעים ואמוג'י לכל תיקייה (פיקר קטן)
 
-### 1.1 DB + Storage
-מיגרציה אחת:
-- `ALTER TABLE youtube_jobs ADD COLUMN job_kind text DEFAULT 'youtube', stages jsonb DEFAULT '[]', current_stage text, overall_percent int DEFAULT 0, resume_token jsonb, last_error text;`
-- Storage bucket `pipeline-artifacts` (פרטי) — מבנה: `{user_id}/{job_id}/{stage_key}/{filename}`
-- RLS על `storage.objects` לפי `auth.uid()::text = (storage.foldername(name))[1]`
-- אינדקס על `(user_id, status, created_at desc)`
+### בחירה מרובה
+- **Ctrl+Click** = הוספה/הסרה לבחירה
+- **Shift+Click** = בחירת טווח
+- **Ctrl+A** = הכל
+- פעולות מרובות: מחיקה, העברה, הצמדה, ייצוא, תיוג
 
-### 1.2 ליבת Orchestrator
-קבצים חדשים:
-- `src/lib/jobs/types.ts` — `JobStage`, `JobKind`, `JobRecord`
-- `src/lib/jobs/jobOrchestrator.ts` — `createJob()`, `runJob()`, `resumeJob()`, `cancelJob()`, `updateStage()`
-- `src/lib/jobs/artifactStorage.ts` — `uploadArtifact()`, `downloadArtifact()`, `getSignedUrl()`
-- `src/lib/jobs/pipelines/youtubePipeline.ts` — מימוש 5 השלבים
-- `src/hooks/useJobs.ts` — Realtime subscribe + רשימת jobs של המשתמש
-- `src/hooks/useJob.ts` — subscribe ל-job בודד
+### תפריט קליק-ימני
+פתיחה / שינוי שם (F2) / מחיקה (Del) / שכפול / הוספת תת-תיקייה / שינוי צבע / ייצוא ל-Drive / העתק נתיב
 
-### 1.3 מנוע הורדת YouTube (2 אסטרטגיות)
-- **A) Local yt-dlp** דרך `localhost:3000/yt/*` (קיים בתוכנית) — מועדף כשהשרת חי
-- **B) Cobalt Self-Host** דרך משתנה סביבה `COBALT_SELFHOST_URL` ב-edge function — נוסף ל-`youtube-cobalt` הקיים כ-fallback ראשון לפני ה-public instances
-- מחיקת ה-public instances הלא-זמינים מהקוד; השארתם רק כ-best-effort אחרון
+---
 
-עריכת `supabase/functions/youtube-cobalt/index.ts`:
-- קריאת `Deno.env.get('COBALT_SELFHOST_URL')` ושימוש בה ראשונה
-- timeout קצר יותר (8s) ל-public כדי למנוע 502 ארוך
+## 4. שילוב Google Drive (סנכרון 1:1)
 
-### 1.4 UI — מרכז ה-Jobs
-קבצים חדשים:
-- `src/components/jobs/JobsCenter.tsx` — דרואר/פאנל floating גלובלי (כמו `CompletedFilesPanel`), רשימת כל ה-jobs
-- `src/components/jobs/JobCard.tsx` — כרטיס יחיד עם:
-  - שורה עליונה: שם, סטטוס, פס התקדמות כולל (`overall_percent`)
-  - מתחת: מחולק לשלבים (`JobStagesProgress`) — לכל שלב פס משלו עם אחוז
-  - פעולות לפי סטטוס: בטל / המשך / נסה שוב / פתח תוצאה / הורד artifact
-- `src/components/jobs/JobStagesProgress.tsx` — סטפר אופקי + פס per-stage
-- כפתור FAB גלובלי `JobsCenterTrigger` ב-`App.tsx` (badge עם מספר רצים)
+לכל תיקייה מקומית ניתן (אופציונלי) לקשר תיקיית-בת ב-Drive דרך כפתור **"חבר ל-Drive"**:
+- מציג את `DriveFolderPicker` הקיים
+- שומר `drive_folder_id` בטבלה
+- **כל ייצוא תמלול מהתיקייה הזו ילך אוטומטית לתיקייה ב-Drive**
+- אופציה ל"סנכרון דו-כיווני": ייבוא קבצי אודיו מ-Drive ישירות לתיקייה המקומית
+- אינדיקציה ויזואלית 🔗 ליד תיקיות מסונכרנות
 
-### 1.5 עמוד YouTube
-עדכון `src/pages/YouTube.tsx`:
-- שימוש ב-`useJobs` במקום מנהל הורדות נפרד
-- כפתור "הורד+תמלל" יוצר job דרך Orchestrator
-- הצגת JobCard בעמוד עצמו של ה-job הפעיל
-- אם תקוע: כפתור "המשך מהשלב שנפל" → `resumeJob(id)`
+ה-edge function `google-drive` הקיים כבר תומך ב-`list/download/upload/createFolder` — אין צורך בקוד backend חדש.
 
-## פאזה 2 — העברת תמלול ל-Jobs
+---
 
-- עטיפת `useTranscriptionJobs` הקיים בתוך `transcribePipeline` עם שלבים: `prepare` (chunking) → `transcribe` (per-chunk progress) → `merge`
-- כל chunk שהצליח → נשמר כ-`partial_transcript.json` ב-`pipeline-artifacts`
-- אם נופל באמצע: `resumeJob` מדלג על chunks שכבר תומללו
-- עדכון `useTranscriptionJobs.ts` לקרוא ל-orchestrator במקום ניהול state נפרד (אדפטר תאימות לשמירה על קוד קיים)
+## 5. קבצים חדשים / שינויים
 
-## פאזה 3 — העברת המרה/חיתוך ל-Jobs
+**חדש:**
+- `supabase/migrations/*_folders.sql` — טבלת folders + RLS + עמודת folder_id ב-transcripts
+- `src/hooks/useFolderTree.ts` — טעינה, יצירה, עריכה, מחיקה, גרירה
+- `src/components/file-manager/FileManager.tsx` — Container ראשי
+- `src/components/file-manager/FolderTree.tsx` — סייד-בר עץ עם expand/collapse
+- `src/components/file-manager/FileGrid.tsx` — תצוגת תוכן (רשימה/grid)
+- `src/components/file-manager/Breadcrumbs.tsx`
+- `src/components/file-manager/ContextMenu.tsx` — תפריט ימני
+- `src/components/file-manager/FolderColorPicker.tsx`
+- `src/lib/clipboard.ts` — ניהול clipboard מקומי (copy/cut/paste)
 
-- `VideoToMp3.tsx`: כפתור "המרה" יוצר job מסוג `convert` במקום הזרימה הישנה. תוצאה עדיין נדחפת ל-`completedFilesBus` (תאימות) + נשמרת ב-bucket
-- `QuickCutDialog.tsx`: זהה — job מסוג `cut`
-- שמירה של `completedFilesBus` כשכבת תצוגה לקבצים מוכנים; `JobsCenter` מציג את התהליך עצמו
+**עריכה:**
+- `src/pages/Folders.tsx` — מחליף את `FolderManager` הישן ב-`FileManager`
+- `src/components/GoogleDriveBrowser.tsx` — נשאר זמין כ-modal/טאב נפרד
 
-## חוויית "המשך"
+---
 
-לוגיקת `resumeJob(jobId)`:
-1. טוען את `youtube_jobs.stages`
-2. השלב הראשון שאינו `done` = `current_stage`
-3. אם השלב הקודם הוא `done` ויש לו `artifact_path` → מוריד מהענן ומזין כקלט לשלב הבא
-4. מריץ pipeline מהנקודה הזו והלאה
-5. אם המשתמש סוגר טאב באמצע — בעלייה הבאה `useJobs` מציע "ראיתי שיש job שנקטע, להמשיך?"
+## 6. ספריות
 
-## שינויים תמציתיים
+- **dnd-kit** (`@dnd-kit/core` + `@dnd-kit/sortable`) — הספרייה הסטנדרטית לגרירה ב-React, תומכת RTL ונגישות
+- שאר ה-shadcn (ContextMenu, Tree, ScrollArea) — כבר בפרויקט
 
-| קובץ | פעולה |
-|---|---|
-| migration חדש | ALTER youtube_jobs + bucket + RLS |
-| `youtube-cobalt/index.ts` | תמיכה ב-self-host env + timeout |
-| `src/lib/jobs/*` | חדש — orchestrator, artifacts, pipelines |
-| `src/hooks/useJobs.ts`, `useJob.ts` | חדש |
-| `src/components/jobs/*` | חדש — UI |
-| `src/App.tsx` | הוספת `<JobsCenterTrigger />` גלובלי |
-| `src/pages/YouTube.tsx` | מעבר ל-orchestrator |
-| `useTranscriptionJobs.ts` | adapter ל-orchestrator (פאזה 2) |
-| `VideoToMp3.tsx`, `QuickCutDialog.tsx` | מעבר ל-jobs (פאזה 3) |
+---
 
-## פתיחת הביצוע
+## 7. מה לא כלול בשלב הזה (אם תרצה — נוסיף בהמשך)
 
-מתחיל מפאזה 1 (תשתית מלאה + YouTube). פאזה 2 ו-3 בהמשך באותו loop אם נשאר זמן, אחרת בהודעות נפרדות.
+- שיתוף תיקייה עם משתמש אחר
+- היסטוריית גרסאות לתיקייה
+- חיפוש מתקדם עם פילטרים בתוך כל העץ
+- Auto-sync תקופתי מ-Drive (cron) — דורש pg_cron נפרד
 
-## הערה על Cobalt Self-Host
+---
 
-אם תרצה שירוץ אצלך — אספק הוראות פריסה ל-Railway בסיום פאזה 1, ותגדיר את `COBALT_SELFHOST_URL` ב-Secrets. עד אז המערכת תיפול ל-`localhost:3000` כשהוא חי.
+**אשר לי ואני מתחיל לבנות לפי הסדר: 1) migration → 2) hooks → 3) רכיבי UI → 4) חיבור ל-`Folders.tsx` → 5) Drive integration.**

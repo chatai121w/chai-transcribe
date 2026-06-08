@@ -202,6 +202,62 @@ export type Database = {
           },
         ]
       }
+      folders: {
+        Row: {
+          color: string | null
+          created_at: string
+          drive_folder_id: string | null
+          drive_folder_name: string | null
+          drive_synced_at: string | null
+          emoji: string | null
+          id: string
+          name: string
+          parent_id: string | null
+          pinned: boolean
+          position: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string
+          drive_folder_id?: string | null
+          drive_folder_name?: string | null
+          drive_synced_at?: string | null
+          emoji?: string | null
+          id?: string
+          name: string
+          parent_id?: string | null
+          pinned?: boolean
+          position?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          color?: string | null
+          created_at?: string
+          drive_folder_id?: string | null
+          drive_folder_name?: string | null
+          drive_synced_at?: string | null
+          emoji?: string | null
+          id?: string
+          name?: string
+          parent_id?: string | null
+          pinned?: boolean
+          position?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "folders_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       migration_logs: {
         Row: {
           created_at: string
@@ -466,6 +522,7 @@ export type Database = {
           edited_text: string | null
           engine: string
           folder: string | null
+          folder_id: string | null
           id: string
           is_favorite: boolean | null
           notes: string | null
@@ -483,6 +540,7 @@ export type Database = {
           edited_text?: string | null
           engine?: string
           folder?: string | null
+          folder_id?: string | null
           id?: string
           is_favorite?: boolean | null
           notes?: string | null
@@ -500,6 +558,7 @@ export type Database = {
           edited_text?: string | null
           engine?: string
           folder?: string | null
+          folder_id?: string | null
           id?: string
           is_favorite?: boolean | null
           notes?: string | null
@@ -510,7 +569,15 @@ export type Database = {
           user_id?: string
           word_timings?: Json | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "transcripts_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_api_keys: {
         Row: {
