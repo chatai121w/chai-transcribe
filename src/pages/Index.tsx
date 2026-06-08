@@ -33,7 +33,7 @@ import { extractAudioSegment, probeAudioDurationSec } from "@/lib/audioSegment";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
-import { getApiKey } from "@/lib/keyCrypto";
+import { getApiKey, getEncryptedKey } from "@/lib/keyCrypto";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
 import { isLoshonKodeshEnabled, setLoshonKodeshEnabled } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
