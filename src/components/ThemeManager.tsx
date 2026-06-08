@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTheme, BUILT_IN_THEMES, type AppTheme, type ThemeColors, type ThemeStyleOptions } from "@/hooks/useTheme";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { Button } from "@/components/ui/button";
