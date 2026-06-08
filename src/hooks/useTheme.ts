@@ -551,6 +551,16 @@ export function useTheme() {
     applyThemeToDOM(theme.colors, theme.style);
   }, [customThemes]);
 
+  const applyThemePreview = useCallback((theme: Pick<AppTheme, 'colors' | 'style'>) => {
+    applyThemeToDOM(theme.colors, theme.style);
+  }, []);
+
+  const reapplyActiveTheme = useCallback(() => {
+    const all = [...BUILT_IN_THEMES, ...customThemes];
+    const theme = all.find(t => t.id === activeThemeId) || BUILT_IN_THEMES[0];
+    applyThemeToDOM(theme.colors, theme.style);
+  }, [activeThemeId, customThemes]);
+
   const saveCustomTheme = useCallback((theme: AppTheme) => {
     setCustomThemes(prev => {
       const existing = prev.findIndex(t => t.id === theme.id);
@@ -580,6 +590,8 @@ export function useTheme() {
     allThemes,
     customThemes,
     setTheme,
+    applyThemePreview,
+    reapplyActiveTheme,
     saveCustomTheme,
     deleteCustomTheme,
   };

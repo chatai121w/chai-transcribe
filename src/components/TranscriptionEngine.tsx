@@ -7,11 +7,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Globe, Cpu, Zap, Chrome, Mic, Waves, Server, Power, PowerOff, Loader2, CheckCircle2, XCircle, Copy, Rabbit, Turtle, Settings, ChevronDown, Flame, Download, Sparkles, Link2 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
+import { Globe, Cpu, Zap, Chrome, Mic, Waves, Server, Power, PowerOff, Loader2, CheckCircle2, XCircle, Copy, Rabbit, Turtle, Settings, ChevronDown, Flame, Download, Sparkles, Link2, KeyRound } from "lucide-react";
 import { useLocalServer } from "@/hooks/useLocalServer";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
 import { getApiKey } from "@/lib/keyCrypto";
+import { ApiKeyUsagePanel } from "@/components/ApiKeyUsagePanel";
 
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
@@ -21,6 +25,7 @@ interface TranscriptionEngineProps {
   onChange: (engine: Engine) => void;
   sourceLanguage: SourceLanguage;
   onSourceLanguageChange: (lang: SourceLanguage) => void;
+  groqKeysText?: string;
 }
 
 const getLocalModelLabel = (): string => {
@@ -40,7 +45,8 @@ const hasCustomServerUrl = () => {
   return !url.includes('localhost') && !url.includes('127.0.0.1');
 };
 
-export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, onSourceLanguageChange }: TranscriptionEngineProps) => {
+export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, onSourceLanguageChange, groqKeysText = "" }: TranscriptionEngineProps) => {
+  const isMobile = useIsMobile();
   const { isConnected, serverStatus, checkConnection, startPolling, stopPolling, shutdownServer, warmupServer, preloadModelStream, cancelPreload, modelReady, modelLoading, getBaseUrl } = useLocalServer();
   const { preferences: cloudPrefs, updatePreferences, isLoaded: cloudLoaded } = useCloudPreferences();
   const cloudSynced = useRef(false);
@@ -102,6 +108,14 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
   const [serverUrl, setServerUrl] = useState(() => localStorage.getItem('whisper_server_url') || '');
   const [apiKey, setApiKey] = useState(() => getApiKey('whisper_api_key'));
   const [ollamaUrl, setOllamaUrl] = useState(() => localStorage.getItem('ollama_base_url') || '');
+  const [groqUsageOpen, setGroqUsageOpen] = useState(false);
+  const [groqMaxUsagePct, setGroqMaxUsagePct] = useState(0);
+
+  const groqUsageColorClass = groqMaxUsagePct > 80
+    ? "text-red-600"
+    : groqMaxUsagePct > 50
+      ? "text-amber-500"
+      : "text-blue-900";
 
   // "True remote" = non-localhost site + custom remote URL configured
   // If on Lovable but targeting localhost:3000, that's local-via-web, NOT remote
@@ -201,11 +215,72 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
               <Label
                 key={id}
                 htmlFor={id}
-                className={`flex flex-col items-center justify-center p-2.5 border rounded-xl cursor-pointer transition-all duration-150 hover:border-primary/60 hover:shadow-sm ${
+                className={`relative flex flex-col items-center justify-center p-2.5 border rounded-xl cursor-pointer transition-all duration-150 hover:border-primary/60 hover:shadow-sm ${
                   selected === id ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'border-border/50 bg-card'
                 }`}
               >
                 <RadioGroupItem value={id} id={id} className="sr-only" />
+                {id === 'groq' && (
+                  isMobile ? (
+                    <Drawer open={groqUsageOpen} onOpenChange={setGroqUsageOpen}>
+                      <DrawerTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="מידע ניצול מפתחות Groq"
+                          title="ניצול מפתחות Groq"
+                          className="absolute top-1.5 left-1.5 z-10 rounded-md p-1 hover:bg-primary/10"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                          }}
+                        >
+                          <Settings className={`h-3.5 w-3.5 ${groqUsageColorClass}`} />
+                        </button>
+                      </DrawerTrigger>
+                      <DrawerContent dir="rtl" className="max-h-[80vh]">
+                        <DrawerHeader className="pb-2">
+                          <DrawerTitle className="flex items-center justify-center gap-2 text-sm">
+                            <KeyRound className={`h-4 w-4 ${groqUsageColorClass}`} />
+                            ניצול מפתחות Groq (24 שעות)
+                          </DrawerTitle>
+                        </DrawerHeader>
+                        <div className="px-4 pb-4 overflow-y-auto">
+                          <ApiKeyUsagePanel
+                            provider="groq"
+                            keysText={groqKeysText}
+                            onUsageLevelChange={setGroqMaxUsagePct}
+                          />
+                        </div>
+                      </DrawerContent>
+                    </Drawer>
+                  ) : (
+                    <Popover open={groqUsageOpen} onOpenChange={setGroqUsageOpen}>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="מידע ניצול מפתחות Groq"
+                          title="ניצול מפתחות Groq"
+                          className="absolute top-1.5 left-1.5 z-10 rounded-md p-1 hover:bg-primary/10"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                          }}
+                        >
+                          <Settings className={`h-3.5 w-3.5 ${groqUsageColorClass}`} />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[min(92vw,30rem)] max-h-[70vh] overflow-y-auto" side="bottom" align="end" sideOffset={8} dir="rtl">
+                        <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                          <KeyRound className={`h-4 w-4 ${groqUsageColorClass}`} />
+                          ניצול מפתחות Groq (24 שעות)
+                        </div>
+                        <ApiKeyUsagePanel
+                          provider="groq"
+                          keysText={groqKeysText}
+                          onUsageLevelChange={setGroqMaxUsagePct}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  )
+                )}
                 <Icon className="w-5 h-5 mb-1.5 text-primary/80" />
                 <span className="font-medium text-xs leading-tight">{label}</span>
                 <span className="text-[9px] text-muted-foreground mt-0.5 leading-tight">{sub}</span>

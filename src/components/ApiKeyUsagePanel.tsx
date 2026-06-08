@@ -13,6 +13,7 @@ import {
 interface Props {
   provider: Provider;
   keysText: string; // newline-separated keys
+  onUsageLevelChange?: (maxUsagePct: number) => void;
 }
 
 function fmtSeconds(s: number): string {
@@ -24,7 +25,7 @@ function fmtSeconds(s: number): string {
   return `${h}:${r.toString().padStart(2, "0")} שע׳`;
 }
 
-export function ApiKeyUsagePanel({ provider, keysText }: Props) {
+export function ApiKeyUsagePanel({ provider, keysText, onUsageLevelChange }: Props) {
   const [stats, setStats] = useState<Record<string, KeyUsageStats>>({});
   const [loading, setLoading] = useState(false);
 
@@ -58,6 +59,25 @@ export function ApiKeyUsagePanel({ provider, keysText }: Props) {
     .map((k) => k.trim())
     .filter(Boolean);
 
+  useEffect(() => {
+    if (!onUsageLevelChange) return;
+    if (keys.length === 0) {
+      onUsageLevelChange(0);
+      return;
+    }
+
+    let maxPct = 0;
+    for (const key of keys) {
+      const fp = keyFingerprint(key);
+      const s = stats[fp] ?? { seconds24h: 0, words24h: 0, peakSeconds: 0, peakWords: 0 };
+      const pctTime = s.peakSeconds > 0 ? Math.min(100, (s.seconds24h / s.peakSeconds) * 100) : 0;
+      const pctWords = s.peakWords > 0 ? Math.min(100, (s.words24h / s.peakWords) * 100) : 0;
+      maxPct = Math.max(maxPct, pctTime, pctWords);
+    }
+
+    onUsageLevelChange(maxPct);
+  }, [keysText, keys.length, onUsageLevelChange, stats]);
+
   if (keys.length === 0) return null;
 
   return (
@@ -74,6 +94,7 @@ export function ApiKeyUsagePanel({ provider, keysText }: Props) {
         const s = stats[fp] ?? { seconds24h: 0, words24h: 0, peakSeconds: 0, peakWords: 0 };
         const pctTime = s.peakSeconds > 0 ? Math.min(100, (s.seconds24h / s.peakSeconds) * 100) : 0;
         const pctWords = s.peakWords > 0 ? Math.min(100, (s.words24h / s.peakWords) * 100) : 0;
+        const levelClass = (pct: number) => (pct > 80 ? "text-red-600" : pct > 50 ? "text-amber-600" : "text-foreground");
         return (
           <div key={fp + i} className="space-y-1.5 rounded border border-border/50 bg-background p-2">
             <div className="flex items-center justify-between">
@@ -100,7 +121,7 @@ export function ApiKeyUsagePanel({ provider, keysText }: Props) {
             <div className="space-y-1">
               <div className="flex items-center justify-between text-xs">
                 <span>זמן תמלול: {fmtSeconds(s.seconds24h)} / {fmtSeconds(s.peakSeconds)} שיא</span>
-                <span className="font-semibold">{pctTime.toFixed(0)}%</span>
+                <span className={`font-semibold ${levelClass(pctTime)}`}>{pctTime.toFixed(0)}%</span>
               </div>
               <Progress value={pctTime} className="h-1.5" />
             </div>
@@ -108,7 +129,7 @@ export function ApiKeyUsagePanel({ provider, keysText }: Props) {
             <div className="space-y-1">
               <div className="flex items-center justify-between text-xs">
                 <span>מילים: {s.words24h.toLocaleString()} / {s.peakWords.toLocaleString()} שיא</span>
-                <span className="font-semibold">{pctWords.toFixed(0)}%</span>
+                <span className={`font-semibold ${levelClass(pctWords)}`}>{pctWords.toFixed(0)}%</span>
               </div>
               <Progress value={pctWords} className="h-1.5" />
             </div>

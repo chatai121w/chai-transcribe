@@ -124,7 +124,7 @@ export default defineConfig(({ mode }) => {
   return {
   server: {
     host: "::",
-    port: 5000,
+    port: 8080,
     proxy: {
       '/whisper': {
         target: 'http://127.0.0.1:3000',

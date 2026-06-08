@@ -70,10 +70,10 @@ const CompareReport     = lazyWithLog('CompareReport',     () => import("./pages
 const SmartConsoleLazy = lazy(() => import("./components/SmartConsole").then(m => ({ default: m.SmartConsole })));
 const TranscriptionAnalyticsLazy = lazy(() => import("./components/TranscriptionAnalytics").then(m => ({ default: m.TranscriptionAnalytics })));
 const PWAInstallButtonLazy = lazy(() => import("./components/PWAInstallButton").then(m => ({ default: m.PWAInstallButton })));
-const QuickCutDialogLazy = lazy(() => import("./components/QuickCutDialog"));
+const QuickCutDialogLazy = lazyWithLog('QuickCutDialog', () => import("./components/QuickCutDialog"));
 const BackgroundSyncLazy = lazy(() => import("./components/BackgroundSync").then(m => ({ default: m.BackgroundSync })));
 const SWUpdateNotifierLazy = lazy(() => import("./components/SWUpdateNotifier").then(m => ({ default: m.SWUpdateNotifier })));
-const CloudKeySyncLazy = lazy(() => import("./components/CloudKeySync"));
+const CloudKeySyncLazy = lazyWithLog('CloudKeySync', () => import("./components/CloudKeySync"));
 const DiarizationFloatingStatusLazy = lazy(() => import("./components/DiarizationFloatingStatus").then(m => ({ default: m.DiarizationFloatingStatus })));
 const JobsCenterLazy = lazy(() => import("./components/jobs/JobsCenter").then(m => ({ default: m.JobsCenter })));
 const ConversionJobsBridgeLazy = lazy(() => import("./components/jobs/ConversionJobsBridge").then(m => ({ default: m.ConversionJobsBridge })));

@@ -888,7 +888,7 @@ def load_model(model_id: str, compute_type_override: str | None = None) -> faste
     except Exception as e:
         err_str = str(e).lower()
         # Retry without Flash Attention if not supported by this GPU/driver
-        if "flash attention" in err_str:
+        if "flash attention" in err_str or "flashattention" in err_str:
             _flash_attention_disabled = True
             print(f"  Flash Attention not supported ({e}), disabling globally and retrying...")
             def _load_no_flash(dev, ct):
@@ -3681,37 +3681,38 @@ def main():
             try:
                 model = load_model(model_id)
                 print("  ✅ Background preload complete — model ready!")
-                # Warm-up: run a tone transcription to trigger flash attention
-                # failure NOW instead of during the first real request.
-                # Must use non-silent audio so segments are actually decoded.
-                try:
-                    import wave, struct, math
-                    warmup_path = os.path.join(tempfile.gettempdir(), "_whisper_warmup.wav")
-                    sr = 16000
-                    dur = 2  # seconds
-                    n = sr * dur
-                    # 440 Hz sine wave — enough to produce at least one segment
-                    samples = [int(16000 * math.sin(2 * math.pi * 440 * i / sr)) for i in range(n)]
-                    with wave.open(warmup_path, "w") as wf:
-                        wf.setnchannels(1)
-                        wf.setsampwidth(2)
-                        wf.setframerate(sr)
-                        wf.writeframes(struct.pack("<" + "h" * n, *samples))
-                    segments, _ = model.transcribe(warmup_path, language="he", beam_size=1)
-                    list(segments)  # Force iteration to trigger flash attention errors
-                    os.unlink(warmup_path)
-                    print("  ✅ Warm-up transcription OK (flash attention validated)")
-                except Exception as wu_err:
-                    if "flash attention" in str(wu_err).lower():
-                        print(f"  ⚠️  Flash Attention failed during warm-up — reloading without it...")
-                        _reload_model_without_flash(model_id)
-                        print("  ✅ Model reloaded without Flash Attention — ready!")
-                    else:
-                        print(f"  ⚠️  Warm-up transcription warning: {wu_err}")
+                # Optional warm-up transcription.
+                # Disabled by default because some Windows CUDA setups can crash
+                # if runtime DLLs are incomplete (e.g. missing cuDNN).
+                if os.environ.get("WHISPER_STARTUP_WARMUP", "0") == "1":
                     try:
+                        import wave, struct, math
+                        warmup_path = os.path.join(tempfile.gettempdir(), "_whisper_warmup.wav")
+                        sr = 16000
+                        dur = 2  # seconds
+                        n = sr * dur
+                        # 440 Hz sine wave — enough to produce at least one segment
+                        samples = [int(16000 * math.sin(2 * math.pi * 440 * i / sr)) for i in range(n)]
+                        with wave.open(warmup_path, "w") as wf:
+                            wf.setnchannels(1)
+                            wf.setsampwidth(2)
+                            wf.setframerate(sr)
+                            wf.writeframes(struct.pack("<" + "h" * n, *samples))
+                        segments, _ = model.transcribe(warmup_path, language="he", beam_size=1)
+                        list(segments)  # Force iteration to trigger flash attention errors
                         os.unlink(warmup_path)
-                    except OSError:
-                        pass
+                        print("  ✅ Warm-up transcription OK (flash attention validated)")
+                    except Exception as wu_err:
+                        if "flash attention" in str(wu_err).lower() or "flashattention" in str(wu_err).lower():
+                            print(f"  ⚠️  Flash Attention failed during warm-up — reloading without it...")
+                            _reload_model_without_flash(model_id)
+                            print("  ✅ Model reloaded without Flash Attention — ready!")
+                        else:
+                            print(f"  ⚠️  Warm-up transcription warning: {wu_err}")
+                        try:
+                            os.unlink(warmup_path)
+                        except OSError:
+                            pass
             except Exception as e:
                 print(f"  ⚠️  Background preload failed: {e}")
                 print("  Server will still run — model will load on first request.")

@@ -418,3 +418,49 @@ All colors MUST be HSL.
 .eq-theme-cyber .eq-freq-label {
   color: rgba(0,255,255,0.5);
 }
+
+/* Floating theme editor window resize handles */
+.theme-editor-resize-handle {
+  position: absolute;
+  background: hsl(var(--primary) / 0.22);
+  z-index: 5;
+}
+
+.theme-editor-resize-handle-top,
+.theme-editor-resize-handle-bottom {
+  left: 14px;
+  right: 14px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.theme-editor-resize-handle-top {
+  top: -3px;
+}
+
+.theme-editor-resize-handle-bottom {
+  bottom: -3px;
+}
+
+.theme-editor-resize-handle-left,
+.theme-editor-resize-handle-right {
+  top: 14px;
+  bottom: 14px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.theme-editor-resize-handle-left {
+  left: -3px;
+}
+
+.theme-editor-resize-handle-right {
+  right: -3px;
+}
+
+.theme-editor-resize-handle-corner {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+}

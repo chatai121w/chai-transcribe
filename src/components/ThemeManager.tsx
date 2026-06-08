@@ -10,8 +10,10 @@ import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { Rnd } from "react-rnd";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { Check, Plus, Pencil, Trash2, Palette, Download, Upload, Sparkles, RotateCcw } from "lucide-react";
+import { Check, Plus, Pencil, Trash2, Palette, Download, Upload, Sparkles, RotateCcw, Save, Copy, Minimize2, X } from "lucide-react";
 import {
   contrastRatio,
   contrastLevel,
@@ -82,6 +84,46 @@ const COLOR_GROUPS: { label: string; keys: { key: keyof ThemeColors; label: stri
     ],
   },
 ];
+
+const FLOATING_EDITOR_LAYOUT_KEY = 'theme_editor_floating_layout_v1';
+
+type FloatingEditorLayout = {
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+  minimized: boolean;
+};
+
+function getDefaultFloatingLayout(): FloatingEditorLayout {
+  const width = Math.min(980, Math.max(720, window.innerWidth - 120));
+  const height = Math.min(760, Math.max(520, window.innerHeight - 100));
+  const x = Math.max(24, Math.round((window.innerWidth - width) / 2));
+  const y = Math.max(24, Math.round((window.innerHeight - height) / 2));
+  return { width, height, x, y, minimized: false };
+}
+
+function loadFloatingLayout(): FloatingEditorLayout {
+  try {
+    const raw = localStorage.getItem(FLOATING_EDITOR_LAYOUT_KEY);
+    if (!raw) return getDefaultFloatingLayout();
+    const parsed = JSON.parse(raw) as Partial<FloatingEditorLayout>;
+    const fallback = getDefaultFloatingLayout();
+    return {
+      width: Number(parsed.width) || fallback.width,
+      height: Number(parsed.height) || fallback.height,
+      x: Number(parsed.x) || fallback.x,
+      y: Number(parsed.y) || fallback.y,
+      minimized: Boolean(parsed.minimized),
+    };
+  } catch {
+    return getDefaultFloatingLayout();
+  }
+}
+
+function saveFloatingLayout(layout: FloatingEditorLayout) {
+  localStorage.setItem(FLOATING_EDITOR_LAYOUT_KEY, JSON.stringify(layout));
+}
 
 function hslToHex(hsl: string): string {
   if (!hsl || hsl === 'inherit') return '#daa520';
@@ -257,12 +299,14 @@ function ContrastBadge({ fg, bg }: { fg: string; bg: string }) {
   );
 }
 
-function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn }: {
+function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPreviewChange, onDirtyChange }: {
   initial?: AppTheme;
   onSave: (theme: AppTheme) => void;
   onDuplicate?: (theme: AppTheme) => void;
   onCancel: () => void;
   isBuiltIn?: boolean;
+  onPreviewChange?: (theme: AppTheme) => void;
+  onDirtyChange?: (isDirty: boolean) => void;
 }) {
   const [name, setName] = useState(initial?.nameHe || '');
   const [colors, setColors] = useState<ThemeColors>(initial?.colors || { ...DEFAULT_COLORS });
@@ -285,6 +329,29 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn }: {
   const updateStyle = <K extends keyof ThemeStyleOptions>(key: K, value: ThemeStyleOptions[K]) => {
     setStyle(prev => ({ ...prev, [key]: value }));
   };
+
+  useEffect(() => {
+    const previewTheme: AppTheme = {
+      id: initial?.id || 'theme-preview',
+      name: (name || initial?.nameHe || 'תצוגה מקדימה').trim(),
+      nameHe: (name || initial?.nameHe || 'תצוגה מקדימה').trim(),
+      colors,
+      style,
+      isCustom: true,
+    };
+    onPreviewChange?.(previewTheme);
+  }, [name, colors, style, initial?.id, initial?.nameHe, onPreviewChange]);
+
+  useEffect(() => {
+    const initialName = initial?.nameHe || '';
+    const initialColors = initial?.colors || DEFAULT_COLORS;
+    const initialStyle = initial?.style || DEFAULT_STYLE;
+    const dirty =
+      name !== initialName ||
+      JSON.stringify(colors) !== JSON.stringify(initialColors) ||
+      JSON.stringify(style) !== JSON.stringify(initialStyle);
+    onDirtyChange?.(dirty);
+  }, [name, colors, style, initial, onDirtyChange]);
 
   const getHex = (key: keyof ThemeColors) => {
     const val = colors[key];
@@ -510,11 +577,13 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn }: {
       <div className="flex gap-2 sticky bottom-0 bg-background border-t border-border/40 -mx-1 px-1 pt-3">
         {/* For custom themes: overwrite + duplicate. For built-in: duplicate only */}
         {!isBuiltIn && (
-          <Button onClick={handleOverwrite} className="flex-1">
-            דרוס ושמור
+          <Button onClick={handleOverwrite} className="flex-1 gap-2">
+            <Save className="h-4 w-4" />
+            שמור
           </Button>
         )}
-        <Button onClick={handleDuplicate} variant={isBuiltIn ? "default" : "outline"} className="flex-1">
+        <Button onClick={handleDuplicate} variant={isBuiltIn ? "default" : "outline"} className="flex-1 gap-2">
+          <Copy className="h-4 w-4" />
           {isBuiltIn ? 'שכפל ושמור' : 'שכפל כחדש'}
         </Button>
         <Button variant="ghost" onClick={onCancel}>ביטול</Button>
@@ -523,17 +592,169 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn }: {
   );
 }
 
+function FloatingThemeEditorWindow({
+  open,
+  title,
+  initial,
+  isBuiltIn,
+  onSave,
+  onDuplicate,
+  onClose,
+  onPreview,
+}: {
+  open: boolean;
+  title: string;
+  initial: AppTheme;
+  isBuiltIn?: boolean;
+  onSave: (theme: AppTheme) => void;
+  onDuplicate: (theme: AppTheme) => void;
+  onClose: () => void;
+  onPreview: (theme: AppTheme) => void;
+}) {
+  const [layout, setLayout] = useState<FloatingEditorLayout>(() => loadFloatingLayout());
+  const [isDirty, setIsDirty] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        const ok = !isDirty || window.confirm('יש שינויים שלא נשמרו. לסגור בלי לשמור?');
+        if (ok) onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, isDirty, onClose]);
+
+  if (!open) return null;
+
+  const requestClose = () => {
+    if (!isDirty || window.confirm('יש שינויים שלא נשמרו. לסגור בלי לשמור?')) {
+      onClose();
+    }
+  };
+
+  const persistLayout = (next: FloatingEditorLayout) => {
+    setLayout(next);
+    saveFloatingLayout(next);
+  };
+
+  return createPortal(
+    <>
+      {layout.minimized && (
+        <button
+          type="button"
+          className="fixed bottom-4 right-4 z-[70] inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-background shadow-lg"
+          onClick={() => persistLayout({ ...layout, minimized: false })}
+          title="שחזור עורך ערכת נושא"
+        >
+          <Palette className="h-5 w-5" />
+        </button>
+      )}
+
+      {!layout.minimized && (
+        <Rnd
+          size={{ width: layout.width, height: layout.height }}
+          position={{ x: layout.x, y: layout.y }}
+          minWidth={640}
+          minHeight={420}
+          maxWidth={Math.max(740, window.innerWidth - 24)}
+          maxHeight={Math.max(460, window.innerHeight - 24)}
+          bounds="window"
+          dragHandleClassName="theme-editor-drag-handle"
+          onDragStop={(_, d) => persistLayout({ ...layout, x: d.x, y: d.y })}
+          onResizeStop={(_, __, ref, ___, position) => {
+            persistLayout({
+              ...layout,
+              width: ref.offsetWidth,
+              height: ref.offsetHeight,
+              x: position.x,
+              y: position.y,
+            });
+          }}
+          className="z-[70]"
+          enableResizing={{ top: true, right: true, bottom: true, left: true, topLeft: true, topRight: true, bottomLeft: true, bottomRight: true }}
+          resizeHandleClasses={{
+            top: 'theme-editor-resize-handle theme-editor-resize-handle-top',
+            right: 'theme-editor-resize-handle theme-editor-resize-handle-right',
+            bottom: 'theme-editor-resize-handle theme-editor-resize-handle-bottom',
+            left: 'theme-editor-resize-handle theme-editor-resize-handle-left',
+            topLeft: 'theme-editor-resize-handle theme-editor-resize-handle-corner',
+            topRight: 'theme-editor-resize-handle theme-editor-resize-handle-corner',
+            bottomLeft: 'theme-editor-resize-handle theme-editor-resize-handle-corner',
+            bottomRight: 'theme-editor-resize-handle theme-editor-resize-handle-corner',
+          }}
+        >
+          <div className="flex h-full flex-col rounded-xl border border-border bg-background shadow-2xl">
+            <div className="theme-editor-drag-handle flex cursor-move items-center justify-between gap-2 border-b border-border/50 px-3 py-2 select-none">
+              <div className="text-sm font-semibold">{title}</div>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7"
+                  onClick={() => persistLayout({ ...layout, minimized: true })}
+                  title="מזער"
+                >
+                  <Minimize2 className="h-4 w-4" />
+                </Button>
+                <Button type="button" size="icon" variant="ghost" className="h-7 w-7" onClick={requestClose} title="סגור">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="px-4 py-2 text-[11px] text-muted-foreground border-b border-border/30">
+              תצוגה חיה פעילה על כל האפליקציה. השינויים נשמרים רק בלחיצה על שמור או שכפל ושמור.
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
+              <ThemeEditor
+                initial={initial}
+                onSave={onSave}
+                onDuplicate={onDuplicate}
+                onCancel={requestClose}
+                isBuiltIn={isBuiltIn}
+                onPreviewChange={onPreview}
+                onDirtyChange={setIsDirty}
+              />
+            </div>
+          </div>
+        </Rnd>
+      )}
+    </>,
+    document.body,
+  );
+}
+
 export function ThemeManager() {
-  const { activeThemeId, allThemes, setTheme, saveCustomTheme, deleteCustomTheme, customThemes } = useTheme();
+  const { activeThemeId, allThemes, setTheme, applyThemePreview, reapplyActiveTheme, saveCustomTheme, deleteCustomTheme, customThemes } = useTheme();
   const { updatePreferences } = useCloudPreferences();
-  const [editingTheme, setEditingTheme] = useState<AppTheme | null>(null);
   const [isCreating, setIsCreating] = useState(false);
-  const [editingBuiltIn, setEditingBuiltIn] = useState<AppTheme | null>(null);
+  const [floatingEditor, setFloatingEditor] = useState<{ open: boolean; title: string; initial: AppTheme; isBuiltIn: boolean } | null>(null);
+  const [themeBeforeEditing, setThemeBeforeEditing] = useState<string | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiDescription, setAiDescription] = useState('');
   const [aiName, setAiName] = useState('');
   const [aiPreview, setAiPreview] = useState<AppTheme | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const openFloatingEditor = (initial: AppTheme, title: string, isBuiltIn = false) => {
+    setThemeBeforeEditing(activeThemeId);
+    setFloatingEditor({ open: true, title, initial, isBuiltIn });
+    applyThemePreview({ colors: initial.colors, style: initial.style });
+  };
+
+  const closeFloatingEditor = () => {
+    setFloatingEditor(null);
+    if (themeBeforeEditing) {
+      setTheme(themeBeforeEditing);
+    } else {
+      reapplyActiveTheme();
+    }
+    setThemeBeforeEditing(null);
+  };
 
   const syncThemeToCloud = (themeId: string) => {
     const customJson = localStorage.getItem('app_custom_themes') || '[]';
@@ -556,8 +777,8 @@ export function ThemeManager() {
   const handleSave = (theme: AppTheme) => {
     saveCustomTheme(theme);
     setTheme(theme.id);
-    setEditingTheme(null);
-    setEditingBuiltIn(null);
+    setFloatingEditor(null);
+    setThemeBeforeEditing(null);
     setIsCreating(false);
     setTimeout(() => syncThemeToCloud(theme.id), 0);
     toast.success(`ערכת הנושא "${theme.nameHe}" נשמרה!`);
@@ -566,8 +787,8 @@ export function ThemeManager() {
   const handleDuplicate = (theme: AppTheme) => {
     saveCustomTheme(theme);
     setTheme(theme.id);
-    setEditingTheme(null);
-    setEditingBuiltIn(null);
+    setFloatingEditor(null);
+    setThemeBeforeEditing(null);
     setIsCreating(false);
     setTimeout(() => syncThemeToCloud(theme.id), 0);
     toast.success(`ערכת הנושא "${theme.nameHe}" שוכפלה ונשמרה!`);
@@ -758,25 +979,21 @@ export function ThemeManager() {
                 onClick={() => { setTheme(theme.id); syncThemeToCloud(theme.id); }}
               />
               <div className="absolute bottom-2 left-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Dialog open={editingBuiltIn?.id === theme.id} onOpenChange={open => !open && setEditingBuiltIn(null)}>
-                  <DialogTrigger asChild>
-                    <Button size="icon" variant="ghost" className="h-6 w-6" onClick={e => { e.stopPropagation(); setEditingBuiltIn(theme); }}>
-                      <Pencil className="h-3 w-3" />
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-2xl" dir="rtl">
-                    <DialogHeader>
-                      <DialogTitle>עריכת "{theme.nameHe}" — שכפול כערכה חדשה</DialogTitle>
-                    </DialogHeader>
-                    <ThemeEditor
-                      initial={{ ...theme, nameHe: `${theme.nameHe} (עותק)`, name: `${theme.name}-copy` }}
-                      onSave={handleDuplicate}
-                      onDuplicate={handleDuplicate}
-                      onCancel={() => setEditingBuiltIn(null)}
-                      isBuiltIn
-                    />
-                  </DialogContent>
-                </Dialog>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6"
+                  onClick={e => {
+                    e.stopPropagation();
+                    openFloatingEditor(
+                      { ...theme, nameHe: `${theme.nameHe} (עותק)`, name: `${theme.name}-copy` },
+                      `עריכת "${theme.nameHe}" — שכפול כערכה חדשה`,
+                      true,
+                    );
+                  }}
+                >
+                  <Pencil className="h-3 w-3" />
+                </Button>
               </div>
             </div>
           ))}
@@ -796,24 +1013,17 @@ export function ThemeManager() {
                   onClick={() => { setTheme(theme.id); syncThemeToCloud(theme.id); }}
                 />
                 <div className="absolute bottom-2 left-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Dialog open={editingTheme?.id === theme.id} onOpenChange={open => !open && setEditingTheme(null)}>
-                    <DialogTrigger asChild>
-                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={e => { e.stopPropagation(); setEditingTheme(theme); }}>
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-2xl" dir="rtl">
-                      <DialogHeader>
-                        <DialogTitle>עריכת ערכת נושא</DialogTitle>
-                      </DialogHeader>
-                      <ThemeEditor
-                        initial={theme}
-                        onSave={handleSave}
-                        onDuplicate={handleDuplicate}
-                        onCancel={() => setEditingTheme(null)}
-                      />
-                    </DialogContent>
-                  </Dialog>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    onClick={e => {
+                      e.stopPropagation();
+                      openFloatingEditor(theme, 'עריכת ערכת נושא');
+                    }}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
                   <Button
                     size="icon"
                     variant="ghost"
@@ -827,6 +1037,19 @@ export function ThemeManager() {
             ))}
           </div>
         </div>
+      )}
+
+      {floatingEditor?.open && (
+        <FloatingThemeEditorWindow
+          open={floatingEditor.open}
+          title={floatingEditor.title}
+          initial={floatingEditor.initial}
+          isBuiltIn={floatingEditor.isBuiltIn}
+          onSave={handleSave}
+          onDuplicate={handleDuplicate}
+          onClose={closeFloatingEditor}
+          onPreview={(theme) => applyThemePreview({ colors: theme.colors, style: theme.style })}
+        />
       )}
     </div>
   );
