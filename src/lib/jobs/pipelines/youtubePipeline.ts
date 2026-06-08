@@ -10,6 +10,7 @@ import { getServerUrl } from "@/lib/serverConfig";
 import { createJob, patchJob, updateStage, nextResumableStage, fetchJob } from "../jobOrchestrator";
 import { uploadArtifact, downloadArtifact } from "../artifactStorage";
 import type { JobRecord } from "../types";
+import { db } from "@/lib/localDb";
 
 const YT_REGEX = /^https?:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/|live\/)|youtu\.be\/)[\w-]+/;
 export const isValidYoutubeUrl = (u: string) => YT_REGEX.test(u.trim());
@@ -55,6 +56,41 @@ async function probeCobalt(url: string) {
   });
   if (error) throw new Error(error.message);
   return data;
+}
+
+async function getPreferredYoutubeEngine(userId: string): Promise<string> {
+  try {
+    const { data } = await supabase
+      .from("user_preferences")
+      .select("engine")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const engine = (data as { engine?: string } | null)?.engine;
+    if (engine && engine !== "local" && engine !== "local-server") return engine;
+  } catch {
+    // fall through
+  }
+
+  try {
+    const local = await db.preferences.where("id").equals("current").first();
+    const engine = (local as { engine?: string } | undefined)?.engine;
+    if (engine && engine !== "local" && engine !== "local-server") return engine;
+  } catch {
+    // fall through
+  }
+
+  try {
+    const engine = localStorage.getItem("transcript_engine") || localStorage.getItem("user_preferences");
+    if (engine && ["groq", "openai", "google", "assemblyai", "deepgram"].includes(engine)) return engine;
+    if (engine) {
+      const parsed = JSON.parse(engine);
+      if (parsed?.engine && parsed.engine !== "local" && parsed.engine !== "local-server") return parsed.engine;
+    }
+  } catch {
+    // noop
+  }
+
+  return "groq";
 }
 
 export async function startYoutubeJob(params: StartYoutubeParams): Promise<JobRecord> {
@@ -335,52 +371,36 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
 
     await updateStage(jobId, "transcribe", { status: "running", percent: 5 });
 
-    // Source audio: prefer artifact mirrored in upload_audio; fall back to cobalt URL
-    const uploadStage = job.stages.find((s) => s.key === "upload_audio");
-    const cobaltUrl = job.stages.find((s) => s.key === "download")?.meta?.cobalt_url as string | undefined;
-    let audioBlob: Blob | null = null;
-    try {
-      if (uploadStage?.artifact_path) {
-        audioBlob = await downloadArtifact(uploadStage.artifact_path);
-      } else if (cobaltUrl) {
-        const r = await fetch(cobaltUrl);
-        audioBlob = await r.blob();
-      }
-    } catch (e) {
+    const preferredEngine = await getPreferredYoutubeEngine(job.user_id);
+
+    const { data: storedAudio, error: storeError } = await supabase.functions.invoke("youtube-cobalt", {
+      body: {
+        action: "store_audio",
+        url: job.url,
+        jobId,
+        audioFormat: resume.audioFormat ?? "best",
+      },
+    });
+
+    if (storeError || !storedAudio?.path) {
       await updateStage(jobId, "transcribe", {
         status: "failed",
-        error: `שגיאה בטעינת אודיו: ${e instanceof Error ? e.message : String(e)}`,
+        error: `שגיאה בהעברת אודיו לתמלול: ${storeError?.message ?? "audio store failed"}`,
       });
       return;
     }
-    if (!audioBlob) {
-      await updateStage(jobId, "transcribe", { status: "failed", error: "אין קובץ אודיו לתמלול" });
-      return;
-    }
 
-    // Upload to the `audio-files` bucket where `process-transcription` reads from
-    const ext = ((audioBlob.type.split("/")[1] || "m4a").split(";")[0] || "m4a").replace(/[^a-z0-9]/gi, "") || "m4a";
-    const audioPath = `${job.user_id}/${jobId}_yt.${ext}`;
-    const fileName = `${job.title || "youtube"}.${ext}`;
-    const { error: upErr } = await supabase.storage
-      .from("audio-files")
-      .upload(audioPath, audioBlob, { upsert: true, contentType: audioBlob.type || "audio/mp4" });
-    if (upErr) {
-      await updateStage(jobId, "transcribe", { status: "failed", error: `העלאה לתמלול נכשלה: ${upErr.message}` });
-      return;
-    }
     await updateStage(jobId, "transcribe", { percent: 12 });
 
-    // Create a transcription_jobs row (Groq default — fast Hebrew cloud engine)
-    const engine = "groq";
+    const engine = preferredEngine;
     const { data: tj, error: tjErr } = await supabase
       .from("transcription_jobs")
       .insert({
         user_id: job.user_id,
         status: "pending",
         engine,
-        file_name: fileName,
-        file_path: audioPath,
+        file_name: storedAudio.fileName ?? `${job.title || "youtube"}.webm`,
+        file_path: storedAudio.path,
         language: "he",
         progress: 20,
         total_chunks: 1,
