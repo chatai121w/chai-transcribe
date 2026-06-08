@@ -517,8 +517,10 @@ const Index = () => {
     deepgram: 'Deepgram',
   };
 
-  const getProviderApiKeyPool = (provider: CloudProvider): string[] => {
-    const single = getApiKey(providerSingleKeyStorage[provider])?.trim();
+  const getProviderApiKeyPool = async (provider: CloudProvider): Promise<string[]> => {
+    // Use async decrypt so keys are available even if CloudKeySync hasn't
+    // populated the in-memory cache yet (race on first transcription after refresh).
+    const single = (await getEncryptedKey(providerSingleKeyStorage[provider]))?.trim();
     const raw = localStorage.getItem(providerPoolStorage[provider]);
     let pooled: string[] = [];
 
