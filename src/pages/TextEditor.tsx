@@ -47,7 +47,7 @@ import { useOllama, isOllamaModel } from "@/hooks/useOllama";
 import { db } from "@/lib/localDb";
 import { useCorrectionLearning } from "@/hooks/useCorrectionLearning";
 import { LazyErrorBoundary } from "@/components/LazyErrorBoundary";
-import "@/styles/text-editor-mobile.css";
+import "@/styles/mobile-pages.css";
 
 const sourceLabels: Record<string, string> = {
   original: 'תמלול מקורי',
