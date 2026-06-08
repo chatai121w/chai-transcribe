@@ -26,7 +26,7 @@ const LIVE_MIN_BLOB_BYTES = 800;
 const SILENCE_THRESHOLD = 2;          // Skip chunks below this audio level (averaged over chunk window) — lowered so quiet mics still register speech
 const LIVE_CONTEXT_WORDS = 10;        // Last N words carried as context into next chunk (initial_prompt)
 const MAX_CONSECUTIVE_ERRORS = 5;
-const SEND_TIMEOUT_MS = 18000;        // 18s timeout — allows for larger accumulated chunks
+const SEND_TIMEOUT_MS = 90000;        // 90s timeout — allows for long chunks (up to 60s) at high quality
 
 interface LiveStats {
   chunksProcessed: number;
