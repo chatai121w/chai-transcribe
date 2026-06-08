@@ -6,6 +6,7 @@
 //   5) Public Cobalt instances (best-effort, often rate-limited)
 // Name kept as `youtube-cobalt` for backwards-compat with existing callers.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 import { Innertube } from 'npm:youtubei.js@13.4.0';
 
 const SELFHOST = Deno.env.get('COBALT_SELFHOST_URL')?.trim();
@@ -61,7 +62,8 @@ interface ReqBody {
   mode?: 'audio' | 'video';
   audioFormat?: 'best' | 'mp3' | 'opus' | 'wav' | 'm4a';
   videoQuality?: '144' | '240' | '360' | '480' | '720' | '1080' | 'max';
-  action?: 'fetch' | 'info';
+  action?: 'fetch' | 'info' | 'store_audio';
+  jobId?: string;
 }
 
 const YT_REGEX = /^https?:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/|live\/)|youtu\.be\/)[\w\-]+/;
@@ -104,6 +106,44 @@ interface PipedResponse {
 
 function looksLikeJson(contentType: string | null) {
   return (contentType ?? '').toLowerCase().includes('application/json');
+}
+
+function pickAudioExtension(filename: string | undefined, contentType: string | null) {
+  const fromName = filename?.split('.').pop()?.toLowerCase();
+  if (fromName && /^[a-z0-9]{2,5}$/.test(fromName)) return fromName;
+  const mime = (contentType ?? '').toLowerCase();
+  if (mime.includes('audio/webm')) return 'webm';
+  if (mime.includes('audio/mp4') || mime.includes('audio/m4a')) return 'm4a';
+  if (mime.includes('audio/mpeg')) return 'mp3';
+  if (mime.includes('audio/wav') || mime.includes('audio/x-wav')) return 'wav';
+  if (mime.includes('audio/ogg')) return 'ogg';
+  return 'webm';
+}
+
+async function requireUser(req: Request) {
+  const authHeader = req.headers.get('authorization') ?? req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    const err = new Error('unauthorized');
+    (err as Error & { status?: number }).status = 401;
+    throw err;
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceRoleKey) throw new Error('supabase_env_missing');
+
+  const admin = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const token = authHeader.slice('Bearer '.length);
+  const { data, error } = await admin.auth.getUser(token);
+  if (error || !data.user) {
+    const err = new Error('unauthorized');
+    (err as Error & { status?: number }).status = 401;
+    throw err;
+  }
+
+  return { user: data.user, admin };
 }
 
 async function tryPipedInstance(base: string, videoId: string, opts: ReqBody) {
@@ -382,6 +422,45 @@ Deno.serve(async (req) => {
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       );
+    }
+
+    if (body.action === 'store_audio') {
+      if (!body.jobId?.trim()) {
+        return new Response(JSON.stringify({ error: 'jobId is required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const { user, admin } = await requireUser(req);
+      const result = await fetchWithFallbacks(body.url, { ...body, mode: 'audio' });
+      const mediaRes = await fetch(result.url, {
+        headers: { 'Accept-Encoding': 'identity', 'User-Agent': 'lovable-yt/1.0' },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!mediaRes.ok) throw new Error(`audio_fetch_${mediaRes.status}`);
+      const audioBlob = await mediaRes.blob();
+      const ext = pickAudioExtension(result.filename, mediaRes.headers.get('content-type'));
+      const path = `${user.id}/${body.jobId.trim()}_yt.${ext}`;
+      const { error: uploadError } = await admin.storage
+        .from('audio-files')
+        .upload(path, audioBlob, {
+          upsert: true,
+          contentType: mediaRes.headers.get('content-type') || audioBlob.type || 'audio/webm',
+        });
+      if (uploadError) throw new Error(`audio_upload_${uploadError.message}`);
+
+      return new Response(JSON.stringify({
+        status: 'stored',
+        path,
+        fileName: `${result.title ?? 'youtube'}.${ext}`,
+        mimeType: mediaRes.headers.get('content-type') || audioBlob.type || 'audio/webm',
+        sourceUrl: result.url,
+        filename: result.filename,
+        attempts: result.attempts,
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     const result = await fetchWithFallbacks(body.url, body);
