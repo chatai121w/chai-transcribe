@@ -15,6 +15,8 @@ import { Breadcrumbs } from './Breadcrumbs';
 import { fileClipboard } from '@/lib/clipboard';
 import { GoogleDriveBrowser } from '@/components/GoogleDriveBrowser';
 import { DriveFolderPicker } from '@/components/DriveFolderPicker';
+import { DriveUploadStatus } from './DriveUploadStatus';
+import { driveUploadQueue } from '@/lib/driveUploadQueue';
 import { supabase } from '@/integrations/supabase/client';
 
 export const FileManager = () => {
