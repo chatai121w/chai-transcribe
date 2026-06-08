@@ -46,24 +46,7 @@ const Folders = () => {
           <>
             <GoogleDriveBrowser
               onImportAudio={(file) => {
-                // Stash file in sessionStorage handoff and navigate to home for transcription
-                const reader = new FileReader();
-                reader.onload = () => {
-                  try {
-                    sessionStorage.setItem(
-                      "drive_import_file",
-                      JSON.stringify({
-                        name: file.name,
-                        type: file.type,
-                        dataUrl: reader.result,
-                      })
-                    );
-                    navigate("/?source=drive");
-                  } catch (e) {
-                    console.error("drive import handoff failed", e);
-                  }
-                };
-                reader.readAsDataURL(file);
+                navigate("/", { state: { file } });
               }}
             />
             <FolderManager
