@@ -7,6 +7,9 @@ import { FolderColorPicker } from './FolderColorPicker';
 import type { FolderTreeNode, FolderNode } from '@/hooks/useFolderTree';
 import { cn } from '@/lib/utils';
 
+export type DriveFolderPayload = { id: string; name: string };
+export type DriveFilePayload = { id: string; name: string; mimeType: string };
+
 interface RowProps {
   node: FolderTreeNode;
   selectedId: string | null;
@@ -19,7 +22,10 @@ interface RowProps {
   onTogglePin: (id: string) => void;
   onUpdateStyle: (id: string, patch: { color?: string | null; emoji?: string | null }) => void;
   onLinkDrive: (node: FolderNode) => void;
+  onDropDriveFolder?: (targetLocalParentId: string | null, drive: DriveFolderPayload) => void;
+  onDropDriveFile?: (targetLocalParentId: string | null, drive: DriveFilePayload) => void;
 }
+
 
 const FolderRow = ({ node, selectedId, expanded, onToggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive }: RowProps) => {
   const hasChildren = node.children.length > 0;
