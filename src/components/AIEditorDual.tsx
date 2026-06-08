@@ -1908,7 +1908,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
               onClick={() => setShowSourceEditor(v => !v)}
               title={showSourceEditor ? 'מזער' : 'הצג'}
             >
-              {showSourceEditor ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              {showSourceEditor ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </Button>
           </div>
         </div>
