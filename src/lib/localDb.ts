@@ -132,6 +132,7 @@ class SmartTranscriberDB extends Dexie {
   syncMeta!: Table<SyncMeta, string>;
   audioBlobs!: Table<LocalAudioBlob, string>;
   versions!: Table<LocalVersion, string>;
+  drivePending!: Table<PendingDriveUpload, string>;
 
   constructor() {
     super('SmartTranscriberDB');
@@ -156,7 +157,25 @@ class SmartTranscriberDB extends Dexie {
     this.version(4).stores({
       versions: 'id, transcript_id, user_id, version_number, created_at, _dirty',
     });
+
+    // v5: pending Drive uploads (background-sync queue)
+    this.version(5).stores({
+      drivePending: 'id, created_at',
+    });
   }
+}
+
+// ─── Pending Drive Upload (background sync) ─────────────────────
+export interface PendingDriveUpload {
+  id: string;
+  name: string;
+  folderId: string | null;
+  folderName: string;
+  text: string;
+  resolution?: 'overwrite' | 'duplicate' | 'skip';
+  attempts: number;
+  last_error?: string;
+  created_at: number;
 }
 
 export const db = new SmartTranscriberDB();
