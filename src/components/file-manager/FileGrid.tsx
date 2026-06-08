@@ -61,7 +61,7 @@ const FolderCard = ({ f, isSel, onClick, isCut, onPin, onDelete }: any) => {
             <MoreHorizontal className="w-4 h-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent dir="rtl" align="end">
+        <DropdownMenuContent align="end">
           <DropdownMenuItem onClick={onPin}>{f.pinned ? 'בטל הצמדה' : 'הצמד'}</DropdownMenuItem>
           <DropdownMenuItem className="text-destructive" onClick={onDelete}>מחק תיקייה</DropdownMenuItem>
         </DropdownMenuContent>
@@ -101,7 +101,7 @@ const TranscriptCard = ({ t, isSel, isCut, onClick, onDelete, onFav }: any) => {
             <MoreHorizontal className="w-4 h-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent dir="rtl" align="end">
+        <DropdownMenuContent align="end">
           <DropdownMenuItem className="text-destructive" onClick={onDelete}>מחק תמלול</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -17,7 +17,7 @@ export const FolderColorPicker = ({ color, emoji, onChange, trigger }: Props) =>
     <PopoverTrigger asChild>
       {trigger || <Button size="icon" variant="ghost" className="h-7 w-7"><Palette className="w-3.5 h-3.5" /></Button>}
     </PopoverTrigger>
-    <PopoverContent dir="rtl" className="w-64 p-3" align="end">
+    <PopoverContent className="w-64 p-3" align="end">
       <div className="text-xs text-muted-foreground mb-2">צבע</div>
       <div className="flex flex-wrap gap-1.5 mb-3">
         <button

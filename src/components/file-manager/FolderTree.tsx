@@ -68,7 +68,7 @@ const FolderRow = ({ node, selectedId, expanded, onToggleExpand, onSelect, onCre
               <MoreHorizontal className="w-3.5 h-3.5" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent dir="rtl" align="end">
+          <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => onCreateChild(node.id)}>
               <Plus className="w-3.5 h-3.5 ml-2" /> תת-תיקייה חדשה
             </DropdownMenuItem>
