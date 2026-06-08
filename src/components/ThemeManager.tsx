@@ -918,6 +918,9 @@ function FloatingThemeEditorWindow({
       if (e.key === 'Escape') {
         const ok = !isDirty || window.confirm('יש שינויים שלא נשמרו. לסגור בלי לשמור?');
         if (ok) onClose();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('theme-editor-save'));
       }
     };
     window.addEventListener('keydown', onKey);
