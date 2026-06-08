@@ -102,12 +102,21 @@ interface PipedResponse {
   videoStreams?: PipedStream[];
 }
 
+function looksLikeJson(contentType: string | null) {
+  return (contentType ?? '').toLowerCase().includes('application/json');
+}
+
 async function tryPipedInstance(base: string, videoId: string, opts: ReqBody) {
   const res = await fetch(`${base}/streams/${videoId}`, {
-    headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
+    headers: {
+      Accept: 'application/json',
+      'Accept-Encoding': 'identity',
+      'User-Agent': 'lovable-yt/1.0',
+    },
     signal: AbortSignal.timeout(6000),
   });
   if (!res.ok) throw new Error(`piped ${res.status}`);
+  if (!looksLikeJson(res.headers.get('content-type'))) throw new Error('piped non-json');
   const data = (await res.json()) as PipedResponse;
   let chosen: PipedStream | undefined;
   if (opts.mode === 'video') {
@@ -153,10 +162,15 @@ interface InvResponse {
 
 async function tryInvidiousInstance(base: string, videoId: string, opts: ReqBody) {
   const res = await fetch(`${base}/api/v1/videos/${videoId}`, {
-    headers: { Accept: 'application/json', 'User-Agent': 'lovable-yt/1.0' },
+    headers: {
+      Accept: 'application/json',
+      'Accept-Encoding': 'identity',
+      'User-Agent': 'lovable-yt/1.0',
+    },
     signal: AbortSignal.timeout(6000),
   });
   if (!res.ok) throw new Error(`invidious ${res.status}`);
+  if (!looksLikeJson(res.headers.get('content-type'))) throw new Error('invidious non-json');
   const data = (await res.json()) as InvResponse;
   let chosen: { url: string; container?: string } | undefined;
   if (opts.mode === 'video') {
@@ -204,10 +218,18 @@ async function tryCobalt(url: string, opts: ReqBody) {
     try {
       const res = await fetch(`${base}/`, {
         method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'lovable-yt/1.0' },
+        headers: {
+          Accept: 'application/json',
+          'Accept-Encoding': 'identity',
+          'Content-Type': 'application/json',
+          'User-Agent': 'lovable-yt/1.0',
+        },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(base === SELFHOST ? 20_000 : 6_000),
       });
+      if (!looksLikeJson(res.headers.get('content-type'))) {
+        throw new Error(`cobalt non-json ${res.status}`);
+      }
       const data = await res.json();
       if (res.ok && (data.status === 'tunnel' || data.status === 'redirect' || data.status === 'stream')) {
         return { instance: `cobalt:${new URL(base).host}`, ...data };
@@ -262,21 +284,45 @@ async function tryInnertube(videoId: string, opts: ReqBody): Promise<{ url: stri
   return null;
 }
 
+async function fetchJsonWithIdentity(url: string, timeoutMs: number) {
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      'Accept-Encoding': 'identity',
+      'User-Agent': 'lovable-yt/1.0',
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`http ${res.status}`);
+  if (!looksLikeJson(res.headers.get('content-type'))) throw new Error('non-json');
+  return await res.json();
+}
+
+async function tryNoembed(url: string) {
+  try {
+    const data = await fetchJsonWithIdentity(`https://noembed.com/embed?url=${encodeURIComponent(url)}`, 4000) as {
+      title?: string;
+      thumbnail_url?: string;
+      author_name?: string;
+    };
+    return {
+      title: data.title ?? null,
+      thumbnail: data.thumbnail_url ?? null,
+      author: data.author_name ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ── Orchestrator: try backends in order ─────────────────────────────────────
 async function fetchWithFallbacks(url: string, opts: ReqBody) {
   const videoId = extractVideoId(url);
   const attempts: string[] = [];
 
-  // 1) Innertube (most reliable cloud path, no infra)
-  if (videoId) {
-    try {
-      const it = await tryInnertube(videoId, opts);
-      if (it) return { status: 'redirect', ...it, attempts: [...attempts, 'innertube:ok'] };
-      attempts.push('innertube:fail');
-    } catch (e) {
-      attempts.push(`innertube:${e instanceof Error ? e.message.slice(0, 60) : 'err'}`);
-    }
-  }
+  // 1) Innertube temporarily disabled — it currently crashes the edge runtime
+  // with Brotli decompression errors on this project's workload.
+  attempts.push('innertube:disabled');
 
   // 2) Self-hosted Cobalt if configured
   if (SELFHOST) {
@@ -325,7 +371,7 @@ Deno.serve(async (req) => {
     }
 
     if (body.action === 'info') {
-      const meta = await fetchOEmbed(body.url);
+      const meta = await fetchOEmbed(body.url) ?? await tryNoembed(body.url);
       return new Response(
         JSON.stringify({
           videoId: extractVideoId(body.url),
@@ -339,7 +385,7 @@ Deno.serve(async (req) => {
     }
 
     const result = await fetchWithFallbacks(body.url, body);
-    const meta = await fetchOEmbed(body.url);
+    const meta = await fetchOEmbed(body.url) ?? await tryNoembed(body.url);
 
     return new Response(
       JSON.stringify({
