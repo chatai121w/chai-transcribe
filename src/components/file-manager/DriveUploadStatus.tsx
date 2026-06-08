@@ -160,9 +160,21 @@ export const DriveUploadStatus = () => {
                   </div>
                 )}
 
-                {j.status === 'error' && j.error && (
-                  <div className="text-[10px] text-destructive pr-6 truncate" title={j.error}>
-                    {j.error}
+                {(j.status === 'error' || j.status === 'waiting-network') && (
+                  <div className="flex items-center justify-between gap-2 pr-6">
+                    {j.error && (
+                      <div className="text-[10px] text-destructive truncate flex-1" title={j.error}>
+                        {j.error}
+                      </div>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 text-[10px] shrink-0"
+                      onClick={() => void driveUploadQueue.retry(j.id)}
+                    >
+                      נסה שוב
+                    </Button>
                   </div>
                 )}
               </div>
