@@ -1,70 +1,70 @@
 /* ─── עריכת טקסט — אופטימיזציה למובייל ─────────────────────────────────
- * נטען רק כאשר תווית .text-editor-page נוכחת.
+ * נטען רק כאשר תווית .mobile-optimized-page נוכחת.
  * מטרה: גלילה אנכית בלבד, ווידג'טים גדולים ונוחים, טיפוגרפיה קריאה.
  * ─────────────────────────────────────────────────────────────────── */
 
-.text-editor-page {
+.mobile-optimized-page {
   overflow-x: hidden;
 }
-.text-editor-page * {
+.mobile-optimized-page * {
   min-width: 0;
   max-width: 100%;
 }
-.text-editor-page img,
-.text-editor-page video,
-.text-editor-page canvas,
-.text-editor-page iframe {
+.mobile-optimized-page img,
+.mobile-optimized-page video,
+.mobile-optimized-page canvas,
+.mobile-optimized-page iframe {
   max-width: 100%;
   height: auto;
 }
 
 /* ── מובייל: עד 768px ─────────────────────────────────────────────── */
 @media (max-width: 767px) {
-  .text-editor-page {
+  .mobile-optimized-page {
     padding: 12px !important;
   }
-  .text-editor-page > .max-w-full {
+  .mobile-optimized-page > .max-w-full {
     gap: 14px;
   }
 
   /* כותרת ראשית — אופקית עם wrap, כפתורי פעולה גדולים */
-  .text-editor-page h1 {
+  .mobile-optimized-page h1 {
     font-size: 1.35rem !important;
     line-height: 1.2;
   }
-  .text-editor-page .border-b {
+  .mobile-optimized-page .border-b {
     flex-wrap: wrap;
     gap: 8px;
     padding-bottom: 10px !important;
   }
 
   /* כל הכפתורים האייקוניים במצב מובייל — גדולים ונוחים ללחיצה */
-  .text-editor-page button.h-7.w-7,
-  .text-editor-page button[class*="h-7"][class*="w-7"] {
+  .mobile-optimized-page button.h-7.w-7,
+  .mobile-optimized-page button[class*="h-7"][class*="w-7"] {
     height: 40px !important;
     width: 40px !important;
     border-radius: 12px !important;
   }
-  .text-editor-page button.h-7.w-7 svg,
-  .text-editor-page button[class*="h-7"][class*="w-7"] svg {
+  .mobile-optimized-page button.h-7.w-7 svg,
+  .mobile-optimized-page button[class*="h-7"][class*="w-7"] svg {
     width: 18px !important;
     height: 18px !important;
   }
 
   /* קבוצות כפתורים (כמו בחירת עמודות) */
-  .text-editor-page .border.rounded-md.overflow-hidden {
+  .mobile-optimized-page .border.rounded-md.overflow-hidden {
     border-radius: 14px !important;
   }
 
   /* פס פעולות AI / שמירה — כפתורים גדולים בגריד */
-  .text-editor-page .rounded-xl.border.bg-muted\/20 {
+  .mobile-optimized-page .rounded-xl.border.bg-muted\/20 {
     padding: 12px !important;
     border-radius: 16px !important;
     display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 8px !important;
   }
-  .text-editor-page .rounded-xl.border.bg-muted\/20 > button {
+  .mobile-optimized-page .rounded-xl.border.bg-muted\/20 > button {
     height: 44px !important;
     font-size: 13px !important;
     border-radius: 12px !important;
@@ -72,23 +72,23 @@
     width: 100% !important;
     justify-content: center !important;
   }
-  .text-editor-page .rounded-xl.border.bg-muted\/20 > button svg {
+  .mobile-optimized-page .rounded-xl.border.bg-muted\/20 > button svg {
     width: 16px !important;
     height: 16px !important;
   }
   /* מפריד אנכי בתוך פס הפעולות — מוסתר במובייל */
-  .text-editor-page .rounded-xl.border.bg-muted\/20 > .w-px {
+  .mobile-optimized-page .rounded-xl.border.bg-muted\/20 > .w-px {
     display: none !important;
   }
 
   /* טאבים — כפתורים גבוהים, נוחים לאצבע, אריזה טבעית מימין לשמאל */
-  .text-editor-page [role="tablist"] {
+  .mobile-optimized-page [role="tablist"] {
     padding: 6px !important;
     border-radius: 14px !important;
     gap: 6px !important;
     justify-content: flex-start !important; /* ב-RTL = מימין */
   }
-  .text-editor-page [role="tab"] {
+  .mobile-optimized-page [role="tab"] {
     min-height: 44px !important;
     font-size: 13.5px !important;
     padding: 8px 10px !important;
@@ -99,61 +99,61 @@
   }
 
   /* כרטיסי תוכן — שוליים מעוגלים יותר וריווח פנימי נוח */
-  .text-editor-page .rounded-2xl,
-  .text-editor-page .rounded-xl {
+  .mobile-optimized-page .rounded-2xl,
+  .mobile-optimized-page .rounded-xl {
     border-radius: 16px !important;
   }
 
   /* טקסטריאות ועורכי טקסט — גופן קריא וגובה מינימלי גדול */
-  .text-editor-page textarea,
-  .text-editor-page [contenteditable="true"] {
+  .mobile-optimized-page textarea,
+  .mobile-optimized-page [contenteditable="true"] {
     font-size: 16px !important; /* מונע זום אוטומטי ב-iOS */
     line-height: 1.7 !important;
     min-height: 240px !important;
   }
 
   /* שדות קלט — גדולים יותר */
-  .text-editor-page input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+  .mobile-optimized-page input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
     height: 44px !important;
     font-size: 15px !important;
     border-radius: 12px !important;
   }
 
   /* גריד פנימי — עמודה אחת במובייל לכל הווידג'טים */
-  .text-editor-page .grid.grid-cols-2,
-  .text-editor-page .grid.grid-cols-3,
-  .text-editor-page .md\:grid-cols-2,
-  .text-editor-page .md\:grid-cols-3,
-  .text-editor-page .lg\:grid-cols-2,
-  .text-editor-page .lg\:grid-cols-3 {
+  .mobile-optimized-page .grid.grid-cols-2,
+  .mobile-optimized-page .grid.grid-cols-3,
+  .mobile-optimized-page .md\:grid-cols-2,
+  .mobile-optimized-page .md\:grid-cols-3,
+  .mobile-optimized-page .lg\:grid-cols-2,
+  .mobile-optimized-page .lg\:grid-cols-3 {
     grid-template-columns: 1fr !important;
     gap: 12px !important;
   }
 
   /* כפתורים רגילים בתוך הווידג'טים */
-  .text-editor-page button[class*="h-8"]:not([class*="w-8"]) {
+  .mobile-optimized-page button[class*="h-8"]:not([class*="w-8"]) {
     height: 42px !important;
     font-size: 13px !important;
     border-radius: 10px !important;
   }
 
   /* טבלאות — גלילה אופקית רק בתוך הטבלה, לא בעמוד */
-  .text-editor-page table {
+  .mobile-optimized-page table {
     display: block;
     overflow-x: auto;
     max-width: 100%;
   }
 
   /* בייג'ים גדולים יותר */
-  .text-editor-page .text-\[11px\],
-  .text-editor-page .text-xs {
+  .mobile-optimized-page .text-\[11px\],
+  .mobile-optimized-page .text-xs {
     font-size: 12px !important;
   }
 }
 
 /* ── טאבלט: 768–1023 ─────────────────────────────────────────────── */
 @media (min-width: 768px) and (max-width: 1023px) {
-  .text-editor-page [role="tab"] {
+  .mobile-optimized-page [role="tab"] {
     min-height: 42px !important;
     font-size: 14px !important;
   }
@@ -162,9 +162,9 @@
 /* ── עיטוף סרגלי כלים במובייל בלבד, ללא אכיפת direction (יורש מהאב) ── */
 @media (max-width: 767px) {
   /* סרגלי כלים של עורך טקסט (RichTextEditor) — אריזה עם wrap */
-  .text-editor-page .flex.items-center.gap-1,
-  .text-editor-page .flex.items-center.gap-2,
-  .text-editor-page .flex.items-center.gap-1\.5 {
+  .mobile-optimized-page .flex.items-center.gap-1,
+  .mobile-optimized-page .flex.items-center.gap-2,
+  .mobile-optimized-page .flex.items-center.gap-1\.5 {
     flex-wrap: wrap !important;
   }
 }
