@@ -1088,7 +1088,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
               <span className="text-xs text-muted-foreground whitespace-nowrap">גודל צ'אנק</span>
               <Slider
                 min={2}
-                max={15}
+                max={60}
                 step={1}
                 value={[chunkSec]}
                 onValueChange={([v]) => setChunkSec(v)}
@@ -1096,7 +1096,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
               />
               <span className="text-xs font-mono text-muted-foreground w-12">{chunkSec}s</span>
               <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                {chunkSec <= 3 ? '⚡ מהיר' : chunkSec >= 8 ? '🎯 מדויק' : 'מאוזן'}
+                {chunkSec <= 3 ? '⚡ מהיר' : chunkSec >= 20 ? '🏆 איכות מקסימלית' : chunkSec >= 8 ? '🎯 מדויק' : 'מאוזן'}
               </span>
             </div>
           )}
