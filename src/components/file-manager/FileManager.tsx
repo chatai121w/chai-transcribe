@@ -44,6 +44,13 @@ export const FileManager = () => {
   const [driveLinkOpen, setDriveLinkOpen] = useState<FolderNode | null>(null);
   const [driveBrowserOpen, setDriveBrowserOpen] = useState(false);
   const [driveSplitView, setDriveSplitView] = useState(true);
+  const [inlineDriveSplit, setInlineDriveSplit] = useState<boolean>(() => {
+    try { return localStorage.getItem('fm_inline_drive_split') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('fm_inline_drive_split', inlineDriveSplit ? '1' : '0'); } catch {}
+  }, [inlineDriveSplit]);
+
 
   useEffect(() => {
     if (!driveBrowserOpen) return;
