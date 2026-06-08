@@ -419,6 +419,12 @@ function ContrastBadge({ fg, bg }: { fg: string; bg: string }) {
   );
 }
 
+interface EditorSnapshot {
+  name: string;
+  colors: ThemeColors;
+  style: ThemeStyleOptions;
+}
+
 function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPreviewChange, onDirtyChange }: {
   initial?: AppTheme;
   onSave: (theme: AppTheme) => void;
@@ -433,12 +439,69 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
   const [style, setStyle] = useState<ThemeStyleOptions>(initial?.style || { ...DEFAULT_STYLE });
   const [showDarkPreview, setShowDarkPreview] = useState(false);
 
+  // What the user is currently hovering / changed — drives highlight ring in preview
+  const [highlightKey, setHighlightKey] = useState<keyof ThemeColors | null>(null);
+  const [flashKey, setFlashKey] = useState<keyof ThemeColors | null>(null);
+  const flashTimer = useRef<number | null>(null);
+  const showHighlight = highlightKey ?? flashKey;
+
+  // Undo / Redo history
+  const historyRef = useRef<EditorSnapshot[]>([]);
+  const redoRef = useRef<EditorSnapshot[]>([]);
+  const skipHistoryRef = useRef(false);
+  const [historyVersion, setHistoryVersion] = useState(0); // re-render trigger for can-undo state
+
+  // push current to history before changing
+  const pushHistory = useCallback(() => {
+    historyRef.current.push({ name, colors: { ...colors }, style: { ...style } });
+    if (historyRef.current.length > 50) historyRef.current.shift();
+    redoRef.current = [];
+    setHistoryVersion(v => v + 1);
+  }, [name, colors, style]);
+
+  const undo = useCallback(() => {
+    const prev = historyRef.current.pop();
+    if (!prev) return;
+    redoRef.current.push({ name, colors: { ...colors }, style: { ...style } });
+    skipHistoryRef.current = true;
+    setName(prev.name);
+    setColors(prev.colors);
+    setStyle(prev.style);
+    setHistoryVersion(v => v + 1);
+    toast.info('בוטל הצעד האחרון');
+  }, [name, colors, style]);
+
+  const redo = useCallback(() => {
+    const next = redoRef.current.pop();
+    if (!next) return;
+    historyRef.current.push({ name, colors: { ...colors }, style: { ...style } });
+    skipHistoryRef.current = true;
+    setName(next.name);
+    setColors(next.colors);
+    setStyle(next.style);
+    setHistoryVersion(v => v + 1);
+    toast.info('הצעד שוחזר');
+  }, [name, colors, style]);
+
+  // Flash the changed region in preview for 1.5s
+  const triggerFlash = (key: keyof ThemeColors) => {
+    setFlashKey(key);
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlashKey(null), 1500);
+  };
+
   const resetStyleField = <K extends keyof ThemeStyleOptions>(key: K) => {
+    pushHistory();
     setStyle(prev => ({ ...prev, [key]: DEFAULT_STYLE[key] }));
   };
-  const resetAllStyle = () => setStyle({ ...DEFAULT_STYLE });
+  const resetAllStyle = () => {
+    pushHistory();
+    setStyle({ ...DEFAULT_STYLE });
+  };
 
   const updateColor = (key: keyof ThemeColors, hex: string) => {
+    pushHistory();
+    triggerFlash(key);
     if (key === 'iconColor') {
       setColors(prev => ({ ...prev, [key]: hex ? `hsl(${hexToHsl(hex)})` : '' }));
     } else {
@@ -447,7 +510,15 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
   };
 
   const updateStyle = <K extends keyof ThemeStyleOptions>(key: K, value: ThemeStyleOptions[K]) => {
+    pushHistory();
     setStyle(prev => ({ ...prev, [key]: value }));
+  };
+
+  // Apply a quick palette preset: overrides only the keys in the preset
+  const applyPalette = (preset: typeof PALETTE_PRESETS[number]) => {
+    pushHistory();
+    setColors(prev => ({ ...prev, ...preset.colors } as ThemeColors));
+    toast.success(`הוחלה פלטה: ${preset.emoji} ${preset.name}`);
   };
 
   useEffect(() => {
@@ -472,6 +543,18 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
       JSON.stringify(style) !== JSON.stringify(initialStyle);
     onDirtyChange?.(dirty);
   }, [name, colors, style, initial, onDirtyChange]);
+
+  // Keyboard: Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if ((k === 'y') || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo]);
 
   const getHex = (key: keyof ThemeColors) => {
     const val = colors[key];
@@ -507,26 +590,78 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
     (onDuplicate || onSave)(newTheme);
   };
 
+  // Listen for Ctrl+S dispatched from the floating window header
+  useEffect(() => {
+    const onSaveEvent = () => { if (!isBuiltIn) handleOverwrite(); else handleDuplicate(); };
+    window.addEventListener('theme-editor-save', onSaveEvent);
+    return () => window.removeEventListener('theme-editor-save', onSaveEvent);
+  });
+
+  const canUndo = historyRef.current.length > 0;
+  const canRedo = redoRef.current.length > 0;
+
   return (
     <div className="space-y-5 max-h-[75vh] overflow-y-auto pr-1" dir="rtl">
       <div className="space-y-2">
-        <Label>שם ערכת הנושא</Label>
-        <Input value={name} onChange={e => setName(e.target.value)} placeholder="שם הערכה..." />
+        <div className="flex items-center justify-between">
+          <Label>שם ערכת הנושא</Label>
+          <div className="flex items-center gap-1">
+            <Button size="icon" variant="ghost" className="h-7 w-7" disabled={!canUndo} onClick={undo} title="בטל (Ctrl+Z)">
+              <RotateCcw className="h-3.5 w-3.5" />
+            </Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7" disabled={!canRedo} onClick={redo} title="בצע שוב (Ctrl+Y)">
+              <RotateCcw className="h-3.5 w-3.5 scale-x-[-1]" />
+            </Button>
+            <span className="text-[10px] text-muted-foreground tabular-nums px-1">
+              {historyRef.current.length}/{historyRef.current.length + redoRef.current.length} צעדים
+            </span>
+          </div>
+        </div>
+        <Input value={name} onChange={e => { if (!skipHistoryRef.current) pushHistory(); skipHistoryRef.current = false; setName(e.target.value); }} placeholder="שם הערכה..." />
+      </div>
+
+      {/* Quick palette presets */}
+      <div className="space-y-2 rounded-lg border border-border/40 p-3 bg-muted/10">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-muted-foreground">פלטות מוכנות — לחיצה מחילה ארבעת הצבעים הראשיים</Label>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {PALETTE_PRESETS.map(p => (
+            <button
+              key={p.name}
+              type="button"
+              onClick={() => applyPalette(p)}
+              className="group flex items-center gap-1.5 rounded-md border border-border/50 px-2 py-1 text-[11px] hover:bg-accent hover:text-accent-foreground transition-colors"
+              title={`החל פלטה: ${p.name}`}
+            >
+              <span>{p.emoji}</span>
+              <span>{p.name}</span>
+              <span className="flex gap-0.5">
+                {(['primary', 'accent', 'background', 'foreground'] as const).map(k => (
+                  <span key={k} className="h-2 w-2 rounded-full border border-border/40" style={{ backgroundColor: p.colors[k] ? `hsl(${p.colors[k]})` : 'transparent' }} />
+                ))}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Live preview — single or dual */}
-      <div className="space-y-2">
+      <div className="space-y-2 sticky top-0 z-10 bg-background pt-2 pb-1 -mt-2">
         <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">תצוגה מקדימה חיה</Label>
+          <Label className="text-xs text-muted-foreground">
+            תצוגה מקדימה חיה {showHighlight && <span className="text-yellow-600 font-semibold">· מסומן: {COLOR_DESCRIPTIONS[showHighlight] || showHighlight}</span>}
+          </Label>
           <div className="flex items-center gap-2">
             <Label className="text-xs text-muted-foreground" htmlFor="dual-preview">השוואת בהיר/כהה</Label>
             <Switch id="dual-preview" checked={showDarkPreview} onCheckedChange={setShowDarkPreview} />
           </div>
         </div>
         <div className={showDarkPreview ? 'grid grid-cols-2 gap-3' : ''}>
-          <ThemeLivePreview colors={colors} style={style} name={name || 'תצוגה מקדימה חיה'} variant="light" />
-          {showDarkPreview && <ThemeLivePreview colors={invertColorsForPreview(colors)} style={style} name={`${name || 'תצוגה מקדימה'} (כהה)`} variant="dark" />}
+          <ThemeLivePreview colors={colors} style={style} name={name || 'תצוגה מקדימה חיה'} variant="light" highlightKey={showHighlight} />
+          {showDarkPreview && <ThemeLivePreview colors={invertColorsForPreview(colors)} style={style} name={`${name || 'תצוגה מקדימה'} (כהה)`} variant="dark" highlightKey={showHighlight} />}
         </div>
+        <div className="text-[10px] text-muted-foreground">💡 רחף מעל פקד כדי לראות מה הוא משנה בתצוגה למעלה. שינוי יבליט את האזור המושפע למשך 1.5 שניות.</div>
       </div>
 
       <Tabs defaultValue="colors" className="w-full">
@@ -563,18 +698,33 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
           {COLOR_GROUPS.map(group => (
             <div key={group.label} className="space-y-2.5">
               <h4 className="text-sm font-semibold text-muted-foreground">{group.label}</h4>
-              <div className="grid grid-cols-2 gap-3">
-                {group.keys.map(({ key, label }) => (
-                  <div key={key} className="flex items-center gap-2.5 rounded-md border border-border/40 p-2 bg-muted/20">
-                    <input
-                      type="color"
-                      value={getHex(key) || '#daa520'}
-                      onChange={e => updateColor(key, e.target.value)}
-                      className="w-9 h-9 rounded border cursor-pointer shrink-0"
-                    />
-                    <span className="text-xs flex-1">{label}</span>
-                  </div>
-                ))}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {group.keys.map(({ key, label }) => {
+                  const desc = COLOR_DESCRIPTIONS[key];
+                  const isHi = showHighlight === key;
+                  return (
+                    <div
+                      key={key}
+                      onMouseEnter={() => setHighlightKey(key)}
+                      onMouseLeave={() => setHighlightKey(null)}
+                      onFocus={() => setHighlightKey(key)}
+                      onBlur={() => setHighlightKey(null)}
+                      className={`flex items-start gap-2.5 rounded-md border p-2 transition-colors cursor-help ${isHi ? 'border-yellow-500 bg-yellow-500/5' : 'border-border/40 bg-muted/20 hover:border-yellow-500/50'}`}
+                      title={desc || label}
+                    >
+                      <input
+                        type="color"
+                        value={getHex(key) || '#daa520'}
+                        onChange={e => updateColor(key, e.target.value)}
+                        className="w-9 h-9 rounded border cursor-pointer shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-medium">{label}</div>
+                        {desc && <div className="text-[10px] text-muted-foreground leading-tight mt-0.5">{desc}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -594,14 +744,22 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
             <div className="flex items-center justify-between">
               <Label className="text-sm">עיגול פינות</Label>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground tabular-nums">{style.radius ?? 8}px</span>
+                <Input
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={style.radius ?? 8}
+                  onChange={e => updateStyle('radius', Math.max(0, Math.min(20, Number(e.target.value) || 0)))}
+                  className="h-6 w-14 text-xs text-center px-1"
+                />
+                <span className="text-[10px] text-muted-foreground">px</span>
                 <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => resetStyleField('radius')} title="אפס">
                   <RotateCcw className="h-3 w-3" />
                 </Button>
               </div>
             </div>
             <Slider min={0} max={20} step={1} value={[style.radius ?? 8]} onValueChange={(v) => updateStyle('radius', v[0])} />
-            <div className="text-[10px] text-muted-foreground">0 = פינות חדות · 20 = עגול מאוד</div>
+            <div className="text-[10px] text-muted-foreground">{STYLE_DESCRIPTIONS.radius} · 0 = פינות חדות · 20 = עגול מאוד</div>
           </div>
 
           {/* Density */}
@@ -620,6 +778,7 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
                 <SelectItem value="spacious">מרווח — נוח לעין</SelectItem>
               </SelectContent>
             </Select>
+            <div className="text-[10px] text-muted-foreground">{STYLE_DESCRIPTIONS.density}</div>
           </div>
 
           {/* Font family */}
@@ -643,6 +802,7 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
                 <SelectItem value="system-ui, sans-serif">מערכת</SelectItem>
               </SelectContent>
             </Select>
+            <div className="text-[10px] text-muted-foreground">{STYLE_DESCRIPTIONS.fontFamily}</div>
           </div>
 
           {/* Font size + weight */}
@@ -651,25 +811,43 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
               <div className="flex items-center justify-between">
                 <Label className="text-sm">גודל גופן</Label>
                 <div className="flex items-center gap-1">
-                  <span className="text-xs text-muted-foreground tabular-nums">{style.fontSize ?? 14}px</span>
+                  <Input
+                    type="number"
+                    min={11}
+                    max={20}
+                    value={style.fontSize ?? 14}
+                    onChange={e => updateStyle('fontSize', Math.max(11, Math.min(20, Number(e.target.value) || 14)))}
+                    className="h-6 w-12 text-xs text-center px-1"
+                  />
+                  <span className="text-[10px] text-muted-foreground">px</span>
                   <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => resetStyleField('fontSize')} title="אפס">
                     <RotateCcw className="h-3 w-3" />
                   </Button>
                 </div>
               </div>
               <Slider min={11} max={20} step={1} value={[style.fontSize ?? 14]} onValueChange={(v) => updateStyle('fontSize', v[0])} />
+              <div className="text-[9px] text-muted-foreground">{STYLE_DESCRIPTIONS.fontSize}</div>
             </div>
             <div className="space-y-2 rounded-lg border border-border/40 p-3 bg-muted/20">
               <div className="flex items-center justify-between">
                 <Label className="text-sm">עובי גופן</Label>
                 <div className="flex items-center gap-1">
-                  <span className="text-xs text-muted-foreground tabular-nums">{style.fontWeight ?? 400}</span>
+                  <Input
+                    type="number"
+                    min={300}
+                    max={800}
+                    step={100}
+                    value={style.fontWeight ?? 400}
+                    onChange={e => updateStyle('fontWeight', Math.max(300, Math.min(800, Number(e.target.value) || 400)))}
+                    className="h-6 w-14 text-xs text-center px-1"
+                  />
                   <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => resetStyleField('fontWeight')} title="אפס">
                     <RotateCcw className="h-3 w-3" />
                   </Button>
                 </div>
               </div>
               <Slider min={300} max={800} step={100} value={[style.fontWeight ?? 400]} onValueChange={(v) => updateStyle('fontWeight', v[0])} />
+              <div className="text-[9px] text-muted-foreground">{STYLE_DESCRIPTIONS.fontWeight}</div>
             </div>
           </div>
 
@@ -690,16 +868,16 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
                 <SelectItem value="strong">חזק — תלת-ממד</SelectItem>
               </SelectContent>
             </Select>
+            <div className="text-[10px] text-muted-foreground">{STYLE_DESCRIPTIONS.shadow}</div>
           </div>
         </TabsContent>
       </Tabs>
 
       <div className="flex gap-2 sticky bottom-0 bg-background border-t border-border/40 -mx-1 px-1 pt-3">
-        {/* For custom themes: overwrite + duplicate. For built-in: duplicate only */}
         {!isBuiltIn && (
-          <Button onClick={handleOverwrite} className="flex-1 gap-2">
+          <Button onClick={handleOverwrite} className="flex-1 gap-2" title="Ctrl+S">
             <Save className="h-4 w-4" />
-            שמור
+            שמור <span className="text-[10px] opacity-70">(Ctrl+S)</span>
           </Button>
         )}
         <Button onClick={handleDuplicate} variant={isBuiltIn ? "default" : "outline"} className="flex-1 gap-2">
