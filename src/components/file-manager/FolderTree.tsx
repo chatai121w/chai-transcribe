@@ -47,7 +47,26 @@ const FolderRow = ({ node, selectedId, expanded, onToggleExpand, onSelect, onCre
         )}
         style={{ paddingInlineStart: `${node.depth * 12 + 8}px` }}
         onClick={() => onSelect(node.id)}
+        onDragOver={(e) => {
+          const t = e.dataTransfer.types;
+          if (t.includes('application/x-sht-drive-folder') || t.includes('application/x-sht-drive-file')) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+          }
+        }}
+        onDrop={(e) => {
+          const rawFolder = e.dataTransfer.getData('application/x-sht-drive-folder');
+          const rawFile = e.dataTransfer.getData('application/x-sht-drive-file');
+          if (!rawFolder && !rawFile) return;
+          e.preventDefault();
+          e.stopPropagation();
+          try {
+            if (rawFolder && onDropDriveFolder) onDropDriveFolder(node.id, JSON.parse(rawFolder));
+            else if (rawFile && onDropDriveFile) onDropDriveFile(node.id, JSON.parse(rawFile));
+          } catch { /* ignore */ }
+        }}
       >
+
         <button
           onClick={(e) => { e.stopPropagation(); if (hasChildren) onToggleExpand(node.id); }}
           className="w-4 h-4 flex items-center justify-center text-muted-foreground shrink-0"
