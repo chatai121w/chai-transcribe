@@ -85,6 +85,53 @@ const COLOR_GROUPS: { label: string; keys: { key: keyof ThemeColors; label: stri
   },
 ];
 
+/** Plain-language description of what each color controls in the UI. */
+const COLOR_DESCRIPTIONS: Partial<Record<keyof ThemeColors, string>> = {
+  background: 'הרקע הראשי של כל האפליקציה',
+  foreground: 'צבע הטקסט הראשי על הרקע',
+  primary: 'כפתורים ראשיים, קישורים פעילים, סרגלי התקדמות',
+  primaryForeground: 'טקסט על כפתור ראשי',
+  accent: 'הדגשות, hover, רקע של פריט פעיל',
+  accentForeground: 'טקסט על אזור הדגשה',
+  card: 'רקע של כרטיסים, דיאלוגים וחלונות',
+  cardForeground: 'טקסט בתוך כרטיסים',
+  border: 'קווי מסגרת סביב כרטיסים ושדות',
+  input: 'רקע ומסגרת של שדות קלט',
+  ring: 'טבעת המסגרת סביב שדה בפוקוס',
+  secondary: 'כפתורים משניים, רקע tabs',
+  secondaryForeground: 'טקסט בכפתורים משניים',
+  muted: 'רקע אזורים שקטים, badges, סטטוס',
+  mutedForeground: 'טקסט משני, placeholder, תיאורים',
+  sidebarBackground: 'רקע התפריט הצדדי',
+  sidebarForeground: 'טקסט בתפריט הצדדי',
+  sidebarPrimary: 'פריט פעיל בתפריט הצדדי',
+  sidebarBorder: 'קו מפריד בתפריט הצדדי',
+  iconColor: 'צבע אייקונים גלובלי באפליקציה',
+  destructive: 'כפתורי מחיקה והודעות שגיאה',
+};
+
+/** Plain-language description for each style option. */
+const STYLE_DESCRIPTIONS = {
+  radius: 'משפיע על: כפתורים, כרטיסים, שדות קלט, badges',
+  density: 'משפיע על: רווחים פנימיים בכל הרכיבים',
+  fontFamily: 'משפיע על: כל הטקסט באפליקציה',
+  fontSize: 'משפיע על: גודל הטקסט הבסיסי בכל המסכים',
+  fontWeight: 'משפיע על: עובי כל הטקסטים',
+  shadow: 'משפיע על: כרטיסים, dropdowns, dialogs',
+} as const;
+
+/** Quick palette presets — apply only the 4 primary colors, the rest stays. */
+const PALETTE_PRESETS: { name: string; emoji: string; colors: Partial<ThemeColors> }[] = [
+  { name: 'זהב מלכותי', emoji: '👑', colors: { background: '0 0% 100%', foreground: '220 60% 18%', primary: '43 74% 49%', primaryForeground: '0 0% 100%', accent: '43 74% 49%', accentForeground: '0 0% 100%' } },
+  { name: 'אוקיינוס כחול', emoji: '🌊', colors: { background: '210 30% 98%', foreground: '215 50% 15%', primary: '210 80% 45%', primaryForeground: '0 0% 100%', accent: '195 75% 50%', accentForeground: '0 0% 100%' } },
+  { name: 'יער עמוק', emoji: '🌲', colors: { background: '120 10% 98%', foreground: '140 30% 15%', primary: '142 55% 35%', primaryForeground: '0 0% 100%', accent: '160 50% 40%', accentForeground: '0 0% 100%' } },
+  { name: 'אדמה חמה', emoji: '🔥', colors: { background: '30 30% 97%', foreground: '20 35% 15%', primary: '20 80% 45%', primaryForeground: '0 0% 100%', accent: '35 75% 55%', accentForeground: '20 60% 15%' } },
+  { name: 'לילה כהה', emoji: '🌙', colors: { background: '220 20% 10%', foreground: '210 20% 95%', primary: '210 80% 60%', primaryForeground: '220 30% 10%', accent: '260 70% 65%', accentForeground: '0 0% 100%' } },
+  { name: 'פסטל רך', emoji: '🌸', colors: { background: '340 30% 98%', foreground: '320 30% 20%', primary: '320 50% 60%', primaryForeground: '0 0% 100%', accent: '280 50% 65%', accentForeground: '0 0% 100%' } },
+  { name: 'מינימליסט שחור-לבן', emoji: '⚫', colors: { background: '0 0% 100%', foreground: '0 0% 5%', primary: '0 0% 10%', primaryForeground: '0 0% 100%', accent: '0 0% 20%', accentForeground: '0 0% 100%' } },
+  { name: 'תורני קלאסי', emoji: '📜', colors: { background: '40 25% 96%', foreground: '20 50% 12%', primary: '15 65% 35%', primaryForeground: '40 30% 98%', accent: '40 70% 45%', accentForeground: '20 60% 12%' } },
+];
+
 const FLOATING_EDITOR_LAYOUT_KEY = 'theme_editor_floating_layout_v1';
 
 type FloatingEditorLayout = {
