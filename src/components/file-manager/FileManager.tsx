@@ -42,8 +42,6 @@ export const FileManager = () => {
   const [renameOpen, setRenameOpen] = useState<FolderNode | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [driveLinkOpen, setDriveLinkOpen] = useState<FolderNode | null>(null);
-  const [driveBrowserOpen, setDriveBrowserOpen] = useState(false);
-  const [driveSplitView, setDriveSplitView] = useState(true);
   const [inlineDriveSplit, setInlineDriveSplit] = useState<boolean>(() => {
     try { return localStorage.getItem('fm_inline_drive_split') === '1'; } catch { return false; }
   });
@@ -51,19 +49,6 @@ export const FileManager = () => {
     try { localStorage.setItem('fm_inline_drive_split', inlineDriveSplit ? '1' : '0'); } catch {}
   }, [inlineDriveSplit]);
 
-
-  useEffect(() => {
-    if (!driveBrowserOpen) return;
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setDriveBrowserOpen(false);
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [driveBrowserOpen]);
 
   const pinned = useMemo(() => folders.filter(f => f.pinned), [folders]);
   const path = useMemo(() => getPath(currentFolderId), [currentFolderId, getPath]);
@@ -273,13 +258,73 @@ export const FileManager = () => {
       const bin = Uint8Array.from(atob(data.base64), c => c.charCodeAt(0));
       const importedFile = new File([bin], file.name, { type: data.contentType || file.mimeType });
 
-      setDriveBrowserOpen(false);
       navigate('/', { state: { file: importedFile } });
+
       toast({ title: '✅ ייבוא מ-Drive', description: file.name });
     } catch (e: any) {
       toast({ title: 'שגיאת ייבוא מ-Drive', description: e.message, variant: 'destructive' });
     }
   };
+
+  // Drop a Drive file onto a specific local folder in the tree → import for transcription, pre-selecting folder
+  const handleDropDriveFileToTreeFolder = async (parentLocalId: string | null, file: { id: string; name: string; mimeType: string }) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('google-drive', {
+        body: { action: 'download', fileId: file.id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const bin = Uint8Array.from(atob(data.base64), c => c.charCodeAt(0));
+      const importedFile = new File([bin], file.name, { type: data.contentType || file.mimeType });
+      navigate('/', { state: { file: importedFile, targetFolderId: parentLocalId } });
+      toast({ title: '✅ ייבוא מ-Drive', description: file.name });
+    } catch (e: any) {
+      toast({ title: 'שגיאת ייבוא מ-Drive', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  // Recursively mirror a Drive folder tree under a local parent folder.
+  // Creates local folders with the same names, links each to its Drive folder,
+  // and counts audio files found (which the user can later drag individually to transcribe).
+  const handleDropDriveFolderToTree = async (parentLocalId: string | null, drive: { id: string; name: string }) => {
+    let createdFolders = 0;
+    let audioFilesFound = 0;
+    const tInfo = toast({ title: '⏳ מייבא מבנה תיקיות מ-Drive…', description: drive.name });
+    const mirror = async (driveFolderId: string, driveFolderName: string, localParentId: string | null) => {
+      const created = await createFolder({
+        name: driveFolderName,
+        parent_id: localParentId,
+        drive_folder_id: driveFolderId,
+        drive_folder_name: driveFolderName,
+        drive_synced_at: new Date().toISOString(),
+      } as any);
+      createdFolders++;
+      const { data, error } = await supabase.functions.invoke('google-drive', {
+        body: { action: 'list', folderId: driveFolderId, audioOnly: false, pageSize: 200 },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const children = (data?.files || []) as Array<{ id: string; name: string; mimeType: string }>;
+      for (const c of children) {
+        if (c.mimeType === 'application/vnd.google-apps.folder') {
+          await mirror(c.id, c.name, created.id);
+        } else if (/^audio\//.test(c.mimeType) || /\.(mp3|wav|m4a|ogg|flac|webm|aac)$/i.test(c.name)) {
+          audioFilesFound++;
+        }
+      }
+    };
+    try {
+      await mirror(drive.id, drive.name, parentLocalId);
+      try { (tInfo as any)?.dismiss?.(); } catch {}
+      toast({
+        title: '✅ מבנה תיקיות יובא',
+        description: `${createdFolders} תיקיות נוצרו · ${audioFilesFound} קובצי אודיו זוהו (גרור פרטנית לתמלול)`,
+      });
+    } catch (e: any) {
+      toast({ title: 'שגיאת ייבוא מבנה', description: e.message, variant: 'destructive' });
+    }
+  };
+
 
   return (
     <DndContext sensors={sensors} onDragEnd={onDragEnd}>
@@ -307,26 +352,29 @@ export const FileManager = () => {
           <Button size="sm" variant="ghost" onClick={doDeleteSelected} disabled={selected.size === 0} className="text-destructive" title="Delete">
             <Trash2 className="w-4 h-4 ml-1" /> מחק
           </Button>
-          <div className="h-6 w-px bg-border mx-1" />
+          <div className="h-6 w-px bg-border mx-1 hidden sm:block" />
           <Button
             size="sm"
             variant={inlineDriveSplit ? 'default' : 'outline'}
             onClick={() => setInlineDriveSplit(v => !v)}
             title="תצוגה מפוצלת — מקומי לצד Google Drive עם גרירה בין העמודות"
+            className="gap-1"
           >
-            <Columns2 className="w-4 h-4 ml-1" />
-            {inlineDriveSplit ? 'סגור תצוגה מפוצלת' : 'תצוגה מפוצלת + Drive'}
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setDriveBrowserOpen(true)}>
-            <Cloud className="w-4 h-4 ml-1" /> דפדף ב-Drive
+            <Columns2 className="w-4 h-4" />
+            <Cloud className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{inlineDriveSplit ? 'סגור מפוצל' : 'מפוצל + Drive'}</span>
           </Button>
         </div>
 
-        {/* Body: tree + grid (+ optional Drive column) */}
+        {/* Body: tree + grid (+ optional Drive column). Stacks on mobile, splits on lg+ */}
         <div
-          className={`grid ${inlineDriveSplit ? 'grid-cols-[240px_1fr_minmax(360px,1fr)]' : 'grid-cols-[260px_1fr]'} min-h-[600px]`}
+          className={
+            inlineDriveSplit
+              ? 'grid grid-cols-1 lg:grid-cols-[240px_1fr_minmax(360px,1fr)] min-h-[600px]'
+              : 'grid grid-cols-1 md:grid-cols-[260px_1fr] min-h-[600px]'
+          }
         >
-          <div className="border-l bg-muted/10">
+          <div className="border-b md:border-b-0 md:border-l bg-muted/10 max-h-[260px] md:max-h-none overflow-y-auto">
             <FolderTree
               tree={tree}
               pinned={pinned.map(f => ({ ...f, depth: 0, children: [] }))}
@@ -338,11 +386,13 @@ export const FileManager = () => {
               onTogglePin={togglePin}
               onUpdateStyle={(id, patch) => updateFolder(id, patch)}
               onLinkDrive={(f) => setDriveLinkOpen(f)}
+              onDropDriveFolder={(parentId, drive) => void handleDropDriveFolderToTree(parentId, drive)}
+              onDropDriveFile={(parentId, drive) => void handleDropDriveFileToTreeFolder(parentId, drive)}
             />
           </div>
 
           <div
-            className="flex flex-col border-l"
+            className="flex flex-col border-b lg:border-b-0 lg:border-l min-w-0"
             onDragOver={(e) => {
               if (!inlineDriveSplit) return;
               if (e.dataTransfer.types.includes('application/x-sht-drive-file')) {
@@ -361,21 +411,21 @@ export const FileManager = () => {
               } catch { /* ignore */ }
             }}
           >
-            <div className="px-4 py-2 border-b flex items-center justify-between">
+            <div className="px-3 sm:px-4 py-2 border-b flex items-center justify-between gap-2" dir="rtl">
               <Breadcrumbs path={path} onNavigate={setCurrentFolderId} />
               {selected.size > 0 && (
-                <div className="text-xs text-muted-foreground flex items-center gap-2">
+                <div className="text-xs text-muted-foreground flex items-center gap-2 shrink-0">
                   {selected.size} נבחרו
                   <button onClick={() => setSelected(new Set())}><X className="w-3 h-3" /></button>
                 </div>
               )}
             </div>
             {inlineDriveSplit && (
-              <div className="px-4 py-1.5 text-[11px] text-muted-foreground bg-yellow-50/40 dark:bg-yellow-950/10 border-b">
-                גרור תמלול ימינה ל-Drive להעלאה (העתקה) · גרור קובץ Drive שמאלה לכאן לייבוא לתמלול
+              <div className="px-3 sm:px-4 py-1.5 text-[11px] text-muted-foreground bg-yellow-50/40 dark:bg-yellow-950/10 border-b text-right" dir="rtl">
+                גרור תמלול ל-Drive להעלאה · גרור תיקייה/קובץ מ-Drive לעץ התיקיות כדי לייבא (תיקייה = שכפול מבנה)
               </div>
             )}
-            <div className="flex-1 p-4 overflow-y-auto">
+            <div className="flex-1 p-3 sm:p-4 overflow-y-auto">
               <FileGrid
                 items={itemsInCurrent}
                 selected={selected}
@@ -392,7 +442,7 @@ export const FileManager = () => {
           </div>
 
           {inlineDriveSplit && (
-            <div className="bg-muted/5 p-3 overflow-y-auto">
+            <div className="bg-muted/5 p-2 sm:p-3 overflow-y-auto min-w-0" dir="rtl">
               <GoogleDriveBrowser
                 onDropLocalTranscriptToFolder={(folder, transcriptId) =>
                   void handleUploadTranscriptToDriveFolder(folder, transcriptId)
@@ -405,6 +455,7 @@ export const FileManager = () => {
           )}
         </div>
       </Card>
+
 
 
       {/* New folder */}
@@ -452,96 +503,8 @@ export const FileManager = () => {
         />
       )}
 
-      {/* Drive browser */}
-      <Dialog open={driveBrowserOpen} onOpenChange={setDriveBrowserOpen} modal={false}>
-        <DialogContent
-          dir="rtl"
-          hideOverlay
-          className={driveSplitView ? 'max-w-6xl' : 'max-w-3xl'}
-          onKeyDownCapture={(event) => {
-            if (event.key === 'Escape') {
-              setDriveBrowserOpen(false);
-            }
-          }}
-          onEscapeKeyDown={() => setDriveBrowserOpen(false)}
-        >
-          <DialogHeader>
-            <DialogTitle>Google Drive</DialogTitle>
-            <DialogDescription>
-              תצוגה מפוצלת: מקומי מול Drive. גרור תמלול מקומי לתיקיית Drive כדי להעלות, או גרור קובץ מ-Drive לאזור המקומי כדי לייבא.
-            </DialogDescription>
-          </DialogHeader>
+      {/* (Drive browser dialog removed — the inline split view is the single source for Drive operations) */}
 
-          <div className="flex items-center justify-between">
-            <div className="text-xs text-muted-foreground">מצב תצוגה</div>
-            <Button size="sm" variant="outline" onClick={() => setDriveSplitView(v => !v)}>
-              {driveSplitView ? 'מצב רגיל' : 'תצוגה מפוצלת'}
-            </Button>
-          </div>
-
-          {driveSplitView ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card
-                className="border-yellow-500/30"
-                onDragOver={(e) => {
-                  if (e.dataTransfer.types.includes('application/x-sht-drive-file')) {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'copy';
-                  }
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const raw = e.dataTransfer.getData('application/x-sht-drive-file');
-                  if (!raw) return;
-                  try {
-                    const file = JSON.parse(raw) as DriveDropFile;
-                    void handleDropDriveFileToLocal(file);
-                  } catch {
-                    // ignore malformed drag payload
-                  }
-                }}
-              >
-                <div className="p-4 border-b">
-                  <div className="font-semibold">קבצים מקומיים (תיקייה נוכחית)</div>
-                  <div className="text-xs text-muted-foreground mt-1">גרור מכאן לתיקייה ב-Drive או גרור קובץ מ-Drive לאזור זה.</div>
-                </div>
-                <div className="p-2 max-h-[430px] overflow-auto space-y-1">
-                  {localTranscriptsInCurrent.length === 0 ? (
-                    <div className="text-sm text-muted-foreground p-3">אין תמלולים בתיקייה הנוכחית.</div>
-                  ) : localTranscriptsInCurrent.map((t: any) => (
-                    <div
-                      key={t.id}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('application/x-sht-local-transcript-id', t.id);
-                        e.dataTransfer.effectAllowed = 'copy';
-                      }}
-                      className="p-2 rounded border bg-background hover:bg-muted cursor-grab active:cursor-grabbing"
-                      title={t.title || 'ללא כותרת'}
-                    >
-                      <div className="text-sm font-medium truncate">{t.title || 'ללא כותרת'}</div>
-                      <div className="text-xs text-muted-foreground truncate">{(t.text || '').slice(0, 100) || 'ללא תוכן'}</div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-
-              <GoogleDriveBrowser
-                onDropLocalTranscriptToFolder={(folder, transcriptId) => void handleUploadTranscriptToDriveFolder(folder, transcriptId)}
-                onImportAudio={(file) => {
-                  setDriveBrowserOpen(false);
-                  navigate('/', { state: { file } });
-                }}
-              />
-            </div>
-          ) : (
-            <GoogleDriveBrowser onImportAudio={(file) => {
-              setDriveBrowserOpen(false);
-              navigate('/', { state: { file } });
-            }} />
-          )}
-        </DialogContent>
-      </Dialog>
 
       {/* Floating upload status panel */}
       <DriveUploadStatus />

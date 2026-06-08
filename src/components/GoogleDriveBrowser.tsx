@@ -172,14 +172,19 @@ export const GoogleDriveBrowser = ({ onImportAudio, onDropLocalTranscriptToFolde
                   <div
                     key={f.id}
                     className={`flex items-center gap-2 p-2 rounded hover:bg-muted group ${dragTargetFolderId === f.id ? 'ring-1 ring-yellow-500 bg-yellow-50/40' : ''}`}
-                    draggable={!folder}
+                    draggable
                     onDragStart={(e) => {
-                      if (folder) return;
-                      e.dataTransfer.setData('application/x-sht-drive-file', JSON.stringify({
-                        id: f.id,
-                        name: f.name,
-                        mimeType: f.mimeType,
-                      }));
+                      if (folder) {
+                        e.dataTransfer.setData(
+                          'application/x-sht-drive-folder',
+                          JSON.stringify({ id: f.id, name: f.name }),
+                        );
+                      } else {
+                        e.dataTransfer.setData(
+                          'application/x-sht-drive-file',
+                          JSON.stringify({ id: f.id, name: f.name, mimeType: f.mimeType }),
+                        );
+                      }
                       e.dataTransfer.effectAllowed = 'copy';
                     }}
                     onDragOver={(e) => {
@@ -190,6 +195,7 @@ export const GoogleDriveBrowser = ({ onImportAudio, onDropLocalTranscriptToFolde
                         setDragTargetFolderId(f.id);
                       }
                     }}
+
                     onDragLeave={() => {
                       if (dragTargetFolderId === f.id) setDragTargetFolderId(null);
                     }}

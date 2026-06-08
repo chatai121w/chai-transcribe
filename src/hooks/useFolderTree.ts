@@ -77,7 +77,7 @@ export const useFolderTree = () => {
 
   const createFolder = useCallback(async (input: Partial<FolderNode> & { name: string }) => {
     if (!user) throw new Error('not authed');
-    const payload = {
+    const payload: any = {
       user_id: user.id,
       name: input.name,
       parent_id: input.parent_id ?? null,
@@ -86,7 +86,11 @@ export const useFolderTree = () => {
       pinned: input.pinned ?? false,
       position: input.position ?? 0,
     };
+    if (input.drive_folder_id !== undefined) payload.drive_folder_id = input.drive_folder_id;
+    if (input.drive_folder_name !== undefined) payload.drive_folder_name = input.drive_folder_name;
+    if (input.drive_synced_at !== undefined) payload.drive_synced_at = input.drive_synced_at;
     const { data, error } = await supabase.from('folders' as any).insert(payload).select().single();
+
     if (error) throw error;
     await refetch();
     return data as unknown as FolderNode;
