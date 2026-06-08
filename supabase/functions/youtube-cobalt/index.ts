@@ -102,6 +102,10 @@ interface PipedResponse {
   videoStreams?: PipedStream[];
 }
 
+function looksLikeJson(contentType: string | null) {
+  return (contentType ?? '').toLowerCase().includes('application/json');
+}
+
 async function tryPipedInstance(base: string, videoId: string, opts: ReqBody) {
   const res = await fetch(`${base}/streams/${videoId}`, {
     headers: {
@@ -112,6 +116,7 @@ async function tryPipedInstance(base: string, videoId: string, opts: ReqBody) {
     signal: AbortSignal.timeout(6000),
   });
   if (!res.ok) throw new Error(`piped ${res.status}`);
+  if (!looksLikeJson(res.headers.get('content-type'))) throw new Error('piped non-json');
   const data = (await res.json()) as PipedResponse;
   let chosen: PipedStream | undefined;
   if (opts.mode === 'video') {
@@ -165,6 +170,7 @@ async function tryInvidiousInstance(base: string, videoId: string, opts: ReqBody
     signal: AbortSignal.timeout(6000),
   });
   if (!res.ok) throw new Error(`invidious ${res.status}`);
+  if (!looksLikeJson(res.headers.get('content-type'))) throw new Error('invidious non-json');
   const data = (await res.json()) as InvResponse;
   let chosen: { url: string; container?: string } | undefined;
   if (opts.mode === 'video') {
@@ -221,6 +227,9 @@ async function tryCobalt(url: string, opts: ReqBody) {
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(base === SELFHOST ? 20_000 : 6_000),
       });
+      if (!looksLikeJson(res.headers.get('content-type'))) {
+        throw new Error(`cobalt non-json ${res.status}`);
+      }
       const data = await res.json();
       if (res.ok && (data.status === 'tunnel' || data.status === 'redirect' || data.status === 'stream')) {
         return { instance: `cobalt:${new URL(base).host}`, ...data };
