@@ -1339,7 +1339,13 @@ export function ThemeManager() {
                     size="icon"
                     variant="ghost"
                     className="h-6 w-6 text-destructive"
-                    onClick={e => { e.stopPropagation(); deleteCustomTheme(theme.id); setTimeout(() => syncThemeToCloud(activeThemeId), 0); toast.success('ערכת הנושא נמחקה'); }}
+                    onClick={e => {
+                      e.stopPropagation();
+                      if (!window.confirm(`למחוק לצמיתות את ערכת הנושא "${theme.nameHe}"? פעולה זו אינה הפיכה.`)) return;
+                      deleteCustomTheme(theme.id);
+                      setTimeout(() => syncThemeToCloud(activeThemeId), 0);
+                      toast.success('ערכת הנושא נמחקה');
+                    }}
                   >
                     <Trash2 className="h-3 w-3" />
                   </Button>
