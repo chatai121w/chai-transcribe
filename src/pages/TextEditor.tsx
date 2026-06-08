@@ -954,7 +954,7 @@ const TextEditor = () => {
             );
           })()}
 
-          <TabsContent value="player" className="space-y-4">
+          <TabsContent value="player" className="flex flex-col gap-3">
             <LazyErrorBoundary label="נגן מסונכרן">
 
             {/* ── Toolbar: layout controls ── */}
@@ -1115,7 +1115,7 @@ const TextEditor = () => {
             </LazyErrorBoundary>
           </TabsContent>
 
-          <TabsContent value="edit" className="space-y-4">
+          <TabsContent value="edit" className="flex flex-col gap-3">
             {/* Marking toolbar — always visible, text display only when active */}
             <LazyErrorBoundary label="סימון ויזואלי">
               <TextMarkingOverlay
@@ -1152,13 +1152,13 @@ const TextEditor = () => {
             )}
           </TabsContent>
 
-          <TabsContent value="speakers" className="space-y-4">
+          <TabsContent value="speakers" className="flex flex-col gap-3">
             <LazyErrorBoundary label="זיהוי דוברים">
               <SpeakerDiarization serverUrl="/whisper" initialAudioBlob={audioBlob} initialAudioName={audioFileName} initialText={text} />
             </LazyErrorBoundary>
           </TabsContent>
 
-          <TabsContent value="templates" className="space-y-4">
+          <TabsContent value="templates" className="flex flex-col gap-3">
             <LazyErrorBoundary label="תבניות עריכה"><EditingTemplates
               text={text}
               onApply={(newText, templateName) => {
@@ -1167,7 +1167,7 @@ const TextEditor = () => {
             /></LazyErrorBoundary>
           </TabsContent>
 
-          <TabsContent value="ai" className="space-y-4">
+          <TabsContent value="ai" className="flex flex-col gap-3">
             <div
               style={{
                 fontSize: `${fontSize}px`,
@@ -1191,7 +1191,7 @@ const TextEditor = () => {
             </div>
           </TabsContent>
 
-          <TabsContent value="compare" className="space-y-4">
+          <TabsContent value="compare" className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
               <p className="text-xs text-muted-foreground">
                 במסך הזה אפשר גם להשוות בין כל הגרסאות (מקומי + ענן) וגם להריץ עריכת AI ישירות.
