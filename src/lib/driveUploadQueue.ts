@@ -1,10 +1,12 @@
 import { supabase } from '@/integrations/supabase/client';
+import { db, isDbAvailable, type PendingDriveUpload } from '@/lib/localDb';
 
 export type DriveUploadStatus =
   | 'pending'
   | 'checking'
   | 'awaiting-confirm'
   | 'uploading'
+  | 'waiting-network'
   | 'done'
   | 'skipped'
   | 'error';
@@ -20,6 +22,8 @@ export interface DriveUploadJob {
   webViewLink?: string;
   existing?: { id: string; name: string; modifiedTime?: string }[];
   resolution?: 'overwrite' | 'duplicate' | 'skip';
+  /** Whether this job is persisted in IndexedDB for background retry */
+  persisted?: boolean;
 }
 
 export interface UploadRequest {
@@ -32,11 +36,41 @@ export interface UploadRequest {
 
 type Listener = () => void;
 
+/** Network-style error (lost connection) — eligible for background retry. */
+function isNetworkError(err: any): boolean {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return (
+    !navigator.onLine ||
+    msg.includes('failed to fetch') ||
+    msg.includes('networkerror') ||
+    msg.includes('network error') ||
+    msg.includes('load failed') ||
+    msg.includes('aborted') ||
+    msg.includes('timeout')
+  );
+}
+
 class Queue {
   jobs: DriveUploadJob[] = [];
   /** When user picks "apply to all" we remember the choice */
   bulkResolution: 'overwrite' | 'duplicate' | 'skip' | null = null;
   private listeners = new Set<Listener>();
+  private initialized = false;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      // Retry persisted jobs when network comes back
+      window.addEventListener('online', () => { void this.retryPersisted('online'); });
+      // Listen for SW background-sync wake-ups
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener?.('message', (ev) => {
+          if (ev.data?.type === 'DRIVE_RETRY_PENDING') {
+            void this.retryPersisted('sw-sync');
+          }
+        });
+      }
+    }
+  }
 
   subscribe(fn: Listener) {
     this.listeners.add(fn);
@@ -64,6 +98,96 @@ class Queue {
     this.emit();
   }
 
+  /** Restore any pending uploads from previous session (call once on app boot). */
+  async restoreFromDb() {
+    if (this.initialized) return;
+    this.initialized = true;
+    try {
+      if (!(await isDbAvailable())) return;
+      const pending = await db.drivePending.toArray();
+      if (pending.length === 0) return;
+      for (const p of pending) {
+        this.jobs.push({
+          id: p.id,
+          name: p.name,
+          folderId: p.folderId,
+          folderName: p.folderName,
+          text: p.text,
+          status: 'waiting-network',
+          resolution: p.resolution,
+          error: p.last_error,
+          persisted: true,
+        });
+      }
+      this.emit();
+      if (navigator.onLine) void this.retryPersisted('boot');
+    } catch (e) {
+      console.warn('[driveUploadQueue] restoreFromDb failed', e);
+    }
+  }
+
+  /** Persist a job to IndexedDB so it survives reload / can be retried by SW. */
+  private async persist(job: DriveUploadJob, lastError?: string) {
+    try {
+      if (!(await isDbAvailable())) return;
+      const record: PendingDriveUpload = {
+        id: job.id,
+        name: job.name,
+        folderId: job.folderId,
+        folderName: job.folderName,
+        text: job.text,
+        resolution: job.resolution,
+        attempts: 0,
+        last_error: lastError,
+        created_at: Date.now(),
+      };
+      await db.drivePending.put(record);
+      this.update(job.id, { persisted: true });
+      // Ask SW to wake us when connectivity returns (no-op in dev/preview)
+      this.requestBackgroundSync();
+    } catch (e) {
+      console.warn('[driveUploadQueue] persist failed', e);
+    }
+  }
+
+  private async unpersist(id: string) {
+    try {
+      if (!(await isDbAvailable())) return;
+      await db.drivePending.delete(id);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private async requestBackgroundSync() {
+    try {
+      if (!('serviceWorker' in navigator)) return;
+      const reg: any = await navigator.serviceWorker.ready;
+      if (reg?.sync?.register) {
+        await reg.sync.register('drive-upload-retry').catch(() => {});
+      }
+    } catch {
+      /* ignore — SW unavailable (dev/preview) */
+    }
+  }
+
+  /** Retry all jobs currently in waiting-network state. */
+  private retrying = false;
+  async retryPersisted(_source: string) {
+    if (this.retrying) return;
+    this.retrying = true;
+    try {
+      const targets = this.jobs.filter((j) => j.status === 'waiting-network' || j.status === 'error');
+      for (const job of targets) {
+        if (!navigator.onLine) break;
+        this.update(job.id, { status: 'pending' });
+        await this.processOne(job.id);
+      }
+    } finally {
+      this.retrying = false;
+    }
+  }
+
   /** Add and start processing requests. */
   async enqueue(reqs: UploadRequest[]) {
     const newJobs: DriveUploadJob[] = reqs.map((r) => ({
@@ -88,7 +212,7 @@ class Queue {
     if (!job) return;
 
     try {
-      this.update(jobId, { status: 'checking' });
+      this.update(jobId, { status: 'checking', error: undefined });
       // Check existing
       const { data, error } = await supabase.functions.invoke('google-drive', {
         body: { action: 'findByName', name: job.name, parentId: job.folderId },
@@ -101,10 +225,12 @@ class Queue {
         // Need a resolution
         if (this.bulkResolution) {
           this.update(jobId, { existing, resolution: this.bulkResolution });
-        } else {
+        } else if (!job.resolution) {
           this.update(jobId, { existing, status: 'awaiting-confirm' });
           // Wait for resolution
           await this.waitForResolution(jobId);
+        } else {
+          this.update(jobId, { existing });
         }
       }
 
@@ -112,6 +238,7 @@ class Queue {
       if (!job) return;
       if (job.resolution === 'skip') {
         this.update(jobId, { status: 'skipped' });
+        await this.unpersist(jobId);
         return;
       }
 
@@ -144,8 +271,16 @@ class Queue {
       }
 
       this.update(jobId, { status: 'done', webViewLink: result?.webViewLink });
+      await this.unpersist(jobId);
     } catch (e: any) {
-      this.update(jobId, { status: 'error', error: e?.message || String(e) });
+      const msg = e?.message || String(e);
+      if (isNetworkError(e)) {
+        this.update(jobId, { status: 'waiting-network', error: msg });
+        const current = get();
+        if (current) await this.persist(current, msg);
+      } else {
+        this.update(jobId, { status: 'error', error: msg });
+      }
     }
   }
 
@@ -173,6 +308,14 @@ class Queue {
         }
       });
     }
+  }
+
+  /** Manual retry for a single failed job. */
+  async retry(jobId: string) {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job) return;
+    this.update(jobId, { status: 'pending', error: undefined });
+    await this.processOne(jobId);
   }
 }
 

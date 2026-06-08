@@ -18,6 +18,8 @@ const StatusIcon = ({ status }: { status: DriveUploadJob['status'] }) => {
       return <Loader2 className="w-3.5 h-3.5 animate-spin text-yellow-600" />;
     case 'awaiting-confirm':
       return <AlertCircle className="w-3.5 h-3.5 text-orange-500" />;
+    case 'waiting-network':
+      return <Cloud className="w-3.5 h-3.5 text-yellow-600 animate-pulse" />;
     case 'done':
       return <Check className="w-3.5 h-3.5 text-green-600" />;
     case 'skipped':
@@ -32,6 +34,7 @@ const statusLabel: Record<DriveUploadJob['status'], string> = {
   checking: 'בודק קיים...',
   'awaiting-confirm': 'דרוש אישור',
   uploading: 'מעלה...',
+  'waiting-network': 'ממתין לחיבור',
   done: 'הועלה',
   skipped: 'דולג',
   error: 'שגיאה',
@@ -42,7 +45,11 @@ export const DriveUploadStatus = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [applyAll, setApplyAll] = useState(false);
 
-  useEffect(() => { const unsub = driveUploadQueue.subscribe(() => force((n) => n + 1)); return () => { unsub(); }; }, []);
+  useEffect(() => {
+    void driveUploadQueue.restoreFromDb();
+    const unsub = driveUploadQueue.subscribe(() => force((n) => n + 1));
+    return () => { unsub(); };
+  }, []);
 
   const jobs = driveUploadQueue.jobs;
   if (jobs.length === 0) return null;
@@ -153,9 +160,21 @@ export const DriveUploadStatus = () => {
                   </div>
                 )}
 
-                {j.status === 'error' && j.error && (
-                  <div className="text-[10px] text-destructive pr-6 truncate" title={j.error}>
-                    {j.error}
+                {(j.status === 'error' || j.status === 'waiting-network') && (
+                  <div className="flex items-center justify-between gap-2 pr-6">
+                    {j.error && (
+                      <div className="text-[10px] text-destructive truncate flex-1" title={j.error}>
+                        {j.error}
+                      </div>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 text-[10px] shrink-0"
+                      onClick={() => void driveUploadQueue.retry(j.id)}
+                    >
+                      נסה שוב
+                    </Button>
                   </div>
                 )}
               </div>

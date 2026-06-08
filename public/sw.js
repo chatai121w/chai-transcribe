@@ -197,3 +197,21 @@ self.addEventListener('notificationclick', (event) => {
     })
   );
 });
+
+// ═══════════════════════════════════════════════
+//  BACKGROUND SYNC — wake clients to retry Drive uploads
+// ═══════════════════════════════════════════════
+// Note: we don't perform the upload from the SW itself (would require storing
+// auth tokens). Instead we ping open clients so the main-thread queue can
+// retry using the live Supabase session. If no client is open, the browser
+// keeps the sync registration and will retry next time the user opens the app
+// (combined with the `online` listener in driveUploadQueue.ts).
+self.addEventListener('sync', (event) => {
+  if (event.tag !== 'drive-upload-retry') return;
+  event.waitUntil((async () => {
+    const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windowClients) {
+      client.postMessage({ type: 'DRIVE_RETRY_PENDING' });
+    }
+  })());
+});
