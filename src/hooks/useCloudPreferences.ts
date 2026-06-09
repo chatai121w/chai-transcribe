@@ -39,6 +39,8 @@ export interface UserPreferences {
   loshon_kodesh_enabled: boolean;         // Loshon Kodesh transcription mode
   active_pronunciation_profile: string;   // active pronunciation profile ID ('' = none)
   diarize_enabled: boolean;              // speaker diarization toggle
+  live_chunk_sec: number;                // Live transcription chunk length (seconds)
+  live_mic_gain: number;                 // Live transcription mic sensitivity (gain multiplier)
 }
 
 const DEFAULT_PREFERENCES: UserPreferences = {
@@ -73,6 +75,8 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   loshon_kodesh_enabled: false,
   active_pronunciation_profile: '',
   diarize_enabled: false,
+  live_chunk_sec: 5,
+  live_mic_gain: 3.5,
 };
 
 const useCloudPreferencesImpl = () => {
@@ -242,7 +246,9 @@ const useCloudPreferencesImpl = () => {
             : ((data as any).active_pronunciation_profile ?? DEFAULT_PREFERENCES.active_pronunciation_profile),
           diarize_enabled: localDiarize !== null
             ? localDiarize === '1'
-            : ((data as any).diarize_enabled ?? DEFAULT_PREFERENCES.diarize_enabled),
+              : ((data as any).diarize_enabled ?? DEFAULT_PREFERENCES.diarize_enabled),
+          live_chunk_sec: (data as any).live_chunk_sec ?? DEFAULT_PREFERENCES.live_chunk_sec,
+          live_mic_gain: (data as any).live_mic_gain != null ? Number((data as any).live_mic_gain) : DEFAULT_PREFERENCES.live_mic_gain,
         };
         setPreferences(loaded);
         // Mirror to localStorage so useTheme picks up cloud values
@@ -477,6 +483,8 @@ const useCloudPreferencesImpl = () => {
           loshon_kodesh_enabled: updated.loshon_kodesh_enabled,
           active_pronunciation_profile: updated.active_pronunciation_profile || '',
           diarize_enabled: updated.diarize_enabled,
+          live_chunk_sec: updated.live_chunk_sec,
+          live_mic_gain: updated.live_mic_gain,
           updated_at: new Date().toISOString(),
         } as any, { onConflict: 'user_id' })
         .select('updated_at, personal_pronunciation_enabled')

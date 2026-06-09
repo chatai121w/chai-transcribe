@@ -43,6 +43,7 @@ serve(async (req) => {
     let fileBlob: Blob | undefined;
     let fileName = 'audio.webm';
     let language = 'he';
+    let modelOverride: string | undefined;
 
     if (contentType.includes('multipart/form-data')) {
       const form = await req.formData();
@@ -50,6 +51,8 @@ serve(async (req) => {
       if (typeof apiKey === 'string') GROQ_API_KEY = apiKey;
       const lang = form.get('language');
       if (typeof lang === 'string' && lang !== 'auto') language = lang;
+      const mdl = form.get('model');
+      if (typeof mdl === 'string' && mdl.trim()) modelOverride = mdl.trim();
       const file = form.get('file');
       if (file instanceof Blob) {
         fileBlob = file;
@@ -59,10 +62,11 @@ serve(async (req) => {
       }
       if (!fileBlob) throw new Error('file is required in multipart form');
     } else {
-      const { audio, fileName: jsonName, apiKey, language: jsonLang } = await req.json();
+      const { audio, fileName: jsonName, apiKey, language: jsonLang, model: jsonModel } = await req.json();
       if (!audio) throw new Error('No audio data provided');
       GROQ_API_KEY = apiKey || Deno.env.get('GROQ_API_KEY');
       if (jsonLang && jsonLang !== 'auto') language = jsonLang;
+      if (typeof jsonModel === 'string' && jsonModel.trim()) modelOverride = jsonModel.trim();
       const binaryAudio = Uint8Array.from(atob(audio), c => c.charCodeAt(0));
       fileBlob = new Blob([binaryAudio], { type: 'application/octet-stream' });
       fileName = jsonName || fileName;
@@ -90,7 +94,12 @@ serve(async (req) => {
     const mimeType = mimeMap[ext] || 'audio/mpeg';
     const typedBlob = new Blob([await fileBlob!.arrayBuffer()], { type: mimeType });
 
-    const models = ['whisper-large-v3-turbo', 'whisper-large-v3'];
+    // If caller provided a model override (e.g. "whisper-large-v3" for highest quality),
+    // try it first and fall back to the other variant if it fails.
+    const allowedModels = ['whisper-large-v3-turbo', 'whisper-large-v3'];
+    const models = modelOverride && allowedModels.includes(modelOverride)
+      ? [modelOverride, ...allowedModels.filter(m => m !== modelOverride)]
+      : allowedModels;
     let result: any = null;
     let lastError: Error | undefined;
 

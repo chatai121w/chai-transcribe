@@ -17,6 +17,7 @@ import { toast } from "@/hooks/use-toast";
 import { getServerUrl } from "@/lib/serverConfig";
 import { supabase } from "@/integrations/supabase/client";
 import { useCloudApiKeys } from "@/hooks/useCloudApiKeys";
+import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 
 type LiveMode = "browser" | "cuda" | "groq";
 
@@ -56,6 +57,7 @@ interface LiveTranscriberProps {
 
 export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveTranscriberProps) => {
   const { keys: apiKeys } = useCloudApiKeys();
+  const { preferences, updatePreference, isLoaded: prefsLoaded } = useCloudPreferences();
   const [isListening, setIsListening] = useState(false);
   const isListeningRef = useRef(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -64,7 +66,8 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const [finalText, setFinalText] = useState("");
   const [isSupported, setIsSupported] = useState(true);
   const [mode, setMode] = useState<LiveMode>(serverConnected ? "cuda" : "groq");
-  const [chunkSec, setChunkSec] = useState<number>(DEFAULT_CHUNK_SEC);
+  const chunkSec = preferences.live_chunk_sec ?? DEFAULT_CHUNK_SEC;
+  const setChunkSec = useCallback((v: number) => updatePreference('live_chunk_sec', v), [updatePreference]);
   const chunkSecRef = useRef<number>(DEFAULT_CHUNK_SEC);
   useEffect(() => { chunkSecRef.current = chunkSec; }, [chunkSec]);
   const recognitionRef = useRef<any>(null);
@@ -81,7 +84,15 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   // Save settings
   const [fileName, setFileName] = useState("");
   const [saveFormat, setSaveFormat] = useState<SaveFormat>('txt');
-  const [micGain, setMicGain] = useState(3.5); // sensitivity boost: 1x=normal, 4x=max — default raised so soft speech registers
+  const micGain = preferences.live_mic_gain ?? 3.5; // sensitivity (1x..4x)
+  const setMicGain = useCallback((v: number) => updatePreference('live_mic_gain', v), [updatePreference]);
+  const micGainRef = useRef(micGain);
+  useEffect(() => {
+    micGainRef.current = micGain;
+    if (gainNodeRef.current) {
+      try { gainNodeRef.current.gain.value = micGain; } catch { /* */ }
+    }
+  }, [micGain]);
   const gainNodeRef = useRef<GainNode | null>(null);
   const processedStreamRef = useRef<MediaStream | null>(null);
 
@@ -292,6 +303,9 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
           return;
         }
         formData.append("apiKey", groqKey);
+        // Highest-quality model for live: prefer whisper-large-v3 when chunks are large enough
+        // (turbo is faster but slightly lower accuracy). For chunks ≥6s we have headroom for quality.
+        formData.append("model", chunkSecRef.current >= 6 ? "whisper-large-v3" : "whisper-large-v3-turbo");
         // Groq via edge function — chunked near-live transcription
         const { data: gd, error: gerr } = await supabase.functions.invoke('transcribe-groq', {
           body: formData,

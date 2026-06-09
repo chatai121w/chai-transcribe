@@ -674,6 +674,8 @@ export type Database = {
           font_size: number | null
           id: string
           line_height: number | null
+          live_chunk_sec: number | null
+          live_mic_gain: number | null
           loshon_kodesh_enabled: boolean
           personal_pronunciation_enabled: boolean
           player_layout: string | null
@@ -713,6 +715,8 @@ export type Database = {
           font_size?: number | null
           id?: string
           line_height?: number | null
+          live_chunk_sec?: number | null
+          live_mic_gain?: number | null
           loshon_kodesh_enabled?: boolean
           personal_pronunciation_enabled?: boolean
           player_layout?: string | null
@@ -752,6 +756,8 @@ export type Database = {
           font_size?: number | null
           id?: string
           line_height?: number | null
+          live_chunk_sec?: number | null
+          live_mic_gain?: number | null
           loshon_kodesh_enabled?: boolean
           personal_pronunciation_enabled?: boolean
           player_layout?: string | null
