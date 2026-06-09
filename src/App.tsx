@@ -215,7 +215,9 @@ const App = () => {
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <CloudPreferencesProvider>
+      <DesignModeProvider>
       <TooltipProvider>
+        <DesignModeOverlay />
         <Toaster />
         <Sonner />
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
