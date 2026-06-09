@@ -94,7 +94,12 @@ serve(async (req) => {
     const mimeType = mimeMap[ext] || 'audio/mpeg';
     const typedBlob = new Blob([await fileBlob!.arrayBuffer()], { type: mimeType });
 
-    const models = ['whisper-large-v3-turbo', 'whisper-large-v3'];
+    // If caller provided a model override (e.g. "whisper-large-v3" for highest quality),
+    // try it first and fall back to the other variant if it fails.
+    const allowedModels = ['whisper-large-v3-turbo', 'whisper-large-v3'];
+    const models = modelOverride && allowedModels.includes(modelOverride)
+      ? [modelOverride, ...allowedModels.filter(m => m !== modelOverride)]
+      : allowedModels;
     let result: any = null;
     let lastError: Error | undefined;
 
