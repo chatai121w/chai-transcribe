@@ -94,10 +94,13 @@ export function useTranscriptionEngines(
   // ── Helpers ─────────────────────────────────────────────────
 
   const saveToHistory = useCallback(async (text: string, engineUsed: string, skipCloud?: boolean, timings?: WordTiming[], audioFile?: File, folder?: string) => {
-    const correctionResult = isPersonalPronunciationEnabled()
+    const personalPronunciationOn = isPersonalPronunciationEnabled();
+    const correctionResult = personalPronunciationOn
       ? applyLearnedCorrections(text, { engine: engineUsed })
       : { text, appliedCount: 0 };
-    const profileResult = applyProfileCorrections(correctionResult.text);
+    const profileResult = personalPronunciationOn
+      ? applyProfileCorrections(correctionResult.text)
+      : { text: correctionResult.text, appliedCount: 0 };
     const vocabResult = applyVocabularyCorrections(profileResult.text);
     const finalText = vocabResult.text;
     if (correctionResult.appliedCount > 0 || vocabResult.appliedCount > 0 || profileResult.appliedCount > 0) {

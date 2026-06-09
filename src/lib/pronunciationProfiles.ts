@@ -21,6 +21,7 @@
  *   pp_profile_<id>_verified    → VerifiedRecord[]
  *   pp_profile_<id>_approved    → string[]   (normalized words)
  *   pp_profile_<id>_highlights  → Record<string, WordHighlight>
+ *   pp_profile_<id>_samples     → ProfileLearningSample[]
  */
 
 import type { CorrectionEntry } from '@/utils/correctionLearning';
@@ -30,8 +31,19 @@ import { normalizeHebrewWord } from './personalPronunciationModel';
 // ─── Keys ──────────────────────────────────────────────────────────
 const INDEX_KEY = 'pp_profiles_index';
 const ACTIVE_KEY = 'pp_active_profile';
-const profileKey = (id: string, kind: 'corrections' | 'verified' | 'approved' | 'highlights') =>
+const profileKey = (id: string, kind: 'corrections' | 'verified' | 'approved' | 'highlights' | 'samples') =>
   `pp_profile_${id}_${kind}`;
+
+const MAX_PROFILE_SAMPLES = 200;
+const MAX_SAMPLE_PAIRS = 250;
+const MAX_CORRECTION_HOTWORDS = 120;
+
+const HOTWORD_STOPWORDS = new Set([
+  'אני', 'אתה', 'את', 'אנחנו', 'הוא', 'היא', 'הם', 'הן',
+  'של', 'עם', 'על', 'אל', 'אם', 'או', 'גם', 'כי', 'אבל',
+  'זה', 'זאת', 'זו', 'איזה', 'איזו', 'יש', 'אין', 'היה', 'היו',
+  'מה', 'מי', 'כן', 'לא', 'כל', 'עוד', 'כמו', 'רק', 'כבר', 'אחרי',
+]);
 
 // ─── Types ─────────────────────────────────────────────────────────
 export interface PronunciationProfile {
@@ -58,6 +70,36 @@ export interface ProfileVerifiedRecord {
   corrected: string;
   verifiedAt: number;
   count: number;
+}
+
+export interface ProfileLearningPair {
+  original: string;
+  corrected: string;
+  count: number;
+}
+
+export interface ProfileLearningAudioRef {
+  source: 'supabase' | 'blob' | 'url' | 'unknown';
+  audioUrl?: string;
+  audioFilePath?: string;
+  fileName?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  durationSec?: number;
+}
+
+export interface ProfileLearningSample {
+  id: string;
+  createdAt: number;
+  source: string;
+  transcriptId?: string;
+  engineLabel?: string;
+  actionLabel?: string;
+  note?: string;
+  originalText: string;
+  correctedText: string;
+  correctionPairs: ProfileLearningPair[];
+  audio?: ProfileLearningAudioRef;
 }
 
 // ─── JSON helpers ──────────────────────────────────────────────────
@@ -133,7 +175,7 @@ export function updateProfileSettings(id: string, settings: PronunciationProfile
 
 export function deleteProfile(id: string): void {
   saveProfiles(listProfiles().filter((p) => p.id !== id));
-  for (const k of ['corrections', 'verified', 'approved', 'highlights'] as const) {
+  for (const k of ['corrections', 'verified', 'approved', 'highlights', 'samples'] as const) {
     try {
       localStorage.removeItem(profileKey(id, k));
     } catch { /* ignore */ }
@@ -273,6 +315,103 @@ export function setProfileHighlight(
   writeJSON(profileKey(id, 'highlights'), all);
 }
 
+// ─── Per-profile full learning samples ─────────────────────────────
+export function getProfileLearningSamples(id: string): ProfileLearningSample[] {
+  return readJSON<ProfileLearningSample[]>(profileKey(id, 'samples'), []);
+}
+
+function buildLearningSampleFingerprint(sample: {
+  transcriptId?: string;
+  source?: string;
+  originalText: string;
+  correctedText: string;
+  correctionPairs: ProfileLearningPair[];
+  audio?: ProfileLearningAudioRef;
+}): string {
+  const pairsPart = sample.correctionPairs
+    .map((p) => `${p.original.trim()}=>${p.corrected.trim()}:${Math.max(1, p.count || 1)}`)
+    .join('|');
+  const audioPath = sample.audio?.audioFilePath || '';
+  const audioUrl = sample.audio?.audioUrl || '';
+  const audioFile = sample.audio?.fileName || '';
+  return [
+    sample.transcriptId || '',
+    sample.source || '',
+    sample.originalText.trim(),
+    sample.correctedText.trim(),
+    pairsPart,
+    audioPath,
+    audioUrl,
+    audioFile,
+  ].join('||');
+}
+
+function saveProfileLearningSamples(id: string, list: ProfileLearningSample[]): void {
+  writeJSON(profileKey(id, 'samples'), list.slice(0, MAX_PROFILE_SAMPLES));
+  touchProfile(id);
+}
+
+export function addProfileLearningSample(
+  id: string,
+  sample: Omit<ProfileLearningSample, 'id' | 'createdAt'> & Partial<Pick<ProfileLearningSample, 'id' | 'createdAt'>>
+): ProfileLearningSample {
+  const normalizedPairs = (sample.correctionPairs || [])
+    .filter((p) => p.original?.trim() && p.corrected?.trim() && p.original !== p.corrected)
+    .slice(0, MAX_SAMPLE_PAIRS)
+    .map((p) => ({
+      original: p.original.trim(),
+      corrected: p.corrected.trim(),
+      count: Math.max(1, p.count || 1),
+    }));
+
+  const record: ProfileLearningSample = {
+    id: sample.id || `pls_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: sample.createdAt || Date.now(),
+    source: sample.source || 'unknown',
+    transcriptId: sample.transcriptId,
+    engineLabel: sample.engineLabel,
+    actionLabel: sample.actionLabel,
+    note: sample.note,
+    originalText: sample.originalText.trim(),
+    correctedText: sample.correctedText.trim(),
+    correctionPairs: normalizedPairs,
+    audio: sample.audio,
+  };
+
+  const existingList = getProfileLearningSamples(id);
+  const seenFingerprints = new Set<string>();
+  const list = existingList.filter((existing) => {
+    const fp = buildLearningSampleFingerprint(existing);
+    if (seenFingerprints.has(fp)) return false;
+    seenFingerprints.add(fp);
+    return true;
+  });
+  const nextFingerprint = buildLearningSampleFingerprint(record);
+  const duplicateIndex = list.findIndex((existing) => {
+    if (sample.id && existing.id === sample.id) return true;
+    return buildLearningSampleFingerprint(existing) === nextFingerprint;
+  });
+
+  if (duplicateIndex >= 0) {
+    const existing = list[duplicateIndex];
+    const merged: ProfileLearningSample = {
+      ...existing,
+      ...record,
+      id: existing.id,
+      createdAt: existing.createdAt,
+      note: record.note || existing.note,
+    };
+    list.splice(duplicateIndex, 1);
+    list.unshift(merged);
+    saveProfileLearningSamples(id, list);
+    return merged;
+  }
+
+  list.unshift(record);
+  saveProfileLearningSamples(id, list);
+  return record;
+}
+
 // ─── Apply profile corrections to engine output ────────────────────
 export interface ApplyProfileResult {
   text: string;
@@ -314,6 +453,31 @@ export function applyProfileCorrections(
   return { text: result, appliedCount: applied };
 }
 
+function normalizeHotwordToken(word: string): string {
+  const normalized = normalizeHebrewWord(word).replace(/[\u200f\u200e]/g, '').trim();
+  if (!normalized) return '';
+  if (normalized.length < 2) return '';
+  if (HOTWORD_STOPWORDS.has(normalized)) return '';
+  return normalized;
+}
+
+function collectCorrectionHotwords(profileId: string): string[] {
+  const weighted = new Map<string, number>();
+  for (const c of getProfileCorrections(profileId)) {
+    if (!c.corrected) continue;
+    const score = Math.max(1, c.frequency || 1) * Math.max(0.3, c.confidence || 0.5);
+    for (const raw of c.corrected.split(/\s+/)) {
+      const token = normalizeHotwordToken(raw);
+      if (!token) continue;
+      weighted.set(token, (weighted.get(token) || 0) + score);
+    }
+  }
+  return Array.from(weighted.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, MAX_CORRECTION_HOTWORDS)
+    .map(([token]) => token);
+}
+
 // ─── Engine integration: hotwords + initial prompt ─────────────────
 /**
  * Build the comma-separated hotwords string the active profile contributes.
@@ -348,6 +512,9 @@ export function buildProfileHotwords(profileId?: string): string {
       const t = w.trim();
       if (t) set.add(t);
     }
+  }
+  for (const token of collectCorrectionHotwords(id)) {
+    set.add(token);
   }
   return Array.from(set).join(', ');
 }
@@ -480,24 +647,26 @@ export function bulkTrainProfile(profileId: string, pairs: BulkTrainingPair[]): 
 
 // ─── Export / Import a profile (JSON) ──────────────────────────────
 export interface ProfileExport {
-  version: 1;
+  version: 1 | 2;
   profile: PronunciationProfile;
   corrections: CorrectionEntry[];
   verified: ProfileVerifiedRecord[];
   approved: string[];
   highlights: Record<string, WordHighlight>;
+  samples?: ProfileLearningSample[];
 }
 
 export function exportProfile(id: string): string | null {
   const profile = getProfile(id);
   if (!profile) return null;
   const payload: ProfileExport = {
-    version: 1,
+    version: 2,
     profile,
     corrections: getProfileCorrections(id),
     verified: getProfileVerified(id),
     approved: getProfileApproved(id),
     highlights: getProfileHighlights(id),
+    samples: getProfileLearningSamples(id),
   };
   return JSON.stringify(payload, null, 2);
 }
@@ -515,6 +684,9 @@ export function importProfile(json: string): PronunciationProfile {
   if (Array.isArray(data.approved)) writeJSON(profileKey(profile.id, 'approved'), data.approved);
   if (data.highlights && typeof data.highlights === 'object') {
     writeJSON(profileKey(profile.id, 'highlights'), data.highlights);
+  }
+  if (Array.isArray(data.samples)) {
+    writeJSON(profileKey(profile.id, 'samples'), data.samples.slice(0, MAX_PROFILE_SAMPLES));
   }
   return profile;
 }
@@ -572,6 +744,7 @@ export interface ProfileSummaryStats {
   verified: number;
   approved: number;
   highlights: number;
+  samples: number;
   avgConfidence: number;
 }
 
@@ -581,6 +754,7 @@ export function getAllProfileStats(): ProfileSummaryStats[] {
     const verified = getProfileVerified(p.id);
     const approved = getProfileApproved(p.id);
     const highlights = getProfileHighlights(p.id);
+    const samples = getProfileLearningSamples(p.id);
     const avg = corrections.length > 0
       ? corrections.reduce((s, c) => s + (c.confidence ?? 0.5), 0) / corrections.length
       : 0;
@@ -591,6 +765,7 @@ export function getAllProfileStats(): ProfileSummaryStats[] {
       verified: verified.length,
       approved: approved.length,
       highlights: Object.keys(highlights).length,
+      samples: samples.length,
       avgConfidence: avg,
     };
   });

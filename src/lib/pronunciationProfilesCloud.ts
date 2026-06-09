@@ -150,7 +150,7 @@ export async function pullFromCloud(): Promise<SyncResult> {
 function reassignImportedProfileId(fromId: string, toId: string): void {
   if (fromId === toId) return;
   // Move per-profile keys.
-  for (const kind of ['corrections', 'verified', 'approved', 'highlights']) {
+  for (const kind of ['corrections', 'verified', 'approved', 'highlights', 'samples']) {
     const fromKey = `pp_profile_${fromId}_${kind}`;
     const toKey = `pp_profile_${toId}_${kind}`;
     try {

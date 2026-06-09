@@ -381,10 +381,13 @@ const Index = () => {
   // Save to cloud history (respects cloud save mode for CUDA engine)
   const saveToHistory = async (text: string, engineUsed: string, skipCloud?: boolean, timings?: Array<{word: string, start: number, end: number, probability?: number}>, audioFile?: File, folder?: string) => {
     // Apply learned corrections to improve transcription
-    const correctionResult = isPersonalPronunciationEnabled()
+    const personalPronunciationOn = isPersonalPronunciationEnabled();
+    const correctionResult = personalPronunciationOn
       ? applyLearnedCorrections(text, { engine: engineUsed })
       : { text, appliedCount: 0 };
-    const profileResult = applyProfileCorrections(correctionResult.text);
+    const profileResult = personalPronunciationOn
+      ? applyProfileCorrections(correctionResult.text)
+      : { text: correctionResult.text, appliedCount: 0 };
     const finalText = profileResult.text;
     if (correctionResult.appliedCount > 0 || profileResult.appliedCount > 0) {
       debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile corrections`);

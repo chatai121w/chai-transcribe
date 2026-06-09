@@ -184,6 +184,18 @@ Deno.serve(async (req) => {
         });
       }
 
+      case 'delete': {
+        const { fileId } = params;
+        if (!fileId) return json({ error: 'fileId required' }, 400);
+        const res = await fetch(`${GATEWAY}/drive/v3/files/${fileId}`, {
+          method: 'DELETE',
+          headers: authHeaders(),
+        });
+        const txt = await res.text();
+        if (!res.ok) return json({ error: 'delete failed', status: res.status, body: txt }, 500);
+        return json({ success: true });
+      }
+
       default:
         return json({ error: `unknown action: ${action}` }, 400);
     }

@@ -43,6 +43,9 @@ import {
   RefreshCw,
   FolderOpen,
   BarChart3,
+  LayoutGrid,
+  Rows3,
+  Table2,
   Sparkles,
   X as XIcon,
 } from 'lucide-react';
@@ -65,6 +68,7 @@ import {
   exportAllProfiles,
   importBundle,
   getAllProfileStats,
+  buildProfileHotwords,
   type BulkTrainingPair,
 } from '@/lib/pronunciationProfiles';
 import {
@@ -80,12 +84,15 @@ import { topSuggestionForFile, getCurrentAudioFilename, getProfileUsageStats, ty
 import { ProfileConfidenceChart } from '@/components/ProfileConfidenceChart';
 import type { CorrectionEntry } from '@/utils/correctionLearning';
 import { toast } from '@/hooks/use-toast';
+import { getServerUrl } from '@/lib/serverConfig';
 
 const ACTIVE_EVENT = 'pp-active-profile-changed';
 
 interface PronunciationProfileSelectorProps {
   onProfileChange?: (id: string) => void;
 }
+
+type ManageViewMode = 'list' | 'grid' | 'table';
 
 export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationProfileSelectorProps = {}) => {
   const [profiles, setProfiles] = useState<PronunciationProfile[]>(() => listProfiles());
@@ -111,7 +118,10 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
   const [trainId, setTrainId] = useState<string>('');
   const [trainRaw, setTrainRaw] = useState('');
   const [trainCorrected, setTrainCorrected] = useState('');
+  const [trainPairsForApply, setTrainPairsForApply] = useState<BulkTrainingPair[]>([]);
   const [trainPreview, setTrainPreview] = useState<BulkTrainingPair[]>([]);
+  const [autoTrainRunning, setAutoTrainRunning] = useState(false);
+  const [autoTrainStatus, setAutoTrainStatus] = useState<{ done: number; total: number; skipped: number; current: string } | null>(null);
 
   // Corrections-viewer dialog state
   const [viewId, setViewId] = useState<string>('');
@@ -132,8 +142,125 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
 
   // Manage-dialog filter
   const [manageFilter, setManageFilter] = useState('');
+  const [manageViewMode, setManageViewMode] = useState<ManageViewMode>('list');
 
   const refresh = () => setProfiles(listProfiles());
+
+  const setTrainingPairs = (pairs: BulkTrainingPair[], previewSize: number = 500) => {
+    const merged = new Map<string, BulkTrainingPair>();
+    for (const p of pairs) {
+      const key = `${p.original}__${p.corrected}`;
+      const e = merged.get(key);
+      if (e) e.count += p.count;
+      else merged.set(key, { ...p, count: Math.max(1, p.count || 1) });
+    }
+    const sorted = Array.from(merged.values()).sort((a, b) => b.count - a.count);
+    setTrainPairsForApply(sorted);
+    setTrainPreview(sorted.slice(0, previewSize));
+    return sorted.length;
+  };
+
+  const isAudioFile = (name: string) => /\.(wav|mp3|m4a|aac|ogg|webm|flac|mp4|mov|mkv)$/i.test(name);
+  const isTextFile = (name: string) => /\.(txt|md|text)$/i.test(name);
+  const canonicalStem = (name: string) =>
+    name
+      .toLowerCase()
+      .replace(/\.[^.]+$/, '')
+      .replace(/[_\-\s]*(corrected|fixed|fix|מתוקן|after|gold|gt)$/, '')
+      .replace(/[_\-\s]*(raw|original|before|גולמי)$/, '')
+      .trim();
+
+  const buildCorrectedMapFromTextFiles = async (textFiles: File[]) => {
+    const correctedMap = new Map<string, string>();
+    for (const tf of textFiles) {
+      const key = canonicalStem(tf.name);
+      if (!key) continue;
+      const content = (await tf.text()).trim();
+      if (!content) continue;
+      const isPreferred = /(corrected|fixed|fix|מתוקן|after|gold|gt)/i.test(tf.name);
+      if (!correctedMap.has(key) || isPreferred) correctedMap.set(key, content);
+    }
+    return correctedMap;
+  };
+
+  const pickDirectoryFiles = (accept: string) => new Promise<File[]>((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = accept;
+    input.setAttribute('webkitdirectory', '');
+    input.onchange = () => resolve(Array.from(input.files || []));
+    input.click();
+  });
+
+  const processAutoTrainCandidates = async (audioFiles: File[], correctedMap: Map<string, string>) => {
+    const preferredModel = localStorage.getItem('preferred_local_model') || '';
+    const hotwords = buildProfileHotwords(trainId || undefined);
+    const allPairs: BulkTrainingPair[] = [];
+    let skipped = 0;
+
+    setAutoTrainRunning(true);
+    setAutoTrainStatus({ done: 0, total: audioFiles.length, skipped: 0, current: '' });
+    try {
+      for (let i = 0; i < audioFiles.length; i++) {
+        const audio = audioFiles[i];
+        const stem = canonicalStem(audio.name);
+        const correctedText = correctedMap.get(stem);
+        setAutoTrainStatus({ done: i, total: audioFiles.length, skipped, current: audio.name });
+
+        if (!correctedText) {
+          skipped += 1;
+          continue;
+        }
+
+        const form = new FormData();
+        form.append('file', audio, audio.name);
+        form.append('language', 'he');
+        if (preferredModel) form.append('model', preferredModel);
+        if (hotwords) form.append('hotwords', hotwords);
+
+        try {
+          const res = await fetch(`${getServerUrl()}/transcribe`, {
+            method: 'POST',
+            body: form,
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          const rawText = (data?.text || '').toString().trim();
+          if (!rawText) {
+            skipped += 1;
+            continue;
+          }
+
+          const pairs = diffForTraining(rawText, correctedText);
+          if (pairs.length === 0) {
+            skipped += 1;
+            continue;
+          }
+          allPairs.push(...pairs);
+        } catch {
+          skipped += 1;
+        }
+      }
+
+      setAutoTrainStatus({ done: audioFiles.length, total: audioFiles.length, skipped, current: '' });
+      const totalPairs = setTrainingPairs(allPairs, 500);
+      if (totalPairs === 0) {
+        toast({
+          title: 'לא נמצאו זוגות לאימון',
+          description: 'בדוק התאמת שמות קבצים בין האודיו לטקסט המתוקן.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      toast({
+        title: 'הכנה לאימון הושלמה',
+        description: `${audioFiles.length - skipped}/${audioFiles.length} קבצים עובדו · ${totalPairs} זוגות נמצאו`,
+      });
+    } finally {
+      setAutoTrainRunning(false);
+    }
+  };
 
   /** Central helper: set active profile in localStorage, component state, and notify parent */
   const applyActiveProfile = (id: string) => {
@@ -334,18 +461,53 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
         return;
       }
 
-      // Aggregate duplicates.
-      const merged = new Map<string, BulkTrainingPair>();
-      for (const p of totalPairs) {
-        const key = `${p.original}__${p.corrected}`;
-        const e = merged.get(key);
-        if (e) e.count += p.count;
-        else merged.set(key, { ...p });
-      }
-      setTrainPreview(Array.from(merged.values()).sort((a, b) => b.count - a.count).slice(0, 500));
-      toast({ title: 'נטענו קבצים', description: `נמצאו ${merged.size} זוגות תיקון` });
+      const total = setTrainingPairs(totalPairs, 500);
+      toast({ title: 'נטענו קבצים', description: `נמצאו ${total} זוגות תיקון` });
     };
     input.click();
+  };
+
+  const handleAutoTrainFromAudioAndCorrected = async () => {
+    if (!trainId || autoTrainRunning) return;
+    const files = await pickDirectoryFiles('.wav,.mp3,.m4a,.aac,.ogg,.webm,.flac,.mp4,.mov,.mkv,.txt,.md,.text');
+    if (files.length === 0) return;
+
+    const audioFiles = files.filter((f) => isAudioFile(f.name));
+    const textFiles = files.filter((f) => isTextFile(f.name));
+    if (!audioFiles.length || !textFiles.length) {
+      toast({
+        title: 'חסרים קבצים מתאימים',
+        description: 'נדרשים קבצי אודיו וקבצי טקסט מתוקן באותה תיקיה.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const correctedMap = await buildCorrectedMapFromTextFiles(textFiles);
+    await processAutoTrainCandidates(audioFiles, correctedMap);
+  };
+
+  const handleAutoTrainFromSeparateFolders = async () => {
+    if (!trainId || autoTrainRunning) return;
+
+    toast({ title: 'שלב 1/2', description: 'בחר עכשיו את תיקיית האודיו.' });
+    const audioPicked = await pickDirectoryFiles('.wav,.mp3,.m4a,.aac,.ogg,.webm,.flac,.mp4,.mov,.mkv');
+    const audioFiles = audioPicked.filter((f) => isAudioFile(f.name));
+    if (!audioFiles.length) {
+      toast({ title: 'לא נבחרו קבצי אודיו', description: 'נסה שוב ובחר תיקיה נכונה.', variant: 'destructive' });
+      return;
+    }
+
+    toast({ title: 'שלב 2/2', description: 'בחר עכשיו את תיקיית הטקסטים המתוקנים.' });
+    const textPicked = await pickDirectoryFiles('.txt,.md,.text');
+    const textFiles = textPicked.filter((f) => isTextFile(f.name));
+    if (!textFiles.length) {
+      toast({ title: 'לא נבחרו קבצי טקסט', description: 'נסה שוב ובחר תיקיה נכונה.', variant: 'destructive' });
+      return;
+    }
+
+    const correctedMap = await buildCorrectedMapFromTextFiles(textFiles);
+    await processAutoTrainCandidates(audioFiles, correctedMap);
   };
 
   const handleOpenSettings = (p: PronunciationProfile) => {
@@ -371,19 +533,31 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
     setTrainId(p.id);
     setTrainRaw('');
     setTrainCorrected('');
+    setTrainPairsForApply([]);
     setTrainPreview([]);
+    setAutoTrainStatus(null);
   };
 
   const handlePreviewTrain = () => {
     if (!trainRaw.trim() || !trainCorrected.trim()) return;
-    setTrainPreview(diffForTraining(trainRaw, trainCorrected).slice(0, 200));
+    const total = setTrainingPairs(diffForTraining(trainRaw, trainCorrected), 200);
+    if (!total) {
+      toast({ title: 'לא נמצאו הבדלים', description: 'בדוק שהטקסטים אכן שונים.', variant: 'destructive' });
+    }
   };
 
   const handleApplyTrain = () => {
-    if (!trainId || trainPreview.length === 0) return;
-    const n = bulkTrainProfile(trainId, trainPreview);
+    if (!trainId || trainPairsForApply.length === 0) return;
+    const n = bulkTrainProfile(trainId, trainPairsForApply);
+    const hotwordsCount = buildProfileHotwords(trainId)
+      .split(',')
+      .map((w) => w.trim())
+      .filter(Boolean).length;
     refresh();
-    toast({ title: 'התבצע אימון', description: `${n} תיקונים נוספו לפרופיל` });
+    toast({
+      title: 'התבצע אימון',
+      description: `${n} תיקונים נוספו לפרופיל · ${hotwordsCount} hotwords יוטו לזיהוי הבא`,
+    });
     setTrainId('');
   };
 
@@ -457,6 +631,99 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
   };
 
   const activeProfile = profiles.find((p) => p.id === activeId);
+  const filteredProfiles = profiles.filter(
+    (p) => !manageFilter.trim() || `${p.name} ${p.description || ''}`.toLowerCase().includes(manageFilter.toLowerCase())
+  );
+
+  const cycleManageView = () => {
+    const order: ManageViewMode[] = ['list', 'grid', 'table'];
+    const idx = order.indexOf(manageViewMode);
+    setManageViewMode(order[(idx + 1) % order.length]);
+  };
+
+  const manageViewLabel =
+    manageViewMode === 'list' ? 'רשימה' : manageViewMode === 'grid' ? 'רשת' : 'טבלה';
+
+  const ManageViewIcon =
+    manageViewMode === 'list' ? Rows3 : manageViewMode === 'grid' ? LayoutGrid : Table2;
+
+  const renderProfileActions = (p: PronunciationProfile) => (
+    <div className="flex gap-1 shrink-0 flex-wrap justify-end">
+      {activeId !== p.id && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          onClick={() => handleSelect(p.id)}
+        >
+          הפעל
+        </Button>
+      )}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 w-7 p-0"
+        title="צפה בתיקונים"
+        onClick={() => handleOpenView(p)}
+      >
+        <ListChecks className="w-3.5 h-3.5 text-blue-500" />
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 w-7 p-0"
+        title="גרף למידה"
+        onClick={() => setChartId(p.id)}
+      >
+        <BarChart3 className="w-3.5 h-3.5 text-emerald-600" />
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 w-7 p-0"
+        title="אמן (לפני/אחרי)"
+        onClick={() => handleOpenTrain(p)}
+      >
+        <GraduationCap className="w-3.5 h-3.5 text-purple-500" />
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 w-7 p-0"
+        title="הגדרות מנוע"
+        onClick={() => handleOpenSettings(p)}
+      >
+        <SettingsIcon className="w-3.5 h-3.5" />
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 w-7 p-0"
+        title="ערוך"
+        onClick={() => handleStartRename(p)}
+      >
+        <Pencil className="w-3.5 h-3.5" />
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 w-7 p-0"
+        title="ייצא"
+        onClick={() => handleExport(p)}
+      >
+        <Download className="w-3.5 h-3.5" />
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 w-7 p-0 text-red-500 hover:text-red-600"
+        title="מחק"
+        onClick={() => handleDelete(p)}
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </Button>
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-2" dir="rtl">
@@ -531,7 +798,7 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
           </Button>
         </DialogTrigger>
         <DialogContent
-          className="max-w-xl"
+          className="max-w-xl text-right"
           dir="rtl"
           hideOverlay
           onEscapeKeyDown={() => setManageOpen(false)}
@@ -603,27 +870,98 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
           </div>
 
           {/* List */}
-          {profiles.length > 4 && (
-            <div className="relative">
-              <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-              <Input
-                placeholder="חפש לפי שם או תיאור..."
-                value={manageFilter}
-                onChange={(e) => setManageFilter(e.target.value)}
-                className="h-8 text-xs pr-8"
-                dir="rtl"
-              />
+          {profiles.length > 0 && (
+            <div className="flex items-center gap-2" dir="rtl">
+              {profiles.length > 4 ? (
+                <div className="relative flex-1 min-w-0">
+                  <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                  <Input
+                    placeholder="חפש לפי שם או תיאור..."
+                    value={manageFilter}
+                    onChange={(e) => setManageFilter(e.target.value)}
+                    className="h-8 text-xs pr-8 text-right"
+                    dir="rtl"
+                  />
+                </div>
+              ) : (
+                <div className="flex-1" />
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={cycleManageView}
+                title={`החלף תצוגה · כרגע: ${manageViewLabel}`}
+              >
+                <ManageViewIcon className="w-3.5 h-3.5" />
+              </Button>
             </div>
           )}
-          <div className="space-y-2 max-h-[40vh] overflow-y-auto">
+
+          <div
+            className={
+              manageViewMode === 'grid'
+                ? 'grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[40vh] overflow-y-auto'
+                : 'space-y-2 max-h-[40vh] overflow-y-auto'
+            }
+          >
             {profiles.length === 0 ? (
               <div className="text-center text-xs text-muted-foreground py-6">
                 עדיין אין פרופילים. צור אחד למעלה.
               </div>
+            ) : manageViewMode === 'table' ? (
+              <div className="rounded-lg border border-border/60 overflow-hidden bg-background">
+                <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.8fr)] gap-2 px-2 py-1.5 text-[11px] font-semibold text-muted-foreground bg-muted/30 text-right">
+                  <div>פרופיל</div>
+                  <div>תיקונים</div>
+                  <div>שימוש</div>
+                  <div className="text-left">פעולות</div>
+                </div>
+                {filteredProfiles.map((p) => {
+                  const corrections = getProfileCorrections(p.id).length;
+                  const verified = getProfileVerified(p.id).length;
+                  const usage = getProfileUsageStats(p.id);
+                  const isEditing = renameId === p.id;
+                  return (
+                    <div key={p.id} className="border-t border-border/40">
+                      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.8fr)] gap-2 px-2 py-2 text-xs items-center text-right">
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">{p.name}</div>
+                          {p.description && <div className="text-muted-foreground truncate mt-0.5">{p.description}</div>}
+                        </div>
+                        <div className="text-muted-foreground">{corrections} · {verified}</div>
+                        <div className="text-muted-foreground truncate" title={usage.count > 0 ? new Date(usage.lastUsed).toLocaleString('he-IL') : ''}>
+                          {usage.count > 0 ? `${usage.count} תמלולים` : '-'}
+                        </div>
+                        <div className="justify-self-end">{renderProfileActions(p)}</div>
+                      </div>
+                      {isEditing && (
+                        <div className="border-t border-border/30 px-2 py-2 space-y-2 bg-muted/20">
+                          <Input
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            className="h-8 text-sm"
+                            dir="rtl"
+                          />
+                          <Textarea
+                            value={renameDesc}
+                            onChange={(e) => setRenameDesc(e.target.value)}
+                            className="text-xs min-h-[50px]"
+                            dir="rtl"
+                            placeholder="תיאור"
+                          />
+                          <div className="flex gap-2 justify-end">
+                            <Button size="sm" className="h-7 text-xs" onClick={handleApplyRename}>שמור</Button>
+                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setRenameId('')}>ביטול</Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
-              profiles
-                .filter((p) => !manageFilter.trim() || `${p.name} ${p.description || ''}`.toLowerCase().includes(manageFilter.toLowerCase()))
-                .map((p) => {
+              filteredProfiles.map((p) => {
                 const corrections = getProfileCorrections(p.id).length;
                 const verified = getProfileVerified(p.id).length;
                 const usage = getProfileUsageStats(p.id);
@@ -693,81 +1031,7 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
                             )}
                           </div>
                         </div>
-                        <div className="flex gap-1 shrink-0 flex-wrap justify-end">
-                          {activeId !== p.id && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs"
-                              onClick={() => handleSelect(p.id)}
-                            >
-                              הפעל
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            title="צפה בתיקונים"
-                            onClick={() => handleOpenView(p)}
-                          >
-                            <ListChecks className="w-3.5 h-3.5 text-blue-500" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            title="גרף למידה"
-                            onClick={() => setChartId(p.id)}
-                          >
-                            <BarChart3 className="w-3.5 h-3.5 text-emerald-600" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            title="אמן (לפני/אחרי)"
-                            onClick={() => handleOpenTrain(p)}
-                          >
-                            <GraduationCap className="w-3.5 h-3.5 text-purple-500" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            title="הגדרות מנוע"
-                            onClick={() => handleOpenSettings(p)}
-                          >
-                            <SettingsIcon className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            title="ערוך"
-                            onClick={() => handleStartRename(p)}
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            title="ייצא"
-                            onClick={() => handleExport(p)}
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0 text-red-500 hover:text-red-600"
-                            title="מחק"
-                            onClick={() => handleDelete(p)}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
+                        {renderProfileActions(p)}
                       </div>
                     )}
                   </div>
@@ -815,7 +1079,7 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
                   <CloudDownload className="w-3.5 h-3.5" />
                 </Button>
                 {lastSync > 0 && (
-                  <span className="text-[10px] text-muted-foreground ml-1">
+                  <span className="text-[10px] text-muted-foreground ms-1">
                     סונכרן לאחרונה: {new Date(lastSync).toLocaleTimeString('he-IL')}
                   </span>
                 )}
@@ -897,6 +1161,7 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
             </DialogTitle>
             <DialogDescription>
               הדבק תמלול גולמי (איך המנוע תמלל) ותמלול מתוקן (מה צריך להיות). המערכת תחלץ את ההבדלים ותלמד את הפרופיל אוטומטית.
+              אחרי האימון, מילים חזקות מהתיקונים יוזרמו גם ל-hotwords של מנוע הזיהוי.
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3">
@@ -935,12 +1200,48 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
               <FolderOpen className="w-3.5 h-3.5" />
               טען מקבצי טקסט / JSON
             </Button>
-            {trainPreview.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1"
+              onClick={handleAutoTrainFromAudioAndCorrected}
+              disabled={autoTrainRunning}
+              title="בחר תיקיה אחת שמעורבים בה קבצי אודיו + טקסט מתוקן"
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              אימון אוטומטי (תיקיה מעורבת)
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1"
+              onClick={handleAutoTrainFromSeparateFolders}
+              disabled={autoTrainRunning}
+              title="בחירה בשתי תיקיות: קודם אודיו, ואז תיקיית טקסט מתוקן"
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              אימון אוטומטי (2 תיקיות)
+            </Button>
+            {trainPairsForApply.length > 0 && (
               <span className="text-xs text-muted-foreground">
-                נמצאו {trainPreview.length} זוגות תיקון
+                נמצאו {trainPairsForApply.length} זוגות תיקון
               </span>
             )}
           </div>
+          {autoTrainStatus && (
+            <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2">
+                {autoTrainRunning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
+                <span>
+                  עיבוד קבצים: {autoTrainStatus.done}/{autoTrainStatus.total}
+                  {autoTrainStatus.skipped > 0 ? ` · דולגו: ${autoTrainStatus.skipped}` : ''}
+                </span>
+              </div>
+              {autoTrainStatus.current && (
+                <div className="mt-1 truncate" title={autoTrainStatus.current}>מעבד: {autoTrainStatus.current}</div>
+              )}
+            </div>
+          )}
           {trainPreview.length > 0 && (
             <div className="max-h-[35vh] overflow-y-auto border border-border/60 rounded-lg p-2 space-y-1 bg-muted/20">
               {trainPreview.map((p, i) => (
@@ -962,10 +1263,10 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
             <Button
               size="sm"
               className="h-8 text-xs"
-              disabled={trainPreview.length === 0}
+              disabled={trainPairsForApply.length === 0 || autoTrainRunning}
               onClick={handleApplyTrain}
             >
-              אמן את הפרופיל ({trainPreview.length})
+              אמן את הפרופיל ({trainPairsForApply.length})
             </Button>
           </DialogFooter>
         </DialogContent>

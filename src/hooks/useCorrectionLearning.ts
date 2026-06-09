@@ -12,7 +12,6 @@ import {
   type CorrectionEntry,
   type CorrectionStats,
 } from '@/utils/correctionLearning';
-import { addProfileCorrection, getActiveProfileId } from '@/lib/pronunciationProfiles';
 
 export function useCorrectionLearning() {
   const [stats, setStats] = useState<CorrectionStats>(() => getCorrectionStats());
@@ -28,12 +27,6 @@ export function useCorrectionLearning() {
     const newCorrections = extractCorrections(originalText, editedText, engine);
     if (newCorrections.length > 0) {
       learnFromCorrections(newCorrections);
-      // Mirror into active profile so per-speaker memory accumulates from
-      // ordinary text edits, not just right-click verifications.
-      const activeId = getActiveProfileId();
-      if (activeId) {
-        for (const c of newCorrections) addProfileCorrection(activeId, c);
-      }
       refresh();
     }
     return newCorrections.length;

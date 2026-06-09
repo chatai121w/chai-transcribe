@@ -19,7 +19,8 @@ import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import type { WordTiming } from "./SyncAudioPlayer";
@@ -45,6 +46,14 @@ interface SyncMirrorLayoutProps {
   onSearchMatchCount?: (count: number) => void;
   onSaveReplace?: () => void;
   onDuplicateSave?: (newName: string) => void;
+  learningProfiles?: Array<{ id: string; name: string }>;
+  learningEnabled?: boolean;
+  onSaveLearning?: (payload: {
+    editedText: string;
+    profileId: string;
+    mode: 'quick' | 'advanced';
+    note?: string;
+  }) => Promise<boolean | void> | boolean | void;
 }
 
 function normalizeWord(w: string) {
@@ -79,6 +88,9 @@ export const SyncMirrorLayout = ({
   onSearchMatchCount,
   onSaveReplace,
   onDuplicateSave,
+  learningProfiles = [],
+  learningEnabled = true,
+  onSaveLearning,
 }: SyncMirrorLayoutProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -90,6 +102,14 @@ export const SyncMirrorLayout = ({
   // ── Duplicate & save dialog ───────────────────────────────────────────────
   const [dupDialogOpen, setDupDialogOpen] = useState(false);
   const [dupName, setDupName] = useState("");
+
+  // ── Save-to-learning dialogs ───────────────────────────────────────────────
+  const [learnPickerOpen, setLearnPickerOpen] = useState(false);
+  const [learnConfirmOpen, setLearnConfirmOpen] = useState(false);
+  const [learnMode, setLearnMode] = useState<'quick' | 'advanced'>('quick');
+  const [learnProfileId, setLearnProfileId] = useState('');
+  const [learnNote, setLearnNote] = useState('');
+  const [learnSaving, setLearnSaving] = useState(false);
 
   // ── Local typography overrides (start from props, user can adjust) ──────────
   const [localFontFamily, setLocalFontFamily] = useState(fontFamily);
@@ -320,6 +340,50 @@ export const SyncMirrorLayout = ({
     ...(localTextColor ? { color: localTextColor } : {}),
   };
 
+  const selectedLearningProfile = useMemo(
+    () => learningProfiles.find((p) => p.id === learnProfileId),
+    [learningProfiles, learnProfileId],
+  );
+
+  const editedTextForLearning = useMemo(
+    () => (fullEditMode ? editDraft : text).trim(),
+    [fullEditMode, editDraft, text],
+  );
+
+  const openLearningPicker = useCallback((mode: 'quick' | 'advanced') => {
+    if (!onSaveLearning) return;
+    setLearnMode(mode);
+    setLearnProfileId('');
+    setLearnNote('');
+    setLearnPickerOpen(true);
+  }, [onSaveLearning]);
+
+  const continueToLearningConfirm = useCallback(() => {
+    if (!learnProfileId || !editedTextForLearning || !learningEnabled) return;
+    setLearnPickerOpen(false);
+    setLearnConfirmOpen(true);
+  }, [learnProfileId, editedTextForLearning, learningEnabled]);
+
+  const submitLearning = useCallback(async () => {
+    if (!onSaveLearning || !learnProfileId || !editedTextForLearning) return;
+    setLearnSaving(true);
+    try {
+      const ok = await onSaveLearning({
+        editedText: editedTextForLearning,
+        profileId: learnProfileId,
+        mode: learnMode,
+        note: learnMode === 'advanced' ? (learnNote.trim() || undefined) : undefined,
+      });
+      if (ok !== false) {
+        setLearnConfirmOpen(false);
+        setLearnProfileId('');
+        setLearnNote('');
+      }
+    } finally {
+      setLearnSaving(false);
+    }
+  }, [onSaveLearning, learnProfileId, editedTextForLearning, learnMode, learnNote]);
+
   // ── Render a single line row for one column ─────────────────────────────────
   const renderLine = (
     line: WordTiming[],
@@ -436,6 +500,42 @@ export const SyncMirrorLayout = ({
             <span className="text-sm font-semibold">עריכת טקסט מלאה</span>
             <span className="text-[11px] text-muted-foreground">מתעדכן אוטומטית אחרי 10 שניות או בסיום מילה</span>
             <div className="flex gap-2 ms-auto shrink-0">
+              {onSaveLearning && (
+                <div className="inline-flex items-center">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openLearningPicker('quick')}
+                    disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}
+                    title="שמור ללמידה עם בחירת פרופיל"
+                    className="rounded-e-none"
+                  >
+                    <Brain className="w-3.5 h-3.5 me-1" />
+                    שמור ללמידה
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-s-none border-s-0 px-2"
+                        disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}
+                        title="אפשרויות שמירה ללמידה"
+                      >
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" dir="rtl" className="text-xs">
+                      <DropdownMenuItem onClick={() => openLearningPicker('quick')}>
+                        שמירה מהירה ללמידה
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => openLearningPicker('advanced')}>
+                        שמירה מתקדמת (עם הערה)
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              )}
               <Button size="sm" variant="default" onClick={saveFullEdit}>
                 <Check className="w-3.5 h-3.5 me-1" />
                 שמור
@@ -624,6 +724,42 @@ export const SyncMirrorLayout = ({
                 <Copy className="w-2.5 h-2.5" />
                 שכפל ושמור
               </Button>
+            )}
+            {onSaveLearning && (
+              <div className="inline-flex items-center">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-[10px] px-2 gap-0.5 rounded-e-none"
+                  onClick={() => openLearningPicker('quick')}
+                  disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}
+                  title="שמור ללמידה עם בחירת פרופיל"
+                >
+                  <Brain className="w-2.5 h-2.5" />
+                  שמור ללמידה
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 rounded-s-none border-s-0 px-1"
+                      disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}
+                      title="אפשרויות שמירה ללמידה"
+                    >
+                      <ChevronDown className="w-2.5 h-2.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" dir="rtl" className="text-xs">
+                    <DropdownMenuItem onClick={() => openLearningPicker('quick')}>
+                      שמירה מהירה ללמידה
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => openLearningPicker('advanced')}>
+                      שמירה מתקדמת (עם הערה)
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             )}
             {/* Typography popover */}
             <Popover>
@@ -909,6 +1045,97 @@ export const SyncMirrorLayout = ({
 
       {/* Word-replace popover */}
 
+      {/* ── Save to learning: profile picker ── */}
+      <Dialog open={learnPickerOpen} onOpenChange={setLearnPickerOpen}>
+        <DialogContent dir="rtl" className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-right">
+              {learnMode === 'advanced' ? 'שמירה מתקדמת ללמידה' : 'שמירה מהירה ללמידה'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            {!learningEnabled && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                כדי להשתמש בלמידת פרופילים יש להפעיל קודם את "מודל הגייה אישי" במסך הראשי.
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">בחירת פרופיל יעד (חובה בכל שמירה)</Label>
+              <Select value={learnProfileId} onValueChange={setLearnProfileId}>
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue placeholder="בחר פרופיל" />
+                </SelectTrigger>
+                <SelectContent dir="rtl">
+                  {learningProfiles.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!learningProfiles.length && (
+                <p className="text-xs text-destructive">לא נמצאו פרופילים. צור פרופיל קודם במסך הראשי.</p>
+              )}
+            </div>
+            {learnMode === 'advanced' && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">הערה (אופציונלי)</Label>
+                <Textarea
+                  value={learnNote}
+                  onChange={(e) => setLearnNote(e.target.value)}
+                  className="min-h-[84px] text-sm"
+                  placeholder="למשל: שיעור חנוכה · דגש על שמות תנאים"
+                  dir="rtl"
+                />
+              </div>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              יישמרו טקסט מקורי/ערוך, זוגות תיקון, והקשר אודיו (אם זמין) לפרופיל הנבחר.
+            </p>
+          </div>
+          <DialogFooter className="flex-row-reverse gap-2 sm:gap-2">
+            <Button
+              onClick={continueToLearningConfirm}
+              disabled={!learningEnabled || !learningProfiles.length || !learnProfileId || !editedTextForLearning}
+            >
+              המשך לאישור
+            </Button>
+            <Button variant="ghost" onClick={() => setLearnPickerOpen(false)}>ביטול</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Save to learning: explicit confirm ── */}
+      <Dialog open={learnConfirmOpen} onOpenChange={setLearnConfirmOpen}>
+        <DialogContent dir="rtl" className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-right">אישור שמירה ללמידה</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-1 text-sm">
+            <p>
+              פרופיל יעד: <span className="font-semibold">{selectedLearningProfile?.name || 'לא נבחר'}</span>
+            </p>
+            <p>
+              מצב שמירה: <span className="font-semibold">{learnMode === 'advanced' ? 'מתקדם' : 'מהיר'}</span>
+            </p>
+            <p>
+              אורך טקסט: <span className="font-semibold">{editedTextForLearning.split(/\s+/).filter(Boolean).length}</span> מילים
+            </p>
+            {learnMode === 'advanced' && learnNote.trim() && (
+              <p className="text-xs text-muted-foreground">הערה: {learnNote.trim()}</p>
+            )}
+            <div className="rounded-md border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
+              השמירה תעדכן רק את הפרופיל שבחרת, ותוסיף דוגמת למידה מלאה לסנכרון ענן עתידי.
+            </div>
+          </div>
+          <DialogFooter className="flex-row-reverse gap-2 sm:gap-2">
+            <Button onClick={submitLearning} disabled={learnSaving || !learnProfileId}>
+              {learnSaving ? 'שומר...' : 'מאשר ושומר'}
+            </Button>
+            <Button variant="ghost" onClick={() => setLearnConfirmOpen(false)} disabled={learnSaving}>ביטול</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Duplicate & save dialog ── */}
       <Dialog open={dupDialogOpen} onOpenChange={setDupDialogOpen}>

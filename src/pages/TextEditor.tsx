@@ -50,6 +50,13 @@ import { useOllama, isOllamaModel } from "@/hooks/useOllama";
 import { db } from "@/lib/localDb";
 import { useCorrectionLearning } from "@/hooks/useCorrectionLearning";
 import { getServerUrl } from "@/lib/serverConfig";
+import {
+  addProfileLearningSample,
+  bulkTrainProfile,
+  diffForTraining,
+  getProfile,
+  listProfiles,
+} from "@/lib/pronunciationProfiles";
 import { LazyErrorBoundary } from "@/components/LazyErrorBoundary";
 import { CollapsibleWidget } from "@/components/ui/CollapsibleWidget";
 import "@/styles/mobile-pages.css";
@@ -232,6 +239,10 @@ const TextEditor = () => {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   const setColumns = (v: number) => updatePreference('editor_columns', v);
+  const cycleColumnView = () => {
+    const next = columns === 1 ? 2 : columns === 2 ? 3 : 1;
+    setColumns(next);
+  };
 
   const columnStyle: React.CSSProperties = columns > 1 ? {
     columnCount: columns,
@@ -398,6 +409,7 @@ const TextEditor = () => {
       
       if (savedText) {
         setText(savedText);
+        if (!originalTextRef.current) originalTextRef.current = savedText;
       }
     }
 
@@ -827,6 +839,89 @@ const TextEditor = () => {
     });
   }, [buildSyncedTimings, saveCloudVersion, transcriptId]);
 
+  const learningProfiles = useMemo(
+    () => listProfiles().map((p) => ({ id: p.id, name: p.name })),
+    [preferences.active_pronunciation_profile],
+  );
+
+  const handleSaveLearningToProfile = useCallback(async (
+    payload: { editedText: string; profileId: string; mode: 'quick' | 'advanced'; note?: string }
+  ): Promise<boolean> => {
+    const profile = getProfile(payload.profileId);
+    if (!profile) {
+      toast({ title: 'פרופיל לא נמצא', description: 'בחר פרופיל תקין ונסה שוב.', variant: 'destructive' });
+      return false;
+    }
+
+    const editedText = payload.editedText.trim();
+    const originalText = (originalTextRef.current || text).trim();
+    if (!editedText || !originalText) {
+      toast({ title: 'אין מספיק נתונים', description: 'נדרש טקסט מקורי וערוך כדי ללמוד.', variant: 'destructive' });
+      return false;
+    }
+
+    const pairs = diffForTraining(originalText, editedText);
+    const accepted = bulkTrainProfile(payload.profileId, pairs);
+    if (accepted <= 0) {
+      toast({
+        title: 'לא נמצאו שינויים ללמידה',
+        description: 'הטקסט הערוך כמעט זהה לטקסט המקורי.',
+        variant: 'destructive',
+      });
+      return false;
+    }
+
+    const navState = (location.state || {}) as Record<string, unknown>;
+    const navAudioUrl = typeof navState.audioUrl === 'string' ? navState.audioUrl : undefined;
+    const navAudioFilePath = typeof navState.audioFilePath === 'string' ? navState.audioFilePath : undefined;
+    const effectiveAudioUrl = audioUrl || navAudioUrl;
+    const audioSource = navAudioFilePath
+      ? 'supabase'
+      : effectiveAudioUrl?.startsWith('blob:')
+        ? 'blob'
+        : effectiveAudioUrl
+          ? 'url'
+          : 'unknown';
+
+    addProfileLearningSample(payload.profileId, {
+      source: 'text-editor-sync-mirror',
+      transcriptId: transcriptIdRef.current || transcriptId || undefined,
+      engineLabel: typeof navState.engine === 'string' ? navState.engine : undefined,
+      actionLabel: payload.mode === 'advanced' ? 'שמירה מתקדמת מהעורך' : 'שמירה מהירה מהעורך',
+      note: payload.note,
+      originalText,
+      correctedText: editedText,
+      correctionPairs: pairs.map((p) => ({
+        original: p.original,
+        corrected: p.corrected,
+        count: Math.max(1, p.count || 1),
+      })),
+      audio: {
+        source: audioSource,
+        audioUrl: effectiveAudioUrl,
+        audioFilePath: navAudioFilePath,
+        fileName: audioFileName || (typeof navState.audioFileName === 'string' ? navState.audioFileName : undefined),
+        mimeType: audioBlob?.type,
+        sizeBytes: audioBlob?.size,
+        durationSec: wordTimings[wordTimings.length - 1]?.end,
+      },
+    });
+
+    toast({
+      title: 'נשמר ללמידת פרופיל ✅',
+      description: `${profile.name} · ${accepted} זוגות תיקון נשמרו`,
+    });
+    return true;
+  }, [
+    text,
+    location.state,
+    audioUrl,
+    transcriptId,
+    audioFileName,
+    audioBlob,
+    wordTimings,
+  ]);
+
   return (
     <Suspense fallback={null}>
     <div className="mobile-optimized-page text-editor-page min-h-screen bg-background p-2 md:p-4" dir="rtl">
@@ -857,6 +952,15 @@ const TextEditor = () => {
                 </Button>
               ))}
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={cycleColumnView}
+              title={`החלף תצוגה מהירה · עכשיו: ${columns === 1 ? 'רשימה' : columns === 2 ? 'רשת' : 'טבלה'}`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </Button>
             <TextStyleControl
               fontSize={fontSize}
               fontFamily={fontFamily}
@@ -1209,6 +1313,9 @@ const TextEditor = () => {
                   onSearchMatchCount={setTranscriptMatchCount}
                   onSaveReplace={() => handleSaveAndReplaceOriginal(text, 'manual', 'נגן מסונכרן', 'שמירה מהנגן')}
                   onDuplicateSave={(newName) => handleDuplicateAndSave(text, 'manual', 'נגן מסונכרן', 'שכפול מהנגן', newName)}
+                  learningProfiles={learningProfiles}
+                  learningEnabled={true}
+                  onSaveLearning={handleSaveLearningToProfile}
                 />
               </div>
             )}

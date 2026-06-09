@@ -6,14 +6,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
-import { Search, Plus, Copy, Scissors, Clipboard, Trash2, Pin, Cloud, Loader2, X, Columns2 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Search, Plus, Copy, Scissors, Clipboard, Trash2, Pin, Cloud, Loader2, X, Columns2, Rows3, LayoutGrid, Table2 } from 'lucide-react';
 import { useFolderTree, type FolderNode } from '@/hooks/useFolderTree';
 import { useCloudTranscripts, type CloudTranscript } from '@/hooks/useCloudTranscripts';
 import { FolderTree } from './FolderTree';
-import { FileGrid } from './FileGrid';
+import { FileGrid, type FileGridViewMode } from './FileGrid';
 import { Breadcrumbs } from './Breadcrumbs';
 import { fileClipboard } from '@/lib/clipboard';
-import { GoogleDriveBrowser, uploadToDrive } from '@/components/GoogleDriveBrowser';
+import { GoogleDriveBrowser, uploadToDrive, type LocalDragItem } from '@/components/GoogleDriveBrowser';
 import { DriveFolderPicker } from '@/components/DriveFolderPicker';
 import { DriveUploadStatus } from './DriveUploadStatus';
 import { driveUploadQueue } from '@/lib/driveUploadQueue';
@@ -25,8 +26,16 @@ type DriveDropFile = {
   mimeType: string;
 };
 
+type DriveDropFolder = {
+  id: string;
+  name: string;
+};
+
+type CrossSystemAction = 'copy' | 'move' | 'cancel';
+
 export const FileManager = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { tree, folders, createFolder, updateFolder, deleteFolder, moveFolder, togglePin, getPath } = useFolderTree();
   const { transcripts, updateTranscript, deleteTranscript } = useCloudTranscripts();
 
@@ -45,9 +54,27 @@ export const FileManager = () => {
   const [inlineDriveSplit, setInlineDriveSplit] = useState<boolean>(() => {
     try { return localStorage.getItem('fm_inline_drive_split') === '1'; } catch { return false; }
   });
+  const [localViewMode, setLocalViewMode] = useState<FileGridViewMode>(() => {
+    try {
+      const v = localStorage.getItem('fm_local_view_mode');
+      return (v === 'list' || v === 'table' || v === 'grid') ? v : 'grid';
+    } catch {
+      return 'grid';
+    }
+  });
   useEffect(() => {
     try { localStorage.setItem('fm_inline_drive_split', inlineDriveSplit ? '1' : '0'); } catch {}
   }, [inlineDriveSplit]);
+  useEffect(() => {
+    try { localStorage.setItem('fm_local_view_mode', localViewMode); } catch {}
+  }, [localViewMode]);
+
+  const cycleLocalViewMode = () => {
+    setLocalViewMode((prev) => (prev === 'grid' ? 'list' : prev === 'list' ? 'table' : 'grid'));
+  };
+
+  const LocalViewIcon = localViewMode === 'grid' ? LayoutGrid : localViewMode === 'list' ? Rows3 : Table2;
+  const localViewLabel = localViewMode === 'grid' ? 'רשת' : localViewMode === 'list' ? 'רשימה' : 'טבלה';
 
 
   const pinned = useMemo(() => folders.filter(f => f.pinned), [folders]);
@@ -226,69 +253,235 @@ export const FileManager = () => {
     setDriveLinkOpen(null);
   };
 
-  const handleUploadTranscriptToDriveFolder = async (
+  const invokeDrive = async <T,>(body: Record<string, any>): Promise<T> => {
+    const { data, error } = await supabase.functions.invoke('google-drive', { body });
+    if (error) throw error;
+    if ((data as any)?.error) throw new Error((data as any).error);
+    return data as T;
+  };
+
+  const askCrossSystemAction = (label: string): CrossSystemAction => {
+    const raw = window.prompt(`${label}\nבחר פעולה: copy / move / cancel`, 'copy');
+    const v = (raw || '').trim().toLowerCase();
+    if (v === 'move' || v === 'העבר') return 'move';
+    if (v === 'cancel' || v === 'בטל') return 'cancel';
+    return 'copy';
+  };
+
+  const askConflictResolution = (name: string): 'replace' | 'rename' | 'skip' => {
+    const raw = window.prompt(`קיים כבר פריט בשם "${name}". בחר: replace / rename / skip`, 'rename');
+    const v = (raw || '').trim().toLowerCase();
+    if (v === 'replace' || v === 'דרוס') return 'replace';
+    if (v === 'skip' || v === 'דלג') return 'skip';
+    return 'rename';
+  };
+
+  const isDriveFolder = (mimeType: string) => mimeType === 'application/vnd.google-apps.folder';
+  const isTextLike = (mimeType: string, name: string) =>
+    /^text\//.test(mimeType) || /(json|xml|csv)/i.test(mimeType) || /\.(txt|md|json|csv|srt|vtt)$/i.test(name);
+
+  const indexedName = (name: string, idx: number) => {
+    const dot = name.lastIndexOf('.');
+    if (dot > 0) return `${name.slice(0, dot)} (${idx})${name.slice(dot)}`;
+    return `${name} (${idx})`;
+  };
+
+  const findDriveByName = async (name: string, parentId: string | null) => {
+    const data = await invokeDrive<{ files?: Array<{ id: string; name: string; mimeType: string }> }>({
+      action: 'findByName',
+      name,
+      parentId: parentId || undefined,
+    });
+    return data.files || [];
+  };
+
+  const resolveUniqueDriveName = async (name: string, parentId: string | null, folderOnly: boolean) => {
+    for (let i = 1; i < 500; i++) {
+      const candidate = i === 1 ? name : indexedName(name, i);
+      const matches = (await findDriveByName(candidate, parentId)).filter((f) => folderOnly ? isDriveFolder(f.mimeType) : !isDriveFolder(f.mimeType));
+      if (matches.length === 0) return candidate;
+    }
+    return `${name}-${Date.now()}`;
+  };
+
+  const ensureUserId = async () => {
+    if (user?.id) return user.id;
+    const { data } = await supabase.auth.getUser();
+    if (!data.user?.id) throw new Error('יש להתחבר כדי לבצע פעולה זו');
+    return data.user.id;
+  };
+
+  const createLocalTranscriptFromText = async (folderId: string | null, title: string, text: string) => {
+    const uid = await ensureUserId();
+    const existing = transcripts.find((t: any) => (t.folder_id || null) === folderId && (t.title || '').trim() === title.trim());
+    let finalTitle = title;
+    if (existing) {
+      const resolution = askConflictResolution(title);
+      if (resolution === 'skip') return false;
+      if (resolution === 'replace') await deleteTranscript(existing.id);
+      if (resolution === 'rename') {
+        for (let i = 1; i < 500; i++) {
+          const candidate = indexedName(title, i);
+          const clash = transcripts.find((t: any) => (t.folder_id || null) === folderId && (t.title || '').trim() === candidate.trim());
+          if (!clash) { finalTitle = candidate; break; }
+        }
+      }
+    }
+
+    const { error } = await supabase.from('transcripts').insert({
+      user_id: uid,
+      text,
+      engine: 'drive-import',
+      title: finalTitle,
+      notes: 'Imported from Google Drive',
+      tags: [],
+      folder_id: folderId,
+    } as any);
+    if (error) throw error;
+    return true;
+  };
+
+  const uploadTranscriptToDriveWithConflicts = async (
     targetFolder: { id: string | null; name: string },
     transcriptId: string,
   ) => {
     const tr = transcripts.find((t: any) => t.id === transcriptId);
-    if (!tr) return;
+    if (!tr) return false;
 
-    try {
-      const safeTitle = (tr.title || 'transcript').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'transcript';
+    const safeTitle = (tr.title || 'transcript').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'transcript';
+    const fileName = `${safeTitle}.txt`;
+    const existing = (await findDriveByName(fileName, targetFolder.id)).filter((f) => !isDriveFolder(f.mimeType));
+
+    if (existing.length > 0) {
+      const resolution = askConflictResolution(fileName);
+      if (resolution === 'skip') return false;
+      if (resolution === 'replace') {
+        const base64 = btoa(unescape(encodeURIComponent(tr.text || '')));
+        await invokeDrive({
+          action: 'updateContent',
+          fileId: existing[0].id,
+          mimeType: 'text/plain;charset=utf-8',
+          base64,
+        });
+        return true;
+      }
+      const uniqueName = await resolveUniqueDriveName(fileName, targetFolder.id, false);
       await uploadToDrive({
-        name: `${safeTitle}.txt`,
+        name: uniqueName,
         mimeType: 'text/plain;charset=utf-8',
         content: tr.text || '',
         parents: targetFolder.id ? [targetFolder.id] : undefined,
       });
-      toast({ title: '☁️ הועלה ל-Drive', description: `${tr.title || 'תמלול'} -> ${targetFolder.name}` });
-    } catch (e: any) {
-      toast({ title: 'שגיאת העלאה ל-Drive', description: e.message, variant: 'destructive' });
+      return true;
+    }
+
+    await uploadToDrive({
+      name: fileName,
+      mimeType: 'text/plain;charset=utf-8',
+      content: tr.text || '',
+      parents: targetFolder.id ? [targetFolder.id] : undefined,
+    });
+    return true;
+  };
+
+  const copyLocalFolderToDriveRecursive = async (localFolderId: string, targetDriveParentId: string | null) => {
+    const localFolder = folders.find((f) => f.id === localFolderId);
+    if (!localFolder) return;
+
+    const existingFolders = (await findDriveByName(localFolder.name, targetDriveParentId)).filter((f) => isDriveFolder(f.mimeType));
+    let destinationId: string | null = null;
+    if (existingFolders.length > 0) {
+      const resolution = askConflictResolution(localFolder.name);
+      if (resolution === 'skip') return;
+      if (resolution === 'replace') destinationId = existingFolders[0].id;
+    }
+    if (!destinationId) {
+      const folderName = existingFolders.length > 0 ? await resolveUniqueDriveName(localFolder.name, targetDriveParentId, true) : localFolder.name;
+      const created = await invokeDrive<{ id: string }>({
+        action: 'createFolder',
+        name: folderName,
+        parents: targetDriveParentId ? [targetDriveParentId] : undefined,
+      });
+      destinationId = created.id;
+    }
+
+    const childTranscripts = transcripts.filter((t: any) => (t.folder_id || null) === localFolderId);
+    for (const tr of childTranscripts) {
+      await uploadTranscriptToDriveWithConflicts({ id: destinationId, name: localFolder.name }, tr.id);
+    }
+
+    const childFolders = folders.filter((f) => f.parent_id === localFolderId);
+    for (const child of childFolders) {
+      await copyLocalFolderToDriveRecursive(child.id, destinationId);
     }
   };
 
-  const handleDropDriveFileToLocal = async (file: DriveDropFile) => {
+  const handleDropLocalItemToDriveFolder = async (
+    targetFolder: { id: string | null; name: string },
+    item: LocalDragItem,
+  ) => {
+    const action = askCrossSystemAction(`מקומי -> Drive (${targetFolder.name})`);
+    if (action === 'cancel') return;
+
     try {
-      const { data, error } = await supabase.functions.invoke('google-drive', {
-        body: { action: 'download', fileId: file.id },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (item.kind === 'transcript') {
+        const uploaded = await uploadTranscriptToDriveWithConflicts(targetFolder, item.id);
+        if (!uploaded) return;
+        if (action === 'move') await deleteTranscript(item.id);
+        toast({ title: action === 'move' ? '✅ הועבר ל-Drive' : '✅ הועתק ל-Drive' });
+        return;
+      }
 
+      await copyLocalFolderToDriveRecursive(item.id, targetFolder.id);
+      if (action === 'move') await deleteFolder(item.id);
+      toast({ title: action === 'move' ? '✅ תיקייה הועברה ל-Drive' : '✅ תיקייה הועתקה ל-Drive', description: item.name || '' });
+    } catch (e: any) {
+      toast({ title: 'שגיאת העברה ל-Drive', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const importDriveFileToLocalFolder = async (folderId: string | null, file: DriveDropFile, shouldMove: boolean) => {
+    const data = await invokeDrive<{ base64: string; contentType?: string }>({ action: 'download', fileId: file.id });
+    const mime = data.contentType || file.mimeType;
+
+    if (isTextLike(mime, file.name)) {
+      const title = file.name.replace(/\.[^.]+$/, '') || file.name;
+      const text = new TextDecoder('utf-8').decode(Uint8Array.from(atob(data.base64), c => c.charCodeAt(0)));
+      const created = await createLocalTranscriptFromText(folderId, title, text);
+      if (!created) return;
+    } else {
       const bin = Uint8Array.from(atob(data.base64), c => c.charCodeAt(0));
-      const importedFile = new File([bin], file.name, { type: data.contentType || file.mimeType });
+      const importedFile = new File([bin], file.name, { type: mime });
+      navigate('/', { state: { file: importedFile, targetFolderId: folderId } });
+    }
 
-      navigate('/', { state: { file: importedFile } });
+    if (shouldMove) {
+      await invokeDrive({ action: 'delete', fileId: file.id });
+    }
+  };
 
-      toast({ title: '✅ ייבוא מ-Drive', description: file.name });
+  const handleDropDriveFileToLocal = async (folderId: string | null, file: DriveDropFile) => {
+    const action = askCrossSystemAction(`Drive -> מקומי (${file.name})`);
+    if (action === 'cancel') return;
+    try {
+      await importDriveFileToLocalFolder(folderId, file, action === 'move');
+      toast({ title: action === 'move' ? '✅ הועבר מ-Drive' : '✅ הועתק מ-Drive', description: file.name });
     } catch (e: any) {
       toast({ title: 'שגיאת ייבוא מ-Drive', description: e.message, variant: 'destructive' });
     }
   };
 
-  // Drop a Drive file onto a specific local folder in the tree → import for transcription, pre-selecting folder
-  const handleDropDriveFileToTreeFolder = async (parentLocalId: string | null, file: { id: string; name: string; mimeType: string }) => {
-    try {
-      const { data, error } = await supabase.functions.invoke('google-drive', {
-        body: { action: 'download', fileId: file.id },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      const bin = Uint8Array.from(atob(data.base64), c => c.charCodeAt(0));
-      const importedFile = new File([bin], file.name, { type: data.contentType || file.mimeType });
-      navigate('/', { state: { file: importedFile, targetFolderId: parentLocalId } });
-      toast({ title: '✅ ייבוא מ-Drive', description: file.name });
-    } catch (e: any) {
-      toast({ title: 'שגיאת ייבוא מ-Drive', description: e.message, variant: 'destructive' });
-    }
+  const handleDropDriveFileToTreeFolder = async (parentLocalId: string | null, file: DriveDropFile) => {
+    await handleDropDriveFileToLocal(parentLocalId, file);
   };
 
-  // Recursively mirror a Drive folder tree under a local parent folder.
-  // Creates local folders with the same names, links each to its Drive folder,
-  // and counts audio files found (which the user can later drag individually to transcribe).
-  const handleDropDriveFolderToTree = async (parentLocalId: string | null, drive: { id: string; name: string }) => {
+  const handleDropDriveFolderToTree = async (parentLocalId: string | null, drive: DriveDropFolder) => {
+    const action = askCrossSystemAction(`תיקיית Drive -> מקומי (${drive.name})`);
+    if (action === 'cancel') return;
+
     let createdFolders = 0;
-    let audioFilesFound = 0;
+    let importedTextFiles = 0;
+    let skippedBinaryFiles = 0;
     const tInfo = toast({ title: '⏳ מייבא מבנה תיקיות מ-Drive…', description: drive.name });
     const mirror = async (driveFolderId: string, driveFolderName: string, localParentId: string | null) => {
       const created = await createFolder({
@@ -299,26 +492,33 @@ export const FileManager = () => {
         drive_synced_at: new Date().toISOString(),
       } as any);
       createdFolders++;
-      const { data, error } = await supabase.functions.invoke('google-drive', {
-        body: { action: 'list', folderId: driveFolderId, audioOnly: false, pageSize: 200 },
+      const data = await invokeDrive<{ files?: Array<{ id: string; name: string; mimeType: string }> }>({
+        action: 'list',
+        folderId: driveFolderId,
+        audioOnly: false,
+        pageSize: 200,
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      const children = (data?.files || []) as Array<{ id: string; name: string; mimeType: string }>;
+      const children = data.files || [];
       for (const c of children) {
-        if (c.mimeType === 'application/vnd.google-apps.folder') {
+        if (isDriveFolder(c.mimeType)) {
           await mirror(c.id, c.name, created.id);
-        } else if (/^audio\//.test(c.mimeType) || /\.(mp3|wav|m4a|ogg|flac|webm|aac)$/i.test(c.name)) {
-          audioFilesFound++;
+        } else if (isTextLike(c.mimeType, c.name)) {
+          await importDriveFileToLocalFolder(created.id, c, false);
+          importedTextFiles++;
+        } else {
+          skippedBinaryFiles++;
         }
       }
     };
     try {
       await mirror(drive.id, drive.name, parentLocalId);
+      if (action === 'move') {
+        await invokeDrive({ action: 'delete', fileId: drive.id });
+      }
       try { (tInfo as any)?.dismiss?.(); } catch {}
       toast({
-        title: '✅ מבנה תיקיות יובא',
-        description: `${createdFolders} תיקיות נוצרו · ${audioFilesFound} קובצי אודיו זוהו (גרור פרטנית לתמלול)`,
+        title: action === 'move' ? '✅ תיקייה הועברה מ-Drive' : '✅ תיקייה הועתקה מ-Drive',
+        description: `${createdFolders} תיקיות · ${importedTextFiles} קבצי טקסט · ${skippedBinaryFiles} קבצים בינאריים דולגו`,
       });
     } catch (e: any) {
       toast({ title: 'שגיאת ייבוא מבנה', description: e.message, variant: 'destructive' });
@@ -407,18 +607,29 @@ export const FileManager = () => {
               e.preventDefault();
               try {
                 const file = JSON.parse(raw) as DriveDropFile;
-                void handleDropDriveFileToLocal(file);
+                void handleDropDriveFileToLocal(currentFolderId, file);
               } catch { /* ignore */ }
             }}
           >
             <div className="px-3 sm:px-4 py-2 border-b flex items-center justify-between gap-2" dir="rtl">
               <Breadcrumbs path={path} onNavigate={setCurrentFolderId} />
-              {selected.size > 0 && (
-                <div className="text-xs text-muted-foreground flex items-center gap-2 shrink-0">
-                  {selected.size} נבחרו
-                  <button onClick={() => setSelected(new Set())}><X className="w-3 h-3" /></button>
-                </div>
-              )}
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7"
+                  onClick={cycleLocalViewMode}
+                  title={`תצוגת קבצים: ${localViewLabel}`}
+                >
+                  <LocalViewIcon className="w-4 h-4" />
+                </Button>
+                {selected.size > 0 && (
+                  <div className="text-xs text-muted-foreground flex items-center gap-2 shrink-0">
+                    {selected.size} נבחרו
+                    <button onClick={() => setSelected(new Set())}><X className="w-3 h-3" /></button>
+                  </div>
+                )}
+              </div>
             </div>
             {inlineDriveSplit && (
               <div className="px-3 sm:px-4 py-1.5 text-[11px] text-muted-foreground bg-yellow-50/40 dark:bg-yellow-950/10 border-b text-right" dir="rtl">
@@ -428,6 +639,7 @@ export const FileManager = () => {
             <div className="flex-1 p-3 sm:p-4 overflow-y-auto">
               <FileGrid
                 items={itemsInCurrent}
+                viewMode={localViewMode}
                 selected={selected}
                 cutIds={cutIds}
                 onSelect={onSelect}
@@ -444,8 +656,8 @@ export const FileManager = () => {
           {inlineDriveSplit && (
             <div className="bg-muted/5 p-2 sm:p-3 overflow-y-auto min-w-0" dir="rtl">
               <GoogleDriveBrowser
-                onDropLocalTranscriptToFolder={(folder, transcriptId) =>
-                  void handleUploadTranscriptToDriveFolder(folder, transcriptId)
+                onDropLocalItemToFolder={(folder, item) =>
+                  void handleDropLocalItemToDriveFolder(folder, item)
                 }
                 onImportAudio={(file) => {
                   navigate('/', { state: { file } });

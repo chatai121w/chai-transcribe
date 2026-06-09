@@ -74,7 +74,17 @@ const FolderRow = ({ node, selectedId, expanded, onToggleExpand, onSelect, onCre
           {hasChildren ? (isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />) : null}
         </button>
 
-        <div ref={setDragRef} {...listeners} {...attributes} className="flex items-center gap-1.5 flex-1 min-w-0">
+        <div
+          ref={setDragRef}
+          {...listeners}
+          {...attributes}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('application/x-sht-local-item', JSON.stringify({ kind: 'folder', id: node.id, name: node.name }));
+            e.dataTransfer.effectAllowed = 'copyMove';
+          }}
+          className="flex items-center gap-1.5 flex-1 min-w-0"
+        >
           {node.emoji ? (
             <span className="text-base shrink-0">{node.emoji}</span>
           ) : isExpanded && hasChildren ? (
