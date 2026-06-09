@@ -23,7 +23,7 @@ function DesignModeToggleButton() {
       variant={enabled ? "default" : "outline"}
       className="gap-2"
       onClick={() => setEnabled(!enabled)}
-      title="עריכת אלמנטים ישירות על העמודים — לחץ על כל אלמנט כדי לשנות אותו"
+      title="עריכת אלמנטים ישירות על העמודים — נשמר בנוסף לערכת הנושא"
     >
       <MousePointerClick className="h-4 w-4" />
       {enabled ? "כבה מצב עיצוב חי" : "מצב עיצוב חי"}
@@ -210,9 +210,9 @@ function hslToHex(hsl: string): string {
 function hexToHsl(hex: string): string {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
   if (!result) return '0 0% 0%';
-  let r = parseInt(result[1], 16) / 255;
-  let g = parseInt(result[2], 16) / 255;
-  let b = parseInt(result[3], 16) / 255;
+  const r = parseInt(result[1], 16) / 255;
+  const g = parseInt(result[2], 16) / 255;
+  const b = parseInt(result[3], 16) / 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
   let h = 0, s = 0;
   const l = (max + min) / 2;
@@ -228,7 +228,17 @@ function hexToHsl(hex: string): string {
   return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
 }
 
-function ThemePreview({ theme, isActive, onClick }: { theme: AppTheme; isActive: boolean; onClick: () => void }) {
+function ThemePreview({
+  theme,
+  isActive,
+  onClick,
+  onDoubleClick,
+}: {
+  theme: AppTheme;
+  isActive: boolean;
+  onClick: () => void;
+  onDoubleClick?: () => void;
+}) {
   const bg = `hsl(${theme.colors.background})`;
   const fg = `hsl(${theme.colors.foreground})`;
   const primary = `hsl(${theme.colors.primary})`;
@@ -239,6 +249,7 @@ function ThemePreview({ theme, isActive, onClick }: { theme: AppTheme; isActive:
   return (
     <button
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       className={`relative rounded-xl p-3 text-right transition-all ${isActive ? 'ring-2 ring-offset-2 ring-primary scale-[1.02]' : 'hover:scale-[1.01]'}`}
       style={{ backgroundColor: bg, border: `2px solid ${border}` }}
     >
@@ -392,13 +403,156 @@ function ThemeLivePreview({ colors, style, name, variant, highlightKey }: {
 // applied live, so users see EXACTLY how their changes look.
 // ─────────────────────────────────────────────────────────────────────
 const SITE_PREVIEW_ROUTES: { path: string; label: string }[] = [
-  { path: '/dashboard', label: '📊 דשבורד' },
+  { path: '/', label: '📊 דשבורד' },
   { path: '/folders', label: '📁 תיקיות' },
   { path: '/settings', label: '⚙️ הגדרות' },
-  { path: '/', label: '🏠 דף ראשי' },
   { path: '/text-editor', label: '✏️ עורך טקסט' },
   { path: '/login', label: '🔐 התחברות' },
 ];
+
+const SITE_PREVIEW_QUICK_KEYS: { key: keyof ThemeColors; label: string }[] = [
+  { key: 'background', label: 'רקע ראשי' },
+  { key: 'foreground', label: 'טקסט ראשי' },
+  { key: 'card', label: 'כרטיסים' },
+  { key: 'primary', label: 'כפתור ראשי' },
+  { key: 'accent', label: 'הדגשה' },
+  { key: 'muted', label: 'רקע משני' },
+  { key: 'border', label: 'מסגרות' },
+  { key: 'sidebarBackground', label: 'רקע סרגל צד' },
+  { key: 'sidebarPrimary', label: 'פריט פעיל בסרגל' },
+  { key: 'iconColor', label: 'אייקונים' },
+];
+
+const BG_MATCH_KEYS: Array<keyof ThemeColors> = ['background', 'card', 'popover', 'primary', 'secondary', 'accent', 'muted', 'destructive', 'sidebarBackground', 'sidebarPrimary', 'sidebarAccent'];
+const FG_MATCH_KEYS: Array<keyof ThemeColors> = ['foreground', 'cardForeground', 'popoverForeground', 'primaryForeground', 'secondaryForeground', 'accentForeground', 'mutedForeground', 'destructiveForeground', 'sidebarForeground', 'sidebarPrimaryForeground', 'sidebarAccentForeground'];
+const BORDER_MATCH_KEYS: Array<keyof ThemeColors> = ['border', 'input', 'ring', 'sidebarBorder', 'sidebarRing'];
+
+type RgbTuple = [number, number, number];
+
+function hslToRgbTuple(h: number, sPct: number, lPct: number): RgbTuple {
+  const s = Math.max(0, Math.min(100, sPct)) / 100;
+  const l = Math.max(0, Math.min(100, lPct)) / 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+
+  let rPrime = 0;
+  let gPrime = 0;
+  let bPrime = 0;
+
+  if (h >= 0 && h < 60) {
+    rPrime = c;
+    gPrime = x;
+  } else if (h >= 60 && h < 120) {
+    rPrime = x;
+    gPrime = c;
+  } else if (h >= 120 && h < 180) {
+    gPrime = c;
+    bPrime = x;
+  } else if (h >= 180 && h < 240) {
+    gPrime = x;
+    bPrime = c;
+  } else if (h >= 240 && h < 300) {
+    rPrime = x;
+    bPrime = c;
+  } else {
+    rPrime = c;
+    bPrime = x;
+  }
+
+  const toByte = (value: number) => Math.round((value + m) * 255);
+  return [toByte(rPrime), toByte(gPrime), toByte(bPrime)];
+}
+
+function parseRgbTuple(input: string): RgbTuple | null {
+  const value = input.trim().toLowerCase();
+  if (!value || value === 'transparent') return null;
+
+  if (value.startsWith('#')) {
+    const hex = value.replace('#', '');
+    if (hex.length === 6) {
+      return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
+    }
+    return null;
+  }
+
+  const rgbBody = value.match(/^rgba?\((.*)\)$/)?.[1];
+  if (!rgbBody) return null;
+  const parts = rgbBody.split(',').map((part) => part.trim());
+  if (parts.length < 3) return null;
+  const alpha = parts.length >= 4 ? Number(parts[3]) : 1;
+  if (!Number.isNaN(alpha) && alpha <= 0.01) return null;
+
+  const r = Number(parts[0]);
+  const g = Number(parts[1]);
+  const b = Number(parts[2]);
+  if ([r, g, b].some((n) => Number.isNaN(n))) return null;
+  return [Math.round(r), Math.round(g), Math.round(b)];
+}
+
+function parseThemeColorToRgbTuple(input: string): RgbTuple | null {
+  if (!input) return null;
+  let value = input.trim();
+  if (!value || value === 'inherit') return null;
+  if (value.startsWith('hsl(') && value.endsWith(')')) {
+    value = value.slice(4, -1);
+  }
+  const parts = value.split(/[\s,]+/).filter(Boolean);
+  if (parts.length < 3) return null;
+  const h = Number(parts[0]);
+  const s = Number(parts[1].replace('%', ''));
+  const l = Number(parts[2].replace('%', ''));
+  if ([h, s, l].some((n) => Number.isNaN(n))) return null;
+  return hslToRgbTuple((h % 360 + 360) % 360, s, l);
+}
+
+function rgbDistance(a: RgbTuple, b: RgbTuple): number {
+  const dr = a[0] - b[0];
+  const dg = a[1] - b[1];
+  const db = a[2] - b[2];
+  return Math.sqrt(dr * dr + dg * dg + db * db);
+}
+
+function closestThemeToken(sample: RgbTuple, keys: Array<keyof ThemeColors>, colors: ThemeColors): keyof ThemeColors | null {
+  let bestKey: keyof ThemeColors | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const key of keys) {
+    const tokenRgb = parseThemeColorToRgbTuple(colors[key]);
+    if (!tokenRgb) continue;
+    const distance = rgbDistance(sample, tokenRgb);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestKey = key;
+    }
+  }
+
+  return bestKey;
+}
+
+function pickThemeTokenFromElement(target: Element, colors: ThemeColors): keyof ThemeColors {
+  const style = getComputedStyle(target as HTMLElement);
+
+  const bg = parseRgbTuple(style.backgroundColor);
+  if (bg) {
+    const key = closestThemeToken(bg, BG_MATCH_KEYS, colors);
+    if (key) return key;
+  }
+
+  const fg = parseRgbTuple(style.color);
+  if (fg) {
+    const key = closestThemeToken(fg, FG_MATCH_KEYS, colors);
+    if (key) return key;
+  }
+
+  const border = parseRgbTuple(style.borderTopColor || style.borderColor);
+  if (border) {
+    const key = closestThemeToken(border, BORDER_MATCH_KEYS, colors);
+    if (key) return key;
+  }
+
+  return 'primary';
+}
 
 const SITE_PREVIEW_CSS_MAP: Record<keyof ThemeColors, string> = {
   background: '--background',
@@ -453,10 +607,24 @@ function applyThemeToIframe(doc: Document, colors: ThemeColors, style: ThemeStyl
   root.style.setProperty('--app-shadow', shadowMap[style.shadow || 'soft']);
 }
 
-function ThemeSitePreview({ colors, style }: { colors: ThemeColors; style: ThemeStyleOptions }) {
-  const [route, setRoute] = useState<string>('/dashboard');
+function ThemeSitePreview({
+  colors,
+  style,
+  onQuickColorChange,
+  getQuickColorHex,
+  onFocusColorKey,
+}: {
+  colors: ThemeColors;
+  style: ThemeStyleOptions;
+  onQuickColorChange?: (key: keyof ThemeColors, hex: string) => void;
+  getQuickColorHex?: (key: keyof ThemeColors) => string;
+  onFocusColorKey?: (key: keyof ThemeColors | null) => void;
+}) {
+  const [route, setRoute] = useState<string>('/');
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [loading, setLoading] = useState(true);
+  const [quickKey, setQuickKey] = useState<keyof ThemeColors>('primary');
+  const [pickMode, setPickMode] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const reapply = useCallback(() => {
@@ -465,6 +633,34 @@ function ThemeSitePreview({ colors, style }: { colors: ThemeColors; style: Theme
   }, [colors, style]);
 
   useEffect(() => { reapply(); }, [reapply]);
+
+  useEffect(() => {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc || !pickMode) return;
+
+    const previousCursor = doc.documentElement.style.cursor;
+    doc.documentElement.style.cursor = 'crosshair';
+
+    const onClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const matchedKey = pickThemeTokenFromElement(target, colors);
+      setQuickKey(matchedKey);
+      onFocusColorKey?.(matchedKey);
+      setPickMode(false);
+      toast.success(`נבחר צבע לעריכה: ${COLOR_DESCRIPTIONS[matchedKey] || matchedKey}`);
+    };
+
+    doc.addEventListener('click', onClick, true);
+
+    return () => {
+      doc.removeEventListener('click', onClick, true);
+      doc.documentElement.style.cursor = previousCursor;
+    };
+  }, [colors, onFocusColorKey, pickMode]);
 
   const width = device === 'mobile' ? 390 : '100%';
   const height = device === 'mobile' ? 700 : 600;
@@ -481,6 +677,53 @@ function ThemeSitePreview({ colors, style }: { colors: ThemeColors; style: Theme
             ))}
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-1 rounded-md border border-border/50 px-1 py-1">
+          <Label className="text-[10px] text-muted-foreground px-1">עריכה מהירה:</Label>
+          <Select
+            value={quickKey}
+            onValueChange={(v) => {
+              const key = v as keyof ThemeColors;
+              setQuickKey(key);
+              onFocusColorKey?.(key);
+            }}
+          >
+            <SelectTrigger className="h-7 w-40 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {SITE_PREVIEW_QUICK_KEYS.map((item) => (
+                <SelectItem key={item.key} value={item.key} className="text-xs">{item.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <input
+            type="color"
+            value={getQuickColorHex?.(quickKey) || '#daa520'}
+            onChange={(e) => onQuickColorChange?.(quickKey, e.target.value)}
+            onFocus={() => onFocusColorKey?.(quickKey)}
+            onBlur={() => onFocusColorKey?.(null)}
+            className="h-7 w-9 rounded border border-border cursor-pointer"
+            title="שנה את הצבע של הרכיב שנבחר"
+          />
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant={pickMode ? 'default' : 'outline'}
+          className="h-7 text-xs"
+          onClick={() => setPickMode((prev) => !prev)}
+        >
+          <MousePointerClick className="h-3 w-3 ml-1" />
+          {pickMode ? 'ביטול בחירת אלמנט' : 'בחר אלמנט מהתצוגה'}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          onClick={() => window.open(`${route}${route.includes('?') ? '&' : '?'}designMode=1`, '_blank', 'noopener,noreferrer')}
+        >
+          <MousePointerClick className="h-3 w-3 ml-1" />
+          עריכה חיה בעמוד חדש
+        </Button>
         <div className="flex rounded-md border border-border/50 overflow-hidden">
           <button type="button" onClick={() => setDevice('desktop')} className={`px-2 py-1 text-[11px] ${device === 'desktop' ? 'bg-primary text-primary-foreground' : ''}`}>🖥️ דסקטופ</button>
           <button type="button" onClick={() => setDevice('mobile')} className={`px-2 py-1 text-[11px] ${device === 'mobile' ? 'bg-primary text-primary-foreground' : ''}`}>📱 מובייל</button>
@@ -500,7 +743,7 @@ function ThemeSitePreview({ colors, style }: { colors: ThemeColors; style: Theme
           style={{ width, height, border: 'none', maxWidth: '100%' }}
         />
       </div>
-      <div className="text-[10px] text-muted-foreground">💡 זו תצוגה אמיתית של עמוד באתר עם הצבעים והסגנון הנוכחיים. לא יישמר עד שתלחץ "שמור".</div>
+      <div className="text-[10px] text-muted-foreground">💡 זו תצוגה אמיתית של עמוד באתר עם הצבעים והסגנון הנוכחיים. בחר אלמנט כדי לזהות צבע לעריכה מהירה. לא יישמר עד שתלחץ "שמור".</div>
     </div>
   );
 }
@@ -797,7 +1040,13 @@ function ThemeEditor({ initial, onSave, onDuplicate, onCancel, isBuiltIn, onPrev
             </div>
           </div>
           <TabsContent value="site" className="mt-2">
-            <ThemeSitePreview colors={colors} style={style} />
+            <ThemeSitePreview
+              colors={colors}
+              style={style}
+              onQuickColorChange={updateColor}
+              getQuickColorHex={(key) => getHex(key) || '#daa520'}
+              onFocusColorKey={setHighlightKey}
+            />
           </TabsContent>
           <TabsContent value="mock" className="mt-2 space-y-2">
             <Label className="text-xs text-muted-foreground">
@@ -1208,12 +1457,31 @@ export function ThemeManager() {
     setThemeBeforeEditing(null);
   };
 
-  const syncThemeToCloud = async (themeId: string) => {
+  const normalizeCustomTheme = (theme: AppTheme): AppTheme => ({ ...theme, isCustom: true });
+
+  const buildNextCustomThemes = (theme: AppTheme): AppTheme[] => {
+    const normalized = normalizeCustomTheme(theme);
+    const existingIndex = customThemes.findIndex((item) => item.id === normalized.id);
+    if (existingIndex >= 0) {
+      return customThemes.map((item) => (item.id === normalized.id ? normalized : item));
+    }
+    return [...customThemes, normalized];
+  };
+
+  const mergeCustomThemes = (themes: AppTheme[]): AppTheme[] => {
+    const map = new Map(customThemes.map((theme) => [theme.id, normalizeCustomTheme(theme)]));
+    for (const theme of themes) {
+      map.set(theme.id, normalizeCustomTheme(theme));
+    }
+    return Array.from(map.values());
+  };
+
+  const syncThemeToCloud = async (themeId: string, customThemesJson?: string) => {
     setSyncStatus('syncing');
     if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
     try {
-      const customJson = localStorage.getItem('app_custom_themes') || '[]';
-      await updatePreferences({ theme: themeId, custom_themes: customJson });
+      const customJson = customThemesJson || localStorage.getItem('app_custom_themes') || '[]';
+      updatePreferences({ theme: themeId, custom_themes: customJson });
       setSyncStatus('saved');
       syncTimerRef.current = window.setTimeout(() => setSyncStatus('idle'), 2500);
     } catch {
@@ -1235,22 +1503,24 @@ export function ThemeManager() {
   }, [allThemes]);
 
   const handleSave = (theme: AppTheme) => {
+    const nextCustomThemes = buildNextCustomThemes(theme);
     saveCustomTheme(theme);
     setTheme(theme.id);
     setFloatingEditor(null);
     setThemeBeforeEditing(null);
     setIsCreating(false);
-    setTimeout(() => syncThemeToCloud(theme.id), 0);
+    setTimeout(() => syncThemeToCloud(theme.id, JSON.stringify(nextCustomThemes)), 0);
     toast.success(`ערכת הנושא "${theme.nameHe}" נשמרה!`);
   };
 
   const handleDuplicate = (theme: AppTheme) => {
+    const nextCustomThemes = buildNextCustomThemes(theme);
     saveCustomTheme(theme);
     setTheme(theme.id);
     setFloatingEditor(null);
     setThemeBeforeEditing(null);
     setIsCreating(false);
-    setTimeout(() => syncThemeToCloud(theme.id), 0);
+    setTimeout(() => syncThemeToCloud(theme.id, JSON.stringify(nextCustomThemes)), 0);
     toast.success(`ערכת הנושא "${theme.nameHe}" שוכפלה ונשמרה!`);
   };
 
@@ -1277,18 +1547,28 @@ export function ThemeManager() {
       // Bundle?
       if (Array.isArray(parsed.themes)) {
         let count = 0;
+        const importedThemes: AppTheme[] = [];
         for (const t of parsed.themes) {
           const imported = importThemeFromJson(JSON.stringify({ theme: t }));
-          if (imported) { saveCustomTheme(imported); count++; }
+          if (imported) {
+            saveCustomTheme(imported);
+            importedThemes.push(imported);
+            count++;
+          }
         }
-        if (count > 0) { setTimeout(() => syncThemeToCloud(activeThemeId), 100); toast.success(`יובאו ${count} ערכות נושא`); }
+        if (count > 0) {
+          const mergedThemes = mergeCustomThemes(importedThemes);
+          setTimeout(() => syncThemeToCloud(activeThemeId, JSON.stringify(mergedThemes)), 100);
+          toast.success(`יובאו ${count} ערכות נושא`);
+        }
         else toast.error('לא נמצאו ערכות תקינות בקובץ');
       } else {
         const imported = importThemeFromJson(text);
         if (!imported) { toast.error('קובץ לא תקין'); return; }
+        const mergedThemes = buildNextCustomThemes(imported);
         saveCustomTheme(imported);
         setTheme(imported.id);
-        setTimeout(() => syncThemeToCloud(imported.id), 100);
+        setTimeout(() => syncThemeToCloud(imported.id, JSON.stringify(mergedThemes)), 100);
         toast.success(`ערכת הנושא "${imported.nameHe}" יובאה והופעלה`);
       }
     } catch {
@@ -1304,14 +1584,38 @@ export function ThemeManager() {
 
   const handleAiSave = () => {
     if (!aiPreview) return;
+    const nextCustomThemes = buildNextCustomThemes(aiPreview);
     saveCustomTheme(aiPreview);
     setTheme(aiPreview.id);
-    setTimeout(() => syncThemeToCloud(aiPreview.id), 100);
+    setTimeout(() => syncThemeToCloud(aiPreview.id, JSON.stringify(nextCustomThemes)), 100);
     toast.success(`ערכת AI "${aiPreview.nameHe}" נוצרה ונשמרה!`);
     setAiOpen(false);
     setAiDescription('');
     setAiName('');
     setAiPreview(null);
+  };
+
+  const handleEditActiveTheme = () => {
+    const active =
+      allThemes.find((theme) => theme.id === activeThemeId) ||
+      allThemes[0] ||
+      BUILT_IN_THEMES.find((theme) => theme.id === activeThemeId) ||
+      BUILT_IN_THEMES[0];
+    if (!active) {
+      toast.error('לא נמצאה ערכת נושא פעילה לעריכה');
+      return;
+    }
+
+    if (active.isCustom) {
+      openFloatingEditor(active, 'עריכת ערכת נושא');
+      return;
+    }
+
+    openFloatingEditor(
+      { ...active, nameHe: `${active.nameHe} (עותק)`, name: `${active.name}-copy` },
+      `עריכת "${active.nameHe}" — שכפול כערכה חדשה`,
+      true,
+    );
   };
 
   return (
@@ -1325,9 +1629,14 @@ export function ThemeManager() {
             {syncStatus === 'saved' && <span className="text-[10px] font-normal text-emerald-600 dark:text-emerald-400">✓ סונכרן לענן</span>}
           </h3>
           <p className="text-sm text-muted-foreground">בחר ערכת נושא, ערוך צבעים וסגנון — הכל מסתנכרן אוטומטית בין מכשירים <kbd className="px-1.5 py-0.5 text-[10px] rounded bg-muted border ml-1">Ctrl+Shift+T</kbd></p>
+          <p className="text-xs text-muted-foreground mt-1">מצב פעיל: 1ב — גם צבעי ערכה וגם שינויים ברמת אלמנט. שינויים ברמת אלמנט נשמרים בנפרד ואינם מוחקים את צבעי הערכה.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <DesignModeToggleButton />
+          <Button variant="outline" className="gap-2" onClick={handleEditActiveTheme}>
+            <Pencil className="h-4 w-4" />
+            ערוך ערכה פעילה
+          </Button>
           {/* AI Generator */}
           <Dialog open={aiOpen} onOpenChange={(open) => { setAiOpen(open); if (!open) setAiPreview(null); }}>
             <DialogTrigger asChild>
@@ -1440,8 +1749,15 @@ export function ThemeManager() {
                 theme={theme}
                 isActive={activeThemeId === theme.id}
                 onClick={() => { setTheme(theme.id); syncThemeToCloud(theme.id); }}
+                onDoubleClick={() => {
+                  openFloatingEditor(
+                    { ...theme, nameHe: `${theme.nameHe} (עותק)`, name: `${theme.name}-copy` },
+                    `עריכת "${theme.nameHe}" — שכפול כערכה חדשה`,
+                    true,
+                  );
+                }}
               />
-              <div className="absolute bottom-2 left-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="absolute bottom-2 left-2 flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                 <Button
                   size="icon"
                   variant="ghost"
@@ -1474,8 +1790,11 @@ export function ThemeManager() {
                   theme={theme}
                   isActive={activeThemeId === theme.id}
                   onClick={() => { setTheme(theme.id); syncThemeToCloud(theme.id); }}
+                  onDoubleClick={() => {
+                    openFloatingEditor(theme, 'עריכת ערכת נושא');
+                  }}
                 />
-                <div className="absolute bottom-2 left-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute bottom-2 left-2 flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                   <Button
                     size="icon"
                     variant="ghost"
@@ -1494,8 +1813,10 @@ export function ThemeManager() {
                     onClick={e => {
                       e.stopPropagation();
                       if (!window.confirm(`למחוק לצמיתות את ערכת הנושא "${theme.nameHe}"? פעולה זו אינה הפיכה.`)) return;
+                      const nextThemeId = activeThemeId === theme.id ? 'default' : activeThemeId;
+                      const remainingThemes = customThemes.filter((item) => item.id !== theme.id);
                       deleteCustomTheme(theme.id);
-                      setTimeout(() => syncThemeToCloud(activeThemeId), 0);
+                      setTimeout(() => syncThemeToCloud(nextThemeId, JSON.stringify(remainingThemes)), 0);
                       toast.success('ערכת הנושא נמחקה');
                     }}
                   >

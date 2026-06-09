@@ -241,6 +241,7 @@ const App = () => {
             <Suspense fallback={<PageLoader label="suspense" />}>
               <Routes>
                 <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                 <Route path="/transcribe" element={<ProtectedRoute><Index /></ProtectedRoute>} />
                 <Route path="/youtube" element={<ProtectedRoute><YouTube /></ProtectedRoute>} />
                 <Route path="/login" element={<Login />} />

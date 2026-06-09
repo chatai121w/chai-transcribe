@@ -25,6 +25,11 @@ export function DesignModeProvider({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     initDesignOverrides();
     setOverrides(loadOverrides());
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('designMode') === '1') {
+      setEnabled(true);
+    }
   }, []);
 
   // Toggle body class for cursor + disable interactions
