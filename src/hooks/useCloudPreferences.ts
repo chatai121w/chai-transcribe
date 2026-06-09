@@ -246,7 +246,9 @@ const useCloudPreferencesImpl = () => {
             : ((data as any).active_pronunciation_profile ?? DEFAULT_PREFERENCES.active_pronunciation_profile),
           diarize_enabled: localDiarize !== null
             ? localDiarize === '1'
-            : ((data as any).diarize_enabled ?? DEFAULT_PREFERENCES.diarize_enabled),
+              : ((data as any).diarize_enabled ?? DEFAULT_PREFERENCES.diarize_enabled),
+          live_chunk_sec: (data as any).live_chunk_sec ?? DEFAULT_PREFERENCES.live_chunk_sec,
+          live_mic_gain: (data as any).live_mic_gain != null ? Number((data as any).live_mic_gain) : DEFAULT_PREFERENCES.live_mic_gain,
         };
         setPreferences(loaded);
         // Mirror to localStorage so useTheme picks up cloud values
