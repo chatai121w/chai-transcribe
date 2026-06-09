@@ -9,6 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { History, Trash2, FileText, Search, Tag, X, Edit, Cloud, HardDrive, Loader2, Calendar, Filter, FolderOpen, FolderPlus, Folder, Download, Brain } from "lucide-react";
 import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
 import { semanticSearch } from "@/utils/semanticSearch";
+import { useFolderTree } from "@/hooks/useFolderTree";
+import { toast } from "@/hooks/use-toast";
 
 interface CloudTranscriptHistoryProps {
   transcripts: CloudTranscript[];
@@ -17,7 +19,7 @@ interface CloudTranscriptHistoryProps {
   onSelect: (text: string) => void;
   onClearAll: () => void;
   onDelete: (id: string) => void;
-  onUpdate: (id: string, updates: Partial<Pick<CloudTranscript, 'tags' | 'notes' | 'title' | 'folder'>>) => void;
+  onUpdate: (id: string, updates: Partial<Pick<CloudTranscript, 'tags' | 'notes' | 'title' | 'folder' | 'folder_id'>>) => void;
   initialFolderFilter?: string;
 }
 
@@ -32,6 +34,7 @@ export const CloudTranscriptHistory = memo(({
   initialFolderFilter,
 }: CloudTranscriptHistoryProps) => {
   const navigate = useNavigate();
+  const { folders: fileManagerFolders, createFolder } = useFolderTree();
   const [searchQuery, setSearchQuery] = useState("");
   const [newTag, setNewTag] = useState("");
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
@@ -57,11 +60,20 @@ export const CloudTranscriptHistory = memo(({
     [transcripts]
   );
 
-  // Get unique folders
-  const folders = useMemo(() =>
+  // Get unique folders from transcript metadata
+  const historyFolders = useMemo(() =>
     [...new Set(transcripts.map(t => t.folder).filter(f => f && f.trim() !== ''))].sort(),
     [transcripts]
   );
+
+  const folderOptions = useMemo(() => {
+    const byName = new Map<string, { id: string | null; name: string }>();
+    fileManagerFolders.forEach((f) => byName.set(f.name, { id: f.id, name: f.name }));
+    historyFolders.forEach((name) => {
+      if (!byName.has(name)) byName.set(name, { id: null, name });
+    });
+    return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name, 'he'));
+  }, [fileManagerFolders, historyFolders]);
 
   // Filter by date range
   const getDateThreshold = (filter: string): Date | null => {
@@ -160,20 +172,34 @@ export const CloudTranscriptHistory = memo(({
 
   const activeFilters = (engineFilter !== "all" ? 1 : 0) + (dateFilter !== "all" ? 1 : 0) + (folderFilter !== "all" ? 1 : 0);
 
-  const handleCreateFolder = () => {
-    if (!newFolderName.trim()) return;
-    // Folder is created implicitly by assigning it to a transcript
+  const handleCreateFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+
+    let folderId: string | null = null;
+    const existing = fileManagerFolders.find((f) => f.name === name);
+    if (existing) {
+      folderId = existing.id;
+    } else {
+      try {
+        const created = await createFolder({ name });
+        folderId = created.id;
+      } catch (e: any) {
+        toast({ title: 'שגיאה ביצירת תיקיה', description: e?.message || 'נסה שוב', variant: 'destructive' });
+        return;
+      }
+    }
+
     setShowNewFolder(false);
-    // If we have a transcript pending assignment, assign it
     if (assigningFolderId) {
-      onUpdate(assigningFolderId, { folder: newFolderName.trim() });
+      onUpdate(assigningFolderId, { folder: name, folder_id: folderId });
       setAssigningFolderId(null);
     }
     setNewFolderName("");
   };
 
-  const handleAssignFolder = (id: string, folder: string) => {
-    onUpdate(id, { folder });
+  const handleAssignFolder = (id: string, folder: string, folderId: string | null = null) => {
+    onUpdate(id, { folder, folder_id: folderId });
     setAssigningFolderId(null);
   };
 
@@ -276,7 +302,7 @@ export const CloudTranscriptHistory = memo(({
               className="w-2.5 h-2.5 cursor-pointer hover:text-destructive"
               onClick={(e) => {
                 e.stopPropagation();
-                onUpdate(entry.id, { folder: '' });
+                onUpdate(entry.id, { folder: '', folder_id: null });
               }}
             />
           </Badge>
@@ -284,17 +310,20 @@ export const CloudTranscriptHistory = memo(({
       )}
 
       {assigningFolderId === entry.id && (
-        <div className="mt-2 p-2 rounded border bg-background space-y-1">
-          {folders.map(f => (
+        <div className="mt-2 p-2 rounded border bg-background space-y-1" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+          {folderOptions.map(f => (
             <Button
-              key={f}
-              variant={entry.folder === f ? "default" : "ghost"}
+              key={f.id || f.name}
+              variant={(entry.folder_id && entry.folder_id === f.id) || entry.folder === f.name ? "default" : "ghost"}
               size="sm"
               className="w-full justify-start text-xs h-7 gap-1"
-              onClick={() => handleAssignFolder(entry.id, f)}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAssignFolder(entry.id, f.name, f.id);
+              }}
             >
               <Folder className="w-3 h-3" />
-              {f}
+              {f.name}
             </Button>
           ))}
           {entry.folder && entry.folder.trim() !== '' && (
@@ -302,7 +331,10 @@ export const CloudTranscriptHistory = memo(({
               variant="ghost"
               size="sm"
               className="w-full justify-start text-xs h-7 gap-1 text-destructive"
-              onClick={() => handleAssignFolder(entry.id, '')}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAssignFolder(entry.id, '', null);
+              }}
             >
               <X className="w-3 h-3" />
               הסר מתיקיה
@@ -314,12 +346,21 @@ export const CloudTranscriptHistory = memo(({
                 placeholder="שם תיקיה..."
                 value={newFolderName}
                 onChange={(e) => setNewFolderName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleCreateFolder(); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void handleCreateFolder();
+                  }
+                }}
                 className="text-xs h-7"
                 dir="rtl"
                 autoFocus
               />
-              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={handleCreateFolder}>
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={(e) => {
+                e.stopPropagation();
+                void handleCreateFolder();
+              }}>
                 צור
               </Button>
             </div>
@@ -328,7 +369,10 @@ export const CloudTranscriptHistory = memo(({
               variant="ghost"
               size="sm"
               className="w-full justify-start text-xs h-7 gap-1"
-              onClick={() => setShowNewFolder(true)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowNewFolder(true);
+              }}
             >
               <FolderPlus className="w-3 h-3" />
               תיקיה חדשה...
@@ -508,7 +552,7 @@ export const CloudTranscriptHistory = memo(({
       ) : (
         <div className="flex gap-3">
           {/* Folder sidebar */}
-          {folders.length > 0 && (
+          {historyFolders.length > 0 && (
             <div className="w-36 shrink-0 space-y-1">
               <p className="text-xs font-medium text-muted-foreground mb-2">תיקיות</p>
               <Button
@@ -529,7 +573,7 @@ export const CloudTranscriptHistory = memo(({
                 <FileText className="w-3 h-3" />
                 ללא תיקיה ({transcripts.filter(t => !t.folder || t.folder.trim() === '').length})
               </Button>
-              {folders.map(f => (
+              {historyFolders.map(f => (
                 <Button
                   key={f}
                   variant={folderFilter === f ? "default" : "ghost"}

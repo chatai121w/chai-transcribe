@@ -21,6 +21,7 @@ export interface CloudTranscript {
   notes: string;
   title: string;
   folder: string;
+  folder_id?: string | null;
   category: string;
   is_favorite: boolean;
   audio_file_path: string | null;
@@ -364,7 +365,7 @@ export const useCloudTranscripts = () => {
 
   const updateTranscript = useCallback(async (
     id: string,
-    updates: Partial<Pick<CloudTranscript, 'text' | 'tags' | 'notes' | 'title' | 'folder' | 'category' | 'is_favorite' | 'edited_text' | 'word_timings'>>
+    updates: Partial<Pick<CloudTranscript, 'text' | 'tags' | 'notes' | 'title' | 'folder' | 'folder_id' | 'category' | 'is_favorite' | 'edited_text' | 'word_timings'>>
   ) => {
     try {
       await updateTranscriptLocally(id, updates);
