@@ -1308,6 +1308,7 @@ export function ThemeManager() {
           <p className="text-sm text-muted-foreground">בחר ערכת נושא, ערוך צבעים וסגנון — הכל מסתנכרן אוטומטית בין מכשירים <kbd className="px-1.5 py-0.5 text-[10px] rounded bg-muted border ml-1">Ctrl+Shift+T</kbd></p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <DesignModeToggleButton />
           {/* AI Generator */}
           <Dialog open={aiOpen} onOpenChange={(open) => { setAiOpen(open); if (!open) setAiPreview(null); }}>
             <DialogTrigger asChild>
