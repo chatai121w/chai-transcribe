@@ -62,10 +62,11 @@ serve(async (req) => {
       }
       if (!fileBlob) throw new Error('file is required in multipart form');
     } else {
-      const { audio, fileName: jsonName, apiKey, language: jsonLang } = await req.json();
+      const { audio, fileName: jsonName, apiKey, language: jsonLang, model: jsonModel } = await req.json();
       if (!audio) throw new Error('No audio data provided');
       GROQ_API_KEY = apiKey || Deno.env.get('GROQ_API_KEY');
       if (jsonLang && jsonLang !== 'auto') language = jsonLang;
+      if (typeof jsonModel === 'string' && jsonModel.trim()) modelOverride = jsonModel.trim();
       const binaryAudio = Uint8Array.from(atob(audio), c => c.charCodeAt(0));
       fileBlob = new Blob([binaryAudio], { type: 'application/octet-stream' });
       fileName = jsonName || fileName;
