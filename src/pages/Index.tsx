@@ -185,15 +185,16 @@ const Index = () => {
 
   useEffect(() => {
     // Keep Index's serverConnected in sync (used by LiveTranscriber and resume flow).
-    // TranscriptionEngine has its own hook instance, so we also poll here.
+    // startPolling already runs an immediate checkConnection() internally,
+    // so we don't call it again here (was causing a duplicate /health call).
     if (engine === 'local-server') {
-      checkConnection();
       startPolling(10000);
     } else {
       stopPolling();
     }
     return () => stopPolling();
-  }, [engine, checkConnection, startPolling, stopPolling]);
+  }, [engine, startPolling, stopPolling]);
+
 
   // Cleanup audio Object URL on unmount
   useEffect(() => {
