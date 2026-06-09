@@ -17,6 +17,7 @@ import { toast } from "@/hooks/use-toast";
 import { getServerUrl } from "@/lib/serverConfig";
 import { supabase } from "@/integrations/supabase/client";
 import { useCloudApiKeys } from "@/hooks/useCloudApiKeys";
+import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 
 type LiveMode = "browser" | "cuda" | "groq";
 
