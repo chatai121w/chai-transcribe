@@ -303,6 +303,9 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
           return;
         }
         formData.append("apiKey", groqKey);
+        // Highest-quality model for live: prefer whisper-large-v3 when chunks are large enough
+        // (turbo is faster but slightly lower accuracy). For chunks ≥6s we have headroom for quality.
+        formData.append("model", chunkSecRef.current >= 6 ? "whisper-large-v3" : "whisper-large-v3-turbo");
         // Groq via edge function — chunked near-live transcription
         const { data: gd, error: gerr } = await supabase.functions.invoke('transcribe-groq', {
           body: formData,
