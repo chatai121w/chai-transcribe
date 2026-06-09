@@ -464,3 +464,11 @@ All colors MUST be HSL.
   border-radius: 9999px;
   background: hsl(var(--primary));
 }
+
+/* ============================================================
+   Global: disable ALL spinners across the app (user preference).
+   Hides any spinning loader icons. Buttons/labels remain functional.
+   ============================================================ */
+.animate-spin {
+  display: none !important;
+}

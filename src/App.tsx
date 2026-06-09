@@ -7,7 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-route
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import AppSidebar from "./components/AppSidebar";
 import AppLayout from "./components/AppLayout";
-import { Loader2 } from "lucide-react";
+// Loader2 removed — spinners disabled globally
 import { ThemeShortcutListener } from "./components/ThemeShortcutListener";
 import { DiarizationQueueProvider } from "./contexts/DiarizationQueueContext";
 import { CloudPreferencesProvider } from "./hooks/useCloudPreferences";
@@ -121,27 +121,17 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       debugLog.info('Auth', '✅ ProtectedRoute: מאומת');
     }
   }, [isLoading, isAuthenticated]);
-  if (isLoading) return <PageLoader label="auth" />;
+  if (isLoading) return null;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   return <>{children}</>;
 };
 
-/** Spinner with logging */
+/** No-op loader — spinners disabled globally per user preference */
 const PageLoader = ({ label = 'page' }: { label?: string }) => {
-  const startRef = useRef(Date.now());
-  useEffect(() => {
-    debugLog.info('Spinner', `⏳ Spinner מוצג (${label})`);
-    return () => {
-      const elapsed = Date.now() - startRef.current;
-      debugLog.perf('Spinner', `Spinner הוסתר (${label})`, elapsed);
-    };
-  }, [label]);
-  return (
-    <div className="flex items-center justify-center min-h-[50vh]">
-      <Loader2 className="w-8 h-8 animate-spin text-primary" />
-    </div>
-  );
+  void label;
+  return null;
 };
+
 
 const App = () => {
   // Initialize theme on app load
