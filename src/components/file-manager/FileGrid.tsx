@@ -43,7 +43,6 @@ const FolderCard = ({ f, isSel, onClick, isCut, onPin, onDelete }: any) => {
         isCut && 'opacity-50',
       )}
     >
-      <div ref={dragRef} {...listeners} {...attributes} className="flex items-center gap-3 flex-1 min-w-0">
       <div
         ref={dragRef}
         {...listeners}

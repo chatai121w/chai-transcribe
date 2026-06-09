@@ -27,20 +27,39 @@ import {
 function lazyWithLog(name: string, factory: () => Promise<{ default: React.ComponentType<unknown> }>) {
   return lazy(() => {
     const stop = debugLog.time('LazyLoad', name);
-    return factory().then(mod => {
-      stop();
-      return mod;
-    }).catch(err => {
-      debugLog.error('LazyLoad', `❌ Failed: ${name}`, err?.message);
-      // If chunk fetch failed (stale deploy), reload once
-      const key = `chunk_reload_${name}`;
-      if (!sessionStorage.getItem(key)) {
-        sessionStorage.setItem(key, '1');
-        debugLog.info('LazyLoad', `🔄 Reloading page for stale chunk: ${name}`);
-        window.location.reload();
-      }
-      throw err;
-    });
+    return factory()
+      .then(mod => {
+        stop();
+        return mod;
+      })
+      .catch(async err => {
+        const message = err?.message ?? '';
+        const transientFetchFailure = typeof message === 'string' && message.includes('Failed to fetch dynamically imported module');
+
+        debugLog.error('LazyLoad', `❌ Failed: ${name}`, message);
+
+        // Vite/HMR can briefly fail while rebuilding; retry once before hard-failing.
+        if (transientFetchFailure) {
+          debugLog.info('LazyLoad', `🔁 Retrying lazy import once: ${name}`);
+          await new Promise(resolve => setTimeout(resolve, 250));
+          try {
+            const mod = await factory();
+            stop();
+            return mod;
+          } catch (retryErr) {
+            debugLog.error('LazyLoad', `❌ Retry failed: ${name}`, (retryErr as { message?: string })?.message);
+          }
+        }
+
+        // If chunk fetch failed (stale deploy), reload once.
+        const key = `chunk_reload_${name}`;
+        if (!sessionStorage.getItem(key)) {
+          sessionStorage.setItem(key, '1');
+          debugLog.info('LazyLoad', `🔄 Reloading page for stale chunk: ${name}`);
+          window.location.reload();
+        }
+        throw err;
+      });
   });
 }
 
