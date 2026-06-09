@@ -39,6 +39,8 @@ export interface UserPreferences {
   loshon_kodesh_enabled: boolean;         // Loshon Kodesh transcription mode
   active_pronunciation_profile: string;   // active pronunciation profile ID ('' = none)
   diarize_enabled: boolean;              // speaker diarization toggle
+  live_chunk_sec: number;                // Live transcription chunk length (seconds)
+  live_mic_gain: number;                 // Live transcription mic sensitivity (gain multiplier)
 }
 
 const DEFAULT_PREFERENCES: UserPreferences = {
