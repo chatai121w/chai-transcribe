@@ -51,6 +51,8 @@ serve(async (req) => {
       if (typeof apiKey === 'string') GROQ_API_KEY = apiKey;
       const lang = form.get('language');
       if (typeof lang === 'string' && lang !== 'auto') language = lang;
+      const mdl = form.get('model');
+      if (typeof mdl === 'string' && mdl.trim()) modelOverride = mdl.trim();
       const file = form.get('file');
       if (file instanceof Blob) {
         fileBlob = file;
