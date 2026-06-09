@@ -269,6 +269,7 @@ const App = () => {
           </DiarizationQueueProvider>
         </BrowserRouter>
       </TooltipProvider>
+      </DesignModeProvider>
       </CloudPreferencesProvider>
     </AuthProvider>
   </QueryClientProvider>
