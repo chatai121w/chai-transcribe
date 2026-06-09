@@ -43,6 +43,7 @@ serve(async (req) => {
     let fileBlob: Blob | undefined;
     let fileName = 'audio.webm';
     let language = 'he';
+    let modelOverride: string | undefined;
 
     if (contentType.includes('multipart/form-data')) {
       const form = await req.formData();
