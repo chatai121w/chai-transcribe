@@ -66,4 +66,28 @@ test.describe('Live Design Mode', () => {
     // URL did not change.
     expect(page.url()).toBe(startUrl);
   });
+
+  test('still opens color editor after page reload', async ({ page }) => {
+    await page.goto('/settings?designMode=1');
+    await expect(page.getByText('מצב עיצוב חי')).toBeVisible({ timeout: 15_000 });
+
+    // Reload the page — design mode must persist via the ?designMode=1 URL param.
+    await page.reload();
+    await expect(page.getByText('מצב עיצוב חי')).toBeVisible({ timeout: 15_000 });
+    expect(page.url()).toContain('designMode=1');
+
+    // Click an element after reload and confirm the color editor opens.
+    const target = page.locator('h1, h2, [role="heading"]').first();
+    await expect(target).toBeVisible();
+    const box = await target.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.up();
+
+    await expect(page.getByText('עריכת אלמנט:')).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('צבע טקסט')).toBeVisible();
+    await expect(page.locator('input[type="color"]').first()).toBeVisible();
+  });
+});
 });
