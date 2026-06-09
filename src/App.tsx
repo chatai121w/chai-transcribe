@@ -14,6 +14,8 @@ import { CloudPreferencesProvider } from "./hooks/useCloudPreferences";
 import { useTheme } from "./hooks/useTheme";
 import { debugLog } from "./lib/debugLogger";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { DesignModeProvider } from "./components/design-mode/DesignModeProvider";
+import { DesignModeOverlay } from "./components/design-mode/DesignModeOverlay";
 import {
   DEV_FLOATING_BUTTONS_EVENT,
   DEV_FLOATING_BUTTONS_STORAGE_KEY,
