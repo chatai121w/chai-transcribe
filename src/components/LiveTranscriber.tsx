@@ -57,6 +57,7 @@ interface LiveTranscriberProps {
 
 export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveTranscriberProps) => {
   const { keys: apiKeys } = useCloudApiKeys();
+  const { preferences, updatePreference, isLoaded: prefsLoaded } = useCloudPreferences();
   const [isListening, setIsListening] = useState(false);
   const isListeningRef = useRef(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -65,7 +66,8 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const [finalText, setFinalText] = useState("");
   const [isSupported, setIsSupported] = useState(true);
   const [mode, setMode] = useState<LiveMode>(serverConnected ? "cuda" : "groq");
-  const [chunkSec, setChunkSec] = useState<number>(DEFAULT_CHUNK_SEC);
+  const chunkSec = preferences.live_chunk_sec ?? DEFAULT_CHUNK_SEC;
+  const setChunkSec = useCallback((v: number) => updatePreference('live_chunk_sec', v), [updatePreference]);
   const chunkSecRef = useRef<number>(DEFAULT_CHUNK_SEC);
   useEffect(() => { chunkSecRef.current = chunkSec; }, [chunkSec]);
   const recognitionRef = useRef<any>(null);
