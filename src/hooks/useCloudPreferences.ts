@@ -75,6 +75,8 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   loshon_kodesh_enabled: false,
   active_pronunciation_profile: '',
   diarize_enabled: false,
+  live_chunk_sec: 5,
+  live_mic_gain: 3.5,
 };
 
 const useCloudPreferencesImpl = () => {
