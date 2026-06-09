@@ -3665,8 +3665,9 @@ def _import_nikud_engine():
 def nikud():
     """Add nikud (diacritics) to Hebrew text.
 
-    JSON body: { "text": "...", "mark_matres_lectionis": "*" (optional) }
-    Returns:   { "text": "<diacritized>", "device": "cuda|cpu" }
+    JSON body: { "text": "...", "style": "male|haser" (optional),
+                 "mark_matres_lectionis": "|" (optional advanced override) }
+    Returns:   { "text": "<diacritized>", "device": "cuda|cpu", "style": "..." }
     """
     data = request.get_json(silent=True) or {}
     text = data.get("text", "")
@@ -3676,6 +3677,9 @@ def nikud():
     if len(text) > 100_000:
         return jsonify({"error": "Text too long (max 100,000 chars)"}), 413
 
+    style = data.get("style") or "male"
+    if style not in ("male", "haser"):
+        style = "male"
     mark = data.get("mark_matres_lectionis") or None
 
     ne = _import_nikud_engine()
@@ -3687,18 +3691,35 @@ def nikud():
 
     start_time = time.time()
     try:
-        result = ne.add_nikud(text, mark_matres_lectionis=mark)
+        result = ne.add_nikud(text, style=style, mark_matres_lectionis=mark)
     except Exception as e:
         _log.error(f"[nikud] Error: {e}\n{_tb_module.format_exc()}")
         return jsonify({"error": f"Nikud failed: {str(e)}"}), 500
 
     elapsed = time.time() - start_time
-    _log.info(f"[nikud] Done in {elapsed:.2f}s — {len(text)} chars")
+    _log.info(f"[nikud] Done in {elapsed:.2f}s — {len(text)} chars (style={style})")
     return jsonify({
         "text": result,
         "device": ne.get_status().get("device", "cpu"),
+        "style": style,
         "processing_time": round(elapsed, 2),
     })
+
+
+@app.route("/nikud/warmup", methods=["POST"])
+def nikud_warmup():
+    """Pre-load the nikud model in a background thread (eliminates cold-start).
+
+    Returns immediately; the model loads asynchronously. The frontend calls
+    this when the text editor opens so the first real /nikud request is fast.
+    """
+    ne = _import_nikud_engine()
+    if not ne.is_available():
+        return jsonify({"warming": False, "available": False}), 200
+    status = ne.get_status()
+    if not status.get("loaded"):
+        threading.Thread(target=ne.warmup, daemon=True).start()
+    return jsonify({"warming": not status.get("loaded"), "available": True})
 
 
 @app.route("/nikud/status", methods=["GET"])
@@ -3832,6 +3853,7 @@ def main():
     print("    POST /lk/transcribe     — Transcribe with LK mode + post-processing")
     print("    GET  /harmonize/capabilities — Available harmony tiers")
     print("    POST /nikud             — Add nikud (diacritics) to Hebrew text")
+    print("    POST /nikud/warmup      — Pre-load nikud model (no cold-start)")
     print("    GET  /nikud/status      — Nikud engine availability")
     print("    POST /load-model        — Load model into GPU memory")
     print("    POST /preload-stream    — Preload model via SSE (background)")

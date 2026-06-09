@@ -53,6 +53,18 @@ def is_available() -> bool:
         return False
 
 
+def warmup() -> None:
+    """Eagerly load the model (safe to call from a background thread).
+
+    Used to eliminate the one-time cold-start latency (~5s) on the first
+    /nikud request by pre-loading when the user opens the text editor.
+    """
+    try:
+        _ensure_loaded()
+    except Exception as e:  # pragma: no cover - defensive
+        _log.warning(f"[nikud] warmup failed: {e}")
+
+
 def _ensure_loaded() -> None:
     """Load the DictaBERT menaked model once (thread-safe, lazy)."""
     global _model, _tokenizer, _load_error, _device
@@ -87,15 +99,24 @@ def _ensure_loaded() -> None:
             _log.error(f"[nikud] Failed to load model: {e}")
 
 
-def add_nikud(text: str, mark_matres_lectionis: str | None = None) -> str:
+def add_nikud(
+    text: str,
+    style: str = "male",
+    mark_matres_lectionis: str | None = None,
+) -> str:
     """
     Add nikud to Hebrew `text`.
 
     Args:
         text: Hebrew text (may contain multiple lines).
-        mark_matres_lectionis: if provided (e.g. '*'), matres lectionis
-            (אימות קריאה) are kept and marked with this symbol; otherwise
-            the model's default behavior (removing them) is used.
+        style: output spelling style:
+            - "male" (default): כתיב מלא — keep every original letter and only
+              add vowel points. Nothing is deleted from the user's text.
+            - "haser": כתיב חסר — drop matres lectionis (אמות קריאה)
+              that the model deems redundant, producing tighter vocalized text.
+        mark_matres_lectionis: advanced override — if provided (e.g. '|'),
+            matres lectionis are kept and marked with this symbol. Takes
+            precedence over `style`.
 
     Returns:
         The diacritized text. Line structure is preserved.
@@ -110,6 +131,14 @@ def add_nikud(text: str, mark_matres_lectionis: str | None = None) -> str:
     if _model is None:
         raise RuntimeError(_load_error or "Nikud model unavailable")
 
+    # Resolve the matres-lectionis handling from style / explicit override.
+    if mark_matres_lectionis is not None:
+        mark = mark_matres_lectionis
+    elif style == "haser":
+        mark = None          # drop redundant matres letters
+    else:                    # "male" (default) — keep all letters untouched
+        mark = ""
+
     # Preserve line breaks: diacritize each non-empty line independently.
     lines = text.split("\n")
     nonempty_idx = [i for i, ln in enumerate(lines) if ln.strip()]
@@ -117,7 +146,7 @@ def add_nikud(text: str, mark_matres_lectionis: str | None = None) -> str:
     if not sentences:
         return text
 
-    results = _predict_chars(sentences, mark_matres_lectionis or None)
+    results = _predict_chars(sentences, mark)
 
     out = list(lines)
     for idx, res in zip(nonempty_idx, results):

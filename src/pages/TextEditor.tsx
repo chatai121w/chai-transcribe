@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
@@ -533,6 +534,9 @@ const TextEditor = () => {
   
 
   const [aiAction, setAiAction] = useState<string | null>(null);
+  const [nikudStyle, setNikudStyle] = useState<'male' | 'haser'>(
+    () => (localStorage.getItem('nikud_style') as 'male' | 'haser') || 'male'
+  );
   const [drivePickerOpen, setDrivePickerOpen] = useState(false);
   const [showCompareAi, setShowCompareAi] = useState(false);
 
@@ -603,17 +607,21 @@ const TextEditor = () => {
   };
 
   /** Add nikud (diacritics) to the Hebrew text via the local DICTA model. */
-  const handleNikud = async () => {
+  const handleNikud = async (style: 'male' | 'haser' = nikudStyle) => {
     if (!text.trim()) {
       toast({ title: "אין טקסט לניקוד", variant: "destructive" });
       return;
+    }
+    if (style !== nikudStyle) {
+      setNikudStyle(style);
+      localStorage.setItem('nikud_style', style);
     }
     setAiAction('nikud');
     try {
       const res = await fetch(`${getServerUrl()}/nikud`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, style }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -624,8 +632,12 @@ const TextEditor = () => {
       }
       const data = await res.json();
       if (!data.text) throw new Error('לא התקבל טקסט מנוקד');
-      addVersion(data.text, 'ai-fix', 'ניקוד (DICTA)');
-      toast({ title: 'ניקוד הושלם ✅', description: `רץ על ${data.device === 'cuda' ? 'GPU' : 'CPU'}` });
+      const styleLabel = style === 'haser' ? 'כתיב חסר' : 'כתיב מלא';
+      addVersion(data.text, 'ai-fix', `ניקוד · ${styleLabel} (DICTA)`);
+      toast({
+        title: 'ניקוד הושלם ✅',
+        description: `${styleLabel} · רץ על ${data.device === 'cuda' ? 'GPU' : 'CPU'}`,
+      });
     } catch (err) {
       console.error('Nikud error:', err);
       toast({ title: "שגיאה בניקוד", description: err instanceof Error ? err.message : 'שגיאה', variant: "destructive" });
@@ -633,6 +645,14 @@ const TextEditor = () => {
       setAiAction(null);
     }
   };
+
+  // Pre-warm the nikud model in the background when the editor opens, so the
+  // first ניקוד click is instant instead of waiting ~5s for a cold start.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetch(`${getServerUrl()}/nikud/warmup`, { method: 'POST', signal: ctrl.signal }).catch(() => {});
+    return () => ctrl.abort();
+  }, []);
 
   const handleEditorChange = useCallback((newText: string) => {
     setText(newText);
@@ -920,17 +940,54 @@ const TextEditor = () => {
               {aiAction === 'split_paragraphs' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SplitSquareVertical className="w-3.5 h-3.5" />}
               פסקאות
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={handleNikud}
-              disabled={!!aiAction}
-              title="הוספת ניקוד לעברית מודרנית (מנוע DICTA מקומי)"
-            >
-              {aiAction === 'nikud' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Type className="w-3.5 h-3.5" />}
-              ניקוד
-            </Button>
+            {/* Nikud — split button: main action uses the chosen style, caret picks style */}
+            <div className="inline-flex">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs gap-1 rounded-l-none border-l-0"
+                onClick={() => handleNikud()}
+                disabled={!!aiAction}
+                title={`הוספת ניקוד (${nikudStyle === 'haser' ? 'כתיב חסר' : 'כתיב מלא'}) — מנוע DICTA מקומי`}
+              >
+                {aiAction === 'nikud' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Type className="w-3.5 h-3.5" />}
+                ניקוד
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-1.5 rounded-r-none"
+                    disabled={!!aiAction}
+                    title="בחירת סגנון ניקוד ומנוע"
+                  >
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>מנוע ניקוד</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    onClick={() => handleNikud('male')}
+                    className="flex flex-col items-start gap-0.5"
+                  >
+                    <span className="font-medium">כתיב מלא {nikudStyle === 'male' && '✓'}</span>
+                    <span className="text-[10px] text-muted-foreground">שומר על כל האותיות, מוסיף ניקוד בלבד</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => handleNikud('haser')}
+                    className="flex flex-col items-start gap-0.5"
+                  >
+                    <span className="font-medium">כתיב חסר {nikudStyle === 'haser' && '✓'}</span>
+                    <span className="text-[10px] text-muted-foreground">מסיר אמות קריאה מיותרות (א/ו/י)</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-[10px] font-normal text-muted-foreground py-1">
+                    DICTA מקומי · פרטי · ~0.25 שנ׳ למשפט
+                  </DropdownMenuLabel>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
             <div className="w-px h-5 bg-border mx-1 hidden sm:block" />
             <Button
               variant="default"
