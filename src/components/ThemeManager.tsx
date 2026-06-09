@@ -13,7 +13,26 @@ import { Switch } from "@/components/ui/switch";
 import { Rnd } from "react-rnd";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { Check, Plus, Pencil, Trash2, Palette, Download, Upload, Sparkles, RotateCcw, Save, Copy, Minimize2, X } from "lucide-react";
+import { Check, Plus, Pencil, Trash2, Palette, Download, Upload, Sparkles, RotateCcw, Save, Copy, Minimize2, X, MousePointerClick } from "lucide-react";
+import { useDesignMode } from "@/components/design-mode/DesignModeProvider";
+
+function DesignModeToggleButton() {
+  const { enabled, setEnabled, overrides } = useDesignMode();
+  return (
+    <Button
+      variant={enabled ? "default" : "outline"}
+      className="gap-2"
+      onClick={() => setEnabled(!enabled)}
+      title="עריכת אלמנטים ישירות על העמודים — לחץ על כל אלמנט כדי לשנות אותו"
+    >
+      <MousePointerClick className="h-4 w-4" />
+      {enabled ? "כבה מצב עיצוב חי" : "מצב עיצוב חי"}
+      {overrides.length > 0 && (
+        <span className="text-[10px] bg-yellow-500 text-black rounded-full px-1.5">{overrides.length}</span>
+      )}
+    </Button>
+  );
+}
 import {
   contrastRatio,
   contrastLevel,
