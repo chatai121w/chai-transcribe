@@ -623,6 +623,7 @@ function ThemeSitePreview({
   const [route, setRoute] = useState<string>('/');
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [loading, setLoading] = useState(true);
+  const [iframeReadyKey, setIframeReadyKey] = useState(0);
   const [quickKey, setQuickKey] = useState<keyof ThemeColors>('primary');
   const [pickMode, setPickMode] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -635,15 +636,85 @@ function ThemeSitePreview({
   useEffect(() => { reapply(); }, [reapply]);
 
   useEffect(() => {
-    const doc = iframeRef.current?.contentDocument;
+    const iframe = iframeRef.current;
+    const doc = iframe?.contentDocument;
     if (!doc || !pickMode) return;
 
     const previousCursor = doc.documentElement.style.cursor;
     doc.documentElement.style.cursor = 'crosshair';
 
+    const hoverBox = doc.createElement('div');
+    hoverBox.setAttribute('data-theme-preview-picker-ui', '1');
+    Object.assign(hoverBox.style, {
+      position: 'fixed',
+      inset: 'auto',
+      pointerEvents: 'none',
+      border: '2px solid hsl(43, 74%, 49%)',
+      background: 'hsla(43, 74%, 49%, 0.08)',
+      boxSizing: 'border-box',
+      zIndex: '2147483645',
+      display: 'none',
+    });
+
+    const hoverLabel = doc.createElement('div');
+    hoverLabel.setAttribute('data-theme-preview-picker-ui', '1');
+    Object.assign(hoverLabel.style, {
+      position: 'fixed',
+      pointerEvents: 'none',
+      background: 'hsl(43, 74%, 49%)',
+      color: '#111827',
+      fontSize: '11px',
+      padding: '2px 6px',
+      borderRadius: '4px',
+      zIndex: '2147483646',
+      display: 'none',
+      whiteSpace: 'nowrap',
+      fontFamily: 'Assistant, sans-serif',
+    });
+
+    doc.body.appendChild(hoverBox);
+    doc.body.appendChild(hoverLabel);
+
+    const hideHover = () => {
+      hoverBox.style.display = 'none';
+      hoverLabel.style.display = 'none';
+    };
+
+    const showHover = (target: Element) => {
+      const rect = target.getBoundingClientRect();
+      if (rect.width < 4 || rect.height < 4) {
+        hideHover();
+        return;
+      }
+
+      hoverBox.style.display = 'block';
+      hoverBox.style.left = `${rect.left}px`;
+      hoverBox.style.top = `${rect.top}px`;
+      hoverBox.style.width = `${rect.width}px`;
+      hoverBox.style.height = `${rect.height}px`;
+
+      hoverLabel.style.display = 'block';
+      hoverLabel.textContent = `לחץ לבחירה: ${target.tagName.toLowerCase()}`;
+      hoverLabel.style.left = `${Math.max(8, rect.left)}px`;
+      hoverLabel.style.top = `${Math.max(8, rect.top - 24)}px`;
+    };
+
+    const onMove = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        hideHover();
+        return;
+      }
+
+      if (target.closest('[data-theme-preview-picker-ui]')) return;
+      showHover(target);
+    };
+
     const onClick = (event: MouseEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
+      if (target.closest('[data-theme-preview-picker-ui]')) return;
+
       event.preventDefault();
       event.stopPropagation();
 
@@ -651,16 +722,21 @@ function ThemeSitePreview({
       setQuickKey(matchedKey);
       onFocusColorKey?.(matchedKey);
       setPickMode(false);
+      hideHover();
       toast.success(`נבחר צבע לעריכה: ${COLOR_DESCRIPTIONS[matchedKey] || matchedKey}`);
     };
 
+    doc.addEventListener('mousemove', onMove, true);
     doc.addEventListener('click', onClick, true);
 
     return () => {
+      doc.removeEventListener('mousemove', onMove, true);
       doc.removeEventListener('click', onClick, true);
+      hoverBox.remove();
+      hoverLabel.remove();
       doc.documentElement.style.cursor = previousCursor;
     };
-  }, [colors, onFocusColorKey, pickMode]);
+  }, [colors, iframeReadyKey, onFocusColorKey, pickMode]);
 
   const width = device === 'mobile' ? 390 : '100%';
   const height = device === 'mobile' ? 700 : 600;
@@ -669,7 +745,7 @@ function ThemeSitePreview({
     <div className="space-y-2 rounded-lg border border-border/60 bg-muted/10 p-2">
       <div className="flex items-center gap-2 flex-wrap">
         <Label className="text-xs text-muted-foreground">עמוד:</Label>
-        <Select value={route} onValueChange={(v) => { setLoading(true); setRoute(v); }}>
+        <Select value={route} onValueChange={(v) => { setLoading(true); setPickMode(false); setRoute(v); }}>
           <SelectTrigger className="h-7 w-40 text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
             {SITE_PREVIEW_ROUTES.map(r => (
@@ -709,7 +785,7 @@ function ThemeSitePreview({
           size="sm"
           variant={pickMode ? 'default' : 'outline'}
           className="h-7 text-xs"
-          onClick={() => setPickMode((prev) => !prev)}
+           onClick={() => setPickMode((prev) => !prev)}
         >
           <MousePointerClick className="h-3 w-3 ml-1" />
           {pickMode ? 'ביטול בחירת אלמנט' : 'בחר אלמנט מהתצוגה'}
@@ -731,7 +807,7 @@ function ThemeSitePreview({
         <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setLoading(true); iframeRef.current?.contentWindow?.location.reload(); }}>
           <RotateCcw className="h-3 w-3 ml-1" /> רענן
         </Button>
-        {loading && <span className="text-[10px] text-muted-foreground animate-pulse">טוען...</span>}
+        {loading && <span className="text-[10px] text-muted-foreground">טוען תצוגה...</span>}
       </div>
       <div className="flex justify-center bg-background/50 rounded overflow-hidden">
         <iframe
@@ -739,11 +815,15 @@ function ThemeSitePreview({
           key={route}
           src={route}
           title="תצוגה מקדימה של האתר"
-          onLoad={() => { setLoading(false); reapply(); }}
+          onLoad={() => {
+            setLoading(false);
+            setIframeReadyKey((prev) => prev + 1);
+            reapply();
+          }}
           style={{ width, height, border: 'none', maxWidth: '100%' }}
         />
       </div>
-      <div className="text-[10px] text-muted-foreground">💡 זו תצוגה אמיתית של עמוד באתר עם הצבעים והסגנון הנוכחיים. בחר אלמנט כדי לזהות צבע לעריכה מהירה. לא יישמר עד שתלחץ "שמור".</div>
+      <div className="text-[10px] text-muted-foreground">💡 זו תצוגה אמיתית של עמוד באתר. „בחר אלמנט מהתצוגה” מזהה טוקן צבע לעריכה מהירה, ו„עריכה חיה בעמוד חדש” פותחת עריכת אלמנטים מלאה עם דיאלוג היקף לכל שינוי.</div>
     </div>
   );
 }
