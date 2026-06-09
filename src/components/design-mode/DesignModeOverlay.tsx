@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { X, Undo2, Eye, EyeOff, Trash2, MousePointerClick, Minimize2, Maximize2 } from 'lucide-react';
+import { X, Undo2, Eye, EyeOff, Trash2, MousePointerClick, Minimize2, Maximize2, Pipette, Plus } from 'lucide-react';
 
 interface PendingChange {
   el: Element;
@@ -29,6 +29,22 @@ type EditorLayout = {
 };
 
 const DESIGN_MODE_EDITOR_LAYOUT_KEY = 'design_mode_editor_layout_v1';
+const COLOR_FAVORITES_KEY = 'design_mode_color_favorites_v1';
+
+function loadColorFavorites(): string[] {
+  try {
+    const raw = localStorage.getItem(COLOR_FAVORITES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function pushColorFavorite(existing: string[], color: string): string[] {
+  const norm = color.toLowerCase();
+  const filtered = existing.filter(c => c.toLowerCase() !== norm);
+  const next = [norm, ...filtered].slice(0, 12);
+  localStorage.setItem(COLOR_FAVORITES_KEY, JSON.stringify(next));
+  return next;
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -99,31 +115,76 @@ export function DesignModeOverlay() {
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const [hoverLabel, setHoverLabel] = useState('');
   const [selectedEl, setSelectedEl] = useState<Element | null>(null);
-  const [pending, setPending] = useState<PendingChange | null>(null);
+  const [liveChanges, setLiveChanges] = useState<Record<string, string>>({}); // property -> value (live preview)
+  const [selectionKey, setSelectionKey] = useState(0); // increments on each new element selection to remount inputs
+  const [colorFavorites, setColorFavorites] = useState<string[]>(loadColorFavorites);
+  const [lastFocusedColorProp, setLastFocusedColorProp] = useState<string>('color');
+  const [hoveredFavIndex, setHoveredFavIndex] = useState<number | null>(null);
+  const [selectedFavs, setSelectedFavs] = useState<Set<number>>(new Set());
+  const [deleteMode, setDeleteMode] = useState(false);
+  const [hoverColors, setHoverColors] = useState<{ bg: string; text: string } | null>(null);
+  const [eyedropperError, setEyedropperError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [editorMinimized, setEditorMinimized] = useState(initialLayout.minimized);
   const [editorSize, setEditorSize] = useState(() => ({ width: initialLayout.width, height: initialLayout.height }));
   const [editorPosition, setEditorPosition] = useState(() => ({ x: initialLayout.x, y: initialLayout.y }));
+  const [clickPoint, setClickPoint] = useState<{ x: number; y: number } | null>(null);
+  const editorSizeRef = useRef(editorSize);
+  editorSizeRef.current = editorSize;
   const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const previewStyleRef = useRef<HTMLStyleElement | null>(null);
 
+  // Create a dedicated <style> element for live preview — removed on unmount.
+  useEffect(() => {
+    const el = document.createElement('style');
+    el.id = 'design-mode-live-preview';
+    document.head.appendChild(el);
+    previewStyleRef.current = el;
+    return () => { el.remove(); previewStyleRef.current = null; };
+  }, []);
+
+  // Update the live preview <style> whenever liveChanges changes.
+  useEffect(() => {
+    const styleEl = previewStyleRef.current;
+    if (!styleEl) return;
+    const entries = Object.entries(liveChanges);
+    if (!selectedEl || entries.length === 0) { styleEl.textContent = ''; return; }
+    const selector = computeClassSelector(selectedEl);
+    const props = entries.map(([prop, val]) => `  ${prop}: ${val} !important;`).join('\n');
+    styleEl.textContent = `${selector} {\n${props}\n}`;
+  }, [liveChanges, selectedEl]);
+
+  // Reposition dialog near the click point whenever a new element is selected.
+  // Intentionally NOT depending on editorSize to avoid jumping after user resizes the panel.
   useEffect(() => {
     if (!selectedEl || editorMinimized) return;
-    const boundsWidth = Math.max(360, window.innerWidth - 24);
-    const boundsHeight = Math.max(320, window.innerHeight - 24);
-    const nextWidth = Math.min(editorSize.width, boundsWidth);
-    const nextHeight = Math.min(editorSize.height, boundsHeight);
-    const rect = selectedEl.getBoundingClientRect();
-    const preferredX = rect.right + 16 + nextWidth <= window.innerWidth
-      ? rect.right + 16
-      : Math.max(8, rect.left - nextWidth - 16);
-    const preferredY = Math.min(Math.max(8, rect.top), Math.max(8, window.innerHeight - nextHeight - 8));
+    const { width: W, height: H } = editorSizeRef.current;
 
-    setEditorSize((prev) => ({
-      width: nextWidth === prev.width ? prev.width : nextWidth,
-      height: nextHeight === prev.height ? prev.height : nextHeight,
-    }));
-    setEditorPosition({ x: Math.max(8, Math.min(preferredX, window.innerWidth - nextWidth - 8)), y: preferredY });
-  }, [editorMinimized, editorSize.height, editorSize.width, selectedEl]);
+    let preferredX: number;
+    let preferredY: number;
+
+    if (clickPoint) {
+      // Place dialog just to the right of (and slightly above) the click point.
+      preferredX = clickPoint.x + 20;
+      preferredY = Math.max(8, clickPoint.y - 40);
+      // If it doesn't fit to the right, flip to the left.
+      if (preferredX + W > window.innerWidth - 8) {
+        preferredX = Math.max(8, clickPoint.x - W - 20);
+      }
+    } else {
+      const rect = selectedEl.getBoundingClientRect();
+      preferredX = rect.right + 16 + W <= window.innerWidth
+        ? rect.right + 16
+        : Math.max(8, rect.left - W - 16);
+      preferredY = Math.min(Math.max(8, rect.top), Math.max(8, window.innerHeight - H - 8));
+    }
+
+    setEditorPosition({
+      x: Math.max(8, Math.min(preferredX, window.innerWidth - W - 8)),
+      y: Math.max(8, Math.min(preferredY, window.innerHeight - H - 8)),
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEl, editorMinimized, clickPoint]);
 
   useEffect(() => {
     saveEditorLayout({
@@ -177,9 +238,14 @@ export function DesignModeOverlay() {
 
     const onMove = (e: MouseEvent) => {
       const target = resolveElementTarget(e.target);
-      if (!target || isOwnUi(target)) { setHoverRect(null); return; }
+      if (!target || isOwnUi(target)) { setHoverRect(null); setHoverColors(null); return; }
       setHoverRect(target.getBoundingClientRect());
       setHoverLabel(describeElement(target));
+      const cs = getComputedStyle(target);
+      setHoverColors({
+        bg: rgbToHex(cs.backgroundColor) || '#000000',
+        text: rgbToHex(cs.color) || '#000000',
+      });
     };
 
     const blockEvent = (e: Event) => {
@@ -198,7 +264,11 @@ export function DesignModeOverlay() {
       // Select on pointerdown so React onClick never fires.
       setCollapsed(false);
       setEditorMinimized(false);
-      setPending(null);
+      // Clear any live preview from the previous element
+      if (previewStyleRef.current) previewStyleRef.current.textContent = '';
+      setLiveChanges({});
+      setSelectionKey(k => k + 1);
+      setClickPoint({ x: e.clientX, y: e.clientY });
       setSelectedEl(target);
       console.log('[design-mode] selected:', describeElement(target));
     };
@@ -238,21 +308,98 @@ export function DesignModeOverlay() {
 
   if (!enabled) return null;
 
+  const hasChanges = Object.keys(liveChanges).length > 0;
+
+  /** Clear live preview and close the editor panel. */
+  const closeEditor = () => {
+    if (previewStyleRef.current) previewStyleRef.current.textContent = '';
+    setLiveChanges({});
+    setSelectedEl(null);
+  };
+
   const applyScope = (scope: OverrideScope) => {
-    if (!pending) return;
-    let selector = '';
-    if (scope === 'element') selector = computeSelector(pending.el);
-    else if (scope === 'class') selector = computeClassSelector(pending.el);
-    else selector = computeClassSelector(pending.el); // 'global' falls back to class for now (token-level not auto-mapped)
+    if (!selectedEl || !hasChanges) return;
+    const selector = scope === 'element'
+      ? computeSelector(selectedEl)
+      : computeClassSelector(selectedEl);
 
     addOverride({
       scope,
       selector,
-      label: `${pending.label} ← ${pending.value}`,
-      css: { [pending.property]: pending.value },
+      label: `${Object.keys(liveChanges).length} שינויים`,
+      css: { ...liveChanges },
     });
-    setPending(null);
+
+    // Auto-save colors to favorites
+    const colorFields = EDITABLE_FIELDS.filter(f => f.type === 'color').map(f => f.property);
+    let favs = colorFavorites;
+    for (const prop of colorFields) {
+      if (liveChanges[prop]) favs = pushColorFavorite(favs, liveChanges[prop]);
+    }
+    if (favs !== colorFavorites) setColorFavorites(favs);
+
+    // Clear preview — the override's own <style> now takes over
+    if (previewStyleRef.current) previewStyleRef.current.textContent = '';
+    setLiveChanges({});
     setSelectedEl(null);
+  };
+
+  /** Save all current live color values to favorites manually */
+  const saveCurrentColorsToFavorites = () => {
+    const colorFields = EDITABLE_FIELDS.filter(f => f.type === 'color').map(f => f.property);
+    let favs = colorFavorites;
+    let changed = false;
+    for (const prop of colorFields) {
+      if (liveChanges[prop]) { favs = pushColorFavorite(favs, liveChanges[prop]); changed = true; }
+    }
+    if (!changed && selectedEl) {
+      // Save computed colors from the element
+      for (const prop of colorFields) {
+        const val = rgbToHex(getComputedStyle(selectedEl).getPropertyValue(prop).trim());
+        if (val) { favs = pushColorFavorite(favs, val); changed = true; }
+      }
+    }
+    if (changed) setColorFavorites(favs);
+  };
+
+  /** Delete selected favorites or single one by index */
+  const deleteFavorite = (idx: number) => {
+    const next = colorFavorites.filter((_, i) => i !== idx);
+    localStorage.setItem(COLOR_FAVORITES_KEY, JSON.stringify(next));
+    setColorFavorites(next);
+    setSelectedFavs(prev => { const s = new Set(prev); s.delete(idx); return s; });
+  };
+
+  const deleteSelectedFavorites = () => {
+    const next = colorFavorites.filter((_, i) => !selectedFavs.has(i));
+    localStorage.setItem(COLOR_FAVORITES_KEY, JSON.stringify(next));
+    setColorFavorites(next);
+    setSelectedFavs(new Set());
+    setDeleteMode(false);
+  };
+
+  const toggleFavSelection = (idx: number) => {
+    setSelectedFavs(prev => {
+      const s = new Set(prev);
+      if (s.has(idx)) s.delete(idx); else s.add(idx);
+      return s;
+    });
+  };
+
+  /** Open native EyeDropper API to pick any color from the screen */
+  const handleEyeDropper = async (property: string) => {
+    if (!('EyeDropper' in window)) {
+      setEyedropperError('הדפדפן לא תומך ב-EyeDropper (נדרש Chrome/Edge)');
+      setTimeout(() => setEyedropperError(null), 3000);
+      return;
+    }
+    try {
+      const dropper = new (window as any).EyeDropper();
+      const { sRGBHex } = await dropper.open();
+      setLiveChanges(prev => ({ ...prev, [property]: sRGBHex }));
+      setLastFocusedColorProp(property);
+      setSelectionKey(k => k + 1); // remount inputs to show picked value
+    } catch { /* user cancelled */ }
   };
 
   return createPortal(
@@ -279,7 +426,14 @@ export function DesignModeOverlay() {
             background: 'hsl(43, 74%, 49%)', color: '#000',
             fontSize: 11, padding: '2px 6px', borderRadius: 4,
             fontFamily: 'monospace', whiteSpace: 'nowrap',
+            display: 'flex', alignItems: 'center', gap: 4,
           }}>
+            {hoverColors && (
+              <>
+                <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: hoverColors.text, border: '1px solid rgba(0,0,0,0.3)', flexShrink: 0 }} title={`טקסט: ${hoverColors.text}`} />
+                <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: hoverColors.bg, border: '1px solid rgba(0,0,0,0.3)', flexShrink: 0 }} title={`רקע: ${hoverColors.bg}`} />
+              </>
+            )}
             {hoverLabel}
           </div>
         </div>
@@ -329,6 +483,16 @@ export function DesignModeOverlay() {
       )}
 
       {selectedEl && !editorMinimized && (
+        /* Fixed full-viewport wrapper so Rnd positions in viewport coords, not document coords.
+           This means no scroll-offset bugs and dragging always works. */
+        <div
+          style={{
+            position: 'fixed', top: 0, left: 0,
+            width: '100vw', height: '100vh',
+            pointerEvents: 'none',
+            zIndex: 100000,
+          }}
+        >
         <Rnd
           size={editorSize}
           position={editorPosition}
@@ -336,21 +500,29 @@ export function DesignModeOverlay() {
           minHeight={320}
           maxWidth={Math.max(420, window.innerWidth - 24)}
           maxHeight={Math.max(340, window.innerHeight - 24)}
-          bounds="window"
+          bounds="parent"
           dragHandleClassName="design-mode-editor-drag-handle"
-          onDragStop={(_, d) => setEditorPosition({ x: d.x, y: d.y })}
+          style={{ pointerEvents: 'all' }}
+          onDragStart={() => {
+            const handle = document.querySelector('.design-mode-editor-drag-handle') as HTMLElement | null;
+            if (handle) handle.style.cursor = 'grabbing';
+          }}
+          onDragStop={(_, d) => {
+            const handle = document.querySelector('.design-mode-editor-drag-handle') as HTMLElement | null;
+            if (handle) handle.style.cursor = 'grab';
+            setEditorPosition({ x: d.x, y: d.y });
+          }}
           onResizeStop={(_, __, ref, ___, position) => {
             setEditorSize({ width: ref.offsetWidth, height: ref.offsetHeight });
             setEditorPosition({ x: position.x, y: position.y });
           }}
-          className="z-[100000]"
         >
           <div className="flex h-full flex-col rounded-xl border border-border bg-background shadow-2xl">
-            <div className="design-mode-editor-drag-handle flex cursor-move items-center justify-between gap-2 border-b border-border/50 px-3 py-2 select-none">
-              <div className="text-sm font-semibold text-right truncate">
+            <div className="design-mode-editor-drag-handle flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2 select-none w-full" style={{ cursor: 'grab' }}>
+              <div className="text-sm font-semibold text-right truncate flex-1 min-w-0">
                 עריכת אלמנט: <code className="text-xs text-muted-foreground">{describeElement(selectedEl)}</code>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0" style={{ cursor: 'default' }}>
                 <Button
                   type="button"
                   size="icon"
@@ -366,20 +538,112 @@ export function DesignModeOverlay() {
                   size="icon"
                   variant="ghost"
                   className="h-7 w-7"
-                  onClick={() => {
-                    setSelectedEl(null);
-                    setPending(null);
-                  }}
-                  title="סגור"
+                  onClick={closeEditor}
+                  title="סגור (מבטל שינויים)"
                 >
                   <X className="h-4 w-4" />
                 </Button>
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-3" dir="rtl">
+            {/* Fields — key forces remount (reset inputs) on each new element selection */}
+            <div key={selectionKey} className="min-h-0 flex-1 overflow-y-auto p-3 space-y-3" dir="rtl">
+              {/* Color favorites palette */}
+              <div className="flex flex-wrap gap-1.5 pb-1 border-b border-border/40 mb-1">
+                <span className="text-[10px] text-muted-foreground w-full text-right flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      title="שמור צבעים נוכחיים למועדפים"
+                      onClick={saveCurrentColorsToFavorites}
+                      className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <Plus style={{ width: 10, height: 10 }} /> שמור
+                    </button>
+                    {colorFavorites.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => { setDeleteMode(d => !d); setSelectedFavs(new Set()); }}
+                        className={`inline-flex items-center gap-0.5 text-[10px] transition-colors ${
+                          deleteMode ? 'text-destructive font-semibold' : 'text-muted-foreground hover:text-destructive'
+                        }`}
+                      >
+                        <Trash2 style={{ width: 10, height: 10 }} /> {deleteMode ? 'בטל' : 'מחק'}
+                      </button>
+                    )}
+                    {deleteMode && selectedFavs.size > 0 && (
+                      <button
+                        type="button"
+                        onClick={deleteSelectedFavorites}
+                        className="inline-flex items-center gap-0.5 text-[10px] text-white bg-destructive rounded px-1 transition-colors"
+                      >
+                        מחק {selectedFavs.size} נבחרים
+                      </button>
+                    )}
+                  </span>
+                  <span>מועדפים:</span>
+                </span>
+                {colorFavorites.length === 0 && (
+                  <span className="text-[10px] text-muted-foreground/60 text-right w-full">עדיין אין — שמור צבע כדי להוסיף</span>
+                )}
+                {colorFavorites.map((c, i) => (
+                  <div
+                    key={i}
+                    style={{ position: 'relative', width: 22, height: 22, flexShrink: 0 }}
+                    onMouseEnter={() => setHoveredFavIndex(i)}
+                    onMouseLeave={() => setHoveredFavIndex(null)}
+                  >
+                    <button
+                      type="button"
+                      title={deleteMode ? `מחק ${c}` : c}
+                      onClick={() => {
+                        if (deleteMode) toggleFavSelection(i);
+                        else setLiveChanges(prev => ({ ...prev, [lastFocusedColorProp]: c }));
+                      }}
+                      style={{
+                        background: c,
+                        width: 22, height: 22,
+                        borderRadius: 4,
+                        border: selectedFavs.has(i)
+                          ? '2px solid red'
+                          : '1.5px solid rgba(0,0,0,0.18)',
+                        flexShrink: 0,
+                        cursor: 'pointer',
+                        opacity: deleteMode && !selectedFavs.has(i) ? 0.6 : 1,
+                        display: 'block',
+                      }}
+                    />
+                    {/* X icon on hover (non-delete mode) */}
+                    {!deleteMode && hoveredFavIndex === i && (
+                      <button
+                        type="button"
+                        title="מחק מהמועדפים"
+                        onClick={(e) => { e.stopPropagation(); deleteFavorite(i); }}
+                        style={{
+                          position: 'absolute', top: -5, right: -5,
+                          width: 13, height: 13,
+                          borderRadius: '50%',
+                          background: 'hsl(var(--destructive))',
+                          color: '#fff',
+                          border: 'none',
+                          cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 9, lineHeight: 1,
+                          zIndex: 10,
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {eyedropperError && (
+                <p className="text-[11px] text-destructive text-right">{eyedropperError}</p>
+              )}
               {EDITABLE_FIELDS.map(f => {
                 const current = getComputedStyle(selectedEl).getPropertyValue(f.property).trim();
+                const liveVal = liveChanges[f.property];
                 return (
                   <div key={f.property} className="flex items-center gap-2">
                     <Label className="w-24 text-xs text-right shrink-0">{f.label}</Label>
@@ -387,30 +651,32 @@ export function DesignModeOverlay() {
                       <>
                         <input
                           type="color"
-                          defaultValue={rgbToHex(current) || '#000000'}
-                          onChange={(e) => setPending({ el: selectedEl, property: f.property, value: e.target.value, label: f.label })}
+                          defaultValue={rgbToHex(liveVal ?? current) || '#000000'}
+                          onFocus={() => setLastFocusedColorProp(f.property)}
+                          onChange={(e) => { setLastFocusedColorProp(f.property); setLiveChanges(prev => ({ ...prev, [f.property]: e.target.value })); }}
                           className="h-8 w-12 rounded border border-border cursor-pointer"
                         />
                         <Input
-                          defaultValue={current}
+                          defaultValue={liveVal ?? current}
                           placeholder={f.placeholder}
-                          onBlur={(e) => {
-                            if (e.target.value !== current) {
-                              setPending({ el: selectedEl, property: f.property, value: e.target.value, label: f.label });
-                            }
-                          }}
+                          onFocus={() => setLastFocusedColorProp(f.property)}
+                          onChange={(e) => { setLastFocusedColorProp(f.property); setLiveChanges(prev => ({ ...prev, [f.property]: e.target.value })); }}
                           className="h-8 text-xs flex-1"
                         />
+                        <button
+                          type="button"
+                          title="בחר צבע מהמסך (EyeDropper)"
+                          onClick={() => handleEyeDropper(f.property)}
+                          className="h-8 w-8 shrink-0 flex items-center justify-center rounded border border-border hover:bg-accent transition-colors"
+                        >
+                          <Pipette className="h-3.5 w-3.5" />
+                        </button>
                       </>
                     ) : (
                       <Input
-                        defaultValue={current}
+                        defaultValue={liveVal ?? current}
                         placeholder={f.placeholder}
-                        onBlur={(e) => {
-                          if (e.target.value !== current) {
-                            setPending({ el: selectedEl, property: f.property, value: e.target.value, label: f.label });
-                          }
-                        }}
+                        onChange={(e) => setLiveChanges(prev => ({ ...prev, [f.property]: e.target.value }))}
                         className="h-8 text-xs flex-1"
                       />
                     )}
@@ -419,35 +685,51 @@ export function DesignModeOverlay() {
               })}
             </div>
 
-            {pending && (
-              <div className="border-t border-border/50 p-3 space-y-2" dir="rtl">
-                <p className="text-xs text-muted-foreground text-right">
-                  להחיל שינוי: <span className="font-mono text-foreground">{pending.label}: {pending.value}</span>
+            {/* Save panel — always visible */}
+            <div className="border-t border-border/50 p-3 space-y-1.5 shrink-0" dir="rtl">
+              {hasChanges && (
+                <p className="text-[11px] text-yellow-600 text-right pb-1">
+                  👁 תצוגה מקדימה חיה — בחר היכן לשמור:
                 </p>
-                <div className="grid grid-cols-1 gap-1.5">
-                  <Button className="justify-start text-right" variant="outline" onClick={() => applyScope('element')}>
-                    🎯 רק האלמנט הזה
-                  </Button>
-                  <Button className="justify-start text-right" variant="outline" onClick={() => applyScope('class')}>
-                    🧩 כל האלמנטים מהסוג הזה בעמוד
-                  </Button>
-                  <Button className="justify-start text-right" variant="outline" onClick={() => applyScope('global')}>
-                    🌐 כל המופעים בכל האתר
-                  </Button>
+              )}
+              {!hasChanges && (
+                <p className="text-[11px] text-muted-foreground text-right pb-1">
+                  שנה ערך למעלה — תראה תצוגה מקדימה מיידית בעמוד
+                </p>
+              )}
+              <Button
+                className="w-full justify-start text-right"
+                variant="outline"
+                disabled={!hasChanges}
+                onClick={() => applyScope('element')}
+              >
+                🎯 שמור רק על האלמנט הזה
+              </Button>
+              <Button
+                className="w-full justify-start text-right"
+                variant="outline"
+                disabled={!hasChanges}
+                onClick={() => applyScope('class')}
+              >
+                🧩 שמור על כל האלמנטים מהסוג הזה
+              </Button>
+              <Button
+                className="w-full justify-start text-right"
+                variant="outline"
+                disabled={!hasChanges}
+                onClick={() => applyScope('global')}
+              >
+                🌐 שמור על כל המופעים בכל האתר
+              </Button>
+              {hasChanges && (
+                <div className="flex justify-end pt-0.5">
+                  <Button variant="ghost" size="sm" onClick={closeEditor}>בטל שינויים</Button>
                 </div>
-                <div className="flex justify-end">
-                  <Button variant="ghost" size="sm" onClick={() => setPending(null)}>ביטול</Button>
-                </div>
-              </div>
-            )}
-
-            {!pending && (
-              <div className="border-t border-border/50 px-3 py-2 text-[11px] text-muted-foreground text-right" dir="rtl">
-                שנה ערך כלשהו למעלה — ואז תיפתח מיד בחירת היקף השינוי.
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </Rnd>
+        </div>
       )}
     </div>,
     document.body
