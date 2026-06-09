@@ -7,7 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-route
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import AppSidebar from "./components/AppSidebar";
 import AppLayout from "./components/AppLayout";
-import { Loader2 } from "lucide-react";
+// Loader2 removed — spinners disabled globally
 import { ThemeShortcutListener } from "./components/ThemeShortcutListener";
 import { DiarizationQueueProvider } from "./contexts/DiarizationQueueContext";
 import { CloudPreferencesProvider } from "./hooks/useCloudPreferences";
