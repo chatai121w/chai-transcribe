@@ -18,6 +18,8 @@ import { getServerUrl } from "@/lib/serverConfig";
 import { supabase } from "@/integrations/supabase/client";
 import { useCloudApiKeys } from "@/hooks/useCloudApiKeys";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
+import { isLoshonKodeshEnabled } from "@/lib/loshonKodesh";
+import { buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
 
 type LiveMode = "browser" | "cuda" | "groq";
 
@@ -255,6 +257,21 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   // ─── CUDA Whisper Live Mode ───
   const getBaseUrl = () => getServerUrl();
 
+  const getLiveBiasOptions = useCallback(() => {
+    const profileHotwords = buildProfileHotwords();
+    const profilePrompt = getProfileInitialPrompt();
+    const profileForcesLk = isProfileLoshonKodesh();
+    const mergedHotwords = [preferences.cuda_hotwords || "", profileHotwords]
+      .filter(Boolean)
+      .join(", ")
+      .trim();
+    return {
+      hotwords: mergedHotwords,
+      initialPrompt: profilePrompt,
+      loshonKodesh: isLoshonKodeshEnabled() || profileForcesLk,
+    };
+  }, [preferences.cuda_hotwords]);
+
   const sendChunk = useCallback(async (blob: Blob, offsetSec: number = 0) => {
     if (blob.size < LIVE_MIN_BLOB_BYTES || processingRef.current) return;
 
@@ -276,6 +293,10 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       const formData = new FormData();
       formData.append("file", blob, "chunk.webm");
       formData.append("language", "he");
+      const bias = getLiveBiasOptions();
+      if (bias.hotwords) formData.append("hotwords", bias.hotwords);
+      if (bias.initialPrompt) formData.append("initial_prompt", bias.initialPrompt);
+      if (bias.loshonKodesh) formData.append("loshon_kodesh", "1");
       // Carry last N words of previous transcript as context (initial_prompt on server)
       const prevWords = finalTextRef.current.trim().split(/\s+/).filter(Boolean);
       if (prevWords.length > 0) {
@@ -406,7 +427,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     } finally {
       processingRef.current = false;
     }
-  }, [appendDedupText, mode, apiKeys.groq_key, apiKeys.groq_keys_pool]);
+  }, [appendDedupText, mode, apiKeys.groq_key, apiKeys.groq_keys_pool, getLiveBiasOptions]);
 
   const runFinalRefinePass = useCallback(async (): Promise<string | null> => {
     if (allChunksRef.current.length === 0) return null;
@@ -420,6 +441,10 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       formData.append("file", fullBlob, "live-final.webm");
       formData.append("language", "he");
       formData.append("final", "1");
+      const bias = getLiveBiasOptions();
+      if (bias.hotwords) formData.append("hotwords", bias.hotwords);
+      if (bias.initialPrompt) formData.append("initial_prompt", bias.initialPrompt);
+      if (bias.loshonKodesh) formData.append("loshon_kodesh", "1");
 
       const res = await fetch(`${getBaseUrl()}/transcribe-live`, {
         method: "POST",
@@ -446,7 +471,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       setIsRefining(false);
       setInterimText("");
     }
-  }, []);
+  }, [getLiveBiasOptions]);
 
   const startCuda = useCallback(async () => {
     try {

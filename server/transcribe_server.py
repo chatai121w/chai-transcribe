@@ -1843,6 +1843,9 @@ def transcribe_live():
         model: whisper model id (optional)
         language: language code (optional, default 'he')
         final: '1' for final refine pass after stop
+        loshon_kodesh: '1' to enable torani prompt/hotwords bias
+        hotwords: comma-separated hotwords (merged with defaults)
+        initial_prompt: optional user/profile prompt prefix
     """
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
@@ -1853,6 +1856,13 @@ def transcribe_live():
     is_final = str(request.form.get("final", "0")).lower() in ("1", "true", "yes")
     # Context from previous chunk (last N words) — used as initial_prompt for continuity
     live_context = request.form.get("context", "").strip()
+    user_hotwords = request.form.get("hotwords", "").strip() or None
+    loshon_kodesh = (request.form.get("loshon_kodesh", "0") or "0").strip().lower() in ("1", "true", "yes")
+    user_initial_prompt = request.form.get("initial_prompt", "").strip() or None
+
+    base_prompt, resolved_hotwords = _resolve_prompt_and_hotwords(
+        language, user_initial_prompt, user_hotwords, loshon_kodesh
+    )
 
     resolved = MODEL_REGISTRY.get(model_id, model_id)
     suffix = _safe_suffix(audio_file.filename)
@@ -1896,12 +1906,15 @@ def transcribe_live():
             with_timestamps = True if is_final else False
             # Build initial_prompt: combine Hebrew prefix + previous chunk context
             if is_final:
-                prompt = "תמלול בעברית." if language == "he" else None
+                prompt = base_prompt or ("תמלול בעברית." if language == "he" else None)
             elif live_context:
                 # Carry last words from previous chunk for linguistic continuity
-                prompt = f"תמלול בעברית. {live_context}" if language == "he" else live_context
+                if base_prompt:
+                    prompt = f"{base_prompt} {live_context}".strip()
+                else:
+                    prompt = f"תמלול בעברית. {live_context}" if language == "he" else live_context
             else:
-                prompt = "תמלול בעברית." if language == "he" else None
+                prompt = base_prompt or ("תמלול בעברית." if language == "he" else None)
             segments, info = m.transcribe(
                 tmp_path,
                 language=language if language != "auto" else None,
@@ -1914,6 +1927,7 @@ def transcribe_live():
                 no_speech_threshold=0.6,
                 suppress_blank=True,
                 initial_prompt=prompt,
+                hotwords=resolved_hotwords,
             )
             # Materialize segments to surface errors (e.g. flash attention)
             # inside this function rather than during lazy iteration.

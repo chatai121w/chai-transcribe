@@ -523,14 +523,19 @@ export const PronunciationProfileSelector = ({ onProfileChange }: PronunciationP
         </Badge>
       )}
 
-      <Dialog open={manageOpen} onOpenChange={setManageOpen}>
+      <Dialog open={manageOpen} onOpenChange={setManageOpen} modal={false}>
         <DialogTrigger asChild>
           <Button size="sm" variant="outline" className="h-8 text-xs gap-1">
             <UserCog className="w-3.5 h-3.5" />
             ניהול
           </Button>
         </DialogTrigger>
-        <DialogContent className="max-w-xl" dir="rtl">
+        <DialogContent
+          className="max-w-xl"
+          dir="rtl"
+          hideOverlay
+          onEscapeKeyDown={() => setManageOpen(false)}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Users className="w-5 h-5" /> פרופילי הגייה
