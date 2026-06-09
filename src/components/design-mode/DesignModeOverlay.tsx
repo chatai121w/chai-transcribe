@@ -182,19 +182,33 @@ export function DesignModeOverlay() {
       setHoverLabel(describeElement(target));
     };
 
-    const onClick = (e: MouseEvent) => {
-      const target = resolveElementTarget(e.target);
-      if (!target || isOwnUi(target)) return;
-
-      // Allow normal click behavior with Ctrl/Cmd (open links, button actions, etc.).
-      if (e.ctrlKey || e.metaKey) return;
-
+    const blockEvent = (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      // If the panel was minimized/collapsed earlier, reopen it when user selects an element.
+      if (typeof (e as any).stopImmediatePropagation === 'function') {
+        (e as any).stopImmediatePropagation();
+      }
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      const target = resolveElementTarget(e.target);
+      if (!target || isOwnUi(target)) return;
+      if (e.ctrlKey || e.metaKey) return;
+      blockEvent(e);
+      // Select on pointerdown so React onClick never fires.
       setCollapsed(false);
       setEditorMinimized(false);
+      setPending(null);
       setSelectedEl(target);
+      console.log('[design-mode] selected:', describeElement(target));
+    };
+
+    const swallow = (e: Event) => {
+      const target = resolveElementTarget(e.target);
+      if (!target || isOwnUi(target)) return;
+      const me = e as MouseEvent;
+      if (me.ctrlKey || me.metaKey) return;
+      blockEvent(e);
     };
 
     const onKey = (e: KeyboardEvent) => {
@@ -209,11 +223,15 @@ export function DesignModeOverlay() {
     };
 
     document.addEventListener('mousemove', onMove, true);
-    document.addEventListener('click', onClick, true);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('mousedown', swallow, true);
+    document.addEventListener('click', swallow, true);
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('mousemove', onMove, true);
-      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('mousedown', swallow, true);
+      document.removeEventListener('click', swallow, true);
       document.removeEventListener('keydown', onKey);
     };
   }, [enabled, selectedEl, setEnabled, undoLast]);
