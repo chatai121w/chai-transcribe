@@ -11,3 +11,5 @@ speechbrain>=1.0.0
 noisereduce>=3.0.0
 soundfile>=0.12.0
 scipy>=1.10.0
+# Hebrew nikud / diacritization (optional — DICTA dictabert-large-char-menaked)
+transformers>=4.40.0

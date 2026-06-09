@@ -34,7 +34,7 @@ const AnalyticsDashboard = lazy(() => import("@/components/AnalyticsDashboard").
 const SpeakerDiarization = lazy(() => import("@/components/SpeakerDiarization").then(m => ({ default: m.SpeakerDiarization })));
 const FloatingPlayerPortal = lazy(() => import("@/components/FloatingPlayerPortal").then(m => ({ default: m.FloatingPlayerPortal })));
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })));
-import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud } from "lucide-react";
+import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type } from "lucide-react";
 import { uploadToDrive } from "@/components/GoogleDriveBrowser";
 import { DriveFolderPicker } from "@/components/DriveFolderPicker";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
@@ -48,6 +48,7 @@ import { useCloudVersions } from "@/hooks/useCloudVersions";
 import { useOllama, isOllamaModel } from "@/hooks/useOllama";
 import { db } from "@/lib/localDb";
 import { useCorrectionLearning } from "@/hooks/useCorrectionLearning";
+import { getServerUrl } from "@/lib/serverConfig";
 import { LazyErrorBoundary } from "@/components/LazyErrorBoundary";
 import { CollapsibleWidget } from "@/components/ui/CollapsibleWidget";
 import "@/styles/mobile-pages.css";
@@ -601,6 +602,38 @@ const TextEditor = () => {
     }
   };
 
+  /** Add nikud (diacritics) to the Hebrew text via the local DICTA model. */
+  const handleNikud = async () => {
+    if (!text.trim()) {
+      toast({ title: "אין טקסט לניקוד", variant: "destructive" });
+      return;
+    }
+    setAiAction('nikud');
+    try {
+      const res = await fetch(`${getServerUrl()}/nikud`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 503) {
+          throw new Error('מנוע הניקוד לא מותקן בשרת (דרוש transformers)');
+        }
+        throw new Error(body.error || `שגיאה ${res.status}`);
+      }
+      const data = await res.json();
+      if (!data.text) throw new Error('לא התקבל טקסט מנוקד');
+      addVersion(data.text, 'ai-fix', 'ניקוד (DICTA)');
+      toast({ title: 'ניקוד הושלם ✅', description: `רץ על ${data.device === 'cuda' ? 'GPU' : 'CPU'}` });
+    } catch (err) {
+      console.error('Nikud error:', err);
+      toast({ title: "שגיאה בניקוד", description: err instanceof Error ? err.message : 'שגיאה', variant: "destructive" });
+    } finally {
+      setAiAction(null);
+    }
+  };
+
   const handleEditorChange = useCallback((newText: string) => {
     setText(newText);
     // Debounce manual version creation (2s)
@@ -886,6 +919,17 @@ const TextEditor = () => {
             >
               {aiAction === 'split_paragraphs' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SplitSquareVertical className="w-3.5 h-3.5" />}
               פסקאות
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1"
+              onClick={handleNikud}
+              disabled={!!aiAction}
+              title="הוספת ניקוד לעברית מודרנית (מנוע DICTA מקומי)"
+            >
+              {aiAction === 'nikud' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Type className="w-3.5 h-3.5" />}
+              ניקוד
             </Button>
             <div className="w-px h-5 bg-border mx-1 hidden sm:block" />
             <Button

@@ -676,6 +676,10 @@ MODEL_REGISTRY = {
     "ivrit-ai/faster-whisper-v2-d4": "ivrit-ai/faster-whisper-v2-d4",
     "ivrit-ai/whisper-large-v3-turbo-ct2": "ivrit-ai/whisper-large-v3-turbo-ct2",
     # ivrit-ai/whisper-large-v3-turbo — requires local HF→CT2 conversion (see MODELS_NEEDING_CONVERSION)
+    # Yiddish-optimized (ivrit-ai fine-tune) — pre-converted CT2, ready for faster-whisper.
+    # Closest available model for Yiddish / לשון-הקודש-style mixed speech.
+    "ivrit-ai/yi-whisper-large-v3-turbo-ct2": "ivrit-ai/yi-whisper-large-v3-turbo-ct2",  # Yiddish turbo (fast)
+    "ivrit-ai/yi-whisper-large-v3-ct2": "ivrit-ai/yi-whisper-large-v3-ct2",              # Yiddish full (accurate)
 }
 
 # Default to ivrit-ai for best Hebrew quality (per Interspeech 2025: Marmor et al.).
@@ -3638,6 +3642,72 @@ def harmonize_capabilities():
     return jsonify({"tiers": tiers})
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  NIKUD ENGINE — Hebrew diacritization (DICTA dictabert-large-char-menaked)
+# ═══════════════════════════════════════════════════════════════════
+
+def _import_nikud_engine():
+    """Import the nikud engine module regardless of run context."""
+    try:
+        from server import nikud_engine as ne
+        return ne
+    except ImportError:
+        try:
+            import nikud_engine as ne
+            return ne
+        except ImportError:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import nikud_engine as ne
+            return ne
+
+
+@app.route("/nikud", methods=["POST"])
+def nikud():
+    """Add nikud (diacritics) to Hebrew text.
+
+    JSON body: { "text": "...", "mark_matres_lectionis": "*" (optional) }
+    Returns:   { "text": "<diacritized>", "device": "cuda|cpu" }
+    """
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        return jsonify({"error": "No text provided"}), 400
+    # Safety cap to avoid OOM on huge payloads
+    if len(text) > 100_000:
+        return jsonify({"error": "Text too long (max 100,000 chars)"}), 413
+
+    mark = data.get("mark_matres_lectionis") or None
+
+    ne = _import_nikud_engine()
+    if not ne.is_available():
+        return jsonify({
+            "error": "Nikud engine unavailable — install transformers",
+            "hint": "pip install transformers",
+        }), 503
+
+    start_time = time.time()
+    try:
+        result = ne.add_nikud(text, mark_matres_lectionis=mark)
+    except Exception as e:
+        _log.error(f"[nikud] Error: {e}\n{_tb_module.format_exc()}")
+        return jsonify({"error": f"Nikud failed: {str(e)}"}), 500
+
+    elapsed = time.time() - start_time
+    _log.info(f"[nikud] Done in {elapsed:.2f}s — {len(text)} chars")
+    return jsonify({
+        "text": result,
+        "device": ne.get_status().get("device", "cpu"),
+        "processing_time": round(elapsed, 2),
+    })
+
+
+@app.route("/nikud/status", methods=["GET"])
+def nikud_status():
+    """Return nikud engine availability and load status."""
+    ne = _import_nikud_engine()
+    return jsonify(ne.get_status())
+
+
 def main():
     global _api_key
     parser = argparse.ArgumentParser(description="Local Whisper Transcription Server")
@@ -3761,6 +3831,8 @@ def main():
     print("    DELETE /lk/rules/<id>   — Remove rule")
     print("    POST /lk/transcribe     — Transcribe with LK mode + post-processing")
     print("    GET  /harmonize/capabilities — Available harmony tiers")
+    print("    POST /nikud             — Add nikud (diacritics) to Hebrew text")
+    print("    GET  /nikud/status      — Nikud engine availability")
     print("    POST /load-model        — Load model into GPU memory")
     print("    POST /preload-stream    — Preload model via SSE (background)")
     print("    POST /download-model    — Download model to disk only")

@@ -24,7 +24,10 @@ MODEL_REGISTRY = {
     "ivrit-ai/faster-whisper-v2-d4": "ivrit-ai/faster-whisper-v2-d4",
     "ivrit-ai/whisper-large-v3-ct2": "ivrit-ai/whisper-large-v3-ct2",
     # ivrit-ai/whisper-large-v3-turbo — requires local HF→CT2 conversion
-    # Yiddish-optimized (ivrit-ai fine-tune)
+    # Yiddish-optimized (ivrit-ai fine-tune) — pre-converted CT2, ready for faster-whisper
+    "ivrit-ai/yi-whisper-large-v3-turbo-ct2": "ivrit-ai/yi-whisper-large-v3-turbo-ct2",  # יידיש turbo (מהיר)
+    "ivrit-ai/yi-whisper-large-v3-ct2": "ivrit-ai/yi-whisper-large-v3-ct2",              # יידיש מלא (מדויק)
+    # ivrit-ai/yi-whisper-large-v3-turbo — non-CT2, requires local HF→CT2 conversion
     "ivrit-ai/yi-whisper-large-v3-turbo": "ivrit-ai/yi-whisper-large-v3-turbo",
 }
 
