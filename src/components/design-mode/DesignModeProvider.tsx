@@ -38,6 +38,17 @@ export function DesignModeProvider({ children }: { children: React.ReactNode }) 
     return () => document.body.classList.remove('design-mode-active');
   }, [enabled]);
 
+  useEffect(() => {
+    if (!enabled) return;
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('designMode') !== '1') {
+      params.set('designMode', '1');
+      const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
+      window.history.replaceState({}, '', next);
+    }
+  }, [enabled]);
+
   const persist = (next: DesignOverride[]) => {
     setOverrides(next);
     saveOverrides(next);

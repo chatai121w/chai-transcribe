@@ -107,6 +107,25 @@ export function DesignModeOverlay() {
   const toolbarRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    if (!selectedEl || editorMinimized) return;
+    const boundsWidth = Math.max(360, window.innerWidth - 24);
+    const boundsHeight = Math.max(320, window.innerHeight - 24);
+    const nextWidth = Math.min(editorSize.width, boundsWidth);
+    const nextHeight = Math.min(editorSize.height, boundsHeight);
+    const rect = selectedEl.getBoundingClientRect();
+    const preferredX = rect.right + 16 + nextWidth <= window.innerWidth
+      ? rect.right + 16
+      : Math.max(8, rect.left - nextWidth - 16);
+    const preferredY = Math.min(Math.max(8, rect.top), Math.max(8, window.innerHeight - nextHeight - 8));
+
+    setEditorSize((prev) => ({
+      width: nextWidth === prev.width ? prev.width : nextWidth,
+      height: nextHeight === prev.height ? prev.height : nextHeight,
+    }));
+    setEditorPosition({ x: Math.max(8, Math.min(preferredX, window.innerWidth - nextWidth - 8)), y: preferredY });
+  }, [editorMinimized, editorSize.height, editorSize.width, selectedEl]);
+
+  useEffect(() => {
     saveEditorLayout({
       width: editorSize.width,
       height: editorSize.height,
@@ -401,6 +420,12 @@ export function DesignModeOverlay() {
                 <div className="flex justify-end">
                   <Button variant="ghost" size="sm" onClick={() => setPending(null)}>ביטול</Button>
                 </div>
+              </div>
+            )}
+
+            {!pending && (
+              <div className="border-t border-border/50 px-3 py-2 text-[11px] text-muted-foreground text-right" dir="rtl">
+                שנה ערך כלשהו למעלה — ואז תיפתח מיד בחירת היקף השינוי.
               </div>
             )}
           </div>
