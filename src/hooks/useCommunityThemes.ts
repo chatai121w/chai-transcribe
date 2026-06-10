@@ -79,7 +79,7 @@ export function useCommunityThemes() {
     };
     const { error } = await supabase
       .from('community_themes')
-      .upsert(payload, { onConflict: 'slug' });
+      .upsert([payload as any], { onConflict: 'slug' });
     if (error) return { ok: false, error: error.message };
     await refresh();
     return { ok: true };
