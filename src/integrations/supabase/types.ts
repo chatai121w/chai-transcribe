@@ -44,6 +44,45 @@ export type Database = {
         }
         Relationships: []
       }
+      community_themes: {
+        Row: {
+          colors: Json
+          created_at: string
+          created_by: string | null
+          element_overrides: Json | null
+          id: string
+          name: string
+          name_he: string
+          slug: string
+          style: Json | null
+          updated_at: string
+        }
+        Insert: {
+          colors: Json
+          created_at?: string
+          created_by?: string | null
+          element_overrides?: Json | null
+          id?: string
+          name: string
+          name_he: string
+          slug: string
+          style?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          colors?: Json
+          created_at?: string
+          created_by?: string | null
+          element_overrides?: Json | null
+          id?: string
+          name?: string
+          name_he?: string
+          slug?: string
+          style?: Json | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       conversion_history: {
         Row: {
           created_at: string

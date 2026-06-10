@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { applyOverridesToDom, type DesignOverride } from '@/lib/designOverrides';
 
 export interface ThemeColors {
   background: string;
@@ -56,6 +57,10 @@ export interface AppTheme {
   colors: ThemeColors;
   style?: ThemeStyleOptions;
   isCustom?: boolean;
+  /** Per-element CSS overrides recorded via Live Design Mode. */
+  elementOverrides?: DesignOverride[];
+  /** Source tag, e.g. 'community' for themes pulled from the shared cloud table. */
+  source?: 'builtin' | 'custom' | 'community';
 }
 
 // Built-in themes
@@ -517,49 +522,70 @@ function applyThemeToDOM(colors: ThemeColors, style?: ThemeStyleOptions) {
   root.style.setProperty('--app-shadow', shadowMap[s.shadow || 'soft']);
 }
 
+/** Merge a theme's own elementOverrides with any user-added overrides from localStorage. */
+function applyThemeOverrides(theme: AppTheme) {
+  let userOverrides: DesignOverride[] = [];
+  try {
+    const raw = localStorage.getItem('design_overrides_v1');
+    if (raw) userOverrides = JSON.parse(raw);
+  } catch { /* noop */ }
+  const themeOverrides = theme.elementOverrides ?? [];
+  applyOverridesToDom([...themeOverrides, ...userOverrides]);
+}
+
 export function useTheme() {
   const [activeThemeId, setActiveThemeId] = useState<string>('default');
   const [customThemes, setCustomThemes] = useState<AppTheme[]>([]);
+  const [communityThemes, setCommunityThemes] = useState<AppTheme[]>([]);
 
   // Load on mount
   useEffect(() => {
     const applyFromStorage = () => {
       const savedId = localStorage.getItem('app_theme_id') || 'default';
       const savedCustom = localStorage.getItem('app_custom_themes');
+      const savedCommunity = localStorage.getItem('app_community_themes');
       const customs: AppTheme[] = savedCustom ? JSON.parse(savedCustom) : [];
+      const community: AppTheme[] = savedCommunity ? JSON.parse(savedCommunity) : [];
       setCustomThemes(customs);
+      setCommunityThemes(community);
       setActiveThemeId(savedId);
-      const all = [...BUILT_IN_THEMES, ...customs];
+      const all = [...BUILT_IN_THEMES, ...community, ...customs];
       const theme = all.find(t => t.id === savedId) || BUILT_IN_THEMES[0];
       applyThemeToDOM(theme.colors, theme.style);
+      applyThemeOverrides(theme);
     };
     applyFromStorage();
-    // Re-apply when cloud preferences load (may have different theme)
     window.addEventListener('cloud-prefs-loaded', applyFromStorage);
-    return () => window.removeEventListener('cloud-prefs-loaded', applyFromStorage);
+    window.addEventListener('community-themes-updated', applyFromStorage);
+    return () => {
+      window.removeEventListener('cloud-prefs-loaded', applyFromStorage);
+      window.removeEventListener('community-themes-updated', applyFromStorage);
+    };
   }, []);
 
-  const allThemes = [...BUILT_IN_THEMES, ...customThemes];
+  const allThemes = [...BUILT_IN_THEMES, ...communityThemes, ...customThemes];
 
   const setTheme = useCallback((themeId: string) => {
-    const all = [...BUILT_IN_THEMES, ...customThemes];
+    const all = [...BUILT_IN_THEMES, ...communityThemes, ...customThemes];
     const theme = all.find(t => t.id === themeId);
     if (!theme) return;
     setActiveThemeId(themeId);
     localStorage.setItem('app_theme_id', themeId);
     localStorage.setItem('app_theme_updated_at', String(Date.now()));
     applyThemeToDOM(theme.colors, theme.style);
-  }, [customThemes]);
+    applyThemeOverrides(theme);
+  }, [customThemes, communityThemes]);
 
   const applyThemePreview = useCallback((theme: Pick<AppTheme, 'colors' | 'style'>) => {
     applyThemeToDOM(theme.colors, theme.style);
   }, []);
 
   const reapplyActiveTheme = useCallback(() => {
-    const all = [...BUILT_IN_THEMES, ...customThemes];
+    const all = [...BUILT_IN_THEMES, ...communityThemes, ...customThemes];
     const theme = all.find(t => t.id === activeThemeId) || BUILT_IN_THEMES[0];
     applyThemeToDOM(theme.colors, theme.style);
-  }, [activeThemeId, customThemes]);
+    applyThemeOverrides(theme);
+  }, [activeThemeId, customThemes, communityThemes]);
 
   const saveCustomTheme = useCallback((theme: AppTheme) => {
     setCustomThemes(prev => {
@@ -589,6 +615,7 @@ export function useTheme() {
     activeThemeId,
     allThemes,
     customThemes,
+    communityThemes,
     setTheme,
     applyThemePreview,
     reapplyActiveTheme,
