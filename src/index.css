@@ -18,44 +18,44 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 40 15% 96%;
-    --foreground: 220 60% 8%;
+    --background: 40 24% 94%;
+    --foreground: 222 52% 14%;
 
-    --card: 38 25% 98%;
-    --card-foreground: 220 60% 8%;
+    --card: 40 35% 97%;
+    --card-foreground: 222 52% 14%;
 
-    --popover: 38 25% 98%;
-    --popover-foreground: 220 60% 8%;
+    --popover: 40 35% 97%;
+    --popover-foreground: 222 52% 14%;
 
-    --primary: 220 85% 22%;
-    --primary-foreground: 40 20% 98%;
+    --primary: 223 63% 16%;
+    --primary-foreground: 43 90% 96%;
 
-    --secondary: 38 20% 90%;
-    --secondary-foreground: 220 60% 8%;
+    --secondary: 40 44% 90%;
+    --secondary-foreground: 222 52% 14%;
 
-    --muted: 38 15% 92%;
-    --muted-foreground: 220 30% 40%;
+    --muted: 40 26% 91%;
+    --muted-foreground: 222 20% 36%;
 
-    --accent: 220 75% 35%;
-    --accent-foreground: 40 20% 98%;
+    --accent: 41 72% 47%;
+    --accent-foreground: 223 63% 16%;
 
     --destructive: 0 70% 50%;
-    --destructive-foreground: 40 20% 98%;
+    --destructive-foreground: 43 90% 96%;
 
-    --border: 38 20% 88%;
-    --input: 38 20% 88%;
-    --ring: 220 85% 22%;
+    --border: 40 40% 72%;
+    --input: 40 33% 82%;
+    --ring: 41 72% 47%;
 
     --radius: 0.75rem;
 
-    --sidebar-background: 38 25% 98%;
-    --sidebar-foreground: 220 60% 8%;
-    --sidebar-primary: 220 85% 22%;
-    --sidebar-primary-foreground: 40 20% 98%;
-    --sidebar-accent: 38 20% 94%;
-    --sidebar-accent-foreground: 220 60% 8%;
-    --sidebar-border: 38 20% 88%;
-    --sidebar-ring: 220 85% 22%;
+    --sidebar-background: 40 35% 97%;
+    --sidebar-foreground: 222 52% 14%;
+    --sidebar-primary: 223 63% 16%;
+    --sidebar-primary-foreground: 43 90% 96%;
+    --sidebar-accent: 40 40% 92%;
+    --sidebar-accent-foreground: 222 52% 14%;
+    --sidebar-border: 40 40% 72%;
+    --sidebar-ring: 41 72% 47%;
   }
 
   .dark {
@@ -115,6 +115,10 @@ All colors MUST be HSL.
     font-size: var(--app-font-size, 14px);
     font-weight: var(--app-font-weight, 400);
     color: var(--app-text-color, hsl(var(--foreground)));
+    background-image:
+      radial-gradient(circle at 9% 12%, hsl(var(--accent) / 0.09) 0, transparent 38%),
+      radial-gradient(circle at 87% 10%, hsl(var(--primary) / 0.08) 0, transparent 44%),
+      linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--background)) 100%);
   }
 
   /* Density scaling — affects spacing/padding via Tailwind utility multiplier */

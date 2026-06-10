@@ -307,7 +307,7 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3">
         {/* New Folder Input */}
         {showNewFolder && (
           <div className="flex gap-2">
@@ -318,71 +318,92 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
           </div>
         )}
 
-        {/* Filters row */}
-        <div className="flex flex-wrap gap-2 items-center">
-          {/* Favorites */}
-          <Badge variant={showFavoritesOnly ? "default" : "outline"} className="cursor-pointer gap-1"
-            onClick={() => { setShowFavoritesOnly(!showFavoritesOnly); }}>
-            <Star className="w-3 h-3" />מועדפים
-          </Badge>
-          {/* Folders */}
-          <Badge variant={selectedFolder === null && !showFavoritesOnly ? "default" : "outline"} className="cursor-pointer"
-            onClick={() => { setSelectedFolder(null); setShowFavoritesOnly(false); }}>
-            הכל ({transcripts.length})
-          </Badge>
-          <Badge variant={selectedFolder === '' ? "default" : "outline"} className="cursor-pointer"
-            onClick={() => setSelectedFolder('')}>
-            ללא תיקיה ({unfolderedCount})
-          </Badge>
-          {folders.map(folder => {
-            const count = transcripts.filter(t => t.folder === folder).length;
-            return (
-              <div key={folder} className="relative group inline-flex">
-                <Badge variant={selectedFolder === folder ? "default" : "outline"} className="cursor-pointer gap-1"
-                  onClick={() => setSelectedFolder(folder)}>
-                  <FolderOpen className="w-3 h-3" />{folder} ({count})
-                </Badge>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder); }}
-                  className="absolute -top-1 -left-1 opacity-0 group-hover:opacity-100 bg-destructive text-destructive-foreground rounded-full w-4 h-4 flex items-center justify-center text-[10px] transition-opacity"
-                  title="מחק תיקיה"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Categories dropdown */}
-        <div className="flex flex-wrap gap-2 items-center">
-          <DropdownMenu dir="rtl">
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1">
-                <Filter className="w-3.5 h-3.5" />
-                {selectedCategory ? CATEGORIES.find(c => c.value === selectedCategory)?.label : 'קטגוריות'}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuLabel>קטגוריות</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className={!selectedCategory ? 'bg-accent' : ''} onClick={() => setSelectedCategory(null)}>
-                הכל
-              </DropdownMenuItem>
-              {CATEGORIES.map(cat => (
-                <DropdownMenuItem key={cat.value} className={selectedCategory === cat.value ? 'bg-accent' : ''}
-                  onClick={() => setSelectedCategory(selectedCategory === cat.value ? null : cat.value)}>
-                  <cat.icon className="w-4 h-4 ml-2" />{cat.label}
+        <div className="rounded-xl border bg-card/60 p-3 space-y-3">
+          {/* Search + Sort + Category */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input placeholder="חפש תמלולים..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                className="pr-10 text-right" dir="rtl" />
+            </div>
+            <Select value={sortKey} onValueChange={v => setSortKey(v as SortKey)}>
+              <SelectTrigger className="w-[130px]">
+                <ArrowUpDown className="w-3 h-3 ml-1" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="date">תאריך</SelectItem>
+                <SelectItem value="title">שם</SelectItem>
+                <SelectItem value="length">אורך</SelectItem>
+                <SelectItem value="engine">מנוע</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button size="icon" variant="ghost" onClick={() => setSortAsc(!sortAsc)} title={sortAsc ? 'א → ת' : 'ת → א'} className="gap-0.5 w-auto px-2">
+              {sortAsc ? <SortAsc className="w-4 h-4" /> : <SortDesc className="w-4 h-4" />}
+              <span className="text-[10px] font-medium">{sortAsc ? 'א→ת' : 'ת→א'}</span>
+            </Button>
+            <DropdownMenu dir="rtl">
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1">
+                  <Filter className="w-3.5 h-3.5" />
+                  {selectedCategory ? CATEGORIES.find(c => c.value === selectedCategory)?.label : 'קטגוריות'}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuLabel>קטגוריות</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className={!selectedCategory ? 'bg-accent' : ''} onClick={() => setSelectedCategory(null)}>
+                  הכל
                 </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {selectedCategory && (
-            <Badge variant="default" className="cursor-pointer gap-1" onClick={() => setSelectedCategory(null)}>
-              {CATEGORIES.find(c => c.value === selectedCategory)?.label}
-              <X className="w-3 h-3" />
+                {CATEGORIES.map(cat => (
+                  <DropdownMenuItem key={cat.value} className={selectedCategory === cat.value ? 'bg-accent' : ''}
+                    onClick={() => setSelectedCategory(selectedCategory === cat.value ? null : cat.value)}>
+                    <cat.icon className="w-4 h-4 ml-2" />{cat.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {selectedCategory && (
+              <Badge variant="default" className="cursor-pointer gap-1" onClick={() => setSelectedCategory(null)}>
+                {CATEGORIES.find(c => c.value === selectedCategory)?.label}
+                <X className="w-3 h-3" />
+              </Badge>
+            )}
+          </div>
+
+          {/* Folders row */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            <Badge variant={showFavoritesOnly ? "default" : "outline"} className="cursor-pointer gap-1 shrink-0"
+              onClick={() => { setShowFavoritesOnly(!showFavoritesOnly); }}>
+              <Star className="w-3 h-3" />מועדפים
             </Badge>
-          )}
+            <Badge variant={selectedFolder === null && !showFavoritesOnly ? "default" : "outline"} className="cursor-pointer shrink-0"
+              onClick={() => { setSelectedFolder(null); setShowFavoritesOnly(false); }}>
+              הכל ({transcripts.length})
+            </Badge>
+            <Badge variant={selectedFolder === '' ? "default" : "outline"} className="cursor-pointer shrink-0"
+              onClick={() => setSelectedFolder('')}>
+              ללא תיקיה ({unfolderedCount})
+            </Badge>
+            {folders.map(folder => {
+              const count = transcripts.filter(t => t.folder === folder).length;
+              return (
+                <div key={folder} className="relative group inline-flex shrink-0">
+                  <Badge variant={selectedFolder === folder ? "default" : "outline"} className="cursor-pointer gap-1"
+                    onClick={() => setSelectedFolder(folder)}>
+                    <FolderOpen className="w-3 h-3" />{folder} ({count})
+                  </Badge>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder); }}
+                    className="absolute -top-1 -left-1 opacity-0 group-hover:opacity-100 bg-destructive text-destructive-foreground rounded-full w-4 h-4 flex items-center justify-center text-[10px] transition-opacity"
+                    title="מחק תיקיה"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* Tags filter */}
@@ -398,31 +419,6 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
             ))}
           </div>
         )}
-
-        {/* Search + Sort */}
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input placeholder="חפש תמלולים..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-              className="pr-10 text-right" dir="rtl" />
-          </div>
-          <Select value={sortKey} onValueChange={v => setSortKey(v as SortKey)}>
-            <SelectTrigger className="w-[140px]">
-              <ArrowUpDown className="w-3 h-3 ml-1" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="date">תאריך</SelectItem>
-              <SelectItem value="title">שם</SelectItem>
-              <SelectItem value="length">אורך</SelectItem>
-              <SelectItem value="engine">מנוע</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button size="icon" variant="ghost" onClick={() => setSortAsc(!sortAsc)} title={sortAsc ? 'א → ת' : 'ת → א'} className="gap-0.5 w-auto px-2">
-            {sortAsc ? <SortAsc className="w-4 h-4" /> : <SortDesc className="w-4 h-4" />}
-            <span className="text-[10px] font-medium">{sortAsc ? 'א→ת' : 'ת→א'}</span>
-          </Button>
-        </div>
 
         {/* Transcript list */}
         <ScrollArea className="h-[400px]">
@@ -597,7 +593,7 @@ const TranscriptItem = ({
   };
 
   return (
-    <div dir="rtl" className={`p-3 rounded-lg border hover:bg-accent/50 transition-colors text-right ${isSelected ? 'ring-2 ring-primary bg-primary/5' : ''}`}>
+    <div dir="rtl" className={`group p-3 rounded-lg border hover:bg-accent/50 transition-colors text-right ${isSelected ? 'ring-2 ring-primary bg-primary/5' : ''}`}>
       {/* Top row */}
       <div className="flex items-center justify-between mb-1 gap-2">
         <div className="flex items-center gap-2">
@@ -607,7 +603,12 @@ const TranscriptItem = ({
               ? <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
               : <StarOff className="w-4 h-4 text-muted-foreground" />}
           </button>
-          <Badge variant="outline" className="text-xs">{t.engine}</Badge>
+          <Badge
+            variant="outline"
+            className="text-xs md:opacity-0 md:max-w-0 md:px-0 md:overflow-hidden md:border-transparent md:group-hover:opacity-100 md:group-hover:max-w-[220px] md:group-hover:px-2.5 md:group-hover:border-border md:group-focus-within:opacity-100 md:group-focus-within:max-w-[220px] md:group-focus-within:px-2.5 md:group-focus-within:border-border md:transition-all md:duration-150"
+          >
+            {t.engine}
+          </Badge>
           {t.folder && (
             <Badge variant="secondary" className="text-xs gap-1">
               <FolderOpen className="w-3 h-3" />{t.folder}
@@ -617,7 +618,10 @@ const TranscriptItem = ({
             <Badge variant="secondary" className="text-xs">{getCategoryLabel(t.category)}</Badge>
           )}
           {t.audio_file_path && (
-            <Badge variant="outline" className="text-xs gap-1">
+            <Badge
+              variant="outline"
+              className="text-xs gap-1 md:opacity-0 md:max-w-0 md:px-0 md:overflow-hidden md:border-transparent md:group-hover:opacity-100 md:group-hover:max-w-[90px] md:group-hover:px-2.5 md:group-hover:border-border md:group-focus-within:opacity-100 md:group-focus-within:max-w-[90px] md:group-focus-within:px-2.5 md:group-focus-within:border-border md:transition-all md:duration-150"
+            >
               <Volume2 className="w-3 h-3" />אודיו
             </Badge>
           )}
@@ -690,7 +694,7 @@ const TranscriptItem = ({
       </div>
 
       {/* Actions */}
-      <div className="flex gap-1 flex-wrap flex-row-reverse">
+      <div className="flex gap-1 flex-wrap flex-row-reverse md:opacity-0 md:max-h-0 md:overflow-hidden md:pointer-events-none md:group-hover:opacity-100 md:group-hover:max-h-24 md:group-hover:pointer-events-auto md:group-focus-within:opacity-100 md:group-focus-within:max-h-24 md:group-focus-within:pointer-events-auto md:transition-all md:duration-150">
         {t.audio_file_path && onGetAudioUrl && (
           <Button size="sm" variant={playingAudio ? "default" : "outline"} className="text-xs h-7" onClick={handlePlayAudio} disabled={isLoadingAudio}>
             {isLoadingAudio ? <Loader2 className="w-3 h-3 ml-1 animate-spin" /> : playingAudio ? <Pause className="w-3 h-3 ml-1" /> : <Play className="w-3 h-3 ml-1" />}

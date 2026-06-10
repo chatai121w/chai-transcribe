@@ -9,18 +9,49 @@ import { RecentFilesWidget } from "@/components/RecentFiles";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Mic, FileText, Settings, LogIn, BarChart3, Clock, Zap, 
-  FileEdit, Cloud, ArrowLeft, TrendingUp, Grid3X3, Table2, RectangleHorizontal, LayoutGrid
+  FileEdit, Cloud, Grid3X3, Table2, RectangleHorizontal, LayoutGrid, FolderOpen, Plus, Pencil, Trash2
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 type RecentViewMode = 'cards' | 'table' | 'rectangles' | 'grid';
 type DashboardStylePreset = 'classic' | 'studio' | 'compact';
+type DashboardLayoutPreset = {
+  id: string;
+  label: string;
+  baseStyle: DashboardStylePreset;
+};
 
 const DASHBOARD_STYLE_STORAGE_KEY = 'dashboard_style_preset_v1';
+const DASHBOARD_LAYOUT_PRESETS_STORAGE_KEY = 'dashboard_layout_presets_v1';
+const DASHBOARD_ACTIVE_LAYOUT_STORAGE_KEY = 'dashboard_active_layout_id_v1';
+
+const DEFAULT_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
+  { id: 'classic', label: 'קלאסי', baseStyle: 'classic' },
+  { id: 'studio', label: 'סטודיו', baseStyle: 'studio' },
+  { id: 'compact', label: 'קומפקטי', baseStyle: 'compact' },
+];
+
+const BASE_STYLE_META: Record<DashboardStylePreset, { preview: string; blocks: [string, string, string] }> = {
+  classic: {
+    preview: 'bg-gradient-to-b from-background via-accent/10 to-background',
+    blocks: ['bg-primary/50', 'bg-accent/40', 'bg-muted/80'],
+  },
+  studio: {
+    preview: 'bg-gradient-to-b from-background via-primary/15 to-background',
+    blocks: ['bg-primary/70', 'bg-secondary/60', 'bg-accent/45'],
+  },
+  compact: {
+    preview: 'bg-muted/30',
+    blocks: ['bg-foreground/20', 'bg-foreground/15', 'bg-foreground/10'],
+  },
+};
 
 function loadDashboardStylePreset(): DashboardStylePreset {
   try {
@@ -52,6 +83,59 @@ function readPresetFromTabSettings(raw: string | null | undefined): DashboardSty
   return null;
 }
 
+function isBaseStyle(value: unknown): value is DashboardStylePreset {
+  return value === 'classic' || value === 'studio' || value === 'compact';
+}
+
+function sanitizeLayoutPresets(value: unknown): DashboardLayoutPreset[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const maybe = item as Record<string, unknown>;
+      const id = typeof maybe.id === 'string' ? maybe.id.trim() : '';
+      const label = typeof maybe.label === 'string' ? maybe.label.trim() : '';
+      const baseStyle = maybe.baseStyle;
+      if (!id || !label || !isBaseStyle(baseStyle) || seen.has(id)) return null;
+      seen.add(id);
+      return { id, label, baseStyle } as DashboardLayoutPreset;
+    })
+    .filter((preset): preset is DashboardLayoutPreset => !!preset);
+}
+
+function readLayoutsFromTabSettings(raw: string | null | undefined): DashboardLayoutPreset[] | null {
+  const parsed = parseTabSettings(raw);
+  const presets = sanitizeLayoutPresets(parsed.dashboard_layout_presets);
+  return presets.length ? presets : null;
+}
+
+function readActiveLayoutIdFromTabSettings(raw: string | null | undefined): string | null {
+  const parsed = parseTabSettings(raw);
+  const value = parsed.dashboard_active_layout_id;
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function loadLayoutPresetsFromStorage(): DashboardLayoutPreset[] {
+  try {
+    const raw = localStorage.getItem(DASHBOARD_LAYOUT_PRESETS_STORAGE_KEY);
+    if (!raw) return DEFAULT_LAYOUT_PRESETS;
+    const parsed = JSON.parse(raw);
+    const presets = sanitizeLayoutPresets(parsed);
+    return presets.length ? presets : DEFAULT_LAYOUT_PRESETS;
+  } catch {
+    return DEFAULT_LAYOUT_PRESETS;
+  }
+}
+
+function loadActiveLayoutIdFromStorage(): string | null {
+  try {
+    return localStorage.getItem(DASHBOARD_ACTIVE_LAYOUT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
@@ -70,37 +154,100 @@ const Dashboard = () => {
   }, [isLoading, transcripts.length, stats]);
 
   const recentTranscripts = transcripts.slice(0, 5);
-  const [stylePreset, setStylePresetState] = useState<DashboardStylePreset>(() => {
-    const fromCloud = readPresetFromTabSettings(preferences.tab_settings_json);
-    return fromCloud ?? loadDashboardStylePreset();
+  const [layoutPresets, setLayoutPresets] = useState<DashboardLayoutPreset[]>(() => {
+    const fromCloud = readLayoutsFromTabSettings(preferences.tab_settings_json);
+    return fromCloud ?? loadLayoutPresetsFromStorage();
   });
+  const [activeLayoutId, setActiveLayoutId] = useState<string>(() => {
+    const cloudId = readActiveLayoutIdFromTabSettings(preferences.tab_settings_json);
+    if (cloudId) return cloudId;
+    const localId = loadActiveLayoutIdFromStorage();
+    if (localId) return localId;
+    const legacyStyle = readPresetFromTabSettings(preferences.tab_settings_json) ?? loadDashboardStylePreset();
+    const match = DEFAULT_LAYOUT_PRESETS.find((preset) => preset.baseStyle === legacyStyle);
+    return match?.id ?? DEFAULT_LAYOUT_PRESETS[0].id;
+  });
+  const [isLayoutManagerOpen, setIsLayoutManagerOpen] = useState(false);
+  const [layoutDrafts, setLayoutDrafts] = useState<DashboardLayoutPreset[]>([]);
+
+  const activeLayout = useMemo(
+    () => layoutPresets.find((preset) => preset.id === activeLayoutId) ?? layoutPresets[0] ?? DEFAULT_LAYOUT_PRESETS[0],
+    [layoutPresets, activeLayoutId],
+  );
+  const stylePreset = activeLayout.baseStyle;
+
   const recentViewMode = (preferences.dashboard_view_mode || 'cards') as RecentViewMode;
   const setRecentViewMode = useCallback((mode: RecentViewMode) => {
     updatePreference('dashboard_view_mode', mode);
   }, [updatePreference]);
-  const setStylePreset = useCallback((preset: DashboardStylePreset) => {
-    setStylePresetState(preset);
+
+  const persistLayoutState = useCallback((nextPresets: DashboardLayoutPreset[], nextActiveId: string) => {
+    const safePresets = sanitizeLayoutPresets(nextPresets);
+    const finalPresets = safePresets.length ? safePresets : DEFAULT_LAYOUT_PRESETS;
+    const hasActive = finalPresets.some((preset) => preset.id === nextActiveId);
+    const finalActiveId = hasActive ? nextActiveId : finalPresets[0].id;
+    const finalActiveStyle = finalPresets.find((preset) => preset.id === finalActiveId)?.baseStyle ?? 'classic';
+
+    setLayoutPresets(finalPresets);
+    setActiveLayoutId(finalActiveId);
+
     try {
-      localStorage.setItem(DASHBOARD_STYLE_STORAGE_KEY, preset);
+      localStorage.setItem(DASHBOARD_STYLE_STORAGE_KEY, finalActiveStyle);
+      localStorage.setItem(DASHBOARD_LAYOUT_PRESETS_STORAGE_KEY, JSON.stringify(finalPresets));
+      localStorage.setItem(DASHBOARD_ACTIVE_LAYOUT_STORAGE_KEY, finalActiveId);
     } catch {
       // ignore storage errors
     }
+
     const base = parseTabSettings(preferences.tab_settings_json);
-    const merged = { ...base, dashboard_style_preset: preset };
+    const merged = {
+      ...base,
+      dashboard_style_preset: finalActiveStyle,
+      dashboard_layout_presets: finalPresets,
+      dashboard_active_layout_id: finalActiveId,
+    };
     updatePreference('tab_settings_json', JSON.stringify(merged));
   }, [preferences.tab_settings_json, updatePreference]);
 
+  const setStylePreset = useCallback((layoutId: string) => {
+    persistLayoutState(layoutPresets, layoutId);
+  }, [layoutPresets, persistLayoutState]);
+
   useEffect(() => {
-    const fromCloud = readPresetFromTabSettings(preferences.tab_settings_json);
-    if (fromCloud && fromCloud !== stylePreset) {
-      setStylePresetState(fromCloud);
-      try {
-        localStorage.setItem(DASHBOARD_STYLE_STORAGE_KEY, fromCloud);
-      } catch {
-        // ignore storage errors
+    const cloudLayouts = readLayoutsFromTabSettings(preferences.tab_settings_json);
+    const cloudActiveId = readActiveLayoutIdFromTabSettings(preferences.tab_settings_json);
+
+    if (cloudLayouts && cloudLayouts.length) {
+      const nextActiveId = cloudActiveId && cloudLayouts.some((preset) => preset.id === cloudActiveId)
+        ? cloudActiveId
+        : cloudLayouts[0].id;
+
+      const currentSnapshot = JSON.stringify(layoutPresets);
+      const cloudSnapshot = JSON.stringify(cloudLayouts);
+
+      if (cloudSnapshot !== currentSnapshot || nextActiveId !== activeLayoutId) {
+        setLayoutPresets(cloudLayouts);
+        setActiveLayoutId(nextActiveId);
+        try {
+          localStorage.setItem(DASHBOARD_LAYOUT_PRESETS_STORAGE_KEY, cloudSnapshot);
+          localStorage.setItem(DASHBOARD_ACTIVE_LAYOUT_STORAGE_KEY, nextActiveId);
+          const cloudStyle = cloudLayouts.find((preset) => preset.id === nextActiveId)?.baseStyle ?? 'classic';
+          localStorage.setItem(DASHBOARD_STYLE_STORAGE_KEY, cloudStyle);
+        } catch {
+          // ignore storage errors
+        }
+      }
+      return;
+    }
+
+    const legacyStyle = readPresetFromTabSettings(preferences.tab_settings_json);
+    if (legacyStyle) {
+      const fallbackId = layoutPresets.find((preset) => preset.baseStyle === legacyStyle)?.id ?? layoutPresets[0]?.id;
+      if (fallbackId && fallbackId !== activeLayoutId) {
+        setActiveLayoutId(fallbackId);
       }
     }
-  }, [preferences.tab_settings_json, stylePreset]);
+  }, [preferences.tab_settings_json, layoutPresets, activeLayoutId]);
 
   const pageToneClass =
     stylePreset === 'studio'
@@ -109,32 +256,37 @@ const Dashboard = () => {
       ? 'bg-background'
       : 'bg-gradient-to-b from-background via-accent/5 to-background';
   const shellClass = stylePreset === 'compact' ? 'max-w-7xl mx-auto space-y-5' : 'max-w-6xl mx-auto space-y-8';
-  const actionGridClass = stylePreset === 'compact' ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3' : 'grid grid-cols-1 md:grid-cols-3 gap-4';
-  const actionCardPaddingClass = stylePreset === 'compact' ? 'flex items-center gap-4 p-4' : 'flex items-center gap-4 p-6';
-  const actionCardClass = stylePreset === 'studio'
-    ? 'cursor-pointer hover:shadow-xl transition-all hover:-translate-y-0.5 border-primary/25 hover:border-primary/60'
-    : 'cursor-pointer hover:shadow-lg transition-all hover:scale-[1.02] border-primary/20 hover:border-primary/50';
 
-  const stylePresets = useMemo(() => ([
-    {
-      id: 'classic' as const,
-      label: 'קלאסי',
-      preview: 'bg-gradient-to-b from-background via-accent/10 to-background',
-      blocks: ['bg-primary/50', 'bg-accent/40', 'bg-muted/80'],
-    },
-    {
-      id: 'studio' as const,
-      label: 'סטודיו',
-      preview: 'bg-gradient-to-b from-background via-primary/15 to-background',
-      blocks: ['bg-primary/70', 'bg-secondary/60', 'bg-accent/45'],
-    },
-    {
-      id: 'compact' as const,
-      label: 'קומפקטי',
-      preview: 'bg-muted/30',
-      blocks: ['bg-foreground/20', 'bg-foreground/15', 'bg-foreground/10'],
-    },
-  ]), []);
+  const openLayoutManager = useCallback(() => {
+    setLayoutDrafts(layoutPresets.map((preset) => ({ ...preset })));
+    setIsLayoutManagerOpen(true);
+  }, [layoutPresets]);
+
+  const addLayoutDraft = useCallback(() => {
+    setLayoutDrafts((prev) => [
+      ...prev,
+      {
+        id: `custom-${Date.now()}-${prev.length + 1}`,
+        label: `פריסה ${prev.length + 1}`,
+        baseStyle: stylePreset,
+      },
+    ]);
+  }, [stylePreset]);
+
+  const saveLayoutDrafts = useCallback(() => {
+    const normalized = sanitizeLayoutPresets(
+      layoutDrafts.map((preset) => ({
+        ...preset,
+        label: preset.label.trim() || 'פריסה ללא שם',
+      })),
+    );
+    const finalPresets = normalized.length ? normalized : DEFAULT_LAYOUT_PRESETS;
+    const finalActiveId = finalPresets.some((preset) => preset.id === activeLayoutId)
+      ? activeLayoutId
+      : finalPresets[0].id;
+    persistLayoutState(finalPresets, finalActiveId);
+    setIsLayoutManagerOpen(false);
+  }, [layoutDrafts, activeLayoutId, persistLayoutState]);
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -154,33 +306,132 @@ const Dashboard = () => {
   };
 
   return (
-    <div className={`min-h-screen ${pageToneClass} p-4 md:p-8`} dir="rtl">
+    <div className={`min-h-screen ${pageToneClass} px-4 pb-4 pt-0 md:px-8 md:pb-8 md:pt-0`} dir="rtl">
       <div className={shellClass}>
         {/* Header */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-card/70 p-2">
-            {stylePresets.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                onClick={() => setStylePreset(preset.id)}
-                className={`rounded-lg border p-1.5 transition-all ${
-                  stylePreset === preset.id
-                    ? 'border-primary bg-primary/10 shadow-sm'
-                    : 'border-border/70 hover:border-primary/50 hover:bg-accent/40'
-                }`}
-                title={`החלפה לפריסת ${preset.label}`}
-              >
-                <div className={`h-7 w-16 rounded-md p-1 ${preset.preview}`}>
-                  <div className={`h-1.5 w-full rounded ${preset.blocks[0]}`} />
-                  <div className="mt-1 grid grid-cols-2 gap-1">
-                    <div className={`h-3 rounded ${preset.blocks[1]}`} />
-                    <div className={`h-3 rounded ${preset.blocks[2]}`} />
-                  </div>
+          <div className="hidden md:block fixed top-3 left-3 z-[61]">
+            <div className="group/quick-controls relative">
+              <div className="h-10 w-24" aria-hidden="true" />
+              <div className="absolute left-0 top-0 flex items-center gap-2 rounded-xl border bg-card/80 p-1.5 backdrop-blur-sm opacity-0 translate-y-1 pointer-events-none transition-all duration-150 group-hover/quick-controls:opacity-100 group-hover/quick-controls:translate-y-0 group-hover/quick-controls:pointer-events-auto group-focus-within/quick-controls:opacity-100 group-focus-within/quick-controls:translate-y-0 group-focus-within/quick-controls:pointer-events-auto">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="p-2 text-foreground hover:text-foreground/80 hover:bg-transparent"
+                  onClick={() => navigate("/settings")}
+                  title="הגדרות"
+                >
+                  <Settings className="h-5 w-5" />
+                </Button>
+                <DropdownMenu dir="rtl">
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="p-2 text-foreground hover:text-foreground/80 hover:bg-transparent"
+                      title="פריסות"
+                    >
+                      <LayoutGrid className="h-5 w-5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-[300px]">
+                    <DropdownMenuLabel>בחירת פריסה</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <div className="grid grid-cols-2 gap-2 p-2 max-h-[320px] overflow-auto">
+                      {layoutPresets.map((preset) => {
+                        const preview = BASE_STYLE_META[preset.baseStyle];
+                        return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => setStylePreset(preset.id)}
+                          className={`rounded-lg border p-1.5 transition-all ${
+                            activeLayoutId === preset.id
+                              ? 'border-primary bg-primary/10 shadow-sm'
+                              : 'border-border/70 hover:border-primary/50 hover:bg-accent/40'
+                          }`}
+                          title={`החלפה לפריסת ${preset.label}`}
+                        >
+                          <div className={`h-7 w-full rounded-md p-1 ${preview.preview}`}>
+                            <div className={`h-1.5 w-full rounded ${preview.blocks[0]}`} />
+                            <div className="mt-1 grid grid-cols-2 gap-1">
+                              <div className={`h-3 rounded ${preview.blocks[1]}`} />
+                              <div className={`h-3 rounded ${preview.blocks[2]}`} />
+                            </div>
+                          </div>
+                          <div className="mt-1 text-center text-[11px] font-medium">{preset.label}</div>
+                        </button>
+                        );
+                      })}
+                    </div>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={openLayoutManager}>
+                      <Pencil className="w-4 h-4 ml-2" />
+                      עריכת פריסות
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+          </div>
+          <div className="flex md:hidden items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="p-2 text-foreground hover:text-foreground/80 hover:bg-transparent"
+              onClick={() => navigate("/settings")}
+              title="הגדרות"
+            >
+              <Settings className="h-5 w-5" />
+            </Button>
+            <DropdownMenu dir="rtl">
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="p-2 text-foreground hover:text-foreground/80 hover:bg-transparent"
+                  title="פריסות"
+                >
+                  <LayoutGrid className="h-5 w-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-[300px]">
+                <DropdownMenuLabel>בחירת פריסה</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <div className="grid grid-cols-2 gap-2 p-2 max-h-[320px] overflow-auto">
+                  {layoutPresets.map((preset) => {
+                    const preview = BASE_STYLE_META[preset.baseStyle];
+                    return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => setStylePreset(preset.id)}
+                      className={`rounded-lg border p-1.5 transition-all ${
+                        activeLayoutId === preset.id
+                          ? 'border-primary bg-primary/10 shadow-sm'
+                          : 'border-border/70 hover:border-primary/50 hover:bg-accent/40'
+                      }`}
+                      title={`החלפה לפריסת ${preset.label}`}
+                    >
+                      <div className={`h-7 w-full rounded-md p-1 ${preview.preview}`}>
+                        <div className={`h-1.5 w-full rounded ${preview.blocks[0]}`} />
+                        <div className="mt-1 grid grid-cols-2 gap-1">
+                          <div className={`h-3 rounded ${preview.blocks[1]}`} />
+                          <div className={`h-3 rounded ${preview.blocks[2]}`} />
+                        </div>
+                      </div>
+                      <div className="mt-1 text-center text-[11px] font-medium">{preset.label}</div>
+                    </button>
+                    );
+                  })}
                 </div>
-                <div className="mt-1 text-center text-[11px] font-medium">{preset.label}</div>
-              </button>
-            ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={openLayoutManager}>
+                  <Pencil className="w-4 h-4 ml-2" />
+                  עריכת פריסות
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           {!isAuthenticated && (
             <Button variant="outline" onClick={() => navigate("/login")}>
@@ -188,105 +439,81 @@ const Dashboard = () => {
               התחבר
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="fixed top-3 left-3 z-[61] md:static p-2 text-foreground hover:text-foreground/80 hover:bg-transparent"
-            onClick={() => navigate("/settings")}
-          >
-            <Settings className="h-5 w-5" />
-          </Button>
         </div>
 
         {/* Quick Actions */}
-        <div className={actionGridClass}>
-          <Card 
-            className={actionCardClass}
-            onClick={() => navigate("/transcribe")}
-          >
-            <CardContent className={actionCardPaddingClass}>
-              <div className="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center">
-                <Mic className="w-7 h-7 text-blue-900" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-bold text-lg">תמלול חדש</h3>
-                <p className="text-sm text-muted-foreground">העלה קובץ או הקלט ישירות</p>
-              </div>
-              <ArrowLeft className="w-5 h-5 text-muted-foreground" />
-            </CardContent>
-          </Card>
+        <section className="relative overflow-hidden rounded-3xl border border-accent/45 bg-gradient-to-br from-card via-card to-secondary/35 px-6 py-7 shadow-[var(--app-shadow)] mb-4 md:mb-6 md:px-10 md:py-10">
+          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-accent/20 via-accent to-accent/20" />
+          <div className="pointer-events-none absolute -left-12 -top-16 h-44 w-44 rounded-full bg-accent/15 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-16 -right-10 h-40 w-40 rounded-full bg-primary/15 blur-3xl" />
+          <div className="relative space-y-6">
+            <div className="space-y-2 text-center">
+              <p className="text-xs font-semibold tracking-[0.2em] text-primary/70">SMART HEBREW TRANSCRIBER</p>
+              <p className="text-3xl font-black leading-tight text-accent md:text-5xl">מערכת תמלול מתקדמת</p>
+            </div>
 
-          <Card 
-            className={stylePreset === 'studio'
-              ? 'cursor-pointer hover:shadow-xl transition-all hover:-translate-y-0.5 border-accent/25 hover:border-accent/65'
-              : 'cursor-pointer hover:shadow-lg transition-all hover:scale-[1.02] border-accent/20 hover:border-accent/50'}
-            onClick={() => navigate("/text-editor")}
-          >
-            <CardContent className={actionCardPaddingClass}>
-              <div className="w-14 h-14 rounded-xl bg-accent/10 flex items-center justify-center">
-                <FileEdit className="w-7 h-7 text-blue-900" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-bold text-lg">עריכת טקסט</h3>
-                <p className="text-sm text-muted-foreground">עריכה מתקדמת עם AI</p>
-              </div>
-              <ArrowLeft className="w-5 h-5 text-muted-foreground" />
-            </CardContent>
-          </Card>
-
-          <Card 
-            className={stylePreset === 'studio'
-              ? 'cursor-pointer hover:shadow-xl transition-all hover:-translate-y-0.5 border-secondary/50 hover:border-secondary'
-              : 'cursor-pointer hover:shadow-lg transition-all hover:scale-[1.02] border-secondary/40 hover:border-secondary'}
-            onClick={() => navigate("/settings")}
-          >
-            <CardContent className={actionCardPaddingClass}>
-              <div className="w-14 h-14 rounded-xl bg-secondary flex items-center justify-center">
-                <Settings className="w-7 h-7 text-blue-900" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-bold text-lg">הגדרות</h3>
-                <p className="text-sm text-muted-foreground">מפתחות API והגדרות מערכת</p>
-              </div>
-              <ArrowLeft className="w-5 h-5 text-muted-foreground" />
-            </CardContent>
-          </Card>
-        </div>
-
+            <div className="grid gap-3 md:grid-cols-3">
+              <Button
+                variant="outline"
+                className="h-12 justify-center border-primary/25 bg-background/70 text-foreground hover:bg-primary hover:text-primary-foreground"
+                onClick={() => navigate("/transcribe")}
+              >
+                <Mic className="ml-2 h-4 w-4" />
+                תמלול חדש
+              </Button>
+              <Button
+                variant="outline"
+                className="h-12 justify-center border-primary/25 bg-background/70 text-foreground hover:bg-primary hover:text-primary-foreground"
+                onClick={() => navigate("/text-editor")}
+              >
+                <FileEdit className="ml-2 h-4 w-4" />
+                עריכת טקסט
+              </Button>
+              <Button
+                variant="outline"
+                className="h-12 justify-center border-primary/25 bg-background/70 text-foreground hover:bg-primary hover:text-primary-foreground"
+                onClick={() => navigate("/folders")}
+              >
+                <FolderOpen className="ml-2 h-4 w-4" />
+                מנהל קבצים
+              </Button>
+            </div>
+          </div>
+        </section>
         {/* Stats */}
         {isAuthenticated && (
-          <div className={stylePreset === 'compact' ? 'grid grid-cols-2 md:grid-cols-4 gap-3' : 'grid grid-cols-2 md:grid-cols-4 gap-4'}>
+          <div className={stylePreset === 'compact' ? 'pt-5 grid grid-cols-2 md:grid-cols-4 gap-3 md:pt-7' : 'pt-7 grid grid-cols-2 md:grid-cols-4 gap-4 md:pt-10'}>
             <Card>
-              <CardContent className="p-4 text-center">
+              <CardContent className="p-5 text-center md:py-6">
                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-2">
-                  <BarChart3 className="w-5 h-5 text-blue-900" />
+                  <BarChart3 className="w-5 h-5 text-primary" />
                 </div>
                 <p className="text-2xl font-bold">{stats.total}</p>
                 <p className="text-xs text-muted-foreground">סה״כ תמלולים</p>
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-4 text-center">
+              <CardContent className="p-5 text-center md:py-6">
                 <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-2">
-                  <FileText className="w-5 h-5 text-blue-900" />
+                  <FileText className="w-5 h-5 text-primary" />
                 </div>
                 <p className="text-2xl font-bold">{estimateWords(stats.totalChars).toLocaleString()}</p>
                 <p className="text-xs text-muted-foreground">מילים בסה״כ</p>
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-4 text-center">
+              <CardContent className="p-5 text-center md:py-6">
                 <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center mx-auto mb-2">
-                  <Zap className="w-5 h-5 text-blue-900" />
+                  <Zap className="w-5 h-5 text-primary" />
                 </div>
                 <p className="text-2xl font-bold">{stats.engines.length}</p>
                 <p className="text-xs text-muted-foreground">מנועים בשימוש</p>
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-4 text-center">
+              <CardContent className="p-5 text-center md:py-6">
                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-2">
-                  <Cloud className="w-5 h-5 text-blue-900" />
+                  <Cloud className="w-5 h-5 text-primary" />
                 </div>
                 <div className="text-2xl font-bold">
                   <Badge variant="secondary" className="text-xs">מסונכרן</Badge>
@@ -303,7 +530,7 @@ const Dashboard = () => {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-blue-900" />
+                  <Clock className="w-5 h-5 text-primary" />
                   <CardTitle className="text-xl">תמלולים אחרונים</CardTitle>
                 </div>
                 <div className="flex items-center gap-2">
@@ -433,6 +660,85 @@ const Dashboard = () => {
             </CardContent>
           </Card>
         )}
+
+        <Dialog open={isLayoutManagerOpen} onOpenChange={setIsLayoutManagerOpen}>
+          <DialogContent dir="rtl" className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>ניהול פריסות אישיות</DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-3 max-h-[60vh] overflow-auto">
+              {layoutDrafts.map((preset) => (
+                <div key={preset.id} className="rounded-lg border p-3 space-y-2">
+                  <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_auto] gap-2 items-center">
+                    <Input
+                      value={preset.label}
+                      onChange={(e) => {
+                        const label = e.target.value;
+                        setLayoutDrafts((prev) => prev.map((item) => item.id === preset.id ? { ...item, label } : item));
+                      }}
+                      placeholder="שם פריסה"
+                      dir="rtl"
+                      className="text-right"
+                    />
+
+                    <Select
+                      value={preset.baseStyle}
+                      onValueChange={(value) => {
+                        if (!isBaseStyle(value)) return;
+                        setLayoutDrafts((prev) => prev.map((item) => item.id === preset.id ? { ...item, baseStyle: value } : item));
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="סגנון בסיס" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="classic">קלאסי</SelectItem>
+                        <SelectItem value="studio">סטודיו</SelectItem>
+                        <SelectItem value="compact">קומפקטי</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Button
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => {
+                        setLayoutDrafts((prev) => {
+                          if (prev.length <= 1) return prev;
+                          return prev.filter((item) => item.id !== preset.id);
+                        });
+                      }}
+                      disabled={layoutDrafts.length <= 1}
+                      title="מחיקה"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+
+                  <div className="w-[180px] rounded-md border p-1.5">
+                    <div className={`h-7 w-full rounded-md p-1 ${BASE_STYLE_META[preset.baseStyle].preview}`}>
+                      <div className={`h-1.5 w-full rounded ${BASE_STYLE_META[preset.baseStyle].blocks[0]}`} />
+                      <div className="mt-1 grid grid-cols-2 gap-1">
+                        <div className={`h-3 rounded ${BASE_STYLE_META[preset.baseStyle].blocks[1]}`} />
+                        <div className={`h-3 rounded ${BASE_STYLE_META[preset.baseStyle].blocks[2]}`} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              <Button variant="outline" onClick={addLayoutDraft} className="w-full">
+                <Plus className="w-4 h-4 ml-2" />
+                הוספת פריסה חדשה
+              </Button>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsLayoutManagerOpen(false)}>ביטול</Button>
+              <Button onClick={saveLayoutDrafts}>שמירת פריסות</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
