@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { applyOverridesToDom, type DesignOverride } from '@/lib/designOverrides';
 
 export interface ThemeColors {
   background: string;
