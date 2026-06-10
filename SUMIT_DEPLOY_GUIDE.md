@@ -159,7 +159,7 @@ node scripts/test-sumit-proxy.mjs
 ```
 
 ### התקנה ידנית מהדאשבורד
-1. לך ל: https://supabase.com/dashboard/project/holhnbxmupdqpbotrzke/sql/new
+1. לך ל: https://supabase.com/dashboard/project/pycryoyipkymaqorgpjy/sql/new
 2. הדבק את התוכן של `setup-sumit-proxy.sql`
 3. לחץ Run
 
@@ -172,7 +172,7 @@ node scripts/test-sumit-proxy.mjs
 | Company ID | `196701271` |
 | API Key | `0pKvMSJNu9VZHY9eTb9Fdr7RBe1zaOCEbLPQneC5xdxdnAAjQG` |
 | API Base URL | `https://api.sumit.co.il` |
-| Supabase Project | `holhnbxmupdqpbotrzke` |
+| Supabase Project | `pycryoyipkymaqorgpjy` |
 
 ---
 

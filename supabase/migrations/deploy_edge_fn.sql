@@ -17,7 +17,7 @@ SET search_path = public
 AS $$
 DECLARE
   mgmt_token TEXT;
-  project_ref TEXT := 'kjjljpllyjnvitemapox';
+  project_ref TEXT := 'pycryoyipkymaqorgpjy';
   check_result extensions.http_response;
   deploy_result extensions.http_response;
   fn_exists BOOLEAN;

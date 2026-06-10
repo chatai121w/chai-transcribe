@@ -298,11 +298,27 @@ const Dashboard = () => {
 
   const estimateWords = (chars: number) => Math.round(chars / 5);
 
+  const normalizeForCompare = (value: string) =>
+    value
+      .replace(/\s+/g, ' ')
+      .replace(/["'`.,;:!?()\[\]{}<>\\/|\-]/g, '')
+      .trim()
+      .toLowerCase();
+
+  const isDuplicatePreview = (title: string, preview: string) => {
+    const normTitle = normalizeForCompare(title);
+    const normPreview = normalizeForCompare(preview);
+    if (!normTitle || !normPreview) return false;
+    return normPreview === normTitle || normPreview.startsWith(normTitle);
+  };
+
   const getSafeTranscriptText = (transcript: { title?: string | null; text?: string | null; edited_text?: string | null }) => {
     const content = (transcript.edited_text ?? transcript.text ?? "").trim();
-    const title = transcript.title?.trim() || content.substring(0, 50) || "ללא טקסט";
+    const explicitTitle = transcript.title?.trim() || "";
+    const title = explicitTitle || content.substring(0, 50) || "ללא טקסט";
     const preview = content || transcript.title?.trim() || "ללא טקסט";
-    return { title, preview };
+    const showPreview = content.length > 0 && !isDuplicatePreview(title, content);
+    return { title, preview, showPreview };
   };
 
   return (
@@ -597,7 +613,7 @@ const Dashboard = () => {
               ) : (
                 <div className={recentViewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 gap-2' : 'space-y-2'}>
                   {recentTranscripts.map((t) => {
-                    const { title, preview } = getSafeTranscriptText(t);
+                    const { title, preview, showPreview } = getSafeTranscriptText(t);
                     return (
                       <div
                         key={t.id}
@@ -611,7 +627,7 @@ const Dashboard = () => {
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium truncate">{title}</p>
                             <p className="text-xs text-muted-foreground">{formatDate(t.created_at)}</p>
-                            {recentViewMode !== 'rectangles' && (
+                            {recentViewMode !== 'rectangles' && showPreview && (
                               <p className="text-xs text-muted-foreground truncate mt-1">{preview.substring(0, 90)}</p>
                             )}
                           </div>

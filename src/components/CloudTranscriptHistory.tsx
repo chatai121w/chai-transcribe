@@ -23,6 +23,20 @@ interface CloudTranscriptHistoryProps {
   initialFolderFilter?: string;
 }
 
+const normalizeForCompare = (value: string) =>
+  value
+    .replace(/\s+/g, ' ')
+    .replace(/["'`.,;:!?()\[\]{}<>\\/|\-]/g, '')
+    .trim()
+    .toLowerCase();
+
+const isDuplicatePreview = (title: string, preview: string) => {
+  const normTitle = normalizeForCompare(title);
+  const normPreview = normalizeForCompare(preview);
+  if (!normTitle || !normPreview) return false;
+  return normPreview === normTitle || normPreview.startsWith(normTitle);
+};
+
 export const CloudTranscriptHistory = memo(({
   transcripts,
   isCloud,
@@ -213,6 +227,13 @@ export const CloudTranscriptHistory = memo(({
   };
 
   const renderEntryCard = (entry: CloudTranscript, key?: string) => (
+    (() => {
+      const displayTitle = (entry.title ?? '').trim();
+      const previewText = (entry.text ?? '').trim();
+      const showTitle = displayTitle.length > 0;
+      const showPreview = previewText.length > 0 && (!showTitle || !isDuplicatePreview(displayTitle, previewText));
+
+      return (
     <div
       key={key}
       className="group p-4 rounded-xl border border-border/60 hover:border-primary/30 hover:bg-accent/30 hover:shadow-md transition-all duration-200 text-right cursor-pointer"
@@ -229,13 +250,15 @@ export const CloudTranscriptHistory = memo(({
         </div>
       </div>
 
-      {entry.title && (
-        <p className="text-sm font-semibold mb-1.5 text-right text-foreground">{entry.title}</p>
+      {showTitle && (
+        <p className="text-sm font-semibold mb-1.5 text-right text-foreground">{displayTitle}</p>
       )}
 
-      <p className="text-sm line-clamp-2 text-right text-muted-foreground leading-relaxed mb-3">
-        {highlightText(entry.text, searchQuery)}
-      </p>
+      {showPreview && (
+        <p className="text-sm line-clamp-2 text-right text-muted-foreground leading-relaxed mb-3">
+          {highlightText(previewText, searchQuery)}
+        </p>
+      )}
 
       {/* Action icons row - stop propagation so clicking icons doesn't navigate */}
       <div className="flex items-center gap-1.5 pt-2 border-t border-border/40" onClick={(e) => e.stopPropagation()}>
@@ -422,6 +445,8 @@ export const CloudTranscriptHistory = memo(({
         </div>
       )}
     </div>
+      );
+    })()
   );
 
   return (

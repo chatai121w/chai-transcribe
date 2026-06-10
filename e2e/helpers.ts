@@ -2,7 +2,7 @@ import { test as base, type Page, type Route } from '@playwright/test';
 
 // ─── Supabase API mock helpers ───────────────────────────────────────────────
 
-const SUPABASE_HOST = 'kjjljpllyjnvitemapox.supabase.co';
+const SUPABASE_HOST = 'pycryoyipkymaqorgpjy.supabase.co';
 
 /** Fake user returned by auth mocks */
 export const MOCK_USER = {
@@ -207,7 +207,7 @@ export async function injectAuthSession(page: Page) {
         created_at: new Date().toISOString(),
       },
     };
-    const storageKey = 'sb-kjjljpllyjnvitemapox-auth-token';
+    const storageKey = 'sb-pycryoyipkymaqorgpjy-auth-token';
     localStorage.setItem(storageKey, JSON.stringify(session));
   });
 }

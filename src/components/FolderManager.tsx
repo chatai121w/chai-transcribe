@@ -21,7 +21,7 @@ import {
   Star, StarOff, Tag, Grid3X3, List, ArrowUpDown, X, Check,
   StickyNote, Briefcase, GraduationCap, Users, MessageSquare, MoreHorizontal,
   Download, Loader2, Play, Pause, Volume2, Table2, RectangleHorizontal, LayoutGrid,
-  Eye, Filter, SortAsc, SortDesc
+  Eye, Filter, SortAsc, SortDesc, SlidersHorizontal
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
@@ -50,6 +50,20 @@ const getCustomFolders = (): string[] => {
 };
 const saveCustomFolders = (folders: string[]) => {
   localStorage.setItem(CUSTOM_FOLDERS_KEY, JSON.stringify(folders));
+};
+
+const normalizeForCompare = (value: string) =>
+  value
+    .replace(/\s+/g, ' ')
+    .replace(/["'`.,;:!?()\[\]{}<>\\/|\-]/g, '')
+    .trim()
+    .toLowerCase();
+
+const isDuplicatePreview = (title: string, preview: string) => {
+  const normTitle = normalizeForCompare(title);
+  const normPreview = normalizeForCompare(preview);
+  if (!normTitle || !normPreview) return false;
+  return normPreview === normTitle || normPreview.startsWith(normTitle);
 };
 
 export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }: FolderManagerProps) => {
@@ -569,6 +583,14 @@ const TranscriptItem = ({
 }: TranscriptItemProps) => {
   const [playingAudio, setPlayingAudio] = useState<HTMLAudioElement | null>(null);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [handlesOpen, setHandlesOpen] = useState(false);
+  const rawTitle = (t.title ?? '').trim();
+  const previewText = (t.text ?? '').trim();
+  const displayTitle = rawTitle || previewText.substring(0, 60) || 'ללא כותרת';
+  const shouldShowPreview =
+    viewMode !== 'rectangles' &&
+    previewText.length > 0 &&
+    !isDuplicatePreview(displayTitle, previewText);
 
   const handlePlayAudio = async () => {
     if (playingAudio) {
@@ -593,7 +615,75 @@ const TranscriptItem = ({
   };
 
   return (
-    <div dir="rtl" className={`group p-3 rounded-lg border hover:bg-accent/50 transition-colors text-right ${isSelected ? 'ring-2 ring-primary bg-primary/5' : ''}`}>
+    <div dir="rtl" className={`group relative p-3 rounded-lg border hover:bg-accent/50 transition-colors text-right ${isSelected ? 'ring-2 ring-primary bg-primary/5' : ''}`}>
+      <Dialog open={handlesOpen} onOpenChange={setHandlesOpen}>
+        <DialogTrigger asChild>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="absolute left-2 top-2 z-10 h-7 w-7 rounded-full border bg-background/90 backdrop-blur-sm"
+            title="פתח הנדלים"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+          </Button>
+        </DialogTrigger>
+        <DialogContent dir="rtl" className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>הנדלים ופרטי תמלול</DialogTitle>
+          </DialogHeader>
+
+          <div className="max-h-[68vh] overflow-y-auto pr-1 space-y-4">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Badge variant="outline" className="text-xs">{t.engine}</Badge>
+              <span>{formatDate(t.created_at)}</span>
+              {t.folder ? <Badge variant="secondary" className="text-xs">{t.folder}</Badge> : null}
+              {t.category ? <Badge variant="secondary" className="text-xs">{getCategoryLabel(t.category)}</Badge> : null}
+              {t.audio_file_path ? <Badge variant="outline" className="text-xs">אודיו</Badge> : null}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-right">{displayTitle}</p>
+              <p className="text-sm text-muted-foreground leading-7 whitespace-pre-wrap break-words text-right">
+                {(t.text ?? '').trim() || 'אין תוכן להצגה'}
+              </p>
+            </div>
+
+            {t.tags && t.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {t.tags.map((tag, i) => (
+                  <Badge key={i} variant="secondary" className="text-xs">{tag}</Badge>
+                ))}
+              </div>
+            )}
+
+            <div className="border-t pt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+              {t.audio_file_path && onGetAudioUrl && (
+                <Button size="sm" variant={playingAudio ? "default" : "outline"} className="text-xs"
+                  onClick={async (e) => { e.stopPropagation(); await handlePlayAudio(); }}
+                  disabled={isLoadingAudio}
+                >
+                  {isLoadingAudio ? <Loader2 className="w-3 h-3 ml-1 animate-spin" /> : playingAudio ? <Pause className="w-3 h-3 ml-1" /> : <Play className="w-3 h-3 ml-1" />}
+                  {playingAudio ? 'עצור' : 'נגן'}
+                </Button>
+              )}
+              <Button size="sm" variant="outline" className="text-xs" onClick={() => { onNavigateEdit(); setHandlesOpen(false); }}>
+                <Edit className="w-3 h-3 ml-1" />ערוך
+              </Button>
+              <Button size="sm" variant="outline" className="text-xs" onClick={() => { onNavigateDiarization(); setHandlesOpen(false); }}>
+                <Users className="w-3 h-3 ml-1" />דוברים
+              </Button>
+              <Button size="sm" variant="ghost" className="text-xs" onClick={() => { onStartEditNotes(); setHandlesOpen(false); }}>
+                <StickyNote className="w-3 h-3 ml-1" />הערה
+              </Button>
+              <Button size="sm" variant="ghost" className="text-xs text-destructive hover:text-destructive" onClick={() => { onDelete(); setHandlesOpen(false); }}>
+                <Trash2 className="w-3 h-3 ml-1" />מחק
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Top row */}
       <div className="flex items-center justify-between mb-1 gap-2">
         <div className="flex items-center gap-2">
@@ -641,12 +731,12 @@ const TranscriptItem = ({
       ) : (
         <p className="text-sm font-medium truncate mb-1 cursor-pointer hover:text-primary text-right"
           onDoubleClick={onStartEditTitle}>
-          {t.title || (t.text ?? '').substring(0, 60) || 'ללא כותרת'}
+          {displayTitle}
         </p>
       )}
 
-      {viewMode !== 'rectangles' && (
-        <p className="text-xs text-muted-foreground line-clamp-1 mb-1">{(t.text ?? '').substring(0, 100)}</p>
+      {shouldShowPreview && (
+        <p className="text-xs text-muted-foreground line-clamp-1 mb-1">{previewText.substring(0, 100)}</p>
       )}
 
       {/* Notes inline */}
