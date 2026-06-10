@@ -461,6 +461,7 @@ export function DesignModeOverlay() {
             <Trash2 className="h-3.5 w-3.5 text-destructive" />
           </Button>
         )}
+        <DesignModeSaveMenu />
         <Button size="sm" variant="outline" onClick={() => setEnabled(false)} title="יציאה (Esc)">
           <X className="h-3.5 w-3.5 ml-1" /> יציאה
         </Button>
