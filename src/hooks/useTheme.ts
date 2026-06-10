@@ -57,6 +57,10 @@ export interface AppTheme {
   colors: ThemeColors;
   style?: ThemeStyleOptions;
   isCustom?: boolean;
+  /** Per-element CSS overrides recorded via Live Design Mode. */
+  elementOverrides?: DesignOverride[];
+  /** Source tag, e.g. 'community' for themes pulled from the shared cloud table. */
+  source?: 'builtin' | 'custom' | 'community';
 }
 
 // Built-in themes
