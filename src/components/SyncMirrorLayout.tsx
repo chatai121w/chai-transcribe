@@ -525,7 +525,7 @@ export const SyncMirrorLayout = ({
                         <ChevronDown className="w-3.5 h-3.5" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" dir="rtl" className="text-xs">
+                    <DropdownMenuContent align="end" className="text-xs">
                       <DropdownMenuItem onClick={() => openLearningPicker('quick')}>
                         שמירה מהירה ללמידה
                       </DropdownMenuItem>
@@ -750,7 +750,7 @@ export const SyncMirrorLayout = ({
                       <ChevronDown className="w-2.5 h-2.5" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" dir="rtl" className="text-xs">
+                  <DropdownMenuContent align="end" className="text-xs">
                     <DropdownMenuItem onClick={() => openLearningPicker('quick')}>
                       שמירה מהירה ללמידה
                     </DropdownMenuItem>
