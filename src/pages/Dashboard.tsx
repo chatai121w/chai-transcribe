@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
@@ -18,6 +18,39 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 type RecentViewMode = 'cards' | 'table' | 'rectangles' | 'grid';
+type DashboardStylePreset = 'classic' | 'studio' | 'compact';
+
+const DASHBOARD_STYLE_STORAGE_KEY = 'dashboard_style_preset_v1';
+
+function loadDashboardStylePreset(): DashboardStylePreset {
+  try {
+    const raw = localStorage.getItem(DASHBOARD_STYLE_STORAGE_KEY);
+    if (raw === 'classic' || raw === 'studio' || raw === 'compact') return raw;
+  } catch {
+    // ignore storage errors and fallback to default
+  }
+  return 'classic';
+}
+
+function parseTabSettings(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // ignore malformed payload
+  }
+  return {};
+}
+
+function readPresetFromTabSettings(raw: string | null | undefined): DashboardStylePreset | null {
+  const parsed = parseTabSettings(raw);
+  const value = parsed.dashboard_style_preset;
+  if (value === 'classic' || value === 'studio' || value === 'compact') return value;
+  return null;
+}
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -37,10 +70,71 @@ const Dashboard = () => {
   }, [isLoading, transcripts.length, stats]);
 
   const recentTranscripts = transcripts.slice(0, 5);
+  const [stylePreset, setStylePresetState] = useState<DashboardStylePreset>(() => {
+    const fromCloud = readPresetFromTabSettings(preferences.tab_settings_json);
+    return fromCloud ?? loadDashboardStylePreset();
+  });
   const recentViewMode = (preferences.dashboard_view_mode || 'cards') as RecentViewMode;
   const setRecentViewMode = useCallback((mode: RecentViewMode) => {
     updatePreference('dashboard_view_mode', mode);
   }, [updatePreference]);
+  const setStylePreset = useCallback((preset: DashboardStylePreset) => {
+    setStylePresetState(preset);
+    try {
+      localStorage.setItem(DASHBOARD_STYLE_STORAGE_KEY, preset);
+    } catch {
+      // ignore storage errors
+    }
+    const base = parseTabSettings(preferences.tab_settings_json);
+    const merged = { ...base, dashboard_style_preset: preset };
+    updatePreference('tab_settings_json', JSON.stringify(merged));
+  }, [preferences.tab_settings_json, updatePreference]);
+
+  useEffect(() => {
+    const fromCloud = readPresetFromTabSettings(preferences.tab_settings_json);
+    if (fromCloud && fromCloud !== stylePreset) {
+      setStylePresetState(fromCloud);
+      try {
+        localStorage.setItem(DASHBOARD_STYLE_STORAGE_KEY, fromCloud);
+      } catch {
+        // ignore storage errors
+      }
+    }
+  }, [preferences.tab_settings_json, stylePreset]);
+
+  const pageToneClass =
+    stylePreset === 'studio'
+      ? 'bg-gradient-to-b from-background via-primary/5 to-background'
+      : stylePreset === 'compact'
+      ? 'bg-background'
+      : 'bg-gradient-to-b from-background via-accent/5 to-background';
+  const shellClass = stylePreset === 'compact' ? 'max-w-7xl mx-auto space-y-5' : 'max-w-6xl mx-auto space-y-8';
+  const actionGridClass = stylePreset === 'compact' ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3' : 'grid grid-cols-1 md:grid-cols-3 gap-4';
+  const actionCardPaddingClass = stylePreset === 'compact' ? 'flex items-center gap-4 p-4' : 'flex items-center gap-4 p-6';
+  const actionCardClass = stylePreset === 'studio'
+    ? 'cursor-pointer hover:shadow-xl transition-all hover:-translate-y-0.5 border-primary/25 hover:border-primary/60'
+    : 'cursor-pointer hover:shadow-lg transition-all hover:scale-[1.02] border-primary/20 hover:border-primary/50';
+
+  const stylePresets = useMemo(() => ([
+    {
+      id: 'classic' as const,
+      label: 'קלאסי',
+      preview: 'bg-gradient-to-b from-background via-accent/10 to-background',
+      blocks: ['bg-primary/50', 'bg-accent/40', 'bg-muted/80'],
+    },
+    {
+      id: 'studio' as const,
+      label: 'סטודיו',
+      preview: 'bg-gradient-to-b from-background via-primary/15 to-background',
+      blocks: ['bg-primary/70', 'bg-secondary/60', 'bg-accent/45'],
+    },
+    {
+      id: 'compact' as const,
+      label: 'קומפקטי',
+      preview: 'bg-muted/30',
+      blocks: ['bg-foreground/20', 'bg-foreground/15', 'bg-foreground/10'],
+    },
+  ]), []);
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -60,10 +154,34 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-8" dir="rtl">
-      <div className="max-w-6xl mx-auto space-y-8">
+    <div className={`min-h-screen ${pageToneClass} p-4 md:p-8`} dir="rtl">
+      <div className={shellClass}>
         {/* Header */}
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-card/70 p-2">
+            {stylePresets.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => setStylePreset(preset.id)}
+                className={`rounded-lg border p-1.5 transition-all ${
+                  stylePreset === preset.id
+                    ? 'border-primary bg-primary/10 shadow-sm'
+                    : 'border-border/70 hover:border-primary/50 hover:bg-accent/40'
+                }`}
+                title={`החלפה לפריסת ${preset.label}`}
+              >
+                <div className={`h-7 w-16 rounded-md p-1 ${preset.preview}`}>
+                  <div className={`h-1.5 w-full rounded ${preset.blocks[0]}`} />
+                  <div className="mt-1 grid grid-cols-2 gap-1">
+                    <div className={`h-3 rounded ${preset.blocks[1]}`} />
+                    <div className={`h-3 rounded ${preset.blocks[2]}`} />
+                  </div>
+                </div>
+                <div className="mt-1 text-center text-[11px] font-medium">{preset.label}</div>
+              </button>
+            ))}
+          </div>
           {!isAuthenticated && (
             <Button variant="outline" onClick={() => navigate("/login")}>
               <LogIn className="h-4 w-4 ml-2" />
@@ -81,12 +199,12 @@ const Dashboard = () => {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className={actionGridClass}>
           <Card 
-            className="cursor-pointer hover:shadow-lg transition-all hover:scale-[1.02] border-primary/20 hover:border-primary/50"
+            className={actionCardClass}
             onClick={() => navigate("/transcribe")}
           >
-            <CardContent className="flex items-center gap-4 p-6">
+            <CardContent className={actionCardPaddingClass}>
               <div className="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center">
                 <Mic className="w-7 h-7 text-blue-900" />
               </div>
@@ -99,10 +217,12 @@ const Dashboard = () => {
           </Card>
 
           <Card 
-            className="cursor-pointer hover:shadow-lg transition-all hover:scale-[1.02] border-accent/20 hover:border-accent/50"
+            className={stylePreset === 'studio'
+              ? 'cursor-pointer hover:shadow-xl transition-all hover:-translate-y-0.5 border-accent/25 hover:border-accent/65'
+              : 'cursor-pointer hover:shadow-lg transition-all hover:scale-[1.02] border-accent/20 hover:border-accent/50'}
             onClick={() => navigate("/text-editor")}
           >
-            <CardContent className="flex items-center gap-4 p-6">
+            <CardContent className={actionCardPaddingClass}>
               <div className="w-14 h-14 rounded-xl bg-accent/10 flex items-center justify-center">
                 <FileEdit className="w-7 h-7 text-blue-900" />
               </div>
@@ -115,10 +235,12 @@ const Dashboard = () => {
           </Card>
 
           <Card 
-            className="cursor-pointer hover:shadow-lg transition-all hover:scale-[1.02] border-secondary/40 hover:border-secondary"
+            className={stylePreset === 'studio'
+              ? 'cursor-pointer hover:shadow-xl transition-all hover:-translate-y-0.5 border-secondary/50 hover:border-secondary'
+              : 'cursor-pointer hover:shadow-lg transition-all hover:scale-[1.02] border-secondary/40 hover:border-secondary'}
             onClick={() => navigate("/settings")}
           >
-            <CardContent className="flex items-center gap-4 p-6">
+            <CardContent className={actionCardPaddingClass}>
               <div className="w-14 h-14 rounded-xl bg-secondary flex items-center justify-center">
                 <Settings className="w-7 h-7 text-blue-900" />
               </div>
@@ -133,7 +255,7 @@ const Dashboard = () => {
 
         {/* Stats */}
         {isAuthenticated && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className={stylePreset === 'compact' ? 'grid grid-cols-2 md:grid-cols-4 gap-3' : 'grid grid-cols-2 md:grid-cols-4 gap-4'}>
             <Card>
               <CardContent className="p-4 text-center">
                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-2">

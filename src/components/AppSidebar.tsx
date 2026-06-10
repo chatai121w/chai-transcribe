@@ -529,8 +529,17 @@ const AppSidebar = () => {
                 <User className="w-4 h-4 text-blue-900" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground truncate text-right">
+                <p className="text-sm font-medium text-foreground truncate text-right inline-flex items-center gap-1.5">
                   {displayName}
+                  {isAdmin && (
+                    <span
+                      className="inline-flex items-center justify-center rounded-full bg-amber-500/20 text-amber-700 border border-amber-600/40 text-[10px] font-bold leading-none w-4 h-4"
+                      title="Admin"
+                      aria-label="Admin"
+                    >
+                      A
+                    </span>
+                  )}
                 </p>
               </div>
               <button

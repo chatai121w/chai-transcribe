@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useDroppable, useDraggable } from '@dnd-kit/core';
 import { Folder, FileAudio, FileText, Star, MoreHorizontal, Pin } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -7,6 +8,44 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import type { FolderNode } from '@/hooks/useFolderTree';
 import type { CloudTranscript } from '@/hooks/useCloudTranscripts';
 import { cn } from '@/lib/utils';
+
+const NATIVE_DRAG_START_EVENT = 'fm-native-drag-start';
+const NATIVE_DRAG_TARGET_EVENT = 'fm-native-drag-target';
+const NATIVE_DRAG_END_EVENT = 'fm-native-drag-end';
+const DROP_SNAP_EVENT = 'fm-drop-snap';
+
+function setNativeDragImage(e: React.DragEvent, label: string, kind: 'folder' | 'transcript') {
+  const node = document.createElement('div');
+  node.style.position = 'fixed';
+  node.style.top = '-1000px';
+  node.style.left = '-1000px';
+  node.style.padding = '6px 10px';
+  node.style.borderRadius = '10px';
+  node.style.border = '1px solid rgba(217, 119, 6, 0.35)';
+  node.style.background = 'rgba(255,255,255,0.95)';
+  node.style.color = '#1f2937';
+  node.style.font = '500 12px Heebo, Assistant, sans-serif';
+  node.style.whiteSpace = 'nowrap';
+  node.style.boxShadow = '0 6px 18px rgba(0,0,0,0.14)';
+  node.textContent = `${kind === 'folder' ? 'תיקייה' : 'תמלול'}: ${label || 'ללא שם'}`;
+  document.body.appendChild(node);
+  e.dataTransfer.setDragImage(node, 14, 12);
+  requestAnimationFrame(() => {
+    try { document.body.removeChild(node); } catch { /* ignore */ }
+  });
+}
+
+function emitNativeDragStart(kind: 'folder' | 'transcript', id: string, name: string) {
+  window.dispatchEvent(new CustomEvent(NATIVE_DRAG_START_EVENT, { detail: { kind, id, name } }));
+}
+
+function emitNativeDragTarget(targetName: string | null) {
+  window.dispatchEvent(new CustomEvent(NATIVE_DRAG_TARGET_EVENT, { detail: { targetName } }));
+}
+
+function emitNativeDragEnd() {
+  window.dispatchEvent(new CustomEvent(NATIVE_DRAG_END_EVENT));
+}
 
 type Item =
   | { kind: 'folder'; data: FolderNode }
@@ -25,10 +64,11 @@ interface Props {
   onToggleFavorite: (t: CloudTranscript) => void;
   onTogglePinFolder: (id: string) => void;
   onDeleteFolder: (f: FolderNode) => void;
+  onDropLocalItemToFolder?: (targetFolderId: string | null, item: { kind: 'folder' | 'transcript'; id: string; name?: string }) => void;
   cutIds: Set<string>;
 }
 
-const FolderCard = ({ f, isSel, onClick, isCut, onPin, onDelete }: any) => {
+const FolderCard = ({ f, isSel, isSnap, onClick, isCut, onPin, onDelete, onDropLocalItemToFolder }: any) => {
   const { setNodeRef: dropRef, isOver } = useDroppable({ id: `card-folder-${f.id}`, data: { kind: 'folder', id: f.id } });
   const { setNodeRef: dragRef, listeners, attributes } = useDraggable({ id: `drag-card-folder-${f.id}`, data: { kind: 'folder', id: f.id } });
   return (
@@ -36,10 +76,32 @@ const FolderCard = ({ f, isSel, onClick, isCut, onPin, onDelete }: any) => {
       ref={dropRef}
       onClick={onClick}
       onDoubleClick={onClick.doubleClick}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('application/x-sht-local-item')) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          emitNativeDragTarget(f.name || 'תיקייה');
+        }
+      }}
+      onDrop={(e) => {
+        const raw = e.dataTransfer.getData('application/x-sht-local-item');
+        if (!raw || !onDropLocalItemToFolder) return;
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          const parsed = JSON.parse(raw) as { kind: 'folder' | 'transcript'; id: string; name?: string };
+          if (!parsed?.id || (parsed.kind !== 'folder' && parsed.kind !== 'transcript')) return;
+          onDropLocalItemToFolder(f.id, parsed);
+          emitNativeDragEnd();
+        } catch {
+          // ignore malformed drag payload
+        }
+      }}
       className={cn(
         'group relative flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/60 cursor-pointer transition',
         isSel && 'ring-2 ring-yellow-500 bg-yellow-500/10',
-        isOver && 'ring-2 ring-yellow-500 bg-yellow-50 dark:bg-yellow-950/30',
+        isOver && 'ring-2 ring-yellow-500 bg-yellow-100/90 dark:bg-yellow-900/35 shadow-[0_0_0_1px_rgba(234,179,8,0.35)]',
+        isSnap && 'ring-2 ring-emerald-500/70 bg-emerald-50/80 dark:bg-emerald-900/20 animate-[pulse_420ms_ease-out]',
         isCut && 'opacity-50',
       )}
     >
@@ -51,7 +113,10 @@ const FolderCard = ({ f, isSel, onClick, isCut, onPin, onDelete }: any) => {
         onDragStart={(e) => {
           e.dataTransfer.setData('application/x-sht-local-item', JSON.stringify({ kind: 'folder', id: f.id, name: f.name }));
           e.dataTransfer.effectAllowed = 'copyMove';
+          setNativeDragImage(e, f.name || 'תיקייה', 'folder');
+          emitNativeDragStart('folder', f.id, f.name || 'תיקייה');
         }}
+        onDragEnd={() => emitNativeDragEnd()}
         className="flex items-center gap-3 flex-1 min-w-0"
       >
         {f.emoji ? (
@@ -105,7 +170,10 @@ const TranscriptCard = ({ t, isSel, isCut, onClick, onDelete, onFav }: any) => {
           e.dataTransfer.setData('application/x-sht-local-transcript-id', t.id);
           e.dataTransfer.setData('application/x-sht-local-item', JSON.stringify({ kind: 'transcript', id: t.id, name: t.title || 'ללא שם' }));
           e.dataTransfer.effectAllowed = 'copyMove';
+          setNativeDragImage(e, t.title || 'ללא שם', 'transcript');
+          emitNativeDragStart('transcript', t.id, t.title || 'ללא שם');
         }}
+        onDragEnd={() => emitNativeDragEnd()}
         className="flex items-center gap-3 flex-1 min-w-0"
       >
 
@@ -135,7 +203,7 @@ const TranscriptCard = ({ t, isSel, isCut, onClick, onDelete, onFav }: any) => {
   );
 };
 
-const FolderTableRow = ({ f, isSel, isCut, onSelectRow, onOpenFolder, onPin, onDelete }: any) => {
+const FolderTableRow = ({ f, isSel, isSnap, isCut, onSelectRow, onOpenFolder, onPin, onDelete, onDropLocalItemToFolder }: any) => {
   const { setNodeRef: dropRef, isOver } = useDroppable({ id: `table-folder-${f.id}`, data: { kind: 'folder', id: f.id } });
   const { setNodeRef: dragRef, listeners, attributes } = useDraggable({ id: `drag-table-folder-${f.id}`, data: { kind: 'folder', id: f.id } });
   return (
@@ -143,10 +211,32 @@ const FolderTableRow = ({ f, isSel, isCut, onSelectRow, onOpenFolder, onPin, onD
       ref={dropRef}
       onClick={onSelectRow}
       onDoubleClick={() => onOpenFolder(f.id)}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('application/x-sht-local-item')) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          emitNativeDragTarget(f.name || 'תיקייה');
+        }
+      }}
+      onDrop={(e) => {
+        const raw = e.dataTransfer.getData('application/x-sht-local-item');
+        if (!raw || !onDropLocalItemToFolder) return;
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          const parsed = JSON.parse(raw) as { kind: 'folder' | 'transcript'; id: string; name?: string };
+          if (!parsed?.id || (parsed.kind !== 'folder' && parsed.kind !== 'transcript')) return;
+          onDropLocalItemToFolder(f.id, parsed);
+          emitNativeDragEnd();
+        } catch {
+          // ignore malformed drag payload
+        }
+      }}
       className={cn(
         'grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto] items-center gap-2 px-2 py-2 text-xs text-right border-t border-border/40 hover:bg-muted/50 cursor-pointer',
         isSel && 'bg-yellow-500/10',
-        isOver && 'ring-1 ring-yellow-500 bg-yellow-50 dark:bg-yellow-950/30',
+        isOver && 'ring-2 ring-yellow-500 bg-yellow-100/90 dark:bg-yellow-900/35',
+        isSnap && 'ring-2 ring-emerald-500/70 bg-emerald-50/80 dark:bg-emerald-900/20 animate-[pulse_420ms_ease-out]',
         isCut && 'opacity-50',
       )}
     >
@@ -158,7 +248,10 @@ const FolderTableRow = ({ f, isSel, isCut, onSelectRow, onOpenFolder, onPin, onD
         onDragStart={(e) => {
           e.dataTransfer.setData('application/x-sht-local-item', JSON.stringify({ kind: 'folder', id: f.id, name: f.name }));
           e.dataTransfer.effectAllowed = 'copyMove';
+          setNativeDragImage(e, f.name || 'תיקייה', 'folder');
+          emitNativeDragStart('folder', f.id, f.name || 'תיקייה');
         }}
+        onDragEnd={() => emitNativeDragEnd()}
         className="flex items-center gap-2 min-w-0"
       >
         <Folder className="w-4 h-4 shrink-0" style={{ color: f.color || '#eab308' }} />
@@ -206,7 +299,10 @@ const TranscriptTableRow = ({ t, isSel, isCut, onSelectRow, onOpenTranscript, on
           e.dataTransfer.setData('application/x-sht-local-transcript-id', t.id);
           e.dataTransfer.setData('application/x-sht-local-item', JSON.stringify({ kind: 'transcript', id: t.id, name: t.title || 'ללא שם' }));
           e.dataTransfer.effectAllowed = 'copyMove';
+          setNativeDragImage(e, t.title || 'ללא שם', 'transcript');
+          emitNativeDragStart('transcript', t.id, t.title || 'ללא שם');
         }}
+        onDragEnd={() => emitNativeDragEnd()}
         className="flex items-center gap-2 min-w-0"
       >
         {isAudio ? <FileAudio className="w-4 h-4 text-yellow-700 shrink-0" /> : <FileText className="w-4 h-4 text-muted-foreground shrink-0" />}
@@ -232,7 +328,25 @@ const TranscriptTableRow = ({ t, isSel, isCut, onSelectRow, onOpenTranscript, on
   );
 };
 
-export const FileGrid = ({ items, viewMode = 'grid', selected, onSelect, onOpenFolder, onOpenTranscript, onDeleteTranscript, onToggleFavorite, onTogglePinFolder, onDeleteFolder, cutIds }: Props) => {
+export const FileGrid = ({ items, viewMode = 'grid', selected, onSelect, onOpenFolder, onOpenTranscript, onDeleteTranscript, onToggleFavorite, onTogglePinFolder, onDeleteFolder, onDropLocalItemToFolder, cutIds }: Props) => {
+  const [snapTargetId, setSnapTargetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onDropSnap = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ targetId?: string | null }>).detail;
+      if (!detail || detail.targetId == null) return;
+      setSnapTargetId(String(detail.targetId));
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setSnapTargetId(null), 450);
+    };
+    window.addEventListener(DROP_SNAP_EVENT, onDropSnap as EventListener);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener(DROP_SNAP_EVENT, onDropSnap as EventListener);
+    };
+  }, []);
+
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground" dir="rtl">
@@ -259,11 +373,13 @@ export const FileGrid = ({ items, viewMode = 'grid', selected, onSelect, onOpenF
                 key={`f-table-${f.id}`}
                 f={f}
                 isSel={selected.has(f.id)}
+                isSnap={snapTargetId === f.id}
                 isCut={cutIds.has(f.id)}
                 onSelectRow={(e: React.MouseEvent) => onSelect(f.id, 'folder', { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
                 onOpenFolder={onOpenFolder}
                 onPin={() => onTogglePinFolder(f.id)}
                 onDelete={() => onDeleteFolder(f)}
+                onDropLocalItemToFolder={onDropLocalItemToFolder}
               />
             );
           }
@@ -297,10 +413,12 @@ export const FileGrid = ({ items, viewMode = 'grid', selected, onSelect, onOpenF
               <FolderCard
                 f={f}
                 isSel={selected.has(f.id)}
+                isSnap={snapTargetId === f.id}
                 isCut={cutIds.has(f.id)}
                 onClick={click}
                 onPin={() => onTogglePinFolder(f.id)}
                 onDelete={() => onDeleteFolder(f)}
+                onDropLocalItemToFolder={onDropLocalItemToFolder}
               />
             </div>
           );

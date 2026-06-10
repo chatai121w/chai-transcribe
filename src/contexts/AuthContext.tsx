@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { debugLog } from "@/lib/debugLogger";
 import type { User, Session } from "@supabase/supabase-js";
 
+const PRIMARY_ADMIN_EMAIL = "jj1212t@gmail.com";
+
 interface AuthContextType {
   isAuthenticated: boolean;
   user: User | null;
@@ -40,15 +42,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // Without this, session=null + isLoading=false causes / → /login → / flash.
   const [isLoading, setIsLoading] = useState(true);
 
-  const checkAdmin = async (userId: string) => {
+  const checkAdmin = async (userId: string, email?: string | null) => {
+    const normalizedEmail = email?.toLowerCase() ?? "";
+    const isPrimaryAdminEmail = normalizedEmail === PRIMARY_ADMIN_EMAIL;
+
+    // Keep the main admin usable even if user_roles backfill has not run yet.
+    if (isPrimaryAdminEmail) {
+      setIsAdmin(true);
+    }
+
     const { data } = await supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", userId)
       .eq("role", "admin")
       .maybeSingle();
-    setIsAdmin(!!data);
-    debugLog.info('Auth', `👤 Admin check: ${!!data ? 'admin' : 'user'}`);
+
+    const isAdminUser = !!data || isPrimaryAdminEmail;
+    setIsAdmin(isAdminUser);
+    debugLog.info('Auth', `👤 Admin check: ${isAdminUser ? 'admin' : 'user'}`);
   };
 
   useEffect(() => {
@@ -76,7 +88,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setIsLoading(false);
         if (session?.user) {
           // Admin check runs in background — doesn't block page load
-          checkAdmin(session.user.id);
+          checkAdmin(session.user.id, session.user.email);
         } else {
           setIsAdmin(false);
         }

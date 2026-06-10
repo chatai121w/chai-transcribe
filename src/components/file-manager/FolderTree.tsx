@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useDroppable, useDraggable } from '@dnd-kit/core';
 import { ChevronLeft, ChevronDown, Folder, FolderOpen, Pin, MoreHorizontal, Plus, Cloud, Link2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -7,8 +7,48 @@ import { FolderColorPicker } from './FolderColorPicker';
 import type { FolderTreeNode, FolderNode } from '@/hooks/useFolderTree';
 import { cn } from '@/lib/utils';
 
+const NATIVE_DRAG_START_EVENT = 'fm-native-drag-start';
+const NATIVE_DRAG_TARGET_EVENT = 'fm-native-drag-target';
+const NATIVE_DRAG_END_EVENT = 'fm-native-drag-end';
+const DROP_SNAP_EVENT = 'fm-drop-snap';
+
+function setNativeDragImage(e: React.DragEvent, label: string) {
+  const node = document.createElement('div');
+  node.style.position = 'fixed';
+  node.style.top = '-1000px';
+  node.style.left = '-1000px';
+  node.style.padding = '6px 10px';
+  node.style.borderRadius = '10px';
+  node.style.border = '1px solid rgba(217, 119, 6, 0.35)';
+  node.style.background = 'rgba(255,255,255,0.95)';
+  node.style.color = '#1f2937';
+  node.style.font = '500 12px Heebo, Assistant, sans-serif';
+  node.style.whiteSpace = 'nowrap';
+  node.style.boxShadow = '0 6px 18px rgba(0,0,0,0.14)';
+  node.textContent = `תיקייה: ${label || 'ללא שם'}`;
+  document.body.appendChild(node);
+  e.dataTransfer.setDragImage(node, 14, 12);
+  requestAnimationFrame(() => {
+    try { document.body.removeChild(node); } catch { /* ignore */ }
+  });
+}
+
+function emitNativeDragStart(id: string, name: string) {
+  window.dispatchEvent(new CustomEvent(NATIVE_DRAG_START_EVENT, { detail: { kind: 'folder', id, name } }));
+}
+
+function emitNativeDragTarget(targetName: string | null) {
+  window.dispatchEvent(new CustomEvent(NATIVE_DRAG_TARGET_EVENT, { detail: { targetName } }));
+}
+
+function emitNativeDragEnd() {
+  window.dispatchEvent(new CustomEvent(NATIVE_DRAG_END_EVENT));
+}
+
 export type DriveFolderPayload = { id: string; name: string };
 export type DriveFilePayload = { id: string; name: string; mimeType: string };
+
+type LocalDragItem = { kind: 'folder' | 'transcript'; id: string; name?: string };
 
 interface RowProps {
   node: FolderTreeNode;
@@ -22,12 +62,29 @@ interface RowProps {
   onTogglePin: (id: string) => void;
   onUpdateStyle: (id: string, patch: { color?: string | null; emoji?: string | null }) => void;
   onLinkDrive: (node: FolderNode) => void;
+  onDropLocalItem?: (targetLocalParentId: string | null, item: LocalDragItem) => void;
   onDropDriveFolder?: (targetLocalParentId: string | null, drive: DriveFolderPayload) => void;
   onDropDriveFile?: (targetLocalParentId: string | null, drive: DriveFilePayload) => void;
+  snapTargetId?: string | null;
 }
 
-
-const FolderRow = ({ node, selectedId, expanded, onToggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive, onDropDriveFolder, onDropDriveFile }: RowProps) => {
+const FolderRow = ({
+  node,
+  selectedId,
+  expanded,
+  onToggleExpand,
+  onSelect,
+  onCreateChild,
+  onRename,
+  onDelete,
+  onTogglePin,
+  onUpdateStyle,
+  onLinkDrive,
+  onDropLocalItem,
+  onDropDriveFolder,
+  onDropDriveFile,
+  snapTargetId,
+}: RowProps) => {
   const hasChildren = node.children.length > 0;
   const isExpanded = expanded.has(node.id);
   const isSelected = selectedId === node.id;
@@ -43,32 +100,45 @@ const FolderRow = ({ node, selectedId, expanded, onToggleExpand, onSelect, onCre
           'group flex items-center gap-1 px-2 py-1.5 rounded cursor-pointer transition text-sm',
           isSelected && 'bg-yellow-500/20',
           !isSelected && 'hover:bg-muted',
-          isOver && 'ring-2 ring-yellow-500 bg-yellow-50 dark:bg-yellow-950/30',
+          isOver && 'ring-2 ring-yellow-500 bg-yellow-100/90 dark:bg-yellow-900/35 shadow-[0_0_0_1px_rgba(234,179,8,0.35)]',
+          snapTargetId === node.id && 'ring-2 ring-emerald-500/70 bg-emerald-50/80 dark:bg-emerald-900/20 animate-[pulse_420ms_ease-out]',
         )}
         style={{ paddingInlineStart: `${node.depth * 12 + 8}px` }}
         onClick={() => onSelect(node.id)}
         onDragOver={(e) => {
           const t = e.dataTransfer.types;
-          if (t.includes('application/x-sht-drive-folder') || t.includes('application/x-sht-drive-file')) {
+          if (
+            t.includes('application/x-sht-local-item') ||
+            t.includes('application/x-sht-drive-folder') ||
+            t.includes('application/x-sht-drive-file')
+          ) {
             e.preventDefault();
-            e.dataTransfer.dropEffect = 'copy';
+            e.dataTransfer.dropEffect = t.includes('application/x-sht-local-item') ? 'move' : 'copy';
+            emitNativeDragTarget(node.name || 'תיקייה');
           }
         }}
         onDrop={(e) => {
+          const rawLocal = e.dataTransfer.getData('application/x-sht-local-item');
           const rawFolder = e.dataTransfer.getData('application/x-sht-drive-folder');
           const rawFile = e.dataTransfer.getData('application/x-sht-drive-file');
-          if (!rawFolder && !rawFile) return;
+          if (!rawLocal && !rawFolder && !rawFile) return;
           e.preventDefault();
           e.stopPropagation();
           try {
-            if (rawFolder && onDropDriveFolder) onDropDriveFolder(node.id, JSON.parse(rawFolder));
+            if (rawLocal && onDropLocalItem) onDropLocalItem(node.id, JSON.parse(rawLocal));
+            else if (rawFolder && onDropDriveFolder) onDropDriveFolder(node.id, JSON.parse(rawFolder));
             else if (rawFile && onDropDriveFile) onDropDriveFile(node.id, JSON.parse(rawFile));
-          } catch { /* ignore */ }
+            emitNativeDragEnd();
+          } catch {
+            // ignore malformed drop payload
+          }
         }}
       >
-
         <button
-          onClick={(e) => { e.stopPropagation(); if (hasChildren) onToggleExpand(node.id); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (hasChildren) onToggleExpand(node.id);
+          }}
           className="w-4 h-4 flex items-center justify-center text-muted-foreground shrink-0"
         >
           {hasChildren ? (isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />) : null}
@@ -82,7 +152,10 @@ const FolderRow = ({ node, selectedId, expanded, onToggleExpand, onSelect, onCre
           onDragStart={(e) => {
             e.dataTransfer.setData('application/x-sht-local-item', JSON.stringify({ kind: 'folder', id: node.id, name: node.name }));
             e.dataTransfer.effectAllowed = 'copyMove';
+            setNativeDragImage(e, node.name || 'תיקייה');
+            emitNativeDragStart(node.id, node.name || 'תיקייה');
           }}
+          onDragEnd={() => emitNativeDragEnd()}
           className="flex items-center gap-1.5 flex-1 min-w-0"
         >
           {node.emoji ? (
@@ -115,7 +188,9 @@ const FolderRow = ({ node, selectedId, expanded, onToggleExpand, onSelect, onCre
               <Cloud className="w-3.5 h-3.5 ml-2" /> {node.drive_folder_id ? 'נהל קישור Drive' : 'חבר ל-Google Drive'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive" onClick={() => onDelete(node)}>מחק</DropdownMenuItem>
+            <DropdownMenuItem className="text-destructive" onClick={() => onDelete(node)}>
+              מחק
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -130,9 +205,28 @@ const FolderRow = ({ node, selectedId, expanded, onToggleExpand, onSelect, onCre
           }
         />
       </div>
-      {isExpanded && node.children.map(child => (
-        <FolderRow key={child.id} {...{ node: child, selectedId, expanded, onToggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive, onDropDriveFolder, onDropDriveFile }} />
-      ))}
+
+      {isExpanded &&
+        node.children.map((child) => (
+          <FolderRow
+            key={child.id}
+            node={child}
+            selectedId={selectedId}
+            expanded={expanded}
+            onToggleExpand={onToggleExpand}
+            onSelect={onSelect}
+            onCreateChild={onCreateChild}
+            onRename={onRename}
+            onDelete={onDelete}
+            onTogglePin={onTogglePin}
+            onUpdateStyle={onUpdateStyle}
+            onLinkDrive={onLinkDrive}
+            onDropLocalItem={onDropLocalItem}
+            onDropDriveFolder={onDropDriveFolder}
+            onDropDriveFile={onDropDriveFile}
+            snapTargetId={snapTargetId}
+          />
+        ))}
     </>
   );
 };
@@ -148,15 +242,47 @@ interface TreeProps {
   onTogglePin: (id: string) => void;
   onUpdateStyle: (id: string, patch: { color?: string | null; emoji?: string | null }) => void;
   onLinkDrive: (node: FolderNode) => void;
+  onDropLocalItem?: (targetLocalParentId: string | null, item: LocalDragItem) => void;
   onDropDriveFolder?: (targetLocalParentId: string | null, drive: DriveFolderPayload) => void;
   onDropDriveFile?: (targetLocalParentId: string | null, drive: DriveFilePayload) => void;
 }
 
-export const FolderTree = ({ tree, pinned, selectedId, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive, onDropDriveFolder, onDropDriveFile }: TreeProps) => {
+export const FolderTree = ({
+  tree,
+  pinned,
+  selectedId,
+  onSelect,
+  onCreateChild,
+  onRename,
+  onDelete,
+  onTogglePin,
+  onUpdateStyle,
+  onLinkDrive,
+  onDropLocalItem,
+  onDropDriveFolder,
+  onDropDriveFile,
+}: TreeProps) => {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [rootDriveOver, setRootDriveOver] = useState(false);
+  const [snapTargetId, setSnapTargetId] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onDropSnap = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ targetId?: string | null }>).detail;
+      setSnapTargetId(detail?.targetId ?? null);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setSnapTargetId(undefined), 450);
+    };
+    window.addEventListener(DROP_SNAP_EVENT, onDropSnap as EventListener);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener(DROP_SNAP_EVENT, onDropSnap as EventListener);
+    };
+  }, []);
+
   const toggleExpand = (id: string) => {
-    setExpanded(prev => {
+    setExpanded((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -180,9 +306,25 @@ export const FolderTree = ({ tree, pinned, selectedId, onSelect, onCreateChild, 
             <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-yellow-700 flex items-center gap-1">
               <Pin className="w-3 h-3 fill-current" /> נעוצות
             </div>
-            {pinned.map(n => (
-              <FolderRow key={`p-${n.id}`} node={{ ...n, depth: 0, children: [] }}
-                {...{ selectedId, expanded, onToggleExpand: toggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive, onDropDriveFolder, onDropDriveFile }} />
+            {pinned.map((n) => (
+              <FolderRow
+                key={`p-${n.id}`}
+                node={{ ...n, depth: 0, children: [] }}
+                selectedId={selectedId}
+                expanded={expanded}
+                onToggleExpand={toggleExpand}
+                onSelect={onSelect}
+                onCreateChild={onCreateChild}
+                onRename={onRename}
+                onDelete={onDelete}
+                onTogglePin={onTogglePin}
+                onUpdateStyle={onUpdateStyle}
+                onLinkDrive={onLinkDrive}
+                onDropLocalItem={onDropLocalItem}
+                onDropDriveFolder={onDropDriveFolder}
+                onDropDriveFile={onDropDriveFile}
+                snapTargetId={snapTargetId ?? null}
+              />
             ))}
             <div className="my-1 mx-3 border-t border-border/50" />
           </>
@@ -193,39 +335,66 @@ export const FolderTree = ({ tree, pinned, selectedId, onSelect, onCreateChild, 
           onClick={() => onSelect(null)}
           onDragOver={(e) => {
             const t = e.dataTransfer.types;
-            if (t.includes('application/x-sht-drive-folder') || t.includes('application/x-sht-drive-file')) {
+            if (
+              t.includes('application/x-sht-local-item') ||
+              t.includes('application/x-sht-drive-folder') ||
+              t.includes('application/x-sht-drive-file')
+            ) {
               e.preventDefault();
-              e.dataTransfer.dropEffect = 'copy';
+              e.dataTransfer.dropEffect = t.includes('application/x-sht-local-item') ? 'move' : 'copy';
               setRootDriveOver(true);
+              if (t.includes('application/x-sht-local-item')) emitNativeDragTarget('הבית');
             }
           }}
           onDragLeave={() => setRootDriveOver(false)}
           onDrop={(e) => {
             setRootDriveOver(false);
+            const rawLocal = e.dataTransfer.getData('application/x-sht-local-item');
             const rawFolder = e.dataTransfer.getData('application/x-sht-drive-folder');
             const rawFile = e.dataTransfer.getData('application/x-sht-drive-file');
-            if (!rawFolder && !rawFile) return;
+            if (!rawLocal && !rawFolder && !rawFile) return;
             e.preventDefault();
             try {
-              if (rawFolder && onDropDriveFolder) onDropDriveFolder(null, JSON.parse(rawFolder));
+              if (rawLocal && onDropLocalItem) onDropLocalItem(null, JSON.parse(rawLocal));
+              else if (rawFolder && onDropDriveFolder) onDropDriveFolder(null, JSON.parse(rawFolder));
               else if (rawFile && onDropDriveFile) onDropDriveFile(null, JSON.parse(rawFile));
-            } catch { /* ignore */ }
+              emitNativeDragEnd();
+            } catch {
+              // ignore malformed drop payload
+            }
           }}
           className={cn(
             'flex items-center gap-2 px-3 py-1.5 mx-1 rounded text-sm cursor-pointer hover:bg-muted',
             selectedId === null && 'bg-yellow-500/20',
-            (rootOver || rootDriveOver) && 'ring-2 ring-yellow-500',
+            (rootOver || rootDriveOver) && 'ring-2 ring-yellow-500 bg-yellow-100/90 dark:bg-yellow-900/35',
+            snapTargetId === null && 'ring-2 ring-emerald-500/70 bg-emerald-50/80 dark:bg-emerald-900/20 animate-[pulse_420ms_ease-out]',
           )}
         >
           <Folder className="w-4 h-4 text-yellow-600" />
           <span>הבית (כל התיקיות)</span>
         </div>
 
-        {tree.map(n => (
-          <FolderRow key={n.id} node={n} {...{ selectedId, expanded, onToggleExpand: toggleExpand, onSelect, onCreateChild, onRename, onDelete, onTogglePin, onUpdateStyle, onLinkDrive, onDropDriveFolder, onDropDriveFile }} />
+        {tree.map((n) => (
+          <FolderRow
+            key={n.id}
+            node={n}
+            selectedId={selectedId}
+            expanded={expanded}
+            onToggleExpand={toggleExpand}
+            onSelect={onSelect}
+            onCreateChild={onCreateChild}
+            onRename={onRename}
+            onDelete={onDelete}
+            onTogglePin={onTogglePin}
+            onUpdateStyle={onUpdateStyle}
+            onLinkDrive={onLinkDrive}
+            onDropLocalItem={onDropLocalItem}
+            onDropDriveFolder={onDropDriveFolder}
+            onDropDriveFile={onDropDriveFile}
+            snapTargetId={snapTargetId ?? null}
+          />
         ))}
       </div>
     </div>
   );
 };
-

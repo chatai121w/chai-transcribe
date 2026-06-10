@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { Search, Plus, Copy, Scissors, Clipboard, Trash2, Pin, Cloud, Loader2, X, Columns2, Rows3, LayoutGrid, Table2 } from 'lucide-react';
+import { Search, Plus, Copy, Scissors, Clipboard, Trash2, Pin, Cloud, Loader2, X, Columns2, Rows3, LayoutGrid, Table2, Folder as FolderIcon, FileText } from 'lucide-react';
 import { useFolderTree, type FolderNode } from '@/hooks/useFolderTree';
 import { useCloudTranscripts, type CloudTranscript } from '@/hooks/useCloudTranscripts';
 import { FolderTree } from './FolderTree';
@@ -32,6 +32,17 @@ type DriveDropFolder = {
 };
 
 type CrossSystemAction = 'copy' | 'move' | 'cancel';
+type DragPreview = {
+  kind: 'folder' | 'transcript';
+  id: string;
+  name: string;
+  targetName: string | null;
+};
+
+const NATIVE_DRAG_START_EVENT = 'fm-native-drag-start';
+const NATIVE_DRAG_TARGET_EVENT = 'fm-native-drag-target';
+const NATIVE_DRAG_END_EVENT = 'fm-native-drag-end';
+const DROP_SNAP_EVENT = 'fm-drop-snap';
 
 export const FileManager = () => {
   const navigate = useNavigate();
@@ -42,6 +53,7 @@ export const FileManager = () => {
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
+  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   const [, forceRender] = useState(0);
   useEffect(() => fileClipboard.subscribe(() => forceRender(n => n + 1)), []);
 
@@ -193,20 +205,63 @@ export const FileManager = () => {
   // ── Drag and drop ──
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  const onDragEnd = async (e: DragEndEvent) => {
-    const { active, over } = e;
-    if (!over) return;
-    const a = active.data.current as any; const o = over.data.current as any;
-    if (!a || !o || o.kind !== 'folder') return;
-    const targetId = o.id as string | null;
+  const resolveItemName = useCallback((kind: 'folder' | 'transcript', id: string) => {
+    if (kind === 'folder') return folders.find((f) => f.id === id)?.name || 'תיקייה';
+    return transcripts.find((t: any) => t.id === id)?.title || 'תמלול';
+  }, [folders, transcripts]);
+
+  const resolveTargetName = useCallback((id: string | null) => {
+    if (id === null) return 'הבית';
+    return folders.find((f) => f.id === id)?.name || 'תיקייה';
+  }, [folders]);
+
+  const emitDropSnap = useCallback((targetId: string | null) => {
+    window.dispatchEvent(new CustomEvent(DROP_SNAP_EVENT, { detail: { targetId } }));
+  }, []);
+
+  useEffect(() => {
+    const onNativeStart = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ kind: 'folder' | 'transcript'; id: string; name: string }>).detail;
+      if (!detail || (detail.kind !== 'folder' && detail.kind !== 'transcript') || !detail.id) return;
+      setDragPreview({
+        kind: detail.kind,
+        id: detail.id,
+        name: detail.name || resolveItemName(detail.kind, detail.id),
+        targetName: null,
+      });
+    };
+
+    const onNativeTarget = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ targetName?: string | null }>).detail;
+      setDragPreview((prev) => (prev ? { ...prev, targetName: detail?.targetName ?? null } : prev));
+    };
+
+    const onNativeEnd = () => setDragPreview(null);
+
+    window.addEventListener(NATIVE_DRAG_START_EVENT, onNativeStart as EventListener);
+    window.addEventListener(NATIVE_DRAG_TARGET_EVENT, onNativeTarget as EventListener);
+    window.addEventListener(NATIVE_DRAG_END_EVENT, onNativeEnd);
+    return () => {
+      window.removeEventListener(NATIVE_DRAG_START_EVENT, onNativeStart as EventListener);
+      window.removeEventListener(NATIVE_DRAG_TARGET_EVENT, onNativeTarget as EventListener);
+      window.removeEventListener(NATIVE_DRAG_END_EVENT, onNativeEnd);
+    };
+  }, [resolveItemName]);
+
+  const handleDropLocalItemToFolder = useCallback(async (
+    targetId: string | null,
+    item: { kind: 'folder' | 'transcript'; id: string; name?: string }
+  ) => {
     const targetFolder = folders.find((f) => f.id === targetId);
     try {
-      if (a.kind === 'transcript') {
-        await updateTranscript(a.id, { folder_id: targetId } as any);
+      if (item.kind === 'transcript') {
+        await updateTranscript(item.id, { folder_id: targetId } as any);
+        emitDropSnap(targetId);
         toast({ title: '✅ הועבר' });
+
         // If target folder is linked to Drive — also upload there with confirmation flow
         if (targetFolder?.drive_folder_id !== undefined && targetFolder?.drive_folder_id !== null) {
-          const tr: any = transcripts.find((t: any) => t.id === a.id);
+          const tr: any = transcripts.find((t: any) => t.id === item.id);
           if (tr) {
             driveUploadQueue.enqueue([{
               transcriptId: tr.id,
@@ -217,13 +272,29 @@ export const FileManager = () => {
             }]);
           }
         }
-      } else if (a.kind === 'folder') {
-        if (a.id === targetId) return;
-        await moveFolder(a.id, targetId);
+      } else if (item.kind === 'folder') {
+        if (item.id === targetId) return;
+        await moveFolder(item.id, targetId);
+        emitDropSnap(targetId);
         toast({ title: '✅ תיקייה הועברה' });
       }
     } catch (err: any) {
       toast({ title: 'שגיאה בהעברה', description: err.message, variant: 'destructive' });
+    } finally {
+      setDragPreview(null);
+    }
+  }, [emitDropSnap, folders, moveFolder, transcripts, updateTranscript]);
+
+  const onDragEnd = async (e: DragEndEvent) => {
+    const { active, over } = e;
+    try {
+      if (!over) return;
+      const a = active.data.current as any;
+      const o = over.data.current as any;
+      if (!a || !o || o.kind !== 'folder') return;
+      await handleDropLocalItemToFolder(o.id as string | null, { kind: a.kind, id: a.id });
+    } finally {
+      setDragPreview(null);
     }
   };
 
@@ -527,7 +598,31 @@ export const FileManager = () => {
 
 
   return (
-    <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+    <DndContext
+      sensors={sensors}
+      onDragStart={(e) => {
+        const a = e.active.data.current as any;
+        if (!a || (a.kind !== 'folder' && a.kind !== 'transcript')) return;
+        setDragPreview({
+          kind: a.kind,
+          id: a.id,
+          name: resolveItemName(a.kind, a.id),
+          targetName: null,
+        });
+      }}
+      onDragOver={(e) => {
+        if (!dragPreview) return;
+        const o = e.over?.data?.current as any;
+        if (!o || o.kind !== 'folder') {
+          setDragPreview((prev) => (prev ? { ...prev, targetName: null } : prev));
+          return;
+        }
+        const targetName = resolveTargetName(o.id as string | null);
+        setDragPreview((prev) => (prev ? { ...prev, targetName } : prev));
+      }}
+      onDragCancel={() => setDragPreview(null)}
+      onDragEnd={onDragEnd}
+    >
       <Card className="overflow-hidden border-yellow-500/30" dir="rtl">
         {/* Toolbar */}
         <div className="flex items-center gap-2 p-3 border-b bg-muted/30 flex-wrap">
@@ -586,6 +681,7 @@ export const FileManager = () => {
               onTogglePin={togglePin}
               onUpdateStyle={(id, patch) => updateFolder(id, patch)}
               onLinkDrive={(f) => setDriveLinkOpen(f)}
+              onDropLocalItem={(parentId, item) => void handleDropLocalItemToFolder(parentId, item)}
               onDropDriveFolder={(parentId, drive) => void handleDropDriveFolderToTree(parentId, drive)}
               onDropDriveFile={(parentId, drive) => void handleDropDriveFileToTreeFolder(parentId, drive)}
             />
@@ -649,6 +745,7 @@ export const FileManager = () => {
                 onToggleFavorite={(t) => updateTranscript(t.id, { is_favorite: !t.is_favorite })}
                 onTogglePinFolder={togglePin}
                 onDeleteFolder={async (f) => { if (confirm(`למחוק את "${f.name}"?`)) await deleteFolder(f.id); }}
+                onDropLocalItemToFolder={(targetFolderId, item) => void handleDropLocalItemToFolder(targetFolderId, item)}
               />
             </div>
           </div>
@@ -720,6 +817,26 @@ export const FileManager = () => {
 
       {/* Floating upload status panel */}
       <DriveUploadStatus />
+
+      <DragOverlay>
+        {dragPreview ? (
+          <div className="pointer-events-none rounded-lg border border-primary/30 bg-card/95 px-3 py-2 shadow-xl backdrop-blur-sm" dir="rtl">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              {dragPreview.kind === 'folder' ? (
+                <FolderIcon className="w-4 h-4 text-yellow-600" />
+              ) : (
+                <FileText className="w-4 h-4 text-blue-700" />
+              )}
+              <span className="max-w-[220px] truncate">{dragPreview.name}</span>
+            </div>
+            <div className="text-[11px] text-muted-foreground mt-1">
+              {dragPreview.targetName
+                ? `העבר אל ${dragPreview.targetName}`
+                : 'גרור אל תיקייה כדי להעביר'}
+            </div>
+          </div>
+        ) : null}
+      </DragOverlay>
     </DndContext>
   );
 };
