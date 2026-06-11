@@ -9,24 +9,17 @@ import { RecentFilesWidget } from "@/components/RecentFiles";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import {
   Mic, FileText, Settings, LogIn, BarChart3, Clock, Zap, 
-  FileEdit, Cloud, Grid3X3, Table2, RectangleHorizontal, LayoutGrid, FolderOpen, Plus, Pencil, Trash2
+  FileEdit, Cloud, Grid3X3, Table2, RectangleHorizontal, LayoutGrid, FolderOpen, Pencil
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+
+import { DashboardLayoutManager, type DashboardLayoutPreset, type DashboardStylePreset, type DashboardWidgetKey } from "@/components/dashboard/DashboardLayoutManager";
 
 type RecentViewMode = 'cards' | 'table' | 'rectangles' | 'grid';
-type DashboardStylePreset = 'classic' | 'studio' | 'compact';
-type DashboardLayoutPreset = {
-  id: string;
-  label: string;
-  baseStyle: DashboardStylePreset;
-};
 
 const DASHBOARD_STYLE_STORAGE_KEY = 'dashboard_style_preset_v1';
 const DASHBOARD_LAYOUT_PRESETS_STORAGE_KEY = 'dashboard_layout_presets_v1';
@@ -90,6 +83,7 @@ function isBaseStyle(value: unknown): value is DashboardStylePreset {
 function sanitizeLayoutPresets(value: unknown): DashboardLayoutPreset[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
+  const validWidgets = new Set<DashboardWidgetKey>(['recent_transcripts', 'folders', 'stats', 'recorder', 'youtube', 'search']);
   return value
     .map((item) => {
       if (!item || typeof item !== 'object') return null;
@@ -99,7 +93,14 @@ function sanitizeLayoutPresets(value: unknown): DashboardLayoutPreset[] {
       const baseStyle = maybe.baseStyle;
       if (!id || !label || !isBaseStyle(baseStyle) || seen.has(id)) return null;
       seen.add(id);
-      return { id, label, baseStyle } as DashboardLayoutPreset;
+      const widgets = Array.isArray(maybe.widgets)
+        ? (maybe.widgets.filter((w): w is DashboardWidgetKey => typeof w === 'string' && validWidgets.has(w as DashboardWidgetKey)))
+        : undefined;
+      const columnsRaw = maybe.columns;
+      const columns = columnsRaw === 1 || columnsRaw === 2 || columnsRaw === 3 ? columnsRaw : undefined;
+      const density = typeof maybe.density === 'number' && maybe.density >= 0 && maybe.density <= 100 ? maybe.density : undefined;
+      const isDefault = maybe.isDefault === true ? true : undefined;
+      return { id, label, baseStyle, widgets, columns, density, isDefault } as DashboardLayoutPreset;
     })
     .filter((preset): preset is DashboardLayoutPreset => !!preset);
 }
@@ -618,84 +619,13 @@ const Dashboard = () => {
           </Card>
         )}
 
-        <Dialog open={isLayoutManagerOpen} onOpenChange={setIsLayoutManagerOpen}>
-          <DialogContent dir="rtl" className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>ניהול פריסות אישיות</DialogTitle>
-            </DialogHeader>
-
-            <div className="space-y-3 max-h-[60vh] overflow-auto">
-              {layoutDrafts.map((preset) => (
-                <div key={preset.id} className="rounded-lg border p-3 space-y-2">
-                  <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_auto] gap-2 items-center">
-                    <Input
-                      value={preset.label}
-                      onChange={(e) => {
-                        const label = e.target.value;
-                        setLayoutDrafts((prev) => prev.map((item) => item.id === preset.id ? { ...item, label } : item));
-                      }}
-                      placeholder="שם פריסה"
-                      dir="rtl"
-                      className="text-right"
-                    />
-
-                    <Select
-                      value={preset.baseStyle}
-                      onValueChange={(value) => {
-                        if (!isBaseStyle(value)) return;
-                        setLayoutDrafts((prev) => prev.map((item) => item.id === preset.id ? { ...item, baseStyle: value } : item));
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="סגנון בסיס" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="classic">קלאסי</SelectItem>
-                        <SelectItem value="studio">סטודיו</SelectItem>
-                        <SelectItem value="compact">קומפקטי</SelectItem>
-                      </SelectContent>
-                    </Select>
-
-                    <Button
-                      variant="ghost"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => {
-                        setLayoutDrafts((prev) => {
-                          if (prev.length <= 1) return prev;
-                          return prev.filter((item) => item.id !== preset.id);
-                        });
-                      }}
-                      disabled={layoutDrafts.length <= 1}
-                      title="מחיקה"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-
-                  <div className="w-[180px] rounded-md border p-1.5">
-                    <div className={`h-7 w-full rounded-md p-1 ${BASE_STYLE_META[preset.baseStyle].preview}`}>
-                      <div className={`h-1.5 w-full rounded ${BASE_STYLE_META[preset.baseStyle].blocks[0]}`} />
-                      <div className="mt-1 grid grid-cols-2 gap-1">
-                        <div className={`h-3 rounded ${BASE_STYLE_META[preset.baseStyle].blocks[1]}`} />
-                        <div className={`h-3 rounded ${BASE_STYLE_META[preset.baseStyle].blocks[2]}`} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              <Button variant="outline" onClick={addLayoutDraft} className="w-full">
-                <Plus className="w-4 h-4 ml-2" />
-                הוספת פריסה חדשה
-              </Button>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsLayoutManagerOpen(false)}>ביטול</Button>
-              <Button onClick={saveLayoutDrafts}>שמירת פריסות</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <DashboardLayoutManager
+          open={isLayoutManagerOpen}
+          onOpenChange={setIsLayoutManagerOpen}
+          presets={layoutPresets}
+          activeId={activeLayoutId}
+          onSave={(nextPresets, nextActive) => persistLayoutState(nextPresets, nextActive)}
+        />
       </div>
     </div>
   );
