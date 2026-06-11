@@ -307,8 +307,10 @@ export const SyncMirrorLayout = ({
     word: 100, underline: 100, line: 25, glow: 70,
   });
   // Underline sub-settings
-  const [underlineStyle, setUnderlineStyle] = useState<'solid' | 'dashed' | 'dotted' | 'wavy'>('solid');
+  const [underlineStyle, setUnderlineStyle] = useState<'solid' | 'dashed' | 'dotted' | 'wavy' | 'double'>('solid');
   const [underlineWidth, setUnderlineWidth] = useState(2);
+  // Word background sub-settings
+  const [wordRadius, setWordRadius] = useState<'none' | 'sm' | 'full'>('sm');
   // Line mode sub-settings
   const [lineLeftOnly, setLineLeftOnly] = useState(false);
 
@@ -448,8 +450,15 @@ export const SyncMirrorLayout = ({
   const getActiveWordStyle = (mode: HighlightMode): React.CSSProperties => {
     const color = hlColors[mode];
     const op = hlOpacity[mode];
-    if (mode === 'word')      return { backgroundColor: hexToRgba(color, op), color: '#fff' };
-    if (mode === 'underline') return { borderBottomWidth: underlineWidth + 'px', borderBottomStyle: underlineStyle, borderBottomColor: hexToRgba(color, op) };
+    if (mode === 'word') {
+      const radMap = { none: '0px', sm: '4px', full: '999px' } as const;
+      return { backgroundColor: hexToRgba(color, op), color: '#fff', borderRadius: radMap[wordRadius] };
+    }
+    if (mode === 'underline') return {
+      textDecoration: `underline ${underlineStyle}`,
+      textDecorationColor: hexToRgba(color, op),
+      textDecorationThickness: underlineWidth + 'px',
+    };
     if (mode === 'glow')      return { boxShadow: `0 0 0 2px ${hexToRgba(color, op)}, 0 0 8px ${hexToRgba(color, Math.round(op * 0.5))}` };
     return {}; // line — no per-word style
   };
@@ -507,13 +516,15 @@ export const SyncMirrorLayout = ({
               key={globalIdx}
               style={{ ...highlightStyle, ...(isActiveVisible ? getActiveWordStyle(wordHighlightMode) : {}) }}
               className={cn(
-                "inline cursor-pointer select-text rounded-sm transition-all px-[1px]",
+                "inline cursor-pointer select-text transition-all px-[1px]",
+                // base rounding only when NOT active-word (active word controls its own radius via style)
+                !isActiveVisible && "rounded-sm",
                 side === "left" && !isActive && "hover:bg-muted/70",
                 // anchor indicator
                 isAnchor && "ring-1 ring-amber-400 ring-offset-[1px]",
                 // active word structural classes (no color — handled by inline style)
-                isActiveVisible && wordHighlightMode === 'word' && "font-bold rounded-sm",
-                isActiveVisible && wordHighlightMode === 'underline' && "font-semibold pb-px",
+                isActiveVisible && wordHighlightMode === 'word' && "font-bold",
+                isActiveVisible && wordHighlightMode === 'underline' && "font-semibold",
                 isActiveVisible && wordHighlightMode === 'glow' && "rounded-sm font-bold",
                 // line mode: no word-level highlight, line bg handles it
                 !isActive && isSearchActive && "bg-yellow-400 dark:bg-yellow-600 rounded-sm",
@@ -764,17 +775,38 @@ export const SyncMirrorLayout = ({
                       min={0} max={100} step={5}
                     />
                   </div>
+                  {/* Word mode — corner radius */}
+                  {wordHighlightMode === 'word' && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground mb-1">פינות</p>
+                      <div className="flex gap-1">
+                        {([{ v: 'none', label: 'ישר' }, { v: 'sm', label: 'עגול' }, { v: 'full', label: 'Pill' }] as const).map(({ v, label }) => (
+                          <button key={v} onClick={() => setWordRadius(v)}
+                            className={cn("flex-1 py-0.5 rounded border text-[9px] transition-colors",
+                              wordRadius === v ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted text-muted-foreground"
+                            )}
+                          >{label}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {/* Underline sub-settings */}
                   {wordHighlightMode === 'underline' && (<>
                     <div>
                       <p className="text-[10px] text-muted-foreground mb-1">סגנון קו</p>
-                      <div className="flex gap-1">
-                        {(['solid','dashed','dotted','wavy'] as const).map(s => (
-                          <button key={s} onClick={() => setUnderlineStyle(s)}
-                            className={cn("flex-1 py-0.5 rounded border text-[9px] transition-colors",
-                              underlineStyle === s ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted text-muted-foreground"
+                      <div className="grid grid-cols-3 gap-1">
+                        {([
+                          { v: 'solid',  label: 'ישר' },
+                          { v: 'dashed', label: 'מקווקו' },
+                          { v: 'dotted', label: 'נקודות' },
+                          { v: 'wavy',   label: 'גל' },
+                          { v: 'double', label: 'כפול' },
+                        ] as const).map(({ v, label }) => (
+                          <button key={v} onClick={() => setUnderlineStyle(v)}
+                            className={cn("py-0.5 rounded border text-[9px] transition-colors",
+                              underlineStyle === v ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted text-muted-foreground"
                             )}
-                          >{s}</button>
+                          >{label}</button>
                         ))}
                       </div>
                     </div>
