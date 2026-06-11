@@ -20,13 +20,9 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
+import { DashboardLayoutManager, type DashboardLayoutPreset, type DashboardStylePreset, type DashboardWidgetKey } from "@/components/dashboard/DashboardLayoutManager";
+
 type RecentViewMode = 'cards' | 'table' | 'rectangles' | 'grid';
-type DashboardStylePreset = 'classic' | 'studio' | 'compact';
-type DashboardLayoutPreset = {
-  id: string;
-  label: string;
-  baseStyle: DashboardStylePreset;
-};
 
 const DASHBOARD_STYLE_STORAGE_KEY = 'dashboard_style_preset_v1';
 const DASHBOARD_LAYOUT_PRESETS_STORAGE_KEY = 'dashboard_layout_presets_v1';
