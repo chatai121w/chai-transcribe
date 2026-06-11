@@ -48,7 +48,9 @@ import { useTheme } from "@/hooks/useTheme";
 
 const SIDEBAR_WIDTH = 260;
 const TRIGGER_ZONE = 16;
-const SWIPE_THRESHOLD = 50;
+const EDGE_SWIPE_ZONE = 28;
+const SWIPE_THRESHOLD = 44;
+const SWIPE_MAX_VERTICAL_DRIFT = 34;
 
 interface NavItem {
   label: string;
@@ -160,21 +162,35 @@ const AppSidebar = () => {
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isMobile) return;
+    if (!isMobile || isPinned) return;
 
     const onTouchStart = (e: TouchEvent) => {
+      if (isOpen || e.touches.length !== 1) {
+        touchStartRef.current = null;
+        return;
+      }
       const touch = e.touches[0];
-      if (touch.clientX >= window.innerWidth - 30) {
+      if (touch.clientX >= window.innerWidth - EDGE_SWIPE_ZONE) {
         touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+      } else {
+        touchStartRef.current = null;
       }
     };
 
     const onTouchMove = (e: TouchEvent) => {
       if (!touchStartRef.current) return;
+      if (e.touches.length !== 1) return;
       const touch = e.touches[0];
       const dx = touchStartRef.current.x - touch.clientX;
       const dy = Math.abs(touch.clientY - touchStartRef.current.y);
-      if (dx > SWIPE_THRESHOLD && dy < dx) {
+
+      // If the user is mostly scrolling vertically, stop gesture tracking.
+      if (dy > SWIPE_MAX_VERTICAL_DRIFT && dy > dx) {
+        touchStartRef.current = null;
+        return;
+      }
+
+      if (dx > SWIPE_THRESHOLD && dy <= SWIPE_MAX_VERTICAL_DRIFT) {
         setIsOpen(true);
         touchStartRef.current = null;
       }
@@ -187,13 +203,15 @@ const AppSidebar = () => {
     window.addEventListener("touchstart", onTouchStart, { passive: true });
     window.addEventListener("touchmove", onTouchMove, { passive: true });
     window.addEventListener("touchend", onTouchEnd, { passive: true });
+    window.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
     return () => {
       window.removeEventListener("touchstart", onTouchStart);
       window.removeEventListener("touchmove", onTouchMove);
       window.removeEventListener("touchend", onTouchEnd);
+      window.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, [isMobile]);
+  }, [isMobile, isOpen, isPinned]);
 
   const handleMouseEnterTrigger = useCallback(() => {
     clearTimeout(closeTimerRef.current);
@@ -242,10 +260,14 @@ const AppSidebar = () => {
       {isMobile && !isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="fixed top-3 right-3 z-[61] p-2 text-foreground hover:text-foreground/80 transition-colors"
+          className="fixed z-[61] flex h-7 w-7 items-center justify-center bg-transparent p-0 text-foreground/75 transition-colors hover:text-foreground active:text-foreground"
+          style={{
+            top: "calc(max(env(safe-area-inset-top), 0px) + 0.25rem)",
+            right: "0.35rem",
+          }}
           aria-label="פתח תפריט"
         >
-          <Menu className="w-5 h-5" />
+          <Menu className="h-3.5 w-3.5" />
         </button>
       )}
 

@@ -9,6 +9,7 @@ import AppSidebar from "./components/AppSidebar";
 import AppLayout from "./components/AppLayout";
 // Loader2 removed — spinners disabled globally
 import { ThemeShortcutListener } from "./components/ThemeShortcutListener";
+import TouchHoverReveal from "./components/TouchHoverReveal";
 import { DiarizationQueueProvider } from "./contexts/DiarizationQueueContext";
 import { CloudPreferencesProvider } from "./hooks/useCloudPreferences";
 import { useTheme } from "./hooks/useTheme";
@@ -242,6 +243,7 @@ const App = () => {
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <DiarizationQueueProvider>
           <RouteLogger />
+          <TouchHoverReveal />
           <ThemeShortcutListener />
           <DeferredMount delay={0}><CloudKeySyncLazy /></DeferredMount>
           <DeferredMount delay={500}><BackgroundSyncLazy /></DeferredMount>

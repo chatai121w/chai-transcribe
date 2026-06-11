@@ -476,3 +476,37 @@ All colors MUST be HSL.
 .animate-spin {
   display: none !important;
 }
+
+/* Touch long-press reveal for hover-only controls */
+@media (hover: none), (pointer: coarse) {
+  .touch-reveal-active [class*="group-hover:opacity-100"],
+  .touch-reveal-active [class*="group-hover/"][class*="opacity-100"] {
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
+
+  .touch-reveal-active [class*="group-hover:flex"],
+  .touch-reveal-active [class*="group-hover/"][class*=":flex"] {
+    display: flex !important;
+  }
+
+  .touch-reveal-active [class*="group-hover:block"],
+  .touch-reveal-active [class*="group-hover/"][class*=":block"] {
+    display: block !important;
+  }
+
+  .touch-reveal-active [class*="group-hover:inline-flex"],
+  .touch-reveal-active [class*="group-hover/"][class*=":inline-flex"] {
+    display: inline-flex !important;
+  }
+
+  .touch-reveal-active [class*="group-hover:pointer-events-auto"],
+  .touch-reveal-active [class*="group-hover/"][class*="pointer-events-auto"] {
+    pointer-events: auto !important;
+  }
+
+  .touch-reveal-active [class*="group-hover:translate-y-0"],
+  .touch-reveal-active [class*="group-hover/"][class*="translate-y-0"] {
+    transform: translateY(0) !important;
+  }
+}

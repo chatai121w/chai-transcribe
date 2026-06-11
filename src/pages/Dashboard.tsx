@@ -326,7 +326,7 @@ const Dashboard = () => {
       <div className={shellClass}>
         {/* Header */}
         <div className="flex items-center justify-between gap-2">
-          <div className="hidden md:block fixed top-3 left-3 z-[61]">
+          <div className="fixed top-3 left-3 z-[61]">
             <div className="group/quick-controls relative">
               <div className="h-10 w-24" aria-hidden="true" />
               <div className="absolute left-0 top-0 flex items-center gap-2 rounded-xl border bg-card/80 p-1.5 backdrop-blur-sm opacity-0 translate-y-1 pointer-events-none transition-all duration-150 group-hover/quick-controls:opacity-100 group-hover/quick-controls:translate-y-0 group-hover/quick-controls:pointer-events-auto group-focus-within/quick-controls:opacity-100 group-focus-within/quick-controls:translate-y-0 group-focus-within/quick-controls:pointer-events-auto">
@@ -389,65 +389,6 @@ const Dashboard = () => {
                 </DropdownMenu>
               </div>
             </div>
-          </div>
-          <div className="flex md:hidden items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="p-2 text-foreground hover:text-foreground/80 hover:bg-transparent"
-              onClick={() => navigate("/settings")}
-              title="הגדרות"
-            >
-              <Settings className="h-5 w-5" />
-            </Button>
-            <DropdownMenu dir="rtl">
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="p-2 text-foreground hover:text-foreground/80 hover:bg-transparent"
-                  title="פריסות"
-                >
-                  <LayoutGrid className="h-5 w-5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-[300px]">
-                <DropdownMenuLabel>בחירת פריסה</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <div className="grid grid-cols-2 gap-2 p-2 max-h-[320px] overflow-auto">
-                  {layoutPresets.map((preset) => {
-                    const preview = BASE_STYLE_META[preset.baseStyle];
-                    return (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() => setStylePreset(preset.id)}
-                      className={`rounded-lg border p-1.5 transition-all ${
-                        activeLayoutId === preset.id
-                          ? 'border-primary bg-primary/10 shadow-sm'
-                          : 'border-border/70 hover:border-primary/50 hover:bg-accent/40'
-                      }`}
-                      title={`החלפה לפריסת ${preset.label}`}
-                    >
-                      <div className={`h-7 w-full rounded-md p-1 ${preview.preview}`}>
-                        <div className={`h-1.5 w-full rounded ${preview.blocks[0]}`} />
-                        <div className="mt-1 grid grid-cols-2 gap-1">
-                          <div className={`h-3 rounded ${preview.blocks[1]}`} />
-                          <div className={`h-3 rounded ${preview.blocks[2]}`} />
-                        </div>
-                      </div>
-                      <div className="mt-1 text-center text-[11px] font-medium">{preset.label}</div>
-                    </button>
-                    );
-                  })}
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={openLayoutManager}>
-                  <Pencil className="w-4 h-4 ml-2" />
-                  עריכת פריסות
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
           {!isAuthenticated && (
             <Button variant="outline" onClick={() => navigate("/login")}>
