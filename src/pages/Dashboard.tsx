@@ -17,8 +17,6 @@ import {
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 import { DashboardLayoutManager, type DashboardLayoutPreset, type DashboardStylePreset, type DashboardWidgetKey } from "@/components/dashboard/DashboardLayoutManager";
 
