@@ -298,10 +298,10 @@ export function TranscriptionAnalytics() {
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <button
-          className="fixed bottom-4 left-4 z-50 w-11 h-11 rounded-full bg-background border border-border shadow-lg flex items-center justify-center hover:bg-accent transition-colors group"
+          className="fixed bottom-2 left-1/2 -translate-x-1/2 z-[70] w-10 h-10 rounded-full bg-background/95 backdrop-blur border border-border shadow-lg flex items-center justify-center hover:bg-accent transition-colors group"
           title="ניתוח תמלולים"
         >
-          <BarChart3 className="w-5 h-5 text-primary group-hover:scale-110 transition-transform" />
+          <BarChart3 className="w-4 h-4 text-primary group-hover:scale-110 transition-transform" />
         </button>
       </SheetTrigger>
       <SheetContent side="left" className="w-full sm:w-[600px] md:w-[720px] lg:w-[800px] p-0 overflow-hidden" dir="rtl">
