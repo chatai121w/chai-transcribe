@@ -16,7 +16,7 @@ import { useBackgroundTask } from "@/hooks/useBackgroundTask";
 import { debugLog } from "@/lib/debugLogger";
 import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
 import { useTranscriptionAnalytics } from "@/hooks/useTranscriptionAnalytics";
-import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Pause, Play, Square, Copy, Check, Keyboard, Activity, Users, Scissors } from "lucide-react";
+import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Pause, Play, Square, Copy, Check, Keyboard, Activity, Users, Scissors, BrainCircuit } from "lucide-react";
 import { openQuickCut } from "@/lib/quickCutBus";
 import { usePerfMonitor } from "@/hooks/usePerfMonitor";
 import { PerfMonitorPanel } from "@/components/PerfMonitorPanel";
@@ -2038,7 +2038,7 @@ const Index = () => {
               }}
               className="rounded border-purple-400"
             />
-            <span className="font-medium">🧠 מודל הגייה אישי</span>
+            <span className="font-medium flex items-center gap-1"><BrainCircuit className="w-4 h-4 text-[#0f1e43]" /> מודל הגייה אישי</span>
             <span className="text-xs text-muted-foreground">
               — תוספת למנוע: מחיל תיקונים שלמדתי בעבר ומילים שאימתתי כנכון.
             </span>

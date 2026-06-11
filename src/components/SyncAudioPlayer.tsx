@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo, forwardRef, useImperativeHandle } from "react";
 import { createPortal } from "react-dom";
-import { Responsive as ResponsiveGridLayout, WidthProvider, type Layouts } from "react-grid-layout";
+import type { Layouts } from "react-grid-layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -33,8 +33,6 @@ import {
   setStudioEditModeEnabled,
 } from "@/lib/studioLayout";
 import { usePlayerShortcuts } from "@/hooks/usePlayerShortcuts";
-
-const ResponsiveReactGridLayout = WidthProvider(ResponsiveGridLayout);
 
 export interface WordTiming {
   word: string;
@@ -279,6 +277,7 @@ export interface SyncAudioPlayerRef {
   seekTo: (time: number) => void;
   play: () => void;
   pause: () => void;
+  openFeatures: () => void;
 }
 
 export interface SpeakerSegmentForWaveform {
@@ -504,6 +503,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   // ─── Draggable widget grid (Studio layout) ──────────────────
   const [studioLayouts, setStudioLayouts] = useState<Layouts>(() => loadStudioLayouts());
   const [layoutEditMode, setLayoutEditMode] = useState<boolean>(() => isStudioEditModeEnabled());
+  const [featuresPopoverOpen, setFeaturesPopoverOpen] = useState(false);
 
   // ── Widget visibility (player / studio) ───────────────────────────────
   const [hiddenWidgets, setHiddenWidgets] = useState<Set<string>>(() => {
@@ -603,6 +603,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   // rowHeight=32, marginY=6 → itemHeight = 38h - 6 → h = ceil((itemHeight+6)/38)
   const RGL_ROW = 32;
   const RGL_MARGIN_Y = 6;
+  const STUDIO_ITEM_GAP = 1;
 
   const updateAutoHeightFor = useCallback((key: string, element: HTMLDivElement | null) => {
     if (!element) return;
@@ -669,13 +670,22 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   const effectiveLayouts = useMemo(() => {
     const result: Layouts = {};
     for (const [bp, items] of Object.entries(studioLayouts)) {
-      result[bp] = items
+      const withAutoHeights = items
         .filter(item => !hiddenWidgets.has(item.i))
         .map(item =>
           autoHeights[item.i] !== undefined
             ? { ...item, h: autoHeights[item.i] }
             : item
         );
+
+      // Keep widgets packed vertically when content-driven heights shrink.
+      const ordered = [...withAutoHeights].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+      let nextY = 0;
+      result[bp] = ordered.map((item) => {
+        const compacted = { ...item, y: nextY };
+        nextY += item.h + STUDIO_ITEM_GAP;
+        return compacted;
+      });
     }
     return result;
   }, [studioLayouts, autoHeights, hiddenWidgets]);
@@ -899,6 +909,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         setIsPlaying(false);
       }
     },
+    openFeatures: () => setFeaturesPopoverOpen(true),
   }));
 
   // Notify parent of play state changes
@@ -2775,15 +2786,11 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
         {/* ─── Layout / Features toolbar ─────────────────── */}
         {!compact && (
-          <div className="flex items-center gap-2 mb-2 px-1" dir="rtl">
-            {/* ── Features ON/OFF Popover ── */}
-            <Popover>
+          <div className="flex items-center gap-2 mb-2 px-1">
+            {/* Controlled-open features popover — anchor button here; visible button lives in toolbar above */}
+            <Popover open={featuresPopoverOpen} onOpenChange={setFeaturesPopoverOpen}>
               <PopoverTrigger asChild>
-                <Button variant={layoutEditMode ? 'secondary' : 'outline'} size="sm" className="h-7 gap-1.5 text-xs">
-                  <SlidersHorizontal className="w-3.5 h-3.5 no-theme-icon" />
-                  פיצ'רים
-                  {layoutEditMode && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />}
-                </Button>
+                <button className="w-0 h-0 p-0 border-0 opacity-0 overflow-hidden" tabIndex={-1} aria-hidden="true" />
               </PopoverTrigger>
               <PopoverContent className="w-72 p-3" align="start" dir="rtl">
                 {/* ── Grid layout edit controls ── */}
@@ -2970,27 +2977,11 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           </div>
         )}
 
-        {/* ─── Draggable Widget Grid ───────────────────────── */}
-        <div dir="ltr">
-        <ResponsiveReactGridLayout
-          className={`studio-grid ${layoutEditMode ? 'is-editing' : ''}`}
-          layouts={effectiveLayouts}
-          breakpoints={{ lg: 996, md: 768, sm: 480 }}
-          cols={{ lg: 12, md: 10, sm: 6 }}
-          rowHeight={32}
-          margin={[6, 6]}
-          containerPadding={[4, 4]}
-          isDraggable
-          isResizable={layoutEditMode}
-          isBounded={false}
-          preventCollision={false}
-          draggableHandle=".studio-widget-handle"
-          onLayoutChange={handleStudioLayoutChange}
-          compactType="vertical"
-          useCSSTransforms
-        >
+        {/* ─── Widget Stack ─────────────────────────────── */}
+        <div className={`studio-grid flex flex-col gap-4 ${layoutEditMode ? 'is-editing' : ''}`} dir="rtl">
           {/* ═══ WIDGET 1: Player ═══ */}
-          <div key="player" className="studio-widget-body" ref={playerBodyRef} dir="rtl">
+          {!hiddenWidgets.has('player') && (
+          <div className="studio-widget-body" ref={playerBodyRef} dir="rtl" style={{ order: widgetOrder.indexOf('player') }}>
             <div className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground">
               <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
               <span>נגן סינכרוני</span>
@@ -3397,10 +3388,12 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
               ⌨️ Space=נגן/עצור · Ctrl+←→=±5s · Shift+←→=מילה · M=השתק · Alt+S=מהירות
             </p>
           </div>
-          </div>{/* close studio-widget-body for player */}
+          </div>
+          )}
 
           {/* ═══ WIDGET 2: Studio (Mixer & Processing) ═══ */}
-          <div key="studio" className="studio-widget-body" ref={studioBodyRef} dir="rtl">
+          {!hiddenWidgets.has('studio') && (
+          <div className="studio-widget-body" ref={studioBodyRef} dir="rtl" style={{ order: widgetOrder.indexOf('studio') }}>
             <div className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground">
               <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
               <span>סטודיו (מיקסר ועיבוד)</span>
@@ -3493,6 +3486,104 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                       <Settings2 className="w-3.5 h-3.5 no-theme-icon" />
                       מתקדם
                     </Button>
+                    {/* ── Style + Presets compact popover ── */}
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-7 px-3 text-xs gap-1.5">
+                          סגנון
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-80 p-3 space-y-3" align="end" dir="rtl">
+                        {/* Theme */}
+                        <div>
+                          <p className="text-[11px] font-semibold text-muted-foreground mb-1.5">עיצוב סליידרים</p>
+                          <div className="flex flex-wrap gap-1">
+                            {EQ_SLIDER_THEMES.map((t) => (
+                              <button
+                                key={t.id}
+                                className={`px-2 py-0.5 rounded-md text-xs transition-all ${eqSliderTheme === t.id ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-muted hover:bg-muted/80 text-muted-foreground'}`}
+                                onClick={() => setEqSliderTheme(t.id)}
+                                title={t.label}
+                              >{t.label}</button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="border-t border-border/40 -mx-1" />
+                        {/* Presets */}
+                        <div>
+                          <p className="text-[11px] font-semibold text-muted-foreground mb-1.5">פריסטי EQ</p>
+                          <div className="flex flex-wrap gap-1">
+                            {[
+                              { id: 'flat', label: 'שטוח', icon: '⚖️', values: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+                              { id: 'clear-speech', label: 'דיבור ברור', icon: '🎙️', values: [-3, -2, -1, 0, 2, 4, 6, 4, 2, 0] },
+                              { id: 'transcription', label: 'תמלול מדויק', icon: '📝', values: [-6, -4, -2, 0, 3, 5, 8, 6, 0, -2] },
+                              { id: 'deep-voice', label: 'קול עמוק', icon: '🔊', values: [4, 5, 3, 1, 0, -1, -2, -2, -3, -4] },
+                              { id: 'phone-fix', label: 'תיקון טלפון', icon: '📱', values: [3, 4, 2, 1, 2, 3, 5, 3, -2, -4] },
+                              { id: 'room-fix', label: 'תיקון חדר', icon: '🏠', values: [-4, -3, -2, -1, 1, 3, 5, 4, 1, 0] },
+                              { id: 'bass-boost', label: 'בס מוגבר', icon: '🔈', values: [8, 6, 4, 2, 0, 0, 0, 0, -1, -2] },
+                              { id: 'music', label: 'מוזיקה', icon: '🎵', values: [3, 2, 1, 0, 0, 1, 2, 3, 4, 3] },
+                              { id: 'brightness', label: 'בהירות', icon: '✨', values: [-2, -1, 0, 0, 1, 2, 5, 6, 7, 5] },
+                              { id: 'warmth-eq', label: 'חמימות', icon: '☀️', values: [4, 5, 3, 2, -1, -1, -2, -2, -3, -4] },
+                              { id: 'noise-cut', label: 'חיתוך רעש', icon: '🔇', values: [-8, -6, -3, -1, 1, 2, 4, 2, -4, -6] },
+                              { id: 'female-voice', label: 'קול נשי', icon: '👩', values: [-4, -3, -1, 0, 2, 3, 7, 6, 4, 2] },
+                            ].map((preset) => {
+                              const isActive = EQ_BANDS_10_INDICES.every((idx, i) => eqGains[idx] === preset.values[i]);
+                              return (
+                                <button
+                                  key={preset.id}
+                                  className={`flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs transition-all ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}`}
+                                  onClick={() => {
+                                    const v = preset.values;
+                                    const newGains = new Array(31).fill(0);
+                                    EQ_BANDS_10_INDICES.forEach((idx, i) => { newGains[idx] = v[i]; });
+                                    for (let i = 0; i < EQ_BANDS_10_INDICES.length - 1; i++) {
+                                      const startIdx = EQ_BANDS_10_INDICES[i];
+                                      const endIdx = EQ_BANDS_10_INDICES[i + 1];
+                                      const startVal = v[i]; const endVal = v[i + 1];
+                                      for (let j = startIdx + 1; j < endIdx; j++) {
+                                        const t2 = (j - startIdx) / (endIdx - startIdx);
+                                        newGains[j] = Math.round((startVal + (endVal - startVal) * t2) * 2) / 2;
+                                      }
+                                    }
+                                    for (let j = 0; j < EQ_BANDS_10_INDICES[0]; j++) newGains[j] = v[0];
+                                    for (let j = EQ_BANDS_10_INDICES[9] + 1; j < 31; j++) newGains[j] = v[9];
+                                    setEqGains(newGains);
+                                  }}
+                                >
+                                  <span className="font-medium">{preset.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {/* User presets row */}
+                          {userEqPresets.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-border/40">
+                              <span className="text-[10px] text-muted-foreground w-full">פריסטים שלי:</span>
+                              {userEqPresets.map((up) => {
+                                const isActive = up.gains.every((g, i) => eqGains[i] === g);
+                                return (
+                                  <div key={up.id} className="flex items-center gap-0.5 group/upreset">
+                                    <button
+                                      className={`flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] transition-all ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}`}
+                                      onClick={() => loadUserEqPreset(up)}
+                                    >⭐ {up.name}</button>
+                                    <button className="opacity-0 group-hover/upreset:opacity-100 transition-opacity text-destructive p-0.5" onClick={() => deleteUserEqPreset(up.id)} title="מחק פריסט"><X className="w-3 h-3 no-theme-icon" /></button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <button
+                            className="mt-2 flex items-center gap-1 px-2 py-0.5 rounded-md border border-dashed border-primary/40 text-[11px] text-primary hover:bg-primary/10 transition-all"
+                            onClick={() => setShowSaveEqPreset(v => !v)}
+                            title="שמור פריסט מותאם אישית"
+                          >
+                            <Save className="w-3 h-3 no-theme-icon" />
+                            <span className="font-medium">שמור נוכחי</span>
+                          </button>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                     <button
                       className={`px-2 py-1 rounded-lg text-xs transition-all font-mono ${eqBandCount === 31 ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
                       onClick={() => setEqBandCount(eqBandCount === 31 ? 10 : 31)}
@@ -3522,21 +3613,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                 </div>
 
                 {/* EQ Slider Theme Selector */}
-                {!isMixerConsoleCollapsed && (
-                  <div className="flex items-center gap-2 flex-wrap py-1">
-                    <span className="text-xs text-muted-foreground font-medium">עיצוב:</span>
-                    {EQ_SLIDER_THEMES.map((t) => (
-                      <button
-                        key={t.id}
-                        className={`px-2.5 py-1 rounded-lg text-xs transition-all ${
-                          eqSliderTheme === t.id ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-muted hover:bg-muted/80 text-muted-foreground'
-                        }`}
-                        onClick={() => setEqSliderTheme(t.id)}
-                        title={t.label}
-                      >{t.icon} {t.label}</button>
-                    ))}
-                  </div>
-                )}
+                {/* Moved to 🎨 סגנון popover in header */}
 
                 {isMixerConsoleCollapsed && (
                   <p className="text-[11px] text-muted-foreground">המיקסר ממוזער. רחף על הכרטיס ולחץ על האייקון כדי לפתוח מחדש.</p>
@@ -3545,66 +3622,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                 {!isMixerConsoleCollapsed && (
                   <>
 
-                {/* EQ Presets */}
-                <div className="flex flex-wrap gap-2 py-1">
-                  {[
-                    { id: 'flat', label: 'שטוח', icon: '⚖️', values: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
-                    { id: 'clear-speech', label: 'דיבור ברור', icon: '🎙️', values: [-3, -2, -1, 0, 2, 4, 6, 4, 2, 0] },
-                    { id: 'transcription', label: 'תמלול מדויק', icon: '📝', values: [-6, -4, -2, 0, 3, 5, 8, 6, 0, -2] },
-                    { id: 'deep-voice', label: 'קול עמוק', icon: '🔊', values: [4, 5, 3, 1, 0, -1, -2, -2, -3, -4] },
-                    { id: 'phone-fix', label: 'תיקון טלפון', icon: '📱', values: [3, 4, 2, 1, 2, 3, 5, 3, -2, -4] },
-                    { id: 'room-fix', label: 'תיקון חדר', icon: '🏠', values: [-4, -3, -2, -1, 1, 3, 5, 4, 1, 0] },
-                    { id: 'bass-boost', label: 'בס מוגבר', icon: '🔈', values: [8, 6, 4, 2, 0, 0, 0, 0, -1, -2] },
-                    { id: 'music', label: 'מוזיקה', icon: '🎵', values: [3, 2, 1, 0, 0, 1, 2, 3, 4, 3] },
-                    { id: 'brightness', label: 'בהירות', icon: '✨', values: [-2, -1, 0, 0, 1, 2, 5, 6, 7, 5] },
-                    { id: 'warmth-eq', label: 'חמימות', icon: '☀️', values: [4, 5, 3, 2, -1, -1, -2, -2, -3, -4] },
-                    { id: 'noise-cut', label: 'חיתוך רעש', icon: '🔇', values: [-8, -6, -3, -1, 1, 2, 4, 2, -4, -6] },
-                    { id: 'female-voice', label: 'קול נשי', icon: '👩', values: [-4, -3, -1, 0, 2, 3, 7, 6, 4, 2] },
-                  ].map((preset) => {
-                    const isActive = EQ_BANDS_10_INDICES.every((idx, i) => eqGains[idx] === preset.values[i]);
-                    return (
-                      <button
-                        key={preset.id}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all
-                          ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}
-                        `}
-                        onClick={() => {
-                          // Interpolate 10-band preset to 31 bands
-                          const v = preset.values;
-                          const newGains = new Array(31).fill(0);
-                          EQ_BANDS_10_INDICES.forEach((idx, i) => { newGains[idx] = v[i]; });
-                          // Interpolate in-between bands
-                          for (let i = 0; i < EQ_BANDS_10_INDICES.length - 1; i++) {
-                            const startIdx = EQ_BANDS_10_INDICES[i];
-                            const endIdx = EQ_BANDS_10_INDICES[i + 1];
-                            const startVal = v[i];
-                            const endVal = v[i + 1];
-                            for (let j = startIdx + 1; j < endIdx; j++) {
-                              const t = (j - startIdx) / (endIdx - startIdx);
-                              newGains[j] = Math.round((startVal + (endVal - startVal) * t) * 2) / 2;
-                            }
-                          }
-                          // Fill below first and above last
-                          for (let j = 0; j < EQ_BANDS_10_INDICES[0]; j++) newGains[j] = v[0];
-                          for (let j = EQ_BANDS_10_INDICES[9] + 1; j < 31; j++) newGains[j] = v[9];
-                          setEqGains(newGains);
-                        }}
-                      >
-                        <span>{preset.icon}</span>
-                        <span className="font-medium">{preset.label}</span>
-                      </button>
-                    );
-                  })}
-                  {/* Save current as preset */}
-                  <button
-                    className="flex items-center gap-1 px-2 py-1 rounded-md border border-dashed border-primary/40 text-[11px] text-primary hover:bg-primary/10 transition-all"
-                    onClick={() => setShowSaveEqPreset(v => !v)}
-                    title="שמור פריסט מותאם אישית"
-                  >
-                    <Save className="w-3 h-3 no-theme-icon" />
-                    <span className="font-medium">שמור</span>
-                  </button>
-                </div>
+                {/* EQ Presets — moved to 🎨 סגנון popover */}
 
                 {/* Save Custom EQ Preset Form */}
                 {showSaveEqPreset && (
@@ -3627,35 +3645,6 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                   </div>
                 )}
 
-                {/* User Custom EQ Presets */}
-                {userEqPresets.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 items-center">
-                    <span className="text-[10px] text-muted-foreground">פריסטים שלי:</span>
-                    {userEqPresets.map((up) => {
-                      const isActive = up.gains.every((g, i) => eqGains[i] === g);
-                      return (
-                        <div key={up.id} className="flex items-center gap-0.5 group/upreset">
-                          <button
-                            className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] transition-all
-                              ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}
-                            `}
-                            onClick={() => loadUserEqPreset(up)}
-                          >
-                            <span>⭐</span>
-                            <span className="font-medium">{up.name}</span>
-                          </button>
-                          <button
-                            className="opacity-0 group-hover/upreset:opacity-100 transition-opacity text-destructive hover:text-destructive/80 p-0.5"
-                            onClick={() => deleteUserEqPreset(up.id)}
-                            title="מחק פריסט"
-                          >
-                            <X className="w-3 h-3 no-theme-icon" />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
                 <div className="space-y-3">
                   {/* EQ Section */}
                   {(() => { const wideEq = eqWide || isMixerFullscreen;
@@ -3689,7 +3678,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                           <TooltipTrigger asChild>
                         <div className={`flex flex-col items-center gap-0.5 ${themeWrapper} transition-all`}>
                           <span className={`text-[8px] font-mono ${band.color} ${themeGain}`}>{eqGains[band.index] > 0 ? '+' : ''}{eqGains[band.index]}</span>
-                          <div className={`${isMixerFullscreen ? 'h-64' : wideEq ? 'h-40' : 'h-24'} flex items-center relative eq-track-groove`}>
+                          <div className={`${isMixerFullscreen ? 'h-64' : wideEq ? 'h-56' : 'h-36'} flex items-center relative eq-track-groove`}>
                             {eqSliderTheme === 'vu' && (
                               <div className="eq-led-meter">
                                 {Array.from({ length: 12 }, (_, i) => {
@@ -3747,7 +3736,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                           <TooltipTrigger asChild>
                         <div className={`flex flex-col items-center gap-0.5 min-w-[24px] ${themeWrapper} transition-all`}>
                           <span className={`text-[7px] font-mono ${ctrl.color} ${themeGain}`}>{ctrl.display}</span>
-                          <div className={`${isMixerFullscreen ? 'h-64' : wideEq ? 'h-40' : 'h-24'} flex items-center eq-track-groove`}>
+                          <div className={`${isMixerFullscreen ? 'h-64' : wideEq ? 'h-56' : 'h-36'} flex items-center eq-track-groove`}>
                             <Slider
                               orientation="vertical"
                               value={[ctrl.value]}
@@ -4677,8 +4666,8 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
             );
             return eqFloating && eqPortalTarget ? createPortal(eqEl, eqPortalTarget) : eqEl;
           })()}
-          </div>{/* close studio-widget-body for studio */}
-        </ResponsiveReactGridLayout>
+          </div>
+          )}
         </div>
 
       </Wrapper>

@@ -65,10 +65,10 @@ export const TextStyleControl = ({
         <Button
           variant="outline"
           size="icon"
-          className="h-9 w-9 shrink-0"
+          className="h-7 w-7 shrink-0"
           title="הגדרות תצוגה"
         >
-          <Type className="h-4 w-4 text-blue-900" />
+          <Type className="h-3.5 w-3.5 text-[#0f1e43]" />
         </Button>
       </PopoverTrigger>
       <PopoverContent

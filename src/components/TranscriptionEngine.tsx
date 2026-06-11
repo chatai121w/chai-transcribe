@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
-import { Globe, Cpu, Zap, Chrome, Mic, Waves, Server, Power, PowerOff, Loader2, CheckCircle2, XCircle, Copy, Rabbit, Turtle, Settings, ChevronDown, Flame, Download, Sparkles, Link2, KeyRound } from "lucide-react";
+import { Globe, Cpu, Zap, Chrome, Mic, Waves, Server, Power, PowerOff, Loader2, CheckCircle2, XCircle, Copy, Rabbit, Turtle, Settings, ChevronDown, Flame, Download, Sparkles, Link2, KeyRound, Cloud, Monitor, Target, AlertTriangle, BrainCircuit } from "lucide-react";
 import { useLocalServer } from "@/hooks/useLocalServer";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -202,7 +202,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
       <h2 className="text-base font-semibold mb-3 text-right text-foreground">בחר מנוע תמלול</h2>
       
       <div className="mb-3">
-        <h3 className="text-xs font-medium mb-2 text-right text-muted-foreground tracking-wide">☁️ מנועים אונליין</h3>
+        <h3 className="text-xs font-medium mb-2 text-right text-muted-foreground tracking-wide flex items-center justify-end gap-1"><Cloud className="w-3 h-3 text-[#0f1e43]" /> מנועים אונליין</h3>
         <RadioGroup value={selected} onValueChange={(value) => onChange(value as Engine)}>
           <div className="grid grid-cols-5 gap-2">
             {([
@@ -291,7 +291,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
       </div>
 
       <div>
-        <h3 className="text-xs font-medium mb-2 text-right text-muted-foreground tracking-wide">🖥️ מנועים מקומיים</h3>
+        <h3 className="text-xs font-medium mb-2 text-right text-muted-foreground tracking-wide flex items-center justify-end gap-1"><Monitor className="w-3 h-3 text-[#0f1e43]" /> מנועים מקומיים</h3>
         <RadioGroup value={selected} onValueChange={(value) => onChange(value as Engine)}>
           <div className="grid grid-cols-2 gap-2">
             <Label 
@@ -311,7 +311,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                 )}
               </div>
               <Server className="w-5 h-5 mb-1.5 text-primary/80" />
-              <span className="font-medium text-xs">שרת CUDA 🖥️</span>
+              <span className="font-medium text-xs flex items-center gap-1">שרת CUDA <Monitor className="w-3 h-3 text-[#0f1e43]" /></span>
               <span className="text-[9px] text-muted-foreground mt-0.5">GPU + ivrit-ai + faster-whisper</span>
               <Badge variant="secondary" className="mt-1 text-[9px] px-1.5 py-0 h-4">
                 מומלץ לעברית 🇮🇱
@@ -530,7 +530,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
           )}
           {!isConnected && !isRemoteAccess && isNonLocalHost && (
             <div className="text-[11px] text-muted-foreground space-y-1.5 border-t pt-2">
-              <p className="font-medium">🖥️ עובד מול השרת המקומי (localhost:3000)</p>
+              <p className="font-medium flex items-center gap-1"><Monitor className="w-3.5 h-3.5 text-[#0f1e43] flex-shrink-0" /> עובד מול השרת המקומי (localhost:3000)</p>
               <p className="text-muted-foreground">
                 לחץ "הפעל שרת" — האפליקציה תנסה להפעיל את השרת דרך ה-tray (פורט 8764).
                 אם ה-tray לא פועל, הפעל ידנית:
@@ -655,7 +655,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
               onClick={(e) => { e.preventDefault(); applyPreset('accurate'); }}
             >
               <Turtle className="w-3.5 h-3.5" />
-              🎯 מדויק
+              <Target className="w-3 h-3 text-[#0f1e43]" /> מדויק
             </Button>
           </div>
           <p className="text-[10px] text-muted-foreground text-right mt-1">
@@ -692,7 +692,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                     <SelectItem value="int8">int8 — מהיר ביותר (פחות דיוק)</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-[10px] text-muted-foreground text-right">⚠️ שינוי סוג חישוב דורש טעינה מחדש של המודל</p>
+                <p className="text-[10px] text-muted-foreground text-right flex items-center justify-end gap-1"><AlertTriangle className="w-3 h-3 text-[#0f1e43]" /> שינוי סוג חישוב דורש טעינה מחדש של המודל</p>
               </div>
 
               {/* Beam Size */}

@@ -11,7 +11,7 @@ import {
 import {
   Mic, Square, Copy, Trash2, Radio, Cpu, Globe, Volume2, Clock, Zap,
   AlertTriangle, Pause, Play, Save, FolderOpen, FolderPlus, Download,
-  X, FileText
+  X, FileText, Trophy, Target
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { getServerUrl } from "@/lib/serverConfig";
@@ -1135,7 +1135,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
               />
               <span className="text-xs font-mono text-muted-foreground w-12">{chunkSec}s</span>
               <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                {chunkSec <= 3 ? '⚡ מהיר' : chunkSec >= 20 ? '🏆 איכות מקסימלית' : chunkSec >= 8 ? '🎯 מדויק' : 'מאוזן'}
+                {chunkSec <= 3 ? <><Zap className="inline w-3 h-3 text-[#0f1e43]" /> מהיר</> : chunkSec >= 20 ? <><Trophy className="inline w-3 h-3 text-[#0f1e43]" /> איכות מקסימלית</> : chunkSec >= 8 ? <><Target className="inline w-3 h-3 text-[#0f1e43]" /> מדויק</> : 'מאוזן'}
               </span>
             </div>
           )}

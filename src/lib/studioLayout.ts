@@ -32,12 +32,12 @@ export const STUDIO_LAYOUT_EDIT_MODE_KEY = 'studio_widget_edit_mode';
  */
 export const DEFAULT_STUDIO_LAYOUTS: Layouts = {
   lg: [
-    { i: 'player', x: 0, y: 0,  w: 12, h: 18, minW: 4, minH: 10 },
-    { i: 'studio', x: 0, y: 18, w: 12, h: 28, minW: 4, minH: 10 },
+    { i: 'player', x: 0, y: 0,  w: 12, h: 18, minW: 4, minH: 6 },
+    { i: 'studio', x: 0, y: 18, w: 12, h: 28, minW: 4, minH: 6 },
   ],
   md: [
-    { i: 'player', x: 0, y: 0,  w: 10, h: 18, minW: 4, minH: 10 },
-    { i: 'studio', x: 0, y: 18, w: 10, h: 28, minW: 4, minH: 10 },
+    { i: 'player', x: 0, y: 0,  w: 10, h: 18, minW: 4, minH: 6 },
+    { i: 'studio', x: 0, y: 18, w: 10, h: 28, minW: 4, minH: 6 },
   ],
   sm: [
     { i: 'player', x: 0, y: 0,  w: 6, h: 18 },
@@ -105,7 +105,7 @@ function reconcileLayouts(stored: Layouts): Layouts {
       if (!found) return d;
       // Validate: if width or height is below minimum, fall back to defaults
       const minW = d.minW ?? 4;
-      const minH = d.minH ?? 8;
+      const minH = d.minH ?? 6;
       const maxW = Math.max(minW, cols);
       const wRaw = typeof found.w === 'number' && Number.isFinite(found.w) ? Math.round(found.w) : d.w;
       const hRaw = typeof found.h === 'number' && Number.isFinite(found.h) ? Math.round(found.h) : d.h;

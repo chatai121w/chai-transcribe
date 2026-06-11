@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Upload, Loader2, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Music, FolderUp, Files, Play, X, CheckCircle, AlertCircle, RotateCcw, Clock, FileAudio } from "lucide-react";
+import { Upload, Loader2, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Music, FolderUp, Files, Play, X, CheckCircle, AlertCircle, RotateCcw, Clock, FileAudio, RefreshCw } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { isVideoFile } from "@/lib/videoUtils";
 import { toast } from "@/hooks/use-toast";
@@ -410,7 +410,7 @@ export const FileUploader = ({
                   input.click();
                 }}
               >
-                🔄 תמלול ברקע
+                <RefreshCw className="w-3.5 h-3.5 text-[#0f1e43]" /> תמלול ברקע
               </Button>
             </>
           )}

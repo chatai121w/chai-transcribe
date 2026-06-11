@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test';
 
-const APP_URL = 'http://localhost:8080';
+const APP_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8091';
 const EMAIL = 'jj1212t@gmail.com';
 const PASSWORD = '543211';
 
 test.describe('Studio Layout Recovery (Real E2E)', () => {
   test('self-heals broken player layout and persists fixed values', async ({ page }) => {
-    await page.goto(`${APP_URL}/text-editor`);
-    await page.waitForLoadState('networkidle');
+    await page.goto(`${APP_URL}/text-editor`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
 
     // Login only if we were redirected to the login screen.
     if (page.url().includes('/login')) {
@@ -19,7 +19,7 @@ test.describe('Studio Layout Recovery (Real E2E)', () => {
       await passwordInput.fill(PASSWORD);
       await passwordInput.press('Enter');
 
-      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(1000);
     }
 
     // Open an existing transcript in the editor.
@@ -27,8 +27,8 @@ test.describe('Studio Layout Recovery (Real E2E)', () => {
     // in others we need to jump to dashboard and click "ערוך".
     let editButton = page.getByRole('button', { name: 'ערוך' }).first();
     if ((await editButton.count()) === 0) {
-      await page.goto(`${APP_URL}/`);
-      await page.waitForLoadState('networkidle');
+      await page.goto(`${APP_URL}/`, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(1000);
       editButton = page.getByRole('button', { name: 'ערוך' }).first();
     }
 
@@ -41,7 +41,7 @@ test.describe('Studio Layout Recovery (Real E2E)', () => {
       test.skip(true, 'Could not reach /text-editor in this environment (auth gate still active)');
     }
     await expect(page).toHaveURL(/\/text-editor/, { timeout: 30_000 });
-    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
 
     // Move to player tab so the studio grid is mounted.
     const playerTab = page.getByRole('tab', { name: /נגן/ }).first();
@@ -55,14 +55,14 @@ test.describe('Studio Layout Recovery (Real E2E)', () => {
 
     // Inject a known broken layout state that causes overlap/packed-left rendering.
     await page.evaluate(() => {
-      localStorage.setItem('studio_widget_layouts_v1', JSON.stringify({
+      localStorage.setItem('studio_widget_layouts_v5', JSON.stringify({
         lg: [
-          { i: 'player', x: 0, y: 0, w: 4, h: 10, minW: 4, minH: 10 },
-          { i: 'studio', x: 1, y: 0, w: 4, h: 10, minW: 4, minH: 10 },
+          { i: 'player', x: 0, y: 0, w: 4, h: 10, minW: 4, minH: 6 },
+          { i: 'studio', x: 1, y: 0, w: 4, h: 10, minW: 4, minH: 6 },
         ],
         md: [
-          { i: 'player', x: 0, y: 0, w: 10, h: 18, minW: 4, minH: 10 },
-          { i: 'studio', x: 0, y: 18, w: 10, h: 30, minW: 4, minH: 10 },
+          { i: 'player', x: 0, y: 0, w: 10, h: 18, minW: 4, minH: 6 },
+          { i: 'studio', x: 0, y: 18, w: 10, h: 30, minW: 4, minH: 6 },
         ],
         sm: [
           { i: 'player', x: 0, y: 0, w: 6, h: 18 },
@@ -71,8 +71,8 @@ test.describe('Studio Layout Recovery (Real E2E)', () => {
       }));
     });
 
-    await page.reload();
-    await page.waitForLoadState('networkidle');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1000);
 
     // After reload the tab defaults to edit. Go back to player tab and inspect layout.
     await page.getByRole('tab', { name: /נגן/ }).first().click();
@@ -105,7 +105,7 @@ test.describe('Studio Layout Recovery (Real E2E)', () => {
             boxes[1].y < boxes[0].y + boxes[0].h
           );
 
-      const storedRaw = localStorage.getItem('studio_widget_layouts_v1');
+      const storedRaw = localStorage.getItem('studio_widget_layouts_v5');
       const stored = storedRaw ? JSON.parse(storedRaw) : null;
 
       return {

@@ -104,12 +104,12 @@ export function TabSettingsManager({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          variant="ghost"
+          variant="outline"
           size="icon"
           className="h-7 w-7"
           title="הגדרות טאבים"
         >
-          <Settings className="h-3.5 w-3.5" />
+          <Settings className="h-3.5 w-3.5 text-[#0f1e43]" />
         </Button>
       </PopoverTrigger>
       <PopoverContent

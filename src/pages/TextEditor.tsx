@@ -7,7 +7,7 @@ import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
 import { debugLog } from "@/lib/debugLogger";
 import type { TextVersion } from "@/components/TextEditHistory";
-import type { WordTiming } from "@/components/SyncAudioPlayer";
+import type { WordTiming, SyncAudioPlayerRef } from "@/components/SyncAudioPlayer";
 import { TextStyleControl } from "@/components/TextStyleControl";
 
 // Lazy-loaded heavy components
@@ -137,17 +137,17 @@ const TextEditor = () => {
   const ALL_TABS: TabConfig[] = [
     { id: "player", label: "נגן", emoji: "🎧", group: "primary" },
     { id: "edit", label: "עריכת טקסט", group: "primary" },
-    { id: "speakers", label: "זיהוי דוברים", emoji: "👥", group: "primary" },
+    { id: "speakers", label: "זיהוי דוברים", group: "primary" },
     { id: "templates", label: "תבניות", group: "primary" },
     { id: "ai", label: "עריכה עם AI", group: "primary" },
     { id: "pipeline", label: "צינור עיבוד", group: "primary" },
     { id: "prompts", label: "ספריית פרומפטים", group: "primary" },
-    { id: "ollama", label: "Ollama", emoji: "🖥️", group: "secondary" },
-    { id: "learning", label: "למידה", emoji: "🧠", group: "secondary" },
-    { id: "vocab", label: "מילון", emoji: "📖", group: "secondary" },
-    { id: "summary", label: "סיכום", emoji: "📊", group: "secondary" },
-    { id: "ab", label: "A/B", emoji: "⚡", group: "secondary" },
-    { id: "analytics", label: "אנליטיקה", emoji: "📈", group: "secondary" },
+    { id: "ollama", label: "Ollama", group: "secondary" },
+    { id: "learning", label: "למידה", group: "secondary" },
+    { id: "vocab", label: "מילון", group: "secondary" },
+    { id: "summary", label: "סיכום", group: "secondary" },
+    { id: "ab", label: "A/B", group: "secondary" },
+    { id: "analytics", label: "אנליטיקה", group: "secondary" },
     { id: "compare", label: "השוואה", group: "secondary" },
     { id: "history", label: "היסטוריה", group: "secondary" },
   ];
@@ -236,6 +236,7 @@ const TextEditor = () => {
   const [transcriptSearchIdx, setTranscriptSearchIdx] = useState(0);
   const [transcriptMatchCount, setTranscriptMatchCount] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const playerRef = useRef<SyncAudioPlayerRef>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   const setColumns = (v: number) => updatePreference('editor_columns', v);
@@ -953,13 +954,13 @@ const TextEditor = () => {
               ))}
             </div>
             <Button
-              variant="ghost"
+              variant="outline"
               size="icon"
               className="h-7 w-7"
               onClick={cycleColumnView}
               title={`החלף תצוגה מהירה · עכשיו: ${columns === 1 ? 'רשימה' : columns === 2 ? 'רשת' : 'טבלה'}`}
             >
-              <LayoutGrid className="h-3.5 w-3.5" />
+              <LayoutGrid className="h-3.5 w-3.5 text-[#0f1e43]" />
             </Button>
             <TextStyleControl
               fontSize={fontSize}
@@ -990,23 +991,14 @@ const TextEditor = () => {
                 });
               }}
             />
-            <Button 
-              variant="ghost" 
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => navigate("/")}
-              title="חזרה לדף הראשי"
-            >
-              <Home className="h-3.5 w-3.5" />
-            </Button>
             <Button
-              variant="ghost"
+              variant="outline"
               size="icon"
               className="h-7 w-7"
               onClick={() => setShortcutsOpen(true)}
               title="קיצורי מקלדת"
             >
-              <Keyboard className="h-3.5 w-3.5" />
+              <Keyboard className="h-3.5 w-3.5 text-[#0f1e43]" />
             </Button>
           </div>
         </div>
@@ -1141,7 +1133,7 @@ const TextEditor = () => {
                   <TabsList className="flex w-full flex-wrap h-auto gap-1 p-1.5 mb-2">
                     {orderedPrimary.map((tab) => (
                       <TabsTrigger key={tab.id} value={tab.id} className="flex-1 min-w-[5rem] text-xs sm:text-sm py-2 px-3 rounded-lg">
-                        {tab.emoji && <span className="ml-1">{tab.emoji}</span>}{tab.label}
+                        {tab.label}
                       </TabsTrigger>
                     ))}
                   </TabsList>
@@ -1150,7 +1142,7 @@ const TextEditor = () => {
                   <TabsList className="flex w-full flex-wrap h-auto gap-1 p-1.5 bg-muted/40 mb-2 rounded-lg">
                     {orderedSecondary.map((tab) => (
                       <TabsTrigger key={tab.id} value={tab.id} className="flex-1 min-w-[4.5rem] text-xs py-1.5 px-2 rounded-md">
-                        {tab.emoji && <span className="ml-1">{tab.emoji}</span>}{tab.label}
+                        {tab.label}
                       </TabsTrigger>
                     ))}
                   </TabsList>
@@ -1186,6 +1178,16 @@ const TextEditor = () => {
                 >
                   <SlidersHorizontal className="w-3.5 h-3.5" />
                   EQ צף
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-xs gap-1.5"
+                  onClick={() => playerRef.current?.openFeatures()}
+                  title="פיצ'רים — הגדרות נגן"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  פיצ'רים
                 </Button>
               </div>
 
@@ -1233,6 +1235,7 @@ const TextEditor = () => {
               <Suspense fallback={null}>
               <div className="rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden">
                 <SyncAudioPlayer
+                  ref={playerRef}
                   audioUrl={audioUrl}
                   wordTimings={wordTimings}
                   currentTime={playerTime}
