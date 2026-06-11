@@ -685,6 +685,15 @@ const TranscriptItem = ({
       <div className="flex items-center justify-between mb-1 gap-2">
         <div className="flex items-center gap-2">
           <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} />
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 rounded-full border bg-background/90 backdrop-blur-sm shrink-0"
+            title="פתח הנדלים"
+            onClick={(e) => { e.stopPropagation(); setHandlesOpen(true); }}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+          </Button>
           {t.is_favorite && (
             <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" />
           )}
@@ -776,18 +785,6 @@ const TranscriptItem = ({
 
       {/* Actions */}
       <div className="flex items-center gap-2 flex-row-reverse">
-        <div className="w-8 shrink-0 flex items-center justify-center">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 rounded-full border bg-background/90 backdrop-blur-sm"
-            title="פתח הנדלים"
-            onClick={(e) => { e.stopPropagation(); setHandlesOpen(true); }}
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-          </Button>
-        </div>
-
         <div className="flex-1 min-w-0">
           <div className="flex gap-1 flex-wrap flex-row-reverse md:opacity-0 md:max-h-0 md:overflow-hidden md:pointer-events-none md:group-hover:opacity-100 md:group-hover:max-h-24 md:group-hover:pointer-events-auto md:group-focus-within:opacity-100 md:group-focus-within:max-h-24 md:group-focus-within:pointer-events-auto md:transition-all md:duration-150">
           {t.audio_file_path && onGetAudioUrl && (
