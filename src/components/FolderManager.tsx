@@ -685,11 +685,9 @@ const TranscriptItem = ({
       <div className="flex items-center justify-between mb-1 gap-2">
         <div className="flex items-center gap-2">
           <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} />
-          <button onClick={onToggleFavorite} className="hover:scale-110 transition-transform">
-            {t.is_favorite
-              ? <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
-              : <StarOff className="w-4 h-4 text-muted-foreground" />}
-          </button>
+          {t.is_favorite && (
+            <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" />
+          )}
           <Badge
             variant="outline"
             className="text-xs md:opacity-0 md:max-w-0 md:px-0 md:overflow-hidden md:border-transparent md:group-hover:opacity-100 md:group-hover:max-w-[220px] md:group-hover:px-2.5 md:group-hover:border-border md:group-focus-within:opacity-100 md:group-focus-within:max-w-[220px] md:group-focus-within:px-2.5 md:group-focus-within:border-border md:transition-all md:duration-150"
@@ -773,10 +771,6 @@ const TranscriptItem = ({
             </datalist>
             <Button size="sm" variant="ghost" className="h-6 px-1" onClick={onAddTag}><Check className="w-3 h-3" /></Button>
           </div>
-        ) : viewMode !== 'rectangles' ? (
-          <button onClick={onStartAddTag} className="text-xs text-muted-foreground hover:text-primary">
-            <Tag className="w-3 h-3 inline" /> +
-          </button>
         ) : null}
       </div>
 
@@ -847,6 +841,16 @@ const TranscriptItem = ({
               </DialogContent>
             </Dialog>
           )}
+            <Button size="sm" variant="ghost" className="text-xs h-7" onClick={onToggleFavorite} title={t.is_favorite ? 'הסר ממועדפים' : 'הוסף למועדפים'}>
+              {t.is_favorite
+                ? <Star className="w-3 h-3 text-amber-500 fill-amber-500" />
+                : <StarOff className="w-3 h-3" />}
+            </Button>
+            {viewMode !== 'rectangles' && (
+              <Button size="sm" variant="ghost" className="text-xs h-7" onClick={onStartAddTag} title="הוסף תגית">
+                <Tag className="w-3 h-3 ml-1" />+
+              </Button>
+            )}
             <Button size="sm" variant="ghost" className="text-xs h-7 text-destructive hover:text-destructive" onClick={onDelete}>
               <Trash2 className="w-3 h-3" />
             </Button>
