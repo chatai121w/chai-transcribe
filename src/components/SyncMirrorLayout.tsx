@@ -299,6 +299,59 @@ export const SyncMirrorLayout = ({
   // 'word' = background pill | 'underline' = underline only | 'line' = full row | 'glow' = ring glow
   type HighlightMode = 'word' | 'underline' | 'line' | 'glow';
   const [wordHighlightMode, setWordHighlightMode] = useState<HighlightMode>('word');
+  // Per-mode highlight color & opacity
+  const [hlColors, setHlColors] = useState<Record<HighlightMode, string>>({
+    word: '#3b82f6', underline: '#3b82f6', line: '#3b82f6', glow: '#3b82f6',
+  });
+  const [hlOpacity, setHlOpacity] = useState<Record<HighlightMode, number>>({
+    word: 100, underline: 100, line: 25, glow: 70,
+  });
+  // Underline sub-settings
+  const [underlineStyle, setUnderlineStyle] = useState<'solid' | 'dashed' | 'dotted' | 'wavy'>('solid');
+  const [underlineWidth, setUnderlineWidth] = useState(2);
+  // Line mode sub-settings
+  const [lineLeftOnly, setLineLeftOnly] = useState(false);
+
+  // ── Compare mode: freeze right panel at a snapshot ────────────────────────
+  const [compareMode, setCompareMode] = useState(false);
+  const [frozenTimings, setFrozenTimings] = useState<WordTiming[]>([]);
+
+  const toggleCompareMode = useCallback(() => {
+    setCompareMode(v => {
+      if (!v) {
+        // Entering compare mode — snapshot the current displayTimings
+        setFrozenTimings([...displayTimings]);
+      }
+      return !v;
+    });
+  }, [displayTimings]);
+
+  // Lines for the frozen (right) panel in compare mode
+  const frozenLines = useMemo((): WordTiming[][] => {
+    if (!compareMode || !frozenTimings.length) return [];
+    const effectiveWidth = colWidth > 0 ? colWidth : 400;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return [frozenTimings];
+    ctx.font = `${localFontWeight} ${localFontSize}px ${localFontFamily}`;
+    const spaceW = ctx.measureText(" ").width + 1 + localWordSpacing;
+    const result: WordTiming[][] = [];
+    let line: WordTiming[] = [];
+    let w = 0;
+    for (const wt of frozenTimings) {
+      const ww = ctx.measureText(wt.word).width + spaceW + wt.word.length * localLetterSpacing;
+      if (w + ww > effectiveWidth && line.length > 0) {
+        result.push(line);
+        line = [wt];
+        w = ww;
+      } else {
+        line.push(wt);
+        w += ww;
+      }
+    }
+    if (line.length) result.push(line);
+    return result;
+  }, [compareMode, frozenTimings, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
 
   // ── Full-text editing overlay ───────────────────────────────────────────────
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -384,6 +437,23 @@ export const SyncMirrorLayout = ({
     }
   }, [onSaveLearning, learnProfileId, editedTextForLearning, learnMode, learnNote]);
 
+  // ── Highlight helpers ─────────────────────────────────────────────────────
+  const hexToRgba = (hex: string, opacityPct: number) => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${opacityPct / 100})`;
+  };
+
+  const getActiveWordStyle = (mode: HighlightMode): React.CSSProperties => {
+    const color = hlColors[mode];
+    const op = hlOpacity[mode];
+    if (mode === 'word')      return { backgroundColor: hexToRgba(color, op), color: '#fff' };
+    if (mode === 'underline') return { borderBottomWidth: underlineWidth + 'px', borderBottomStyle: underlineStyle, borderBottomColor: hexToRgba(color, op) };
+    if (mode === 'glow')      return { boxShadow: `0 0 0 2px ${hexToRgba(color, op)}, 0 0 8px ${hexToRgba(color, Math.round(op * 0.5))}` };
+    return {}; // line — no per-word style
+  };
+
   // ── Render a single line row for one column ─────────────────────────────────
   const renderLine = (
     line: WordTiming[],
@@ -402,11 +472,12 @@ export const SyncMirrorLayout = ({
         dir="rtl"
         className={cn(
           "min-h-[1.4em] py-[1px] rounded-sm transition-colors",
-          showLineMode && side === "right" && "bg-primary/20",
-          showLineMode && side === "left" && "bg-blue-100 dark:bg-blue-900/40",
           showSubtleLine && side === "right" && "bg-primary/8",
           showSubtleLine && side === "left" && "bg-blue-50 dark:bg-blue-950/30",
         )}
+        style={showLineMode && (!lineLeftOnly || side === "left")
+          ? { backgroundColor: hexToRgba(hlColors.line, hlOpacity.line) }
+          : undefined}
       >
         {line.map((wt, wi) => {
           const globalIdx = lineOffset + wi;
@@ -434,16 +505,16 @@ export const SyncMirrorLayout = ({
           const wordSpan = (
             <span
               key={globalIdx}
-              style={highlightStyle}
+              style={{ ...highlightStyle, ...(isActiveVisible ? getActiveWordStyle(wordHighlightMode) : {}) }}
               className={cn(
                 "inline cursor-pointer select-text rounded-sm transition-all px-[1px]",
                 side === "left" && !isActive && "hover:bg-muted/70",
                 // anchor indicator
                 isAnchor && "ring-1 ring-amber-400 ring-offset-[1px]",
-                // active word styles by mode
-                isActiveVisible && wordHighlightMode === 'word' && "bg-blue-500 text-white font-bold rounded-sm",
-                isActiveVisible && wordHighlightMode === 'underline' && "border-b-2 border-blue-500 font-semibold pb-px",
-                isActiveVisible && wordHighlightMode === 'glow' && "ring-2 ring-blue-400 rounded-sm font-bold shadow-sm shadow-blue-300",
+                // active word structural classes (no color — handled by inline style)
+                isActiveVisible && wordHighlightMode === 'word' && "font-bold rounded-sm",
+                isActiveVisible && wordHighlightMode === 'underline' && "font-semibold pb-px",
+                isActiveVisible && wordHighlightMode === 'glow' && "rounded-sm font-bold",
                 // line mode: no word-level highlight, line bg handles it
                 !isActive && isSearchActive && "bg-yellow-400 dark:bg-yellow-600 rounded-sm",
                 !isActive && isSearchMatch && "bg-yellow-200 dark:bg-yellow-800 rounded-sm",
@@ -577,12 +648,13 @@ export const SyncMirrorLayout = ({
                   <React.Fragment key={i}>
                     <span
                       ref={i === activeIdx ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) : undefined}
+                      style={i === activeIdx ? getActiveWordStyle(wordHighlightMode) : undefined}
                       className={cn(
                         "rounded-sm px-[1px] transition-all duration-150",
-                        i === activeIdx && wordHighlightMode === 'word' && "bg-blue-500 text-white font-bold",
-                        i === activeIdx && wordHighlightMode === 'underline' && "border-b-2 border-blue-500 font-semibold pb-px",
-                        i === activeIdx && wordHighlightMode === 'glow' && "ring-2 ring-blue-400 rounded-sm font-bold shadow-sm shadow-blue-300",
-                        i === activeIdx && wordHighlightMode === 'line' && "font-bold text-blue-600 dark:text-blue-400",
+                        i === activeIdx && wordHighlightMode === 'word' && "font-bold",
+                        i === activeIdx && wordHighlightMode === 'underline' && "font-semibold pb-px",
+                        i === activeIdx && wordHighlightMode === 'glow' && "rounded-sm font-bold",
+                        i === activeIdx && wordHighlightMode === 'line' && "font-bold",
                       )}
                     >
                       {wt.word}
@@ -631,26 +703,28 @@ export const SyncMirrorLayout = ({
         {/* Right column label */}
         <div className="flex-1 flex items-center gap-1.5 px-3 py-2 border-s border-border/40">
           <AlignRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          <span className="text-xs font-semibold text-muted-foreground">תמלול מסונכרן</span>
+          <span className={cn("text-xs font-semibold", compareMode ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
+            {compareMode ? "גרסה קפואה להשוואה" : "תמלול מסונכרן"}
+          </span>
           <div className="ms-auto flex items-center gap-1">
             {/* Highlight style picker */}
             <Popover>
               <PopoverTrigger asChild>
                 <button className="h-5 px-1.5 rounded border border-border/60 text-[10px] text-muted-foreground hover:bg-muted flex items-center gap-1" title="סגנון הדגשה">
-                  {wordHighlightMode === 'word' && <span className="inline-block w-3 h-3 rounded-sm bg-blue-500" />}
-                  {wordHighlightMode === 'underline' && <Minus className="w-3 h-3 text-blue-500" />}
-                  {wordHighlightMode === 'line' && <Rows3 className="w-3 h-3 text-blue-500" />}
-                  {wordHighlightMode === 'glow' && <Sparkles className="w-3 h-3 text-blue-500" />}
+                  {wordHighlightMode === 'word' && <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: hlColors.word }} />}
+                  {wordHighlightMode === 'underline' && <Minus className="w-3 h-3" style={{ color: hlColors.underline }} />}
+                  {wordHighlightMode === 'line' && <Rows3 className="w-3 h-3" style={{ color: hlColors.line }} />}
+                  {wordHighlightMode === 'glow' && <Sparkles className="w-3 h-3" style={{ color: hlColors.glow }} />}
                 </button>
               </PopoverTrigger>
-              <PopoverContent className="w-52 p-2" align="start" dir="rtl">
+              <PopoverContent className="w-56 p-2" align="start" dir="rtl">
                 <p className="text-[10px] text-muted-foreground mb-2 font-medium">סגנון הדגשת מילה פעילה</p>
                 <div className="grid grid-cols-2 gap-1.5">
                   {([
-                    { id: 'word',      label: 'רקע מלא',      icon: <span className="inline-block w-4 h-4 rounded-sm bg-blue-500" /> },
-                    { id: 'underline', label: 'קו תחתון',     icon: <Minus className="w-4 h-4 text-blue-500" /> },
-                    { id: 'line',      label: 'שורה מלאה',    icon: <Rows3 className="w-4 h-4 text-blue-500" /> },
-                    { id: 'glow',      label: 'זוהר (Glow)',  icon: <Sparkles className="w-4 h-4 text-blue-500" /> },
+                    { id: 'word',      label: 'רקע מלא',      icon: <span className="inline-block w-4 h-4 rounded-sm" style={{ backgroundColor: hlColors.word }} /> },
+                    { id: 'underline', label: 'קו תחתון',     icon: <Minus className="w-4 h-4" style={{ color: hlColors.underline }} /> },
+                    { id: 'line',      label: 'שורה מלאה',    icon: <Rows3 className="w-4 h-4" style={{ color: hlColors.line }} /> },
+                    { id: 'glow',      label: 'זוהר (Glow)',  icon: <Sparkles className="w-4 h-4" style={{ color: hlColors.glow }} /> },
                   ] as const).map(({ id, label, icon }) => (
                     <button
                       key={id}
@@ -665,6 +739,67 @@ export const SyncMirrorLayout = ({
                       {icon}{label}
                     </button>
                   ))}
+                </div>
+                {/* Per-mode customization */}
+                <div className="mt-2 pt-2 border-t border-border/40 space-y-2.5">
+                  {/* Color + Opacity — always */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground flex-1">צבע</span>
+                    <input
+                      type="color"
+                      value={hlColors[wordHighlightMode]}
+                      onChange={e => setHlColors(prev => ({ ...prev, [wordHighlightMode]: e.target.value }))}
+                      className="w-6 h-6 rounded cursor-pointer border border-border/60 p-0"
+                      style={{ padding: 0 }}
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] text-muted-foreground">שקיפות</span>
+                      <span className="text-[10px] text-muted-foreground tabular-nums">{hlOpacity[wordHighlightMode]}%</span>
+                    </div>
+                    <Slider
+                      value={[hlOpacity[wordHighlightMode]]}
+                      onValueChange={([v]) => setHlOpacity(prev => ({ ...prev, [wordHighlightMode]: v }))}
+                      min={0} max={100} step={5}
+                    />
+                  </div>
+                  {/* Underline sub-settings */}
+                  {wordHighlightMode === 'underline' && (<>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground mb-1">סגנון קו</p>
+                      <div className="flex gap-1">
+                        {(['solid','dashed','dotted','wavy'] as const).map(s => (
+                          <button key={s} onClick={() => setUnderlineStyle(s)}
+                            className={cn("flex-1 py-0.5 rounded border text-[9px] transition-colors",
+                              underlineStyle === s ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted text-muted-foreground"
+                            )}
+                          >{s}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-muted-foreground">עובי</span>
+                        <span className="text-[10px] text-muted-foreground tabular-nums">{underlineWidth}px</span>
+                      </div>
+                      <Slider value={[underlineWidth]} onValueChange={([v]) => setUnderlineWidth(v)} min={1} max={4} step={1} />
+                    </div>
+                  </>)}
+                  {/* Line mode sub-settings */}
+                  {wordHighlightMode === 'line' && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-muted-foreground">רק צד עריכה</span>
+                      <button
+                        onClick={() => setLineLeftOnly(v => !v)}
+                        className={cn("relative h-4 w-8 rounded-full transition-colors shrink-0",
+                          lineLeftOnly ? "bg-primary" : "bg-muted border border-border")}
+                      >
+                        <span className={cn("absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all",
+                          lineLeftOnly ? "right-0.5" : "left-0.5")} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </PopoverContent>
             </Popover>
@@ -688,7 +823,16 @@ export const SyncMirrorLayout = ({
         {/* Left column label + controls */}
         <div className="flex-1 flex items-center gap-1.5 px-3 py-2">
           <Edit3 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          <span className="text-xs font-semibold text-muted-foreground">עריכה מסונכרנת</span>
+          <button
+            onClick={toggleCompareMode}
+            className={cn(
+              "text-xs font-semibold transition-colors",
+              compareMode ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground hover:text-foreground"
+            )}
+            title={compareMode ? "לחץ לחזרה לעריכה מסונכרנת" : "לחץ לעריכה לא מסונכרנת (השוואה)"}
+          >
+            {compareMode ? "לא מסונכרנת" : "עריכה מסונכרנת"}
+          </button>
           <div className="ms-auto flex items-center gap-1.5">
             {/* Left column sync toggle */}
             <button
@@ -1023,8 +1167,9 @@ export const SyncMirrorLayout = ({
         <div className="flex-1 min-w-0 flex flex-col border-s border-border/40">
           {/* word rows */}
           <div className="p-4" style={textStyle}>
-            {lines.map((line, li) => {
-              const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
+            {(compareMode ? frozenLines : lines).map((line, li) => {
+              const sourceLines = compareMode ? frozenLines : lines;
+              const offset = sourceLines.slice(0, li).reduce((a, l) => a + l.length, 0);
               return renderLine(line, offset, li, "right");
             })}
           </div>
