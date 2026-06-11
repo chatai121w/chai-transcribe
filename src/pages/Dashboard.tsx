@@ -622,84 +622,13 @@ const Dashboard = () => {
           </Card>
         )}
 
-        <Dialog open={isLayoutManagerOpen} onOpenChange={setIsLayoutManagerOpen}>
-          <DialogContent dir="rtl" className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>ניהול פריסות אישיות</DialogTitle>
-            </DialogHeader>
-
-            <div className="space-y-3 max-h-[60vh] overflow-auto">
-              {layoutDrafts.map((preset) => (
-                <div key={preset.id} className="rounded-lg border p-3 space-y-2">
-                  <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_auto] gap-2 items-center">
-                    <Input
-                      value={preset.label}
-                      onChange={(e) => {
-                        const label = e.target.value;
-                        setLayoutDrafts((prev) => prev.map((item) => item.id === preset.id ? { ...item, label } : item));
-                      }}
-                      placeholder="שם פריסה"
-                      dir="rtl"
-                      className="text-right"
-                    />
-
-                    <Select
-                      value={preset.baseStyle}
-                      onValueChange={(value) => {
-                        if (!isBaseStyle(value)) return;
-                        setLayoutDrafts((prev) => prev.map((item) => item.id === preset.id ? { ...item, baseStyle: value } : item));
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="סגנון בסיס" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="classic">קלאסי</SelectItem>
-                        <SelectItem value="studio">סטודיו</SelectItem>
-                        <SelectItem value="compact">קומפקטי</SelectItem>
-                      </SelectContent>
-                    </Select>
-
-                    <Button
-                      variant="ghost"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => {
-                        setLayoutDrafts((prev) => {
-                          if (prev.length <= 1) return prev;
-                          return prev.filter((item) => item.id !== preset.id);
-                        });
-                      }}
-                      disabled={layoutDrafts.length <= 1}
-                      title="מחיקה"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-
-                  <div className="w-[180px] rounded-md border p-1.5">
-                    <div className={`h-7 w-full rounded-md p-1 ${BASE_STYLE_META[preset.baseStyle].preview}`}>
-                      <div className={`h-1.5 w-full rounded ${BASE_STYLE_META[preset.baseStyle].blocks[0]}`} />
-                      <div className="mt-1 grid grid-cols-2 gap-1">
-                        <div className={`h-3 rounded ${BASE_STYLE_META[preset.baseStyle].blocks[1]}`} />
-                        <div className={`h-3 rounded ${BASE_STYLE_META[preset.baseStyle].blocks[2]}`} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              <Button variant="outline" onClick={addLayoutDraft} className="w-full">
-                <Plus className="w-4 h-4 ml-2" />
-                הוספת פריסה חדשה
-              </Button>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsLayoutManagerOpen(false)}>ביטול</Button>
-              <Button onClick={saveLayoutDrafts}>שמירת פריסות</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <DashboardLayoutManager
+          open={isLayoutManagerOpen}
+          onOpenChange={setIsLayoutManagerOpen}
+          presets={layoutPresets}
+          activeId={activeLayoutId}
+          onSave={(nextPresets, nextActive) => persistLayoutState(nextPresets, nextActive)}
+        />
       </div>
     </div>
   );
