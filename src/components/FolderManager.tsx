@@ -139,6 +139,14 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
 
   const unfolderedCount = transcripts.filter(t => !t.folder).length;
 
+  const shouldUseFixedListHeight =
+    viewMode === 'table'
+      ? filteredTranscripts.length > 5
+      : viewMode === 'grid'
+        ? filteredTranscripts.length > 4
+        : filteredTranscripts.length > 3;
+  const transcriptListHeightClass = shouldUseFixedListHeight ? 'h-[400px]' : 'h-auto';
+
   const handleCreateFolder = () => {
     const name = newFolderName.trim();
     if (!name) return;
@@ -435,7 +443,7 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
         )}
 
         {/* Transcript list */}
-        <ScrollArea className="h-[400px]">
+        <ScrollArea className={transcriptListHeightClass}>
           {viewMode === 'table' ? (
             <div className="rounded-lg border overflow-hidden" dir="rtl">
               <table className="w-full text-sm" dir="rtl">
@@ -616,19 +624,8 @@ const TranscriptItem = ({
 
   return (
     <div dir="rtl" className={`group relative p-3 rounded-lg border hover:bg-accent/50 transition-colors text-right ${isSelected ? 'ring-2 ring-primary bg-primary/5' : ''}`}>
-      <Dialog open={handlesOpen} onOpenChange={setHandlesOpen}>
-        <DialogTrigger asChild>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="absolute left-2 top-2 z-10 h-7 w-7 rounded-full border bg-background/90 backdrop-blur-sm"
-            title="פתח הנדלים"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-          </Button>
-        </DialogTrigger>
-        <DialogContent dir="rtl" className="max-w-2xl">
+      <Dialog open={handlesOpen} onOpenChange={setHandlesOpen} modal={false}>
+        <DialogContent dir="rtl" className="max-w-2xl" hideOverlay>
           <DialogHeader>
             <DialogTitle>הנדלים ופרטי תמלול</DialogTitle>
           </DialogHeader>
@@ -784,61 +781,73 @@ const TranscriptItem = ({
       </div>
 
       {/* Actions */}
-      <div className="flex gap-1 flex-wrap flex-row-reverse md:opacity-0 md:max-h-0 md:overflow-hidden md:pointer-events-none md:group-hover:opacity-100 md:group-hover:max-h-24 md:group-hover:pointer-events-auto md:group-focus-within:opacity-100 md:group-focus-within:max-h-24 md:group-focus-within:pointer-events-auto md:transition-all md:duration-150">
-        {t.audio_file_path && onGetAudioUrl && (
-          <Button size="sm" variant={playingAudio ? "default" : "outline"} className="text-xs h-7" onClick={handlePlayAudio} disabled={isLoadingAudio}>
-            {isLoadingAudio ? <Loader2 className="w-3 h-3 ml-1 animate-spin" /> : playingAudio ? <Pause className="w-3 h-3 ml-1" /> : <Play className="w-3 h-3 ml-1" />}
-            {playingAudio ? 'עצור' : 'נגן'}
+      <div className="flex items-center gap-1 flex-row-reverse">
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7 shrink-0 rounded-full border bg-background/90 backdrop-blur-sm"
+          title="פתח הנדלים"
+          onClick={(e) => { e.stopPropagation(); setHandlesOpen(true); }}
+        >
+          <SlidersHorizontal className="w-3.5 h-3.5" />
+        </Button>
+
+        <div className="flex gap-1 flex-wrap flex-row-reverse md:opacity-0 md:max-h-0 md:overflow-hidden md:pointer-events-none md:group-hover:opacity-100 md:group-hover:max-h-24 md:group-hover:pointer-events-auto md:group-focus-within:opacity-100 md:group-focus-within:max-h-24 md:group-focus-within:pointer-events-auto md:transition-all md:duration-150">
+          {t.audio_file_path && onGetAudioUrl && (
+            <Button size="sm" variant={playingAudio ? "default" : "outline"} className="text-xs h-7" onClick={handlePlayAudio} disabled={isLoadingAudio}>
+              {isLoadingAudio ? <Loader2 className="w-3 h-3 ml-1 animate-spin" /> : playingAudio ? <Pause className="w-3 h-3 ml-1" /> : <Play className="w-3 h-3 ml-1" />}
+              {playingAudio ? 'עצור' : 'נגן'}
+            </Button>
+          )}
+          <Button size="sm" variant="outline" className="text-xs h-7" onClick={onNavigateEdit}>
+            <Edit className="w-3 h-3 ml-1" />ערוך
           </Button>
-        )}
-        <Button size="sm" variant="outline" className="text-xs h-7" onClick={onNavigateEdit}>
-          <Edit className="w-3 h-3 ml-1" />ערוך
-        </Button>
-        <Button size="sm" variant="outline" className="text-xs h-7" onClick={onNavigateDiarization} title="זיהוי דוברים">
-          <Users className="w-3 h-3 ml-1" />דוברים
-        </Button>
-        {viewMode !== 'rectangles' && (
-          <Button size="sm" variant="ghost" className="text-xs h-7" onClick={onStartEditNotes}>
-            <StickyNote className="w-3 h-3 ml-1" />הערה
+          <Button size="sm" variant="outline" className="text-xs h-7" onClick={onNavigateDiarization} title="זיהוי דוברים">
+            <Users className="w-3 h-3 ml-1" />דוברים
           </Button>
-        )}
-        {/* Category dropdown */}
-        {viewMode !== 'rectangles' && (
-          <Select value={t.category || 'none'} onValueChange={v => onCategoryChange(v === 'none' ? '' : v)}>
-            <SelectTrigger className="h-7 w-[100px] text-xs">
-              <SelectValue placeholder="קטגוריה" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">ללא</SelectItem>
-              {CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
-        {/* Move */}
-        {viewMode !== 'rectangles' && (
-          <Dialog open={movingId === t.id} onOpenChange={o => setMovingId(o ? t.id : null)}>
-            <DialogTrigger asChild>
-              <Button size="sm" variant="ghost" className="text-xs h-7">
-                <FolderOpen className="w-3 h-3 ml-1" />העבר
-              </Button>
-            </DialogTrigger>
-            <DialogContent dir="rtl" className="max-w-sm">
-              <DialogHeader><DialogTitle>העבר לתיקיה</DialogTitle></DialogHeader>
-              <div className="space-y-2 py-2">
-                <Button variant="outline" className="w-full justify-start" onClick={() => onMoveToFolder('')}>ללא תיקיה</Button>
-                {folders.map(f => (
-                  <Button key={f} variant={t.folder === f ? "default" : "outline"} className="w-full justify-start gap-2"
-                    onClick={() => onMoveToFolder(f)}>
-                    <FolderOpen className="w-4 h-4" />{f}
-                  </Button>
-                ))}
-              </div>
-            </DialogContent>
-          </Dialog>
-        )}
-        <Button size="sm" variant="ghost" className="text-xs h-7 text-destructive hover:text-destructive" onClick={onDelete}>
-          <Trash2 className="w-3 h-3" />
-        </Button>
+          {viewMode !== 'rectangles' && (
+            <Button size="sm" variant="ghost" className="text-xs h-7" onClick={onStartEditNotes}>
+              <StickyNote className="w-3 h-3 ml-1" />הערה
+            </Button>
+          )}
+          {/* Category dropdown */}
+          {viewMode !== 'rectangles' && (
+            <Select value={t.category || 'none'} onValueChange={v => onCategoryChange(v === 'none' ? '' : v)}>
+              <SelectTrigger className="h-7 w-[100px] text-xs">
+                <SelectValue placeholder="קטגוריה" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">ללא</SelectItem>
+                {CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          {/* Move */}
+          {viewMode !== 'rectangles' && (
+            <Dialog open={movingId === t.id} onOpenChange={o => setMovingId(o ? t.id : null)}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="ghost" className="text-xs h-7">
+                  <FolderOpen className="w-3 h-3 ml-1" />העבר
+                </Button>
+              </DialogTrigger>
+              <DialogContent dir="rtl" className="max-w-sm">
+                <DialogHeader><DialogTitle>העבר לתיקיה</DialogTitle></DialogHeader>
+                <div className="space-y-2 py-2">
+                  <Button variant="outline" className="w-full justify-start" onClick={() => onMoveToFolder('')}>ללא תיקיה</Button>
+                  {folders.map(f => (
+                    <Button key={f} variant={t.folder === f ? "default" : "outline"} className="w-full justify-start gap-2"
+                      onClick={() => onMoveToFolder(f)}>
+                      <FolderOpen className="w-4 h-4" />{f}
+                    </Button>
+                  ))}
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+          <Button size="sm" variant="ghost" className="text-xs h-7 text-destructive hover:text-destructive" onClick={onDelete}>
+            <Trash2 className="w-3 h-3" />
+          </Button>
+        </div>
       </div>
     </div>
   );

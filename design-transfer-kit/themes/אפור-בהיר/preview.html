@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>ערכת נושא: אפור בהיר — Preview</title>
+<style>
+  :root {
+    --background: hsl(215 12% 94%);
+    --foreground: hsl(215 35% 14%);
+    --card: hsl(215 16% 96%);
+    --card-foreground: hsl(215 35% 14%);
+    --primary: hsl(215 55% 18%);
+    --primary-foreground: hsl(215 20% 96%);
+    --secondary: hsl(215 25% 88%);
+    --secondary-foreground: hsl(215 35% 14%);
+    --muted: hsl(215 12% 90%);
+    --muted-foreground: hsl(215 18% 42%);
+    --accent: hsl(225 55% 52%);
+    --accent-foreground: hsl(215 55% 18%);
+    --destructive: hsl(0 70% 50%);
+    --destructive-foreground: hsl(215 20% 96%);
+    --border: hsl(215 25% 74%);
+    --input: hsl(215 18% 86%);
+    --ring: hsl(225 55% 52%);
+    --sidebar-background: hsl(215 16% 96%);
+    --sidebar-accent: hsl(215 20% 90%);
+    --radius: 0.625rem;
+  }
+  .dark {
+    --background: hsl(215 40% 8%);
+    --foreground: hsl(215 15% 92%);
+    --card: hsl(215 38% 12%);
+    --card-foreground: hsl(215 15% 92%);
+    --primary: hsl(215 65% 50%);
+    --primary-foreground: hsl(215 15% 96%);
+    --secondary: hsl(215 30% 18%);
+    --secondary-foreground: hsl(215 15% 92%);
+    --muted: hsl(215 25% 14%);
+    --muted-foreground: hsl(215 18% 62%);
+    --accent: hsl(225 60% 56%);
+    --accent-foreground: hsl(215 40% 8%);
+    --destructive: hsl(0 70% 50%);
+    --destructive-foreground: hsl(215 15% 96%);
+    --border: hsl(215 30% 22%);
+    --input: hsl(215 30% 22%);
+    --ring: hsl(225 60% 56%);
+    --sidebar-background: hsl(215 40% 8%);
+    --sidebar-accent: hsl(215 30% 14%);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: 'Assistant', system-ui, sans-serif;
+    font-size: 14px;
+    padding: 32px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 26px; font-weight: 700; margin-bottom: 8px; }
+  h2 { font-size: 18px; font-weight: 600; margin: 32px 0 12px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: var(--muted-foreground); }
+  #toggle {
+    position: fixed; top: 16px; left: 16px;
+    background: var(--primary); color: var(--primary-foreground);
+    border: none; border-radius: var(--radius);
+    padding: 8px 16px; cursor: pointer; font-size: 13px; font-weight: 600;
+  }
+  .swatch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .swatch { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); background: var(--card); }
+  .swatch-color { height: 56px; width: 100%; }
+  .swatch-label { padding: 8px 10px; font-size: 12px; }
+  .swatch-name { font-weight: 600; }
+  .swatch-hex { color: var(--muted-foreground); font-size: 11px; }
+  .type-row { display: flex; align-items: baseline; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .type-label { width: 48px; font-size: 11px; color: var(--muted-foreground); flex-shrink: 0; }
+  .radius-grid { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
+  .radius-box { width: 72px; height: 72px; background: var(--primary); display: flex; align-items: center; justify-content: center; color: var(--primary-foreground); font-size: 11px; font-weight: 600; flex-direction: column; gap: 2px; }
+  .shadow-grid { display: flex; flex-wrap: wrap; gap: 24px; }
+  .shadow-box { width: 120px; height: 80px; background: var(--card); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+  .grad-grid { display: flex; flex-direction: column; gap: 12px; }
+  .grad-box { height: 56px; border-radius: var(--radius); display: flex; align-items: center; padding: 0 16px; font-size: 12px; font-weight: 600; color: var(--foreground); }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn { padding: 8px 18px; border-radius: var(--radius); border: none; font-size: 14px; font-weight: 600; cursor: default; }
+  .space-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+  .space-block { background: var(--accent); opacity: 0.7; }
+  .tonal-row { margin-bottom: 10px; }
+  .tonal-name { font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--muted-foreground); }
+  .tonal-strip { display: flex; border-radius: 8px; overflow: hidden; height: 40px; }
+  .tonal-step { flex: 1; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 3px; font-size: 9px; font-weight: 600; color: rgba(0,0,0,0.45); }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+  .form-field { display: flex; flex-direction: column; gap: 6px; }
+  .form-label { font-size: 12px; font-weight: 600; color: var(--muted-foreground); }
+  .form-input { background: var(--input); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; font-size: 14px; outline: none; width: 100%; font-family: inherit; }
+  .form-input:focus { box-shadow: 0 0 0 2px hsl(225 55% 52%); border-color: hsl(225 55% 52%); }
+  .form-check { display: flex; align-items: center; gap: 8px; }
+  .demo-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; max-width: 340px; box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06); }
+  .demo-card-title { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+  .demo-card-desc { font-size: 13px; color: var(--muted-foreground); margin-bottom: 16px; line-height: 1.5; }
+  .demo-card-footer { display: flex; gap: 8px; }
+  .font-row { padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; gap: 16px; align-items: baseline; }
+  .font-tag { font-size: 11px; color: var(--muted-foreground); width: 130px; flex-shrink: 0; }
+  .font-sample { font-size: 18px; }
+  .density-grid { display: flex; gap: 16px; flex-wrap: wrap; }
+  .density-box { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); flex: 1; min-width: 160px; }
+  .density-header { font-size: 11px; font-weight: 700; color: var(--muted-foreground); background: var(--muted); }
+  .motion-grid { display: flex; flex-direction: column; gap: 12px; }
+  .motion-row { display: flex; align-items: center; gap: 16px; }
+  .motion-label { font-size: 12px; color: var(--muted-foreground); width: 100px; flex-shrink: 0; }
+  .motion-track { flex: 1; height: 8px; background: var(--muted); border-radius: 999px; overflow: hidden; position: relative; }
+  .motion-ball { width: 20px; height: 20px; border-radius: 50%; background: var(--accent); position: absolute; top: -6px; left: 0; animation-name: slide-ball; animation-iteration-count: infinite; animation-direction: alternate; animation-fill-mode: both; }
+  @keyframes slide-ball { from { left: 0 } to { left: calc(100% - 20px) } }
+</style>
+</head>
+<body>
+
+<button id="toggle" onclick="document.body.classList.toggle('dark')">מצב כהה / בהיר</button>
+
+<h1>ערכת נושא: אפור בהיר</h1>
+<p style="color:var(--muted-foreground); margin-top:4px;">Cool grey-blue · Steel-blue accent · Radius 10px</p>
+
+<h2>Semantic Colors</h2>
+<div class="swatch-grid">
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 12% 94%)"></div><div class="swatch-label"><div class="swatch-name">background</div><div class="swatch-hex">#eeeff2</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 35% 14%)"></div><div class="swatch-label"><div class="swatch-name">foreground</div><div class="swatch-hex">#181f2e</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 16% 96%)"></div><div class="swatch-label"><div class="swatch-name">card</div><div class="swatch-hex">#f3f4f7</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 55% 18%)"></div><div class="swatch-label"><div class="swatch-name">primary</div><div class="swatch-hex">#0e1e3f</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 20% 96%)"></div><div class="swatch-label"><div class="swatch-name">primary-fg</div><div class="swatch-hex">#f1f3f7</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 25% 88%)"></div><div class="swatch-label"><div class="swatch-name">secondary</div><div class="swatch-hex">#d3d9e6</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 12% 90%)"></div><div class="swatch-label"><div class="swatch-name">muted</div><div class="swatch-hex">#e2e4e9</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 18% 42%)"></div><div class="swatch-label"><div class="swatch-name">muted-fg</div><div class="swatch-hex">#5c6a82</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(225 55% 52%)"></div><div class="swatch-label"><div class="swatch-name">accent</div><div class="swatch-hex">#4a63d4</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(0 70% 50%)"></div><div class="swatch-label"><div class="swatch-name">destructive</div><div class="swatch-hex">#d92626</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 25% 74%)"></div><div class="swatch-label"><div class="swatch-name">border</div><div class="swatch-hex">#adb5c8</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 18% 86%)"></div><div class="swatch-label"><div class="swatch-name">input</div><div class="swatch-hex">#d3d8e4</div></div></div>
+</div>
+
+<h2>Buttons</h2>
+<div class="btn-row">
+  <button class="btn" style="background:var(--primary);color:var(--primary-foreground)">Primary</button>
+  <button class="btn" style="background:var(--secondary);color:var(--secondary-foreground)">Secondary</button>
+  <button class="btn" style="background:var(--accent);color:var(--accent-foreground);color:#fff">Accent</button>
+  <button class="btn" style="background:var(--destructive);color:var(--destructive-foreground)">Destructive</button>
+  <button class="btn" style="background:var(--muted);color:var(--muted-foreground)">Muted</button>
+</div>
+
+<h2>Gradients</h2>
+<div class="grad-grid">
+  <div class="grad-box" style="background:radial-gradient(circle at 9% 12%, hsl(225 55% 52% / 0.14) 0, transparent 38%), radial-gradient(circle at 87% 10%, hsl(215 55% 18% / 0.10) 0, transparent 44%), hsl(215 12% 94%)">pageAtmosphere</div>
+  <div class="grad-box" style="background:linear-gradient(135deg, hsl(215 55% 18%) 0%, hsl(225 55% 52%) 100%); color:#fff">primaryAction (charcoal → steel-blue)</div>
+  <div class="grad-box" style="background:linear-gradient(135deg, hsl(225 55% 52% / 0.16) 0%, hsl(215 25% 88% / 0.08) 100%)">accentSoft</div>
+  <div class="grad-box" style="background:linear-gradient(180deg, hsl(215 16% 96%) 0%, hsl(215 12% 94%) 100%); border:1px solid var(--border)">cardSurface</div>
+  <div class="grad-box" style="background:linear-gradient(180deg, hsl(215 16% 96%) 0%, hsl(215 20% 90% / 0.68) 100%); border:1px solid var(--border)">sidebarSurface</div>
+  <div class="grad-box" style="background:linear-gradient(135deg, hsl(0 70% 50% / 0.16) 0%, hsl(215 16% 96%) 100%)">alertSurface</div>
+</div>
+
+<h2>Typography Scale</h2>
+<div>
+  <div class="type-row"><span class="type-label">xs 11px</span><span style="font-size:11px">Assistant — טקסט קטן, תגיות, badges</span></div>
+  <div class="type-row"><span class="type-label">sm 12px</span><span style="font-size:12px">Assistant — תוויות משניות</span></div>
+  <div class="type-row"><span class="type-label">md 14px</span><span style="font-size:14px">Assistant — גוף טקסט ברירת מחדל</span></div>
+  <div class="type-row"><span class="type-label">lg 16px</span><span style="font-size:16px">Assistant — גוף מודגש / הדגשה</span></div>
+  <div class="type-row"><span class="type-label">xl 18px</span><span style="font-size:18px">Assistant — כותרות משנה</span></div>
+  <div class="type-row"><span class="type-label">2xl 22px</span><span style="font-size:22px;font-weight:600">כותרת מדור</span></div>
+  <div class="type-row"><span class="type-label">3xl 26px</span><span style="font-size:26px;font-weight:700">כותרת עמוד</span></div>
+</div>
+
+<h2>Radius Scale</h2>
+<div class="radius-grid">
+  <div><h3>none</h3><div class="radius-box" style="border-radius:0">0px</div></div>
+  <div><h3>sm (4px)</h3><div class="radius-box" style="border-radius:4px">4px</div></div>
+  <div><h3>md (8px)</h3><div class="radius-box" style="border-radius:8px">8px</div></div>
+  <div><h3>lg 10px ✓</h3><div class="radius-box" style="border-radius:10px;outline:2px solid var(--accent)">10px</div></div>
+  <div><h3>xl (14px)</h3><div class="radius-box" style="border-radius:14px">14px</div></div>
+  <div><h3>full</h3><div class="radius-box" style="border-radius:999px">pill</div></div>
+</div>
+
+<h2>Shadow Scale</h2>
+<div class="shadow-grid">
+  <div><h3>none</h3><div class="shadow-box" style="box-shadow:none;border:1px solid var(--border)">none</div></div>
+  <div><h3>soft</h3><div class="shadow-box" style="box-shadow:0 1px 3px 0 rgb(0 0 0/0.06),0 1px 2px -1px rgb(0 0 0/0.06)">soft</div></div>
+  <div><h3>medium</h3><div class="shadow-box" style="box-shadow:0 4px 6px -1px rgb(0 0 0/0.10),0 2px 4px -2px rgb(0 0 0/0.10)">medium</div></div>
+  <div><h3>strong</h3><div class="shadow-box" style="box-shadow:0 20px 25px -5px rgb(0 0 0/0.18),0 8px 10px -6px rgb(0 0 0/0.18)">strong</div></div>
+</div>
+
+<h2>Tonal Palettes (50–950)</h2>
+<div class="tonal-row">
+  <div class="tonal-name">primary (slate-navy)</div>
+  <div class="tonal-strip">
+    <div class="tonal-step" style="background:hsl(215 47% 76%)">50</div>
+    <div class="tonal-step" style="background:hsl(215 49% 66%)">100</div>
+    <div class="tonal-step" style="background:hsl(215 51% 56%)">200</div>
+    <div class="tonal-step" style="background:hsl(215 53% 46%)">300</div>
+    <div class="tonal-step" style="background:hsl(215 54% 36%);color:rgba(255,255,255,0.6)">400</div>
+    <div class="tonal-step" style="background:hsl(215 55% 28%);color:rgba(255,255,255,0.55)">500</div>
+    <div class="tonal-step" style="background:hsl(215 55% 22%);color:rgba(255,255,255,0.5)">600</div>
+    <div class="tonal-step" style="background:hsl(215 55% 18%);color:rgba(255,255,255,0.5)">700</div>
+    <div class="tonal-step" style="background:hsl(215 55% 12%);color:rgba(255,255,255,0.45)">800</div>
+    <div class="tonal-step" style="background:hsl(215 55% 7%);color:rgba(255,255,255,0.4)">900</div>
+    <div class="tonal-step" style="background:hsl(215 55% 4%);color:rgba(255,255,255,0.35)">950</div>
+  </div>
+</div>
+<div class="tonal-row">
+  <div class="tonal-name">accent (steel-blue)</div>
+  <div class="tonal-strip">
+    <div class="tonal-step" style="background:hsl(225 44% 88%)">50</div>
+    <div class="tonal-step" style="background:hsl(225 47% 78%)">100</div>
+    <div class="tonal-step" style="background:hsl(225 49% 68%)">200</div>
+    <div class="tonal-step" style="background:hsl(225 51% 60%)">300</div>
+    <div class="tonal-step" style="background:hsl(225 53% 54%)">400</div>
+    <div class="tonal-step" style="background:hsl(225 55% 52%);color:rgba(255,255,255,0.7)">500</div>
+    <div class="tonal-step" style="background:hsl(225 57% 44%);color:rgba(255,255,255,0.65)">600</div>
+    <div class="tonal-step" style="background:hsl(225 59% 36%);color:rgba(255,255,255,0.6)">700</div>
+    <div class="tonal-step" style="background:hsl(225 61% 28%);color:rgba(255,255,255,0.55)">800</div>
+    <div class="tonal-step" style="background:hsl(225 63% 18%);color:rgba(255,255,255,0.5)">900</div>
+    <div class="tonal-step" style="background:hsl(225 63% 10%);color:rgba(255,255,255,0.45)">950</div>
+  </div>
+</div>
+<div class="tonal-row">
+  <div class="tonal-name">neutral (cool grey)</div>
+  <div class="tonal-strip">
+    <div class="tonal-step" style="background:hsl(215 8% 98%)">50</div>
+    <div class="tonal-step" style="background:hsl(215 10% 94%)">100</div>
+    <div class="tonal-step" style="background:hsl(215 11% 86%)">200</div>
+    <div class="tonal-step" style="background:hsl(215 12% 76%)">300</div>
+    <div class="tonal-step" style="background:hsl(215 12% 66%)">400</div>
+    <div class="tonal-step" style="background:hsl(215 12% 56%)">500</div>
+    <div class="tonal-step" style="background:hsl(215 12% 46%);color:rgba(255,255,255,0.6)">600</div>
+    <div class="tonal-step" style="background:hsl(215 12% 36%);color:rgba(255,255,255,0.55)">700</div>
+    <div class="tonal-step" style="background:hsl(215 12% 26%);color:rgba(255,255,255,0.5)">800</div>
+    <div class="tonal-step" style="background:hsl(215 12% 16%);color:rgba(255,255,255,0.45)">900</div>
+    <div class="tonal-step" style="background:hsl(215 12% 9%);color:rgba(255,255,255,0.4)">950</div>
+  </div>
+</div>
+
+<h2>Card Component</h2>
+<div style="display:flex; gap:20px; flex-wrap:wrap;">
+  <div class="demo-card">
+    <div class="demo-card-title">כותרת כרטיסייה</div>
+    <div class="demo-card-desc">טקסט תיאור משני בערכת אפור בהיר — muted-foreground עם border עדין.</div>
+    <div class="demo-card-footer">
+      <button class="btn" style="background:var(--primary);color:var(--primary-foreground);font-size:13px;padding:6px 14px">אישור</button>
+      <button class="btn" style="background:var(--secondary);color:var(--secondary-foreground);font-size:13px;padding:6px 14px">ביטול</button>
+    </div>
+  </div>
+  <div class="demo-card" style="background:linear-gradient(135deg,hsl(225 55% 52% / 0.12) 0%,hsl(215 25% 88% / 0.06) 100%)">
+    <div class="demo-card-title">כרטיסייה עם gradient</div>
+    <div class="demo-card-desc">accentSoft gradient בגוון steel-blue — הדגשה רכה ועדינה.</div>
+    <div class="demo-card-footer">
+      <button class="btn" style="background:var(--accent);color:#fff;font-size:13px;padding:6px 14px">פעולה</button>
+    </div>
+  </div>
+</div>
+
+<h2>Form Elements</h2>
+<div class="form-grid">
+  <div class="form-field"><label class="form-label">שדה טקסט</label><input class="form-input" type="text" placeholder="הקלד כאן..."></div>
+  <div class="form-field"><label class="form-label">שדה עם ערך</label><input class="form-input" type="text" value="ערך לדוגמה"></div>
+  <div class="form-field"><label class="form-label">בחירה מרשימה</label><select class="form-input"><option>אפשרות ראשונה</option><option>שנייה</option></select></div>
+  <div class="form-field"><label class="form-label">טקסט ארוך</label><textarea class="form-input" rows="3" placeholder="תיאור..."></textarea></div>
+  <div class="form-field"><label class="form-label">בחירה</label><label class="form-check"><input type="checkbox" checked> סמן ראשון</label><label class="form-check"><input type="checkbox"> סמן שני</label></div>
+  <div class="form-field"><label class="form-label">בלעדית</label><label class="form-check"><input type="radio" name="r" checked> ראשון</label><label class="form-check"><input type="radio" name="r"> שני</label></div>
+</div>
+
+<h2>Font Families</h2>
+<div>
+  <div class="font-row"><span class="font-tag">Assistant</span><span class="font-sample" style="font-family:'Assistant',sans-serif">שלום עולם — Hello World — 0123456789</span></div>
+  <div class="font-row"><span class="font-tag">Rubik</span><span class="font-sample" style="font-family:'Rubik',sans-serif">שלום עולם — Hello World — 0123456789</span></div>
+  <div class="font-row"><span class="font-tag">Heebo</span><span class="font-sample" style="font-family:'Heebo',sans-serif">שלום עולם — Hello World — 0123456789</span></div>
+  <div class="font-row"><span class="font-tag">Frank Ruhl Libre</span><span class="font-sample" style="font-family:'Frank Ruhl Libre',serif">שלום עולם — Hello World — 0123456789</span></div>
+</div>
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700&family=Rubik:wght@400;600&family=Heebo:wght@400;600&family=Frank+Ruhl+Libre:wght@400;700&display=swap" rel="stylesheet">
+
+<h2>Motion Tokens</h2>
+<div class="motion-grid">
+  <div class="motion-row"><span class="motion-label">instant 80ms</span><div class="motion-track"><div class="motion-ball" style="animation-duration:80ms;animation-timing-function:cubic-bezier(0.2,0,0,1)"></div></div></div>
+  <div class="motion-row"><span class="motion-label">fast 140ms</span><div class="motion-track"><div class="motion-ball" style="animation-duration:140ms;animation-timing-function:cubic-bezier(0.2,0,0,1)"></div></div></div>
+  <div class="motion-row"><span class="motion-label">normal 220ms</span><div class="motion-track"><div class="motion-ball" style="animation-duration:220ms;animation-timing-function:cubic-bezier(0.2,0,0,1)"></div></div></div>
+  <div class="motion-row"><span class="motion-label">slow 320ms</span><div class="motion-track"><div class="motion-ball" style="animation-duration:320ms;animation-timing-function:cubic-bezier(0.2,0.8,0.2,1)"></div></div></div>
+  <div class="motion-row"><span class="motion-label">xslow 480ms</span><div class="motion-track"><div class="motion-ball" style="animation-duration:480ms;animation-timing-function:cubic-bezier(0.2,0.8,0.2,1)"></div></div></div>
+</div>
+
+</body>
+</html>

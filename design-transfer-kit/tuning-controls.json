@@ -1,0 +1,31 @@
+{
+  "mode": "tuning-only",
+  "description": "Core visual knobs for cross-project consistency",
+  "radius": {
+    "baseRem": 0.75
+  },
+  "density": {
+    "compact": 0.85,
+    "comfortable": 1,
+    "spacious": 1.15,
+    "default": "comfortable"
+  },
+  "shadow": {
+    "default": "0 1px 3px rgb(0 0 0 / 0.06)",
+    "soft": "0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06)",
+    "medium": "0 4px 6px -1px rgb(0 0 0 / 0.10), 0 2px 4px -2px rgb(0 0 0 / 0.10)",
+    "strong": "0 20px 25px -5px rgb(0 0 0 / 0.18), 0 8px 10px -6px rgb(0 0 0 / 0.18)"
+  },
+  "themeLight": {
+    "primary": "223 63% 16%",
+    "accent": "41 72% 47%",
+    "background": "40 24% 94%",
+    "foreground": "222 52% 14%"
+  },
+  "themeDark": {
+    "primary": "220 80% 30%",
+    "accent": "220 70% 40%",
+    "background": "220 50% 6%",
+    "foreground": "40 20% 95%"
+  }
+}

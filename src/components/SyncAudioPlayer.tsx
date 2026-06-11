@@ -604,29 +604,65 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   const RGL_ROW = 32;
   const RGL_MARGIN_Y = 6;
 
+  const updateAutoHeightFor = useCallback((key: string, element: HTMLDivElement | null) => {
+    if (!element) return;
+    const contentH = element.scrollHeight;
+    // add widget-body padding (16+18=34) + small buffer (10)
+    const newH = Math.max(6, Math.ceil((contentH + 44 + RGL_MARGIN_Y) / (RGL_ROW + RGL_MARGIN_Y)));
+    setAutoHeights(prev => prev[key] === newH ? prev : { ...prev, [key]: newH });
+  }, []);
+
   useEffect(() => {
     const entries: Array<{ key: string; ref: React.RefObject<HTMLDivElement> }> = [
       { key: 'player', ref: playerBodyRef },
       { key: 'studio', ref: studioBodyRef },
     ];
-    const observers: ResizeObserver[] = [];
+    const resizeObservers: ResizeObserver[] = [];
+    const mutationObservers: MutationObserver[] = [];
+    const rafIds = new Set<number>();
+
+    const scheduleUpdate = (key: string, ref: React.RefObject<HTMLDivElement>) => {
+      const rafId = requestAnimationFrame(() => {
+        rafIds.delete(rafId);
+        updateAutoHeightFor(key, ref.current);
+      });
+      rafIds.add(rafId);
+    };
+
+    const updateAll = () => {
+      for (const { key, ref } of entries) scheduleUpdate(key, ref);
+    };
+
     for (const { key, ref } of entries) {
       if (!ref.current) continue;
-      const update = () => {
-        if (!ref.current) return;
-        const contentH = ref.current.scrollHeight;
-        // add widget-body padding (16+18=34) + small buffer (10)
-        const newH = Math.max(6, Math.ceil((contentH + 44 + RGL_MARGIN_Y) / (RGL_ROW + RGL_MARGIN_Y)));
-        setAutoHeights(prev => prev[key] === newH ? prev : { ...prev, [key]: newH });
-      };
+
+      const update = () => scheduleUpdate(key, ref);
       const obs = new ResizeObserver(update);
       obs.observe(ref.current);
+
+      // Observe the main content node as well; parent card keeps a fixed RGL height.
+      const contentNode = ref.current.children.item(1);
+      if (contentNode instanceof HTMLElement) {
+        obs.observe(contentNode);
+      }
+
+      const mut = new MutationObserver(update);
+      mut.observe(ref.current, { childList: true, subtree: true });
+
       update();
-      observers.push(obs);
+      resizeObservers.push(obs);
+      mutationObservers.push(mut);
     }
-    return () => observers.forEach(o => o.disconnect());
+
+    window.addEventListener('resize', updateAll);
+    return () => {
+      window.removeEventListener('resize', updateAll);
+      resizeObservers.forEach(o => o.disconnect());
+      mutationObservers.forEach(o => o.disconnect());
+      rafIds.forEach(id => cancelAnimationFrame(id));
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [updateAutoHeightFor]);
 
   // Merge auto heights into layouts for display (not persisted)
   // Also hides widgets that are toggled off

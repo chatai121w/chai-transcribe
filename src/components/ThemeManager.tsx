@@ -42,6 +42,29 @@ import {
   downloadFile,
   generateThemeFromDescription,
 } from "@/lib/themeUtils";
+import {
+  exportDesignScalesJson,
+  exportGlobalDesignKitJson,
+  exportGlobalDesignKitMarkdown,
+  exportVsCodeThemeJson,
+} from "@/lib/designScales";
+
+type WritableFileStreamLike = {
+  write: (data: string) => Promise<void>;
+  close: () => Promise<void>;
+};
+
+type FileHandleLike = {
+  createWritable: () => Promise<WritableFileStreamLike>;
+};
+
+type DirectoryHandleLike = {
+  getFileHandle: (name: string, options: { create: boolean }) => Promise<FileHandleLike>;
+};
+
+type DirectoryPickerLike = {
+  showDirectoryPicker?: () => Promise<DirectoryHandleLike>;
+};
 
 const DEFAULT_STYLE: ThemeStyleOptions = {
   radius: 8,
@@ -1620,6 +1643,78 @@ export function ThemeManager() {
     toast.success(`${customThemes.length} ערכות יוצאו`);
   };
 
+  const handleExportDesignScales = () => {
+    const active = allThemes.find(t => t.id === activeThemeId);
+    if (!active) { toast.error('לא נמצאה ערכת נושא פעילה'); return; }
+    const json = exportDesignScalesJson(active);
+    const safeName = (active.name || 'theme').replace(/[^\w-]+/g, '-');
+    downloadFile(`${safeName}.design-scales.json`, json);
+    toast.success(`סקיילס עיצוב מפורט יוצא עבור "${active.nameHe}"`);
+  };
+
+  const handleExportVsCodeTheme = () => {
+    const active = allThemes.find(t => t.id === activeThemeId);
+    if (!active) { toast.error('לא נמצאה ערכת נושא פעילה'); return; }
+    const json = exportVsCodeThemeJson(active);
+    const safeName = (active.name || 'theme').replace(/[^\w-]+/g, '-');
+    downloadFile(`${safeName}.vscode-color-theme.json`, json);
+    toast.success(`ערכת VS Code יוצאה עבור "${active.nameHe}"`);
+  };
+
+  const buildGlobalExportFiles = (active: AppTheme) => {
+    const safeName = (active.name || 'theme').replace(/[^\w-]+/g, '-');
+    return [
+      { name: `${safeName}.global-design-kit.json`, content: exportGlobalDesignKitJson(active), mime: 'application/json' },
+      { name: `${safeName}.global-design-kit.md`, content: exportGlobalDesignKitMarkdown(active), mime: 'text/markdown;charset=utf-8' },
+      { name: `${safeName}.design-scales.json`, content: exportDesignScalesJson(active), mime: 'application/json' },
+      { name: `${safeName}.vscode-color-theme.json`, content: exportVsCodeThemeJson(active), mime: 'application/json' },
+      { name: `${safeName}.theme.json`, content: exportThemeToJson(active), mime: 'application/json' },
+    ] as const;
+  };
+
+  const handleExportGlobalDesignKit = () => {
+    const active = allThemes.find(t => t.id === activeThemeId);
+    if (!active) { toast.error('לא נמצאה ערכת נושא פעילה'); return; }
+    const files = buildGlobalExportFiles(active);
+    const [globalJson, globalMd] = files;
+    downloadFile(globalJson.name, globalJson.content, globalJson.mime);
+    downloadFile(globalMd.name, globalMd.content, globalMd.mime);
+    toast.success(`Global Design Kit יוצא עבור "${active.nameHe}" (JSON + MD)`);
+  };
+
+  const handleExportGlobalDesignKitToFolder = async () => {
+    const active = allThemes.find(t => t.id === activeThemeId);
+    if (!active) { toast.error('לא נמצאה ערכת נושא פעילה'); return; }
+
+    const files = buildGlobalExportFiles(active);
+    const picker = (window as unknown as DirectoryPickerLike).showDirectoryPicker;
+
+    if (!picker) {
+      for (const file of files) {
+        downloadFile(file.name, file.content, file.mime);
+      }
+      toast.info('הדפדפן לא תומך בשמירה ישירה לתיקיה. הקבצים הורדו כרגיל.');
+      return;
+    }
+
+    try {
+      const dirHandle = await picker();
+      for (const file of files) {
+        const fileHandle = await dirHandle.getFileHandle(file.name, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(file.content);
+        await writable.close();
+      }
+      toast.success(`נשמרו ${files.length} קבצי Global Kit לתיקייה שבחרת`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        toast.info('בחירת התיקייה בוטלה');
+        return;
+      }
+      toast.error('שמירה אוטומטית לתיקייה נכשלה');
+    }
+  };
+
   const handleImportFile = async (file: File) => {
     try {
       const text = await file.text();
@@ -1793,10 +1888,29 @@ export function ThemeManager() {
                   <Download className="h-4 w-4" />
                   ייצא את הערכה הפעילה
                 </Button>
+                <Button variant="outline" className="w-full justify-start gap-2" onClick={handleExportDesignScales}>
+                  <Download className="h-4 w-4" />
+                  ייצא סקיילס עיצוב מפורט (JSON)
+                </Button>
+                <Button variant="outline" className="w-full justify-start gap-2" onClick={handleExportVsCodeTheme}>
+                  <Download className="h-4 w-4" />
+                  ייצא ערכת VS Code
+                </Button>
+                <Button variant="outline" className="w-full justify-start gap-2" onClick={handleExportGlobalDesignKit}>
+                  <Download className="h-4 w-4" />
+                  ייצא Global Design Kit (JSON + MD)
+                </Button>
+                <Button variant="outline" className="w-full justify-start gap-2" onClick={handleExportGlobalDesignKitToFolder}>
+                  <Download className="h-4 w-4" />
+                  ייצא Global Kit לתיקיית יעד (אוטומטי)
+                </Button>
                 <Button variant="outline" className="w-full justify-start gap-2" onClick={handleExportAllCustom} disabled={customThemes.length === 0}>
                   <Download className="h-4 w-4" />
                   ייצא חבילה: כל הערכות האישיות ({customThemes.length})
                 </Button>
+                <p className="text-[11px] text-muted-foreground">
+                  כל קבצי הייצוא נוצרים לפי הערכה הפעילה כרגע; מצב אוטומטי שומר לתיקיה שנבחרת.
+                </p>
               </div>
             </DialogContent>
           </Dialog>
