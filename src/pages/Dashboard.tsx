@@ -86,6 +86,7 @@ function isBaseStyle(value: unknown): value is DashboardStylePreset {
 function sanitizeLayoutPresets(value: unknown): DashboardLayoutPreset[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
+  const validWidgets = new Set<DashboardWidgetKey>(['recent_transcripts', 'folders', 'stats', 'recorder', 'youtube', 'search']);
   return value
     .map((item) => {
       if (!item || typeof item !== 'object') return null;
@@ -95,7 +96,14 @@ function sanitizeLayoutPresets(value: unknown): DashboardLayoutPreset[] {
       const baseStyle = maybe.baseStyle;
       if (!id || !label || !isBaseStyle(baseStyle) || seen.has(id)) return null;
       seen.add(id);
-      return { id, label, baseStyle } as DashboardLayoutPreset;
+      const widgets = Array.isArray(maybe.widgets)
+        ? (maybe.widgets.filter((w): w is DashboardWidgetKey => typeof w === 'string' && validWidgets.has(w as DashboardWidgetKey)))
+        : undefined;
+      const columnsRaw = maybe.columns;
+      const columns = columnsRaw === 1 || columnsRaw === 2 || columnsRaw === 3 ? columnsRaw : undefined;
+      const density = typeof maybe.density === 'number' && maybe.density >= 0 && maybe.density <= 100 ? maybe.density : undefined;
+      const isDefault = maybe.isDefault === true ? true : undefined;
+      return { id, label, baseStyle, widgets, columns, density, isDefault } as DashboardLayoutPreset;
     })
     .filter((preset): preset is DashboardLayoutPreset => !!preset);
 }
