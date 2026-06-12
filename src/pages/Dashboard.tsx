@@ -327,10 +327,10 @@ const Dashboard = () => {
       <div className={shellClass}>
         {/* Header */}
         <div className="flex items-center justify-between gap-2">
-          <div className="fixed top-3 left-3 z-[61]">
+          <div className="fixed top-8 left-3 z-[61]">
             <div className="group/quick-controls relative">
-              <div className="h-10 w-24" aria-hidden="true" />
-              <div className="absolute left-0 top-0 flex items-center gap-2 rounded-xl border bg-card/80 p-1.5 backdrop-blur-sm opacity-0 translate-y-1 pointer-events-none transition-all duration-150 group-hover/quick-controls:opacity-100 group-hover/quick-controls:translate-y-0 group-hover/quick-controls:pointer-events-auto group-focus-within/quick-controls:opacity-100 group-focus-within/quick-controls:translate-y-0 group-focus-within/quick-controls:pointer-events-auto">
+              <div className="h-12 w-28" aria-hidden="true" />
+              <div className="absolute left-0 top-1 flex items-center gap-2 p-1 opacity-0 translate-y-1 pointer-events-none transition-all duration-150 group-hover/quick-controls:opacity-100 group-hover/quick-controls:translate-y-0 group-hover/quick-controls:pointer-events-auto group-focus-within/quick-controls:opacity-100 group-focus-within/quick-controls:translate-y-0 group-focus-within/quick-controls:pointer-events-auto">
                 <Button
                   variant="ghost"
                   size="icon"
