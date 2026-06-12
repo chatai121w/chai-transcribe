@@ -165,15 +165,26 @@ const AppSidebar = () => {
     if (!isMobile || isPinned) return;
 
     const onTouchStart = (e: TouchEvent) => {
-      if (isOpen || e.touches.length !== 1) {
+      if (e.touches.length !== 1) {
         touchStartRef.current = null;
         return;
       }
       const touch = e.touches[0];
-      if (touch.clientX >= window.innerWidth - EDGE_SWIPE_ZONE) {
-        touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+      if (isOpen) {
+        // When open, track gesture starting anywhere inside the sidebar (right side in RTL)
+        const sidebarEl = sidebarRef.current;
+        if (sidebarEl && sidebarEl.contains(touch.target as Node)) {
+          touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+        } else {
+          touchStartRef.current = null;
+        }
       } else {
-        touchStartRef.current = null;
+        // When closed, only track from the right edge to open
+        if (touch.clientX >= window.innerWidth - EDGE_SWIPE_ZONE) {
+          touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+        } else {
+          touchStartRef.current = null;
+        }
       }
     };
 
@@ -181,18 +192,27 @@ const AppSidebar = () => {
       if (!touchStartRef.current) return;
       if (e.touches.length !== 1) return;
       const touch = e.touches[0];
-      const dx = touchStartRef.current.x - touch.clientX;
+      const rawDx = touch.clientX - touchStartRef.current.x; // positive = moved right
       const dy = Math.abs(touch.clientY - touchStartRef.current.y);
 
       // If the user is mostly scrolling vertically, stop gesture tracking.
-      if (dy > SWIPE_MAX_VERTICAL_DRIFT && dy > dx) {
+      if (dy > SWIPE_MAX_VERTICAL_DRIFT && dy > Math.abs(rawDx)) {
         touchStartRef.current = null;
         return;
       }
 
-      if (dx > SWIPE_THRESHOLD && dy <= SWIPE_MAX_VERTICAL_DRIFT) {
-        setIsOpen(true);
-        touchStartRef.current = null;
+      if (isOpen) {
+        // Close: swipe left→right (dx positive) in RTL sidebar
+        if (rawDx > SWIPE_THRESHOLD && dy <= SWIPE_MAX_VERTICAL_DRIFT) {
+          setIsOpen(false);
+          touchStartRef.current = null;
+        }
+      } else {
+        // Open: swipe right→left from edge (dx negative)
+        if (-rawDx > SWIPE_THRESHOLD && dy <= SWIPE_MAX_VERTICAL_DRIFT) {
+          setIsOpen(true);
+          touchStartRef.current = null;
+        }
       }
     };
 
@@ -212,6 +232,7 @@ const AppSidebar = () => {
       window.removeEventListener("touchcancel", onTouchEnd);
     };
   }, [isMobile, isOpen, isPinned]);
+
 
   const handleMouseEnterTrigger = useCallback(() => {
     clearTimeout(closeTimerRef.current);
