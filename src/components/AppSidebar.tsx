@@ -171,13 +171,8 @@ const AppSidebar = () => {
       }
       const touch = e.touches[0];
       if (isOpen) {
-        // When open, track gesture starting anywhere inside the sidebar (right side in RTL)
-        const sidebarEl = sidebarRef.current;
-        if (sidebarEl && sidebarEl.contains(touch.target as Node)) {
-          touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-        } else {
-          touchStartRef.current = null;
-        }
+        // When open, allow swipe-to-close from anywhere on screen
+        touchStartRef.current = { x: touch.clientX, y: touch.clientY };
       } else {
         // When closed, only track from the right edge to open
         if (touch.clientX >= window.innerWidth - EDGE_SWIPE_ZONE) {
@@ -187,6 +182,7 @@ const AppSidebar = () => {
         }
       }
     };
+
 
     const onTouchMove = (e: TouchEvent) => {
       if (!touchStartRef.current) return;
