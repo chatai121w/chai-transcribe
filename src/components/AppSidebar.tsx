@@ -161,6 +161,12 @@ const AppSidebar = () => {
     window.dispatchEvent(new CustomEvent("sidebar-open-change", { detail: isOpen }));
   }, [isOpen]);
 
+  // Track latest isOpen in a ref so touch listeners don't need to re-attach on every change.
+  const isOpenRef = useRef(isOpen);
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
+
   useEffect(() => {
     if (!isMobile || isPinned) return;
 
@@ -170,41 +176,37 @@ const AppSidebar = () => {
         return;
       }
       const touch = e.touches[0];
-      if (isOpen) {
-        // When open, allow swipe-to-close from anywhere on screen
+      if (isOpenRef.current) {
+        touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+      } else if (touch.clientX >= window.innerWidth - EDGE_SWIPE_ZONE) {
         touchStartRef.current = { x: touch.clientX, y: touch.clientY };
       } else {
-        // When closed, only track from the right edge to open
-        if (touch.clientX >= window.innerWidth - EDGE_SWIPE_ZONE) {
-          touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-        } else {
-          touchStartRef.current = null;
-        }
+        touchStartRef.current = null;
       }
     };
 
-
     const onTouchMove = (e: TouchEvent) => {
-      if (!touchStartRef.current) return;
-      if (e.touches.length !== 1) return;
+      const start = touchStartRef.current;
+      if (!start || e.touches.length !== 1) return;
       const touch = e.touches[0];
-      const rawDx = touch.clientX - touchStartRef.current.x; // positive = moved right
-      const dy = Math.abs(touch.clientY - touchStartRef.current.y);
+      const rawDx = touch.clientX - start.x; // positive = moved right
+      const adx = Math.abs(rawDx);
+      const dy = Math.abs(touch.clientY - start.y);
 
-      // If the user is mostly scrolling vertically, stop gesture tracking.
-      if (dy > SWIPE_MAX_VERTICAL_DRIFT && dy > Math.abs(rawDx)) {
+      // Cancel if clearly a vertical scroll
+      if (dy > SWIPE_MAX_VERTICAL_DRIFT && dy > adx) {
         touchStartRef.current = null;
         return;
       }
 
-      if (isOpen) {
-        // Close: swipe left→right (dx positive) in RTL sidebar
+      if (isOpenRef.current) {
+        // Close (RTL): swipe left→right
         if (rawDx > SWIPE_THRESHOLD && dy <= SWIPE_MAX_VERTICAL_DRIFT) {
           setIsOpen(false);
           touchStartRef.current = null;
         }
       } else {
-        // Open: swipe right→left from edge (dx negative)
+        // Open (RTL): swipe right→left from right edge
         if (-rawDx > SWIPE_THRESHOLD && dy <= SWIPE_MAX_VERTICAL_DRIFT) {
           setIsOpen(true);
           touchStartRef.current = null;
@@ -227,7 +229,8 @@ const AppSidebar = () => {
       window.removeEventListener("touchend", onTouchEnd);
       window.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, [isMobile, isOpen, isPinned]);
+  }, [isMobile, isPinned]);
+
 
 
   const handleMouseEnterTrigger = useCallback(() => {
