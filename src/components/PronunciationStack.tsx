@@ -42,23 +42,33 @@ export function PronunciationStack({
   loshonKodeshSlot,
   personalModelSlot,
   profileSelectorSlot,
+  mode: controlledMode,
+  onModeChange,
 }: Props) {
-  const [mode, setMode] = useState<PronunciationLayoutMode>(() => {
+  const [uncontrolledMode, setUncontrolledMode] = useState<PronunciationLayoutMode>(() => {
     try {
       const v = localStorage.getItem(STORAGE_KEY);
-      if (v === "rich" || v === "compact" || v === "tabs") return v;
+      if (v === "rich" || v === "compact" || v === "tabs" || v === "grid") return v;
     } catch { /* ignore */ }
     return "rich";
   });
 
+  const mode = controlledMode ?? uncontrolledMode;
+  const setMode = (next: PronunciationLayoutMode) => {
+    if (onModeChange) onModeChange(next);
+    if (controlledMode === undefined) setUncontrolledMode(next);
+  };
+
   const [activeTab, setActiveTab] = useState<"lk" | "personal" | "profile">("lk");
 
   useEffect(() => {
+    // Mirror to localStorage as a fallback so it survives offline reloads.
     try { localStorage.setItem(STORAGE_KEY, mode); } catch { /* ignore */ }
   }, [mode]);
 
   const slotFor = (id: "lk" | "personal" | "profile") =>
     id === "lk" ? loshonKodeshSlot : id === "personal" ? personalModelSlot : profileSelectorSlot;
+
 
   return (
     <section
