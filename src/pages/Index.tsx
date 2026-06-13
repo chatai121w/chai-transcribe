@@ -1998,9 +1998,14 @@ const Index = () => {
               </p>
             </div>
 
-            {/* Loshon Kodesh toggle */}
+          </div>
+        )}
+
+        <PronunciationStack
+          loshonKodeshSlot={
             <div
-              className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm"
+              className="flex items-center justify-between gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-sm"
+              dir="rtl"
             >
               <label className="flex items-center gap-2 cursor-pointer flex-1">
                 <input
@@ -2009,7 +2014,7 @@ const Index = () => {
                   onChange={(e) => {
                     setLoshonKodeshOn(e.target.checked);
                   }}
-                  className="rounded border-amber-400"
+                  className="rounded border-yellow-400"
                 />
                 <span className="font-medium">לשון הקודש (הגייה אשכנזית)</span>
                 <span className="text-xs text-muted-foreground">
@@ -2017,36 +2022,39 @@ const Index = () => {
                 </span>
               </label>
             </div>
-          </div>
-        )}
+          }
+          personalModelSlot={
+            <div
+              className="flex items-center justify-between gap-3 rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-sm"
+              dir="rtl"
+            >
+              <label className="flex items-center gap-2 cursor-pointer flex-1">
+                <input
+                  type="checkbox"
+                  checked={personalModelOn}
+                  onChange={(e) => {
+                    setPersonalPronunciationEnabled(e.target.checked);
+                    setPersonalModelOn(e.target.checked);
+                    updatePreference('personal_pronunciation_enabled', e.target.checked);
+                    debugLog.info('Index', 'Personal pronunciation toggle changed', {
+                      enabled: e.target.checked,
+                      isAuthenticated,
+                    });
+                  }}
+                  className="rounded border-purple-400"
+                />
+                <span className="font-medium flex items-center gap-1"><BrainCircuit className="w-4 h-4 text-[#0f1e43]" /> מודל הגייה אישי</span>
+                <span className="text-xs text-muted-foreground">
+                  — תוספת למנוע: מחיל תיקונים שלמדתי בעבר ומילים שאימתתי כנכון.
+                </span>
+              </label>
+            </div>
+          }
+          profileSelectorSlot={
+            <PronunciationProfileSelector onProfileChange={(id) => updatePreference('active_pronunciation_profile', id)} />
+          }
+        />
 
-        <div
-          className="flex items-center justify-between gap-3 rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-sm"
-          dir="rtl"
-        >
-          <label className="flex items-center gap-2 cursor-pointer flex-1">
-            <input
-              type="checkbox"
-              checked={personalModelOn}
-              onChange={(e) => {
-                setPersonalPronunciationEnabled(e.target.checked);
-                setPersonalModelOn(e.target.checked);
-                  updatePreference('personal_pronunciation_enabled', e.target.checked);
-                  debugLog.info('Index', 'Personal pronunciation toggle changed', {
-                    enabled: e.target.checked,
-                    isAuthenticated,
-                  });
-              }}
-              className="rounded border-purple-400"
-            />
-            <span className="font-medium flex items-center gap-1"><BrainCircuit className="w-4 h-4 text-[#0f1e43]" /> מודל הגייה אישי</span>
-            <span className="text-xs text-muted-foreground">
-              — תוספת למנוע: מחיל תיקונים שלמדתי בעבר ומילים שאימתתי כנכון.
-            </span>
-          </label>
-        </div>
-
-        <PronunciationProfileSelector onProfileChange={(id) => updatePreference('active_pronunciation_profile', id)} />
 
         {(engine === 'assemblyai' || engine === 'deepgram') && (
           <div className="flex items-center gap-2 text-sm" dir="rtl">
