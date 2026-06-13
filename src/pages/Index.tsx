@@ -38,6 +38,7 @@ import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from 
 import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
 import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSuggestion";
 import { PronunciationProfileSelector } from "@/components/PronunciationProfileSelector";
+import { PronunciationStack } from "@/components/PronunciationStack";
 import { applyLearnedCorrections } from "@/utils/correctionLearning";
 import { addRecentFile } from "@/components/RecentFiles";
 
