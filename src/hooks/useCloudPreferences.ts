@@ -488,6 +488,7 @@ const useCloudPreferencesImpl = () => {
           diarize_enabled: updated.diarize_enabled,
           live_chunk_sec: updated.live_chunk_sec,
           live_mic_gain: updated.live_mic_gain,
+          pronunciation_layout_mode: updated.pronunciation_layout_mode,
           updated_at: new Date().toISOString(),
         } as any, { onConflict: 'user_id' })
         .select('updated_at, personal_pronunciation_enabled')
