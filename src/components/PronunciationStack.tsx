@@ -130,6 +130,14 @@ export function PronunciationStack({
         </div>
       )}
 
+      {mode === "grid" && (
+        <div className="grid grid-cols-2 gap-2 [&>*]:min-w-0">
+          <div>{loshonKodeshSlot}</div>
+          <div>{personalModelSlot}</div>
+          <div className="col-span-2">{profileSelectorSlot}</div>
+        </div>
+      )}
+
       {mode === "tabs" && (
         <div className="flex gap-2 min-h-[120px]">
           {/* Vertical rectangular tabs */}
