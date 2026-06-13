@@ -544,6 +544,7 @@ const useCloudPreferencesImpl = () => {
     'loshon_kodesh_enabled',
     'active_pronunciation_profile',
     'diarize_enabled',
+    'pronunciation_layout_mode',
   ];
 
   const updatePreference = useCallback(<K extends keyof UserPreferences>(
