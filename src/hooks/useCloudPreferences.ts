@@ -78,6 +78,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   diarize_enabled: false,
   live_chunk_sec: 5,
   live_mic_gain: 3.5,
+  pronunciation_layout_mode: 'rich',
 };
 
 const useCloudPreferencesImpl = () => {
