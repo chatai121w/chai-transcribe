@@ -2002,6 +2002,8 @@ const Index = () => {
         )}
 
         <PronunciationStack
+          mode={(preferences.pronunciation_layout_mode as any) || 'rich'}
+          onModeChange={(m) => updatePreference('pronunciation_layout_mode', m)}
           loshonKodeshSlot={
             <div
               className="flex items-center justify-between gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-sm"
