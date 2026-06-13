@@ -718,6 +718,7 @@ export type Database = {
           loshon_kodesh_enabled: boolean
           personal_pronunciation_enabled: boolean
           player_layout: string | null
+          pronunciation_layout_mode: string
           sidebar_pinned: boolean | null
           source_language: string | null
           tab_settings_json: Json | null
@@ -759,6 +760,7 @@ export type Database = {
           loshon_kodesh_enabled?: boolean
           personal_pronunciation_enabled?: boolean
           player_layout?: string | null
+          pronunciation_layout_mode?: string
           sidebar_pinned?: boolean | null
           source_language?: string | null
           tab_settings_json?: Json | null
@@ -800,6 +802,7 @@ export type Database = {
           loshon_kodesh_enabled?: boolean
           personal_pronunciation_enabled?: boolean
           player_layout?: string | null
+          pronunciation_layout_mode?: string
           sidebar_pinned?: boolean | null
           source_language?: string | null
           tab_settings_json?: Json | null
