@@ -41,6 +41,7 @@ export interface UserPreferences {
   diarize_enabled: boolean;              // speaker diarization toggle
   live_chunk_sec: number;                // Live transcription chunk length (seconds)
   live_mic_gain: number;                 // Live transcription mic sensitivity (gain multiplier)
+  pronunciation_layout_mode: string;     // 'rich' | 'compact' | 'tabs' | 'grid'
 }
 
 const DEFAULT_PREFERENCES: UserPreferences = {
@@ -77,6 +78,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   diarize_enabled: false,
   live_chunk_sec: 5,
   live_mic_gain: 3.5,
+  pronunciation_layout_mode: 'rich',
 };
 
 const useCloudPreferencesImpl = () => {
@@ -249,6 +251,7 @@ const useCloudPreferencesImpl = () => {
               : ((data as any).diarize_enabled ?? DEFAULT_PREFERENCES.diarize_enabled),
           live_chunk_sec: (data as any).live_chunk_sec ?? DEFAULT_PREFERENCES.live_chunk_sec,
           live_mic_gain: (data as any).live_mic_gain != null ? Number((data as any).live_mic_gain) : DEFAULT_PREFERENCES.live_mic_gain,
+          pronunciation_layout_mode: (data as any).pronunciation_layout_mode ?? DEFAULT_PREFERENCES.pronunciation_layout_mode,
         };
         setPreferences(loaded);
         // Mirror to localStorage so useTheme picks up cloud values
@@ -485,6 +488,7 @@ const useCloudPreferencesImpl = () => {
           diarize_enabled: updated.diarize_enabled,
           live_chunk_sec: updated.live_chunk_sec,
           live_mic_gain: updated.live_mic_gain,
+          pronunciation_layout_mode: updated.pronunciation_layout_mode,
           updated_at: new Date().toISOString(),
         } as any, { onConflict: 'user_id' })
         .select('updated_at, personal_pronunciation_enabled')
@@ -540,6 +544,7 @@ const useCloudPreferencesImpl = () => {
     'loshon_kodesh_enabled',
     'active_pronunciation_profile',
     'diarize_enabled',
+    'pronunciation_layout_mode',
   ];
 
   const updatePreference = useCallback(<K extends keyof UserPreferences>(

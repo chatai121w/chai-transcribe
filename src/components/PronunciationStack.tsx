@@ -9,17 +9,18 @@
  */
 
 import { type ReactNode, useEffect, useState } from "react";
-import { LayoutPanelLeft, Rows3, Square } from "lucide-react";
+import { LayoutGrid, LayoutPanelLeft, Rows3, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type PronunciationLayoutMode = "rich" | "compact" | "tabs";
+export type PronunciationLayoutMode = "rich" | "compact" | "tabs" | "grid";
 
 const STORAGE_KEY = "pronunciation_layout_mode";
 
 const MODES: Array<{ id: PronunciationLayoutMode; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { id: "rich",    label: "מורחב",  icon: Rows3 },
+  { id: "rich",    label: "מורחב",   icon: Rows3 },
   { id: "compact", label: "קומפקטי", icon: Square },
-  { id: "tabs",    label: "טאבים",  icon: LayoutPanelLeft },
+  { id: "grid",    label: "רשת",     icon: LayoutGrid },
+  { id: "tabs",    label: "טאבים",   icon: LayoutPanelLeft },
 ];
 
 const TAB_DEFS: Array<{ id: "lk" | "personal" | "profile"; label: string }> = [
@@ -32,29 +33,42 @@ interface Props {
   loshonKodeshSlot: ReactNode;
   personalModelSlot: ReactNode;
   profileSelectorSlot: ReactNode;
+  /** Controlled mode (when provided, persistence is the parent's job — e.g. cloud prefs). */
+  mode?: PronunciationLayoutMode;
+  onModeChange?: (mode: PronunciationLayoutMode) => void;
 }
 
 export function PronunciationStack({
   loshonKodeshSlot,
   personalModelSlot,
   profileSelectorSlot,
+  mode: controlledMode,
+  onModeChange,
 }: Props) {
-  const [mode, setMode] = useState<PronunciationLayoutMode>(() => {
+  const [uncontrolledMode, setUncontrolledMode] = useState<PronunciationLayoutMode>(() => {
     try {
       const v = localStorage.getItem(STORAGE_KEY);
-      if (v === "rich" || v === "compact" || v === "tabs") return v;
+      if (v === "rich" || v === "compact" || v === "tabs" || v === "grid") return v;
     } catch { /* ignore */ }
     return "rich";
   });
 
+  const mode = controlledMode ?? uncontrolledMode;
+  const setMode = (next: PronunciationLayoutMode) => {
+    if (onModeChange) onModeChange(next);
+    if (controlledMode === undefined) setUncontrolledMode(next);
+  };
+
   const [activeTab, setActiveTab] = useState<"lk" | "personal" | "profile">("lk");
 
   useEffect(() => {
+    // Mirror to localStorage as a fallback so it survives offline reloads.
     try { localStorage.setItem(STORAGE_KEY, mode); } catch { /* ignore */ }
   }, [mode]);
 
   const slotFor = (id: "lk" | "personal" | "profile") =>
     id === "lk" ? loshonKodeshSlot : id === "personal" ? personalModelSlot : profileSelectorSlot;
+
 
   return (
     <section
@@ -113,6 +127,14 @@ export function PronunciationStack({
             {personalModelSlot}
           </div>
           <div>{profileSelectorSlot}</div>
+        </div>
+      )}
+
+      {mode === "grid" && (
+        <div className="grid grid-cols-2 gap-2 [&>*]:min-w-0">
+          <div>{loshonKodeshSlot}</div>
+          <div>{personalModelSlot}</div>
+          <div className="col-span-2">{profileSelectorSlot}</div>
         </div>
       )}
 
