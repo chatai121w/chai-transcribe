@@ -9,17 +9,18 @@
  */
 
 import { type ReactNode, useEffect, useState } from "react";
-import { LayoutPanelLeft, Rows3, Square } from "lucide-react";
+import { LayoutGrid, LayoutPanelLeft, Rows3, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type PronunciationLayoutMode = "rich" | "compact" | "tabs";
+export type PronunciationLayoutMode = "rich" | "compact" | "tabs" | "grid";
 
 const STORAGE_KEY = "pronunciation_layout_mode";
 
 const MODES: Array<{ id: PronunciationLayoutMode; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { id: "rich",    label: "מורחב",  icon: Rows3 },
+  { id: "rich",    label: "מורחב",   icon: Rows3 },
   { id: "compact", label: "קומפקטי", icon: Square },
-  { id: "tabs",    label: "טאבים",  icon: LayoutPanelLeft },
+  { id: "grid",    label: "רשת",     icon: LayoutGrid },
+  { id: "tabs",    label: "טאבים",   icon: LayoutPanelLeft },
 ];
 
 const TAB_DEFS: Array<{ id: "lk" | "personal" | "profile"; label: string }> = [
@@ -32,6 +33,9 @@ interface Props {
   loshonKodeshSlot: ReactNode;
   personalModelSlot: ReactNode;
   profileSelectorSlot: ReactNode;
+  /** Controlled mode (when provided, persistence is the parent's job — e.g. cloud prefs). */
+  mode?: PronunciationLayoutMode;
+  onModeChange?: (mode: PronunciationLayoutMode) => void;
 }
 
 export function PronunciationStack({
