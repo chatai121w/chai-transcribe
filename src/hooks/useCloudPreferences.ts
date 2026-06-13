@@ -41,6 +41,7 @@ export interface UserPreferences {
   diarize_enabled: boolean;              // speaker diarization toggle
   live_chunk_sec: number;                // Live transcription chunk length (seconds)
   live_mic_gain: number;                 // Live transcription mic sensitivity (gain multiplier)
+  pronunciation_layout_mode: string;     // 'rich' | 'compact' | 'tabs' | 'grid'
 }
 
 const DEFAULT_PREFERENCES: UserPreferences = {
