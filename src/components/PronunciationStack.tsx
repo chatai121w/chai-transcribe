@@ -49,7 +49,7 @@ export function PronunciationStack({
   const [uncontrolledMode, setUncontrolledMode] = useState<PronunciationLayoutMode>(() => {
     try {
       const v = localStorage.getItem(STORAGE_KEY);
-      if (v === "rich" || v === "compact" || v === "tabs" || v === "grid") return v;
+      if (v === "rich" || v === "compact" || v === "tabs" || v === "grid" || v === "row") return v;
     } catch { /* ignore */ }
     return "rich";
   });
