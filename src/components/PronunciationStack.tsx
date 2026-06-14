@@ -9,7 +9,7 @@
  */
 
 import { type ReactNode, useEffect, useState } from "react";
-import { LayoutGrid, LayoutPanelLeft, Rows3, Square } from "lucide-react";
+import { LayoutGrid, LayoutPanelLeft, Rows3, Square, Columns3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type PronunciationLayoutMode = "rich" | "compact" | "tabs" | "grid";
