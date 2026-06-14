@@ -11,8 +11,10 @@ import {
 import {
   Mic, Square, Copy, Trash2, Radio, Cpu, Globe, Volume2, Clock, Zap,
   AlertTriangle, Pause, Play, Save, FolderOpen, FolderPlus, Download,
-  X, FileText, Trophy, Target
+  X, FileText, Trophy, Target, RefreshCw
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import { getServerUrl } from "@/lib/serverConfig";
 import { supabase } from "@/integrations/supabase/client";
