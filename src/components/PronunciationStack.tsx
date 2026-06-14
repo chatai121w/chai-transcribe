@@ -12,7 +12,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { LayoutGrid, LayoutPanelLeft, Rows3, Square, Columns3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type PronunciationLayoutMode = "rich" | "compact" | "tabs" | "grid";
+export type PronunciationLayoutMode = "rich" | "compact" | "tabs" | "grid" | "row";
 
 const STORAGE_KEY = "pronunciation_layout_mode";
 
@@ -20,6 +20,7 @@ const MODES: Array<{ id: PronunciationLayoutMode; label: string; icon: React.Com
   { id: "rich",    label: "מורחב",   icon: Rows3 },
   { id: "compact", label: "קומפקטי", icon: Square },
   { id: "grid",    label: "רשת",     icon: LayoutGrid },
+  { id: "row",     label: "אופקי",   icon: Columns3 },
   { id: "tabs",    label: "טאבים",   icon: LayoutPanelLeft },
 ];
 
