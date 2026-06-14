@@ -894,23 +894,32 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         : undefined;
       const duration = Math.floor((Date.now() - startTimeRef.current - totalPausedMsRef.current) / 1000);
 
-      // Refine pass only available for CUDA (local server). Groq uses accumulated text as-is.
+      // Full re-transcribe path (toggle ON): the whole recording is sent as one
+      // unit and REPLACES the chunked text. Falls back to chunked text on failure.
+      // For CUDA, this also enables the existing refine pass.
       let merged = finalTextRef.current;
-      if (mode === "cuda") {
+      const doFullRetranscribe = fullRetranscribeRef.current && (mode === "cuda" || mode === "groq");
+      if (doFullRetranscribe || mode === "cuda") {
         const prevTimings = [...wordTimingsRef.current];
         wordTimingsRef.current = [];
-        const refinedText = await runFinalRefinePass();
+        const refinedText = mode === "groq"
+          ? await runGroqFullRetranscribe()
+          : await runFinalRefinePass();
         if (!refinedText && wordTimingsRef.current.length === 0) {
           wordTimingsRef.current = prevTimings;
         }
         const currentFinalText = finalTextRef.current;
-        merged = refinedText
-          ? (refinedText.length >= Math.max(20, Math.floor(currentFinalText.length * 0.8))
-            ? refinedText
-            : appendDedupText(currentFinalText, refinedText))
-          : currentFinalText;
         if (refinedText) {
+          // When the user explicitly asked for full re-transcribe, replace.
+          // Otherwise (legacy CUDA refine), keep the prior heuristic.
+          merged = fullRetranscribeRef.current
+            ? refinedText
+            : (refinedText.length >= Math.max(20, Math.floor(currentFinalText.length * 0.8))
+              ? refinedText
+              : appendDedupText(currentFinalText, refinedText));
           setFinalText(merged);
+        } else {
+          merged = currentFinalText;
         }
       }
       stopCudaCleanup();
@@ -938,7 +947,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         });
       }
     }
-  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, stopCudaCleanup, stopBrowser, flushGroqTail]);
+  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, runGroqFullRetranscribe, stopCudaCleanup, stopBrowser, flushGroqTail]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(finalText);
