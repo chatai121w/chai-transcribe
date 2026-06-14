@@ -9,10 +9,10 @@
  */
 
 import { type ReactNode, useEffect, useState } from "react";
-import { LayoutGrid, LayoutPanelLeft, Rows3, Square } from "lucide-react";
+import { LayoutGrid, LayoutPanelLeft, Rows3, Square, Columns3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type PronunciationLayoutMode = "rich" | "compact" | "tabs" | "grid";
+export type PronunciationLayoutMode = "rich" | "compact" | "tabs" | "grid" | "row";
 
 const STORAGE_KEY = "pronunciation_layout_mode";
 
@@ -20,6 +20,7 @@ const MODES: Array<{ id: PronunciationLayoutMode; label: string; icon: React.Com
   { id: "rich",    label: "מורחב",   icon: Rows3 },
   { id: "compact", label: "קומפקטי", icon: Square },
   { id: "grid",    label: "רשת",     icon: LayoutGrid },
+  { id: "row",     label: "אופקי",   icon: Columns3 },
   { id: "tabs",    label: "טאבים",   icon: LayoutPanelLeft },
 ];
 
@@ -48,7 +49,7 @@ export function PronunciationStack({
   const [uncontrolledMode, setUncontrolledMode] = useState<PronunciationLayoutMode>(() => {
     try {
       const v = localStorage.getItem(STORAGE_KEY);
-      if (v === "rich" || v === "compact" || v === "tabs" || v === "grid") return v;
+      if (v === "rich" || v === "compact" || v === "tabs" || v === "grid" || v === "row") return v;
     } catch { /* ignore */ }
     return "rich";
   });
@@ -135,6 +136,21 @@ export function PronunciationStack({
           <div>{loshonKodeshSlot}</div>
           <div>{personalModelSlot}</div>
           <div className="col-span-2">{profileSelectorSlot}</div>
+        </div>
+      )}
+
+      {mode === "row" && (
+        <div
+          className="grid grid-cols-3 gap-1.5 [&>*]:min-w-0
+                     [&_>*>*]:!py-1.5 [&_>*>*]:!px-2
+                     [&_>*>*]:!rounded-lg [&_>*>*]:!h-full
+                     [&_span.font-medium]:!text-[11px]
+                     [&_p.text-xs]:!hidden
+                     [&_.text-\\[10px\\]]:!hidden"
+        >
+          <div className="min-w-0">{loshonKodeshSlot}</div>
+          <div className="min-w-0">{personalModelSlot}</div>
+          <div className="min-w-0">{profileSelectorSlot}</div>
         </div>
       )}
 
