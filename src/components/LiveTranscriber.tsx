@@ -74,6 +74,17 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const setChunkSec = useCallback((v: number) => updatePreference('live_chunk_sec', v), [updatePreference]);
   const chunkSecRef = useRef<number>(DEFAULT_CHUNK_SEC);
   useEffect(() => { chunkSecRef.current = chunkSec; }, [chunkSec]);
+
+  // Full re-transcribe on save: chunks are preview-only; on stop, the whole
+  // recording is sent as one unit and replaces the chunked text.
+  const [fullRetranscribe, setFullRetranscribe] = useState<boolean>(() => {
+    try { return localStorage.getItem('live_full_retranscribe') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('live_full_retranscribe', fullRetranscribe ? '1' : '0'); } catch { /* */ }
+  }, [fullRetranscribe]);
+  const fullRetranscribeRef = useRef(fullRetranscribe);
+  useEffect(() => { fullRetranscribeRef.current = fullRetranscribe; }, [fullRetranscribe]);
   const recognitionRef = useRef<any>(null);
   const [isRefining, setIsRefining] = useState(false);
 
