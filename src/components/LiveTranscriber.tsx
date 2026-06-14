@@ -1208,6 +1208,31 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
             </div>
           )}
 
+          {/* Full re-transcribe toggle — applies to CUDA & Groq */}
+          {(mode === "cuda" || mode === "groq") && (
+            <div className="flex items-center justify-center gap-3 px-2">
+              <div className="flex items-center gap-2 rounded-lg border border-yellow-500/40 bg-yellow-500/5 px-3 py-1.5">
+                <RefreshCw className={`w-4 h-4 ${fullRetranscribe ? 'text-yellow-600' : 'text-muted-foreground'}`} />
+                <Label htmlFor="full-retranscribe" className="text-xs cursor-pointer select-none">
+                  תמלול מחדש מלא בשמירה
+                </Label>
+                <Switch
+                  id="full-retranscribe"
+                  checked={fullRetranscribe}
+                  onCheckedChange={setFullRetranscribe}
+                  className="data-[state=checked]:bg-yellow-500"
+                />
+              </div>
+              <span className="text-[10px] text-muted-foreground max-w-[220px] leading-tight">
+                {fullRetranscribe
+                  ? 'הצ׳אנקים הם רק תצוגה מקדימה. בלחיצה על שמור — כל ההקלטה תתמלל מחדש כיחידה אחת.'
+                  : 'הטקסט שנצבר בצ׳אנקים יישמר כמו שהוא.'}
+              </span>
+            </div>
+          )}
+
+
+
           {/* File name + format selector */}
           <div className="flex items-center gap-2 justify-center flex-wrap">
             <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
