@@ -486,6 +486,52 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     }
   }, [getLiveBiasOptions]);
 
+  // Re-transcribe the entire recording via Groq edge function as one unit.
+  // Used when fullRetranscribe is ON and mode=groq.
+  const runGroqFullRetranscribe = useCallback(async (): Promise<string | null> => {
+    if (allChunksRef.current.length === 0) return null;
+    const pool = apiKeys.groq_keys_pool?.filter(Boolean) || [];
+    const groqKey = pool.length > 0
+      ? pool[Math.floor(Math.random() * pool.length)]
+      : apiKeys.groq_key;
+    if (!groqKey) {
+      toast({ title: "חסר מפתח Groq", description: "לא ניתן לתמלל מחדש את ההקלטה המלאה", variant: "destructive" });
+      return null;
+    }
+    setIsRefining(true);
+    setInterimText("מתמלל מחדש את ההקלטה המלאה...");
+    try {
+      const mimeType = mimeTypeRef.current;
+      const fullBlob = new Blob(allChunksRef.current, { type: mimeType });
+      const fd = new FormData();
+      fd.append("file", fullBlob, "live-full.webm");
+      fd.append("apiKey", groqKey);
+      fd.append("language", "he");
+      fd.append("model", "whisper-large-v3");
+      const bias = getLiveBiasOptions();
+      if (bias.hotwords) fd.append("hotwords", bias.hotwords);
+      if (bias.initialPrompt) fd.append("initial_prompt", bias.initialPrompt);
+
+      const { data, error } = await supabase.functions.invoke('transcribe-groq', { body: fd });
+      if (error) throw new Error(String(error.message || error));
+      const text = (data?.text || '').trim();
+      if (!text) return null;
+      if (Array.isArray(data?.wordTimings) && data.wordTimings.length > 0) {
+        wordTimingsRef.current = data.wordTimings.map((w: any) => ({
+          word: String(w.word), start: Number(w.start) || 0, end: Number(w.end) || 0,
+        }));
+      }
+      toast({ title: "✅ תמלול מלא הושלם", description: `${text.split(/\s+/).length} מילים` });
+      return text;
+    } catch (e: any) {
+      toast({ title: "תמלול מחדש נכשל", description: "משתמש בטקסט המקטעי כגיבוי", variant: "destructive" });
+      return null;
+    } finally {
+      setIsRefining(false);
+      setInterimText("");
+    }
+  }, [apiKeys.groq_key, apiKeys.groq_keys_pool, getLiveBiasOptions]);
+
   const startCuda = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
