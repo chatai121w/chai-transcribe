@@ -14,6 +14,7 @@ import { DiarizationQueueProvider } from "./contexts/DiarizationQueueContext";
 import { CloudPreferencesProvider } from "./hooks/useCloudPreferences";
 import { useLoshonKodeshSync } from "./hooks/useLoshonKodeshSync";
 import { useFeatureFlagsCloudSync } from "./hooks/useFeatureFlagsCloudSync";
+import { useABCompareCartCloudSync } from "./hooks/useABCompareCartCloudSync";
 import { useTheme } from "./hooks/useTheme";
 import { debugLog } from "./lib/debugLogger";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -163,6 +164,7 @@ const PageLoader = ({ label = 'page' }: { label?: string }) => {
 const LoshonKodeshSyncBridge = () => {
   useLoshonKodeshSync();
   useFeatureFlagsCloudSync();
+  useABCompareCartCloudSync();
   return null;
 };
 

@@ -26,10 +26,10 @@ function read(): ABCartItem[] {
   }
 }
 
-function write(items: ABCartItem[]) {
+function write(items: ABCartItem[], opts?: { silent?: boolean }) {
   try {
     localStorage.setItem(KEY, JSON.stringify(items.slice(0, MAX_ITEMS)));
-    window.dispatchEvent(new CustomEvent(EVENT));
+    window.dispatchEvent(new CustomEvent(EVENT, { detail: { silent: !!opts?.silent } }));
   } catch {
     /* ignore */
   }
@@ -59,13 +59,21 @@ export const abCart = {
   count(): number {
     return read().length;
   },
-  subscribe(cb: () => void): () => void {
-    const handler = () => cb();
+  /** Replace entire cart (used by cloud sync). silent=true to avoid push loops. */
+  replaceAll(items: ABCartItem[], opts?: { silent?: boolean }) {
+    write(items, opts);
+  },
+  subscribe(cb: (silent: boolean) => void): () => void {
+    const handler = (e: Event) => {
+      const silent = !!(e as CustomEvent)?.detail?.silent;
+      cb(silent);
+    };
+    const storageHandler = () => cb(false);
     window.addEventListener(EVENT, handler);
-    window.addEventListener("storage", handler);
+    window.addEventListener("storage", storageHandler);
     return () => {
       window.removeEventListener(EVENT, handler);
-      window.removeEventListener("storage", handler);
+      window.removeEventListener("storage", storageHandler);
     };
   },
 };

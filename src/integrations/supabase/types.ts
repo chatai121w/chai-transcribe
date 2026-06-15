@@ -686,6 +686,7 @@ export type Database = {
       }
       user_preferences: {
         Row: {
+          ab_compare_cart_json: Json | null
           active_pronunciation_profile: string
           compare_settings_json: Json | null
           created_at: string
@@ -731,6 +732,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          ab_compare_cart_json?: Json | null
           active_pronunciation_profile?: string
           compare_settings_json?: Json | null
           created_at?: string
@@ -776,6 +778,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          ab_compare_cart_json?: Json | null
           active_pronunciation_profile?: string
           compare_settings_json?: Json | null
           created_at?: string
