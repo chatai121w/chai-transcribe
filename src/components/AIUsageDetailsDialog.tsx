@@ -7,6 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Download, ListFilter } from "lucide-react";
 import { useAIUsage, type AIUsageRow } from "@/hooks/useAIUsage";
 import { calcCostUSD, fmtUSD, fmtILS, loadUsdToIls } from "@/lib/aiPricing";
+import { AIUsageRowDetails } from "./AIUsageRowDetails";
+
 
 interface Props {
   feature?: string;
@@ -134,16 +136,17 @@ export function AIUsageDetailsDialog({ feature, triggerLabel = "פרטים מל�
                 <TableHead className="text-right">פלט</TableHead>
                 <TableHead className="text-right">סה״כ</TableHead>
                 <TableHead className="text-right">עלות</TableHead>
+                <TableHead className="text-right w-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.length === 0 && (
-                <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground text-sm py-8">
+                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground text-sm py-8">
                   {loading ? "טוען…" : "אין נתונים בטווח/סינון שנבחר"}
                 </TableCell></TableRow>
               )}
               {filtered.map((r: AIUsageRow) => {
-                const usd = calcCostUSD(r.model, r.prompt_tokens, r.completion_tokens);
+                const usd = r.cost_usd_snapshot ?? calcCostUSD(r.model, r.prompt_tokens, r.completion_tokens);
                 return (
                   <TableRow key={r.id}>
                     <TableCell className="text-xs whitespace-nowrap" dir="ltr">
@@ -155,9 +158,11 @@ export function AIUsageDetailsDialog({ feature, triggerLabel = "פרטים מל�
                     <TableCell className="text-xs">{(r.completion_tokens||0).toLocaleString()}</TableCell>
                     <TableCell className="text-xs font-semibold">{(r.total_tokens||0).toLocaleString()}</TableCell>
                     <TableCell className="text-xs">{fmtUSD(usd)}</TableCell>
+                    <TableCell><AIUsageRowDetails row={r} /></TableCell>
                   </TableRow>
                 );
               })}
+
             </TableBody>
           </Table>
         </div>
