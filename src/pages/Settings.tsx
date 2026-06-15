@@ -15,6 +15,7 @@ import { OllamaManager } from "@/components/OllamaManager";
 import { ThemeManager } from "@/components/ThemeManager";
 import { getApiKey } from "@/lib/keyCrypto";
 import { ApiKeyUsagePanel } from "@/components/ApiKeyUsagePanel";
+import { AIPricingSettings } from "@/components/AIPricingSettings";
 
 const Settings = () => {
   const { isAuthenticated, logout, isLoading, isAdmin, user } = useAuth();
@@ -48,12 +49,15 @@ const Settings = () => {
   useEffect(() => {
     if (location.hash === '#themes-section') {
       setActiveTab('themes');
-      // Wait for tab content to mount
       setTimeout(() => {
         document.getElementById('themes-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 120);
     }
-  }, [location.hash, location.key]);
+    // Support ?tab=ai-pricing deep link
+    const params = new URLSearchParams(location.search);
+    const tab = params.get('tab');
+    if (tab === 'ai-pricing') setActiveTab('ai-pricing');
+  }, [location.hash, location.key, location.search]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -307,16 +311,24 @@ const Settings = () => {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} dir="rtl" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="api-keys" className="gap-2">
               <Key className="h-4 w-4" />
               מפתחות API
+            </TabsTrigger>
+            <TabsTrigger value="ai-pricing" className="gap-2">
+              <Cpu className="h-4 w-4" />
+              מחירי AI
             </TabsTrigger>
             <TabsTrigger value="themes" className="gap-2">
               <Palette className="h-4 w-4" />
               ערכות נושא
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="ai-pricing">
+            <AIPricingSettings />
+          </TabsContent>
 
           <TabsContent value="themes">
             <Card id="themes-section">

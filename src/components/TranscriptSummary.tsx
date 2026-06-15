@@ -5,6 +5,8 @@ import { Sparkles, Loader2, Copy } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Textarea } from "@/components/ui/textarea";
+import { AIUsageBadge } from "@/components/AIUsageBadge";
+import { notifyUsageUpdated } from "@/hooks/useAIUsage";
 
 interface TranscriptSummaryProps {
   transcript: string;
@@ -35,6 +37,7 @@ export const TranscriptSummary = ({ transcript }: TranscriptSummaryProps) => {
 
       if (data?.summary) {
         setSummary(data.summary);
+        notifyUsageUpdated();
         toast({
           title: "הצלחה",
           description: "הסיכום נוצר בהצלחה",
@@ -66,6 +69,7 @@ export const TranscriptSummary = ({ transcript }: TranscriptSummaryProps) => {
         <div className="flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-primary" />
           <h2 className="text-xl font-semibold text-right">סיכום AI</h2>
+          <AIUsageBadge feature="summary" model="google/gemini-2.5-flash" />
         </div>
         <Button
           onClick={generateSummary}

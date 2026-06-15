@@ -1,6 +1,7 @@
 import "../edge-runtime.d.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { logAIUsage } from "../_shared/aiUsage.ts";
 
 const ALLOWED_ORIGINS = [
   'http://localhost:8080',
@@ -112,6 +113,15 @@ serve(async (req) => {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+
+    // ── Log usage (non-blocking) ──
+    await logAIUsage({
+      supabaseUserClient: userClient,
+      userId: user.id,
+      feature: 'loshon-kodesh',
+      model: aiModel,
+      usage: data.usage,
+    });
 
     return new Response(JSON.stringify({ text: out }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
