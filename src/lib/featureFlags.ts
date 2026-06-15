@@ -124,7 +124,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
   {
     key: "ff_pre_roll_buffer",
     label: "Pre-roll buffer",
-    description: "מקליט 2 שניות לפני לחיצה — מציל את ההתחלה שמיד נחתכת.",
+    description: "הוק זמין (usePreRollBuffer) אך טרם משולב בנגן ההקלטה. דורש עדכון LiveTranscriber.",
     category: "audio",
     defaultOn: false,
     experimental: true,
