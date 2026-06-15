@@ -275,10 +275,15 @@ export default function ABCompare() {
   const [sideB, setSideB] = useState<Side>(EMPTY_SIDE);
   const [syncPlayers, setSyncPlayers] = useState(false);
   const [showUnchanged, setShowUnchanged] = useState(true);
+  const [cartItems, setCartItems] = useState<ABCartItem[]>(() => abCart.list());
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const audioARef = useRef<HTMLAudioElement>(null);
   const audioBRef = useRef<HTMLAudioElement>(null);
   const isMirroring = useRef(false);
+
+  // Subscribe to cart changes
+  useEffect(() => abCart.subscribe(() => setCartItems(abCart.list())), []);
 
   // Restore text-only state (audio Blob URLs don't survive reload).
   useEffect(() => {
@@ -290,6 +295,30 @@ export default function ABCompare() {
       if (parsed?.B) setSideB(s => ({ ...s, label: parsed.B.label || "", text: parsed.B.text || "" }));
     } catch { /* ignore */ }
   }, []);
+
+  // Auto-load from cart when ?fromCart=1
+  useEffect(() => {
+    if (searchParams.get("fromCart") !== "1") return;
+    const items = abCart.list();
+    if (items.length >= 1) {
+      setSideA({ label: items[0].label, text: items[0].text, audioUrl: null, audioName: "" });
+    }
+    if (items.length >= 2) {
+      setSideB({ label: items[1].label, text: items[1].text, audioUrl: null, audioName: "" });
+    }
+    if (items.length > 0) {
+      toast({ title: "נטען מהסל", description: `${Math.min(items.length, 2)} פריטים` });
+    }
+    searchParams.delete("fromCart");
+    setSearchParams(searchParams, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const loadCartItemTo = (item: ABCartItem, side: "A" | "B") => {
+    const next: Side = { label: item.label, text: item.text, audioUrl: null, audioName: "" };
+    if (side === "A") setSideA(next); else setSideB(next);
+    toast({ title: `נטען לצד ${side}`, description: item.label });
+  };
+
 
   useEffect(() => {
     try {
