@@ -917,11 +917,23 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       }
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
 
-      // Build audio blob from all chunks BEFORE cleanup
+      // Build a single playable WAV from all chunks (fixes the bug where the
+      // saved audio only played the first chunk because chunks from separate
+      // MediaRecorder sessions can't simply be concatenated).
       const mimeType = mimeTypeRef.current;
-      const audioBlob = allChunksRef.current.length > 0
-        ? new Blob(allChunksRef.current, { type: mimeType })
-        : undefined;
+      let mergedWav: Blob | null = null;
+      if (allChunksRef.current.length > 0) {
+        try {
+          setInterimText("מאחד את ההקלטה...");
+          mergedWav = await mergeChunksToWav(allChunksRef.current);
+        } catch (e) {
+          console.warn("[LiveTranscriber] mergeChunksToWav failed", e);
+        }
+      }
+      const audioBlob: Blob | undefined = mergedWav
+        ?? (allChunksRef.current.length > 0
+          ? new Blob(allChunksRef.current, { type: mimeType })
+          : undefined);
       const duration = Math.floor((Date.now() - startTimeRef.current - totalPausedMsRef.current) / 1000);
 
       // Full re-transcribe path (toggle ON): the whole recording is sent as one
@@ -933,15 +945,13 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         const prevTimings = [...wordTimingsRef.current];
         wordTimingsRef.current = [];
         const refinedText = mode === "groq"
-          ? await runGroqFullRetranscribe()
-          : await runFinalRefinePass();
+          ? await runGroqFullRetranscribe(mergedWav ?? undefined)
+          : await runFinalRefinePass(mergedWav ?? undefined);
         if (!refinedText && wordTimingsRef.current.length === 0) {
           wordTimingsRef.current = prevTimings;
         }
         const currentFinalText = finalTextRef.current;
         if (refinedText) {
-          // When the user explicitly asked for full re-transcribe, replace.
-          // Otherwise (legacy CUDA refine), keep the prior heuristic.
           merged = fullRetranscribeRef.current
             ? refinedText
             : (refinedText.length >= Math.max(20, Math.floor(currentFinalText.length * 0.8))
