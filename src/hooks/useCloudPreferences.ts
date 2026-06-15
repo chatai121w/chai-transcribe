@@ -23,6 +23,7 @@ export interface UserPreferences {
   folder_sort_asc: boolean;
   player_layout: string;       // 'split' | 'stacked' | 'full'
   tab_settings_json: string;   // JSON string of { visible, order }
+  text_editor_view_json: string; // JSON string of TextEditor view state ({ isPlayerFloating, isEqFloating, ... })
   default_ai_model: string;    // preferred AI editing model
   // CUDA / transcription settings
   cuda_preset: string;         // 'fast' | 'balanced' | 'accurate'
