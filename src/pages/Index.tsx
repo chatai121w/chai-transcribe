@@ -1139,15 +1139,19 @@ const Index = () => {
       for (let offset = 0; offset < keyPool.length; offset++) {
         const idx = (safeStartIndex + offset) % keyPool.length;
         debugLog.info('Google', `Calling edge function with key #${idx + 1}/${keyPool.length}`);
-        const result = await supabase.functions.invoke('transcribe-google', {
-          body: {
-            audio: base64Audio,
-            fileName: file.name,
-            apiKey: keyPool[idx],
-            language: sourceLanguage,
-            targetLanguage: 'he'
-          }
-        });
+        const { withAutoResume } = await import('@/lib/autoResume');
+        const result = await withAutoResume(
+          () => supabase.functions.invoke('transcribe-google', {
+            body: {
+              audio: base64Audio,
+              fileName: file.name,
+              apiKey: keyPool[idx],
+              language: sourceLanguage,
+              targetLanguage: 'he'
+            }
+          }),
+          { onRetry: (a, e) => debugLog.warn('Google', `auto-resume retry #${a}`, e) },
+        );
 
         debugLog.info('Google', 'Response received', { hasData: !!result.data, hasError: !!result.error, keyIndex: idx + 1 });
 
