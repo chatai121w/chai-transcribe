@@ -2654,6 +2654,14 @@ const Index = () => {
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 {copied ? "הועתק!" : "העתק תמלול"}
               </Button>
+              <TextExportMenu
+                getText={() => transcript}
+                filename="תמלול"
+                subject="תמלול"
+                variant="download"
+                size="sm"
+                label="ייצוא / שיתוף"
+              />
               <ShareTranscript transcript={transcript} />
             </div>
             <TranscriptSummary transcript={transcript} />
