@@ -24,6 +24,7 @@ import { isLoshonKodeshEnabled } from "@/lib/loshonKodesh";
 import { buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
 import { usePreRollBuffer } from "@/hooks/usePreRollBuffer";
 import { readFlag } from "@/lib/featureFlags";
+import { mergeChunksToWav } from "@/lib/mergeChunksToWav";
 
 type LiveMode = "browser" | "cuda" | "groq";
 
