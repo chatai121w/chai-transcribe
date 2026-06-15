@@ -39,6 +39,7 @@ import {
   ShoppingBasket,
 } from "lucide-react";
 import { abCart, type ABCartItem } from "@/lib/abCompareCart";
+import { ABCompareLab } from "@/components/ABCompareLab";
 import DiffMatchPatch from "diff-match-patch";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
