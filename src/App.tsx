@@ -295,6 +295,8 @@ const App = () => {
                 <Route path="/lashon-kodesh" element={<ProtectedRoute><LashoKodesh /></ProtectedRoute>} />
                 <Route path="/loshon-kodesh-rules" element={<ProtectedRoute><LoshonKodeshRules /></ProtectedRoute>} />
                 <Route path="/compare-report" element={<ProtectedRoute><CompareReport /></ProtectedRoute>} />
+                <Route path="/features" element={<ProtectedRoute><Features /></ProtectedRoute>} />
+                <Route path="/ab-compare" element={<ProtectedRoute><ABCompare /></ProtectedRoute>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
