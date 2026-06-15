@@ -36,6 +36,8 @@ export interface FeatureFlag {
   experimental?: boolean;
   /** Risk note shown next to the toggle. */
   risk?: string;
+  /** Toggle saves preference but is not yet wired into the pipeline. */
+  comingSoon?: boolean;
 }
 
 export const FEATURE_FLAGS: FeatureFlag[] = [
@@ -115,10 +117,9 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
   {
     key: "ff_agc_auto",
     label: "AGC אוטומטי",
-    description: "מאזן רמת קלט מיקרופון בזמן אמת.",
+    description: "AGC של הדפדפן — מאזן רמת קלט מיקרופון בזמן אמת. כיבוי = רמה גולמית.",
     category: "audio",
-    defaultOn: false,
-    experimental: true,
+    defaultOn: true,
   },
   {
     key: "ff_pre_roll_buffer",
@@ -127,6 +128,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     category: "audio",
     defaultOn: false,
     experimental: true,
+    comingSoon: true,
   },
   {
     key: "ff_audio_quality_check",
@@ -135,6 +137,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     category: "audio",
     defaultOn: false,
     experimental: true,
+    comingSoon: true,
   },
   {
     key: "ff_smart_chunking",
@@ -143,6 +146,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     category: "audio",
     defaultOn: false,
     experimental: true,
+    comingSoon: true,
   },
   {
     key: "ff_auto_resume",
@@ -150,6 +154,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     description: "ממשיך תמלול ענן אחרי ניתוק רשת זמני.",
     category: "transcription",
     defaultOn: true,
+    comingSoon: true,
   },
 
   // ── UI ────────────────────────────────────────────────────

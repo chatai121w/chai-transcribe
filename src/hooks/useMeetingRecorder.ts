@@ -177,11 +177,13 @@ export function useMeetingRecorder(options: {
     const captured: MediaStream[] = [];
 
     const getMic = async () => {
+      const { readFlag } = await import("@/lib/featureFlags");
+      const agcOn = readFlag("ff_agc_auto");
       const s = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
+          autoGainControl: agcOn,
           channelCount: preset.channelCount,
           sampleRate: preset.sampleRate,
         },

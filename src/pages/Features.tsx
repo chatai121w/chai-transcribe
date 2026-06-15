@@ -44,7 +44,12 @@ function FlagRow({ flagKey }: { flagKey: string }) {
               <Sparkles className="h-3 w-3" /> ניסיוני
             </Badge>
           )}
-          {enabled && (
+          {meta.comingSoon && (
+            <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-700 dark:text-amber-300">
+              בקרוב
+            </Badge>
+          )}
+          {enabled && !meta.comingSoon && (
             <Badge variant="secondary" className="text-[10px]">פעיל</Badge>
           )}
         </div>

@@ -179,9 +179,35 @@ const Index = () => {
   }, [serverConnected]);
 
   // Helper: set transcript from engine result (also stores original for diff)
+  // Runs the optional post-processing pipeline (names dict, AI fix) based on flags.
+  const postProcessAbortRef = useRef<AbortController | null>(null);
   const setTranscriptFromEngine = useCallback((text: string) => {
     setTranscript(text);
     setOriginalTranscript(text);
+
+    // Fire post-processing async — UI shows raw text immediately, then upgrades.
+    postProcessAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    postProcessAbortRef.current = ctrl;
+    (async () => {
+      try {
+        const { runPostProcessingPipeline } = await import("@/lib/transcriptionPostProcess");
+        const result = await runPostProcessingPipeline(text, { signal: ctrl.signal });
+        if (ctrl.signal.aborted) return;
+        if (result.changed) {
+          setTranscript(result.text);
+          const appliedSteps = result.steps.filter(s => s.applied).map(s => s.name);
+          if (appliedSteps.length > 0) {
+            toast({
+              title: "✨ תיקונים אוטומטיים הוחלו",
+              description: appliedSteps.includes("ai_post_correction") ? "תיקון AI סופי + מילון שמות" : "מילון שמות פרטיים",
+            });
+          }
+        }
+      } catch (err) {
+        debugLog.warn("Index", "Post-process pipeline failed", err);
+      }
+    })();
   }, []);
 
   // Helper to track the start time of each transcription for analytics
