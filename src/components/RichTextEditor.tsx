@@ -775,6 +775,116 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
               </div>
             </PopoverContent>
           </Popover>
+
+          {/* הורד הכל (ZIP — תמלול + אודיו) */}
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={handleDownloadBundle}
+                >
+                  <Package className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>הורד תיקייה — תמלול + אודיו (ZIP)</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          {/* סל השוואת A/B */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 px-2 gap-1 relative" title="סל השוואת A/B">
+                <GitCompare className="w-4 h-4" />
+                {cartItems.length > 0 && (
+                  <Badge variant="secondary" className="h-4 min-w-4 px-1 text-[10px]">
+                    {cartItems.length}
+                  </Badge>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-2" dir="rtl" align="end">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold">סל השוואה ({cartItems.length})</div>
+                  {cartItems.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-[11px] text-destructive"
+                      onClick={() => abCart.clear()}
+                    >
+                      רוקן סל
+                    </Button>
+                  )}
+                </div>
+
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="w-full h-8 gap-1 text-xs"
+                  onClick={handleAddToCart}
+                  disabled={!plainText.trim()}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  הוסף את התמלול הנוכחי
+                </Button>
+
+                {cartItems.length > 0 && (
+                  <div className="max-h-48 overflow-y-auto space-y-1 border-t pt-2">
+                    {cartItems.map((item) => (
+                      <div key={item.id} className="flex items-center gap-1 text-xs bg-muted/40 rounded px-2 py-1">
+                        <span className="flex-1 truncate" title={item.label}>{item.label}</span>
+                        <span className="text-muted-foreground text-[10px]">
+                          {item.text.split(/\s+/).filter(Boolean).length} מ׳
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => abCart.remove(item.id)}
+                        >
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <RouterLink to="/ab-compare?fromCart=1" className="block">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full h-8 gap-1 text-xs"
+                    disabled={cartItems.length < 2}
+                  >
+                    <GitCompare className="w-3.5 h-3.5" />
+                    פתח השוואה
+                  </Button>
+                </RouterLink>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* קישור ישיר לעמוד ההשוואה */}
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <RouterLink to="/ab-compare">
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                    <ExternalLink className="w-4 h-4" />
+                  </Button>
+                </RouterLink>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>פתח עמוד השוואת A/B</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
 
         {/* === חיפוש === */}
