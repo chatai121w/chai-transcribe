@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card } from "@/components/ui/card";
 import { CollapsibleWidget } from "@/components/ui/CollapsibleWidget";
 import { useCloudVersions, type CloudVersion } from "@/hooks/useCloudVersions";
+import { TextExportMenu } from "@/components/TextExportMenu";
 import { formatDistanceToNow } from "date-fns";
 import { he } from "date-fns/locale";
 import DiffMatchPatch from "diff-match-patch";
