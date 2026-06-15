@@ -955,6 +955,22 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     });
   }, [sendChunk]);
 
+  // Stop the parallel backup recorder and resolve once the trailing
+  // dataavailable lands. Returns the full contiguous webm blob, or null.
+  const stopBackupRecorder = useCallback(async (): Promise<Blob | null> => {
+    const rec = backupRecorderRef.current;
+    const mime = mimeTypeRef.current;
+    if (rec && rec.state !== "inactive") {
+      await new Promise<void>((resolve) => {
+        const done = () => resolve();
+        try { rec.onstop = done; rec.stop(); } catch { resolve(); }
+      });
+    }
+    backupRecorderRef.current = null;
+    if (backupChunksRef.current.length === 0) return null;
+    return new Blob(backupChunksRef.current, { type: mime });
+  }, []);
+
   const stopListening = useCallback(async () => {
     if (mode === "cuda" || mode === "groq") {
       // Stop the chunk timer first so no new cycles trigger during flush
@@ -969,22 +985,37 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
           mediaRecorderRef.current.stop();
         }
       }
+
+      // ─── Preferred path: use the parallel BACKUP recorder's single file ───
+      // This is one contiguous MediaRecorder session → no chunk-stitching bugs,
+      // the player and waveform get a real, seekable file, and we hand the same
+      // blob to the re-transcribe pass for perfect alignment.
+      setInterimText("שומר הקלטת גיבוי...");
+      let backupBlob: Blob | null = null;
+      try {
+        backupBlob = await stopBackupRecorder();
+      } catch (e) {
+        console.warn("[LiveTranscriber] backup stop failed", e);
+      }
+
+      // Only stop tracks AFTER both recorders have stopped (so backup gets its
+      // final dataavailable). Backup already stopped above; safe to release mic.
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
 
-      // Build a single playable WAV from all chunks (fixes the bug where the
-      // saved audio only played the first chunk because chunks from separate
-      // MediaRecorder sessions can't simply be concatenated).
+      // Legacy fallback: stitch+decode the per-chunk blobs into a WAV. Only
+      // used when the backup recorder failed to start or produced nothing.
       const mimeType = mimeTypeRef.current;
       let mergedWav: Blob | null = null;
-      if (allChunksRef.current.length > 0) {
+      if (!backupBlob && allChunksRef.current.length > 0) {
         try {
-          setInterimText("מאחד את ההקלטה...");
+          setInterimText("מאחד את ההקלטה (fallback)...");
           mergedWav = await mergeChunksToWav(allChunksRef.current);
         } catch (e) {
           console.warn("[LiveTranscriber] mergeChunksToWav failed", e);
         }
       }
-      const audioBlob: Blob | undefined = mergedWav
+      const audioBlob: Blob | undefined = backupBlob
+        ?? mergedWav
         ?? (allChunksRef.current.length > 0
           ? new Blob(allChunksRef.current, { type: mimeType })
           : undefined);
