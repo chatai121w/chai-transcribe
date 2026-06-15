@@ -413,10 +413,20 @@ export function applyLoshonKodeshReplacements(text: string): string {
     if (categories[cat] === false) continue;
 
     const whole = r.wholeWord !== false;
-    const pattern = whole
-      ? new RegExp(`(?<![\\u0590-\\u05FFA-Za-z0-9])${escapeRegex(r.from)}(?![\\u0590-\\u05FFA-Za-z0-9])`, 'g')
-      : new RegExp(escapeRegex(r.from), 'g');
-    out = out.replace(pattern, r.to);
+    if (whole) {
+      // Allow optional Hebrew one-letter prefix (ו ה ב ל מ ש כ) — repeated up to 2 (e.g. וה, ול, וב, וכ, ומ, שה)
+      // and optional Hebrew suffix letters (ה י ו ת ם ן ך) up to 3 (covers feminine ה, plural ים/ות, possessive י/ך/ו, etc.)
+      // Boundary outside still blocks mid-word false matches against unrelated Latin/digits.
+      const prefix = '([והבלמשכ]{0,2})';
+      const suffix = '([היותםןךנ]{0,3})';
+      const pattern = new RegExp(
+        `(?<![A-Za-z0-9\\u05D0-\\u05EA])${prefix}${escapeRegex(r.from)}${suffix}(?![A-Za-z0-9])`,
+        'g'
+      );
+      out = out.replace(pattern, (_m, pre: string, suf: string) => `${pre || ''}${r.to}${suf || ''}`);
+    } else {
+      out = out.replace(new RegExp(escapeRegex(r.from), 'g'), r.to);
+    }
   }
   return out;
 }
