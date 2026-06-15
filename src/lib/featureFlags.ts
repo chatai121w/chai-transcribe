@@ -123,12 +123,11 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
   },
   {
     key: "ff_pre_roll_buffer",
-    label: "Pre-roll buffer",
-    description: "הוק זמין (usePreRollBuffer) אך טרם משולב בנגן ההקלטה. דורש עדכון LiveTranscriber.",
+    label: "Pre-roll buffer (2 שניות לפני לחיצה)",
+    description: "שומר חלון מתגלגל של 2 שניות אודיו לפני שלחצת הקלט — כך לא מפספסים את ההברה הראשונה. פעיל ב-Live (מצב Groq).",
     category: "audio",
     defaultOn: false,
     experimental: true,
-    comingSoon: true,
   },
   {
     key: "ff_audio_quality_check",
