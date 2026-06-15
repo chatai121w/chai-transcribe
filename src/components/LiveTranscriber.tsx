@@ -865,6 +865,12 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "paused") {
       mediaRecorderRef.current.resume();
     }
+    // Resume backup recorder
+    try {
+      if (backupRecorderRef.current && backupRecorderRef.current.state === "paused") {
+        backupRecorderRef.current.resume();
+      }
+    } catch { /* */ }
     // Restart timer
     timerIntervalRef.current = setInterval(() => {
       setElapsedSec(Math.floor((Date.now() - startTimeRef.current - totalPausedMsRef.current) / 1000));
