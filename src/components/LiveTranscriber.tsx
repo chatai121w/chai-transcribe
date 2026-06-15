@@ -64,6 +64,7 @@ interface LiveTranscriberProps {
 export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveTranscriberProps) => {
   const { keys: apiKeys } = useCloudApiKeys();
   const { preferences, updatePreference, isLoaded: prefsLoaded } = useCloudPreferences();
+  const preRoll = usePreRollBuffer(2);
   const [isListening, setIsListening] = useState(false);
   const isListeningRef = useRef(false);
   const [isPaused, setIsPaused] = useState(false);
