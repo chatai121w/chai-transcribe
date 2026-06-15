@@ -240,6 +240,10 @@ function diffWords(
 /**
  * Learn from corrections: merge new corrections into the stored dictionary.
  * Increases frequency and confidence for repeated corrections.
+ *
+ * Side effect: for each correction that looks like an Ashkenazi→standard
+ * Hebrew pattern, also push a suggestion onto the Loshon Kodesh queue
+ * (the user can accept it in the LK rules page with one click).
  */
 export function learnFromCorrections(newCorrections: CorrectionEntry[]): void {
   if (newCorrections.length === 0) return;
@@ -271,6 +275,14 @@ export function learnFromCorrections(newCorrections: CorrectionEntry[]): void {
         lastUsed: now,
       });
     }
+
+    // ── Auto-feed Loshon Kodesh suggestion queue ──
+    // Lazy require to avoid circular deps at module load.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      const lk = require('@/lib/loshonKodesh');
+      lk.addLkSuggestion?.(nc.original, nc.corrected, { source: 'correction-learning' });
+    } catch { /* ignore — lib may not be available in non-browser tests */ }
   }
 
   saveCorrections(existing);
