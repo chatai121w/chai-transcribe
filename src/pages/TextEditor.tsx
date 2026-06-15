@@ -1114,13 +1114,14 @@ const TextEditor = () => {
             </Button>
             <TextExportMenu
               getText={() => text}
-              filename={transcript?.title || 'תמלול'}
-              subject={transcript?.title || 'תמלול'}
+              filename={audioFileName || 'תמלול'}
+              subject={audioFileName || 'תמלול'}
               size="sm"
               label="ייצוא/שיתוף"
             />
           </div>
         )}
+
 
 
         {/* Main Content */}
