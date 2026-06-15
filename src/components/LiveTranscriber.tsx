@@ -503,8 +503,8 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
   // Re-transcribe the entire recording via Groq edge function as one unit.
   // Used when fullRetranscribe is ON and mode=groq.
-  const runGroqFullRetranscribe = useCallback(async (): Promise<string | null> => {
-    if (allChunksRef.current.length === 0) return null;
+  const runGroqFullRetranscribe = useCallback(async (overrideBlob?: Blob): Promise<string | null> => {
+    if (!overrideBlob && allChunksRef.current.length === 0) return null;
     const pool = apiKeys.groq_keys_pool?.filter(Boolean) || [];
     const groqKey = pool.length > 0
       ? pool[Math.floor(Math.random() * pool.length)]
@@ -517,9 +517,10 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     setInterimText("מתמלל מחדש את ההקלטה המלאה...");
     try {
       const mimeType = mimeTypeRef.current;
-      const fullBlob = new Blob(allChunksRef.current, { type: mimeType });
+      const fullBlob = overrideBlob ?? new Blob(allChunksRef.current, { type: mimeType });
+      const fileExt = overrideBlob ? "wav" : "webm";
       const fd = new FormData();
-      fd.append("file", fullBlob, "live-full.webm");
+      fd.append("file", fullBlob, `live-full.${fileExt}`);
       fd.append("apiKey", groqKey);
       fd.append("language", "he");
       fd.append("model", "whisper-large-v3");
