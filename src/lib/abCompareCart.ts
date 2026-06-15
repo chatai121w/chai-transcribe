@@ -26,10 +26,10 @@ function read(): ABCartItem[] {
   }
 }
 
-function write(items: ABCartItem[]) {
+function write(items: ABCartItem[], opts?: { silent?: boolean }) {
   try {
     localStorage.setItem(KEY, JSON.stringify(items.slice(0, MAX_ITEMS)));
-    window.dispatchEvent(new CustomEvent(EVENT));
+    window.dispatchEvent(new CustomEvent(EVENT, { detail: { silent: !!opts?.silent } }));
   } catch {
     /* ignore */
   }
