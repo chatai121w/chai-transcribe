@@ -97,16 +97,16 @@ export async function splitFileSmart(
 
     // Re-encode each segment as WAV
     const out: AudioChunk[] = [];
-    for (let i = 0; i < cuts.length - 1; i += 1) {
+    const totalChunks = cuts.length - 1;
+    for (let i = 0; i < totalChunks; i += 1) {
       const slice = ch0.subarray(cuts[i], cuts[i + 1]);
       const wav = encodeWav(slice, sr);
       out.push({
         index: i,
+        total: totalChunks,
         blob: wav,
-        start: cuts[i] / sr,
-        end: cuts[i + 1] / sr,
       });
-      onProgress?.((i + 1) / (cuts.length - 1));
+      onProgress?.((i + 1) / totalChunks);
     }
     return out;
   } catch {
