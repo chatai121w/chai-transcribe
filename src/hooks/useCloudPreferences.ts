@@ -482,6 +482,8 @@ const useCloudPreferencesImpl = () => {
       try { customThemesParsed = JSON.parse(updated.custom_themes); } catch {}
       let tabSettingsParsed: unknown = null;
       try { if (updated.tab_settings_json) tabSettingsParsed = JSON.parse(updated.tab_settings_json); } catch {}
+      let textEditorViewParsed: unknown = {};
+      try { if (updated.text_editor_view_json) textEditorViewParsed = JSON.parse(updated.text_editor_view_json); } catch {}
 
       const { data: row, error } = await supabase
         .from('user_preferences')
