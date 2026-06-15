@@ -210,6 +210,133 @@ export default function LoshonKodeshRules() {
         </div>
       </Card>
 
+      {/* Cloud sync indicator + Profile selector */}
+      <Card className="p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Cloud className="w-4 h-4 text-primary" />
+            <div>
+              <div className="font-medium">פרופיל / ערכת כללים</div>
+              <div className="text-xs text-muted-foreground">בחירת ערכה דורסת את הפרומפט/הוטוורדס/שמות/החלפות. הכל מסתנכרן לענן.</div>
+            </div>
+          </div>
+          <Select value={profileId} onValueChange={(v) => {
+            const next = v as LkProfileId;
+            setProfileId(next);
+            setLoshonKodeshProfileId(next);
+            refreshAll();
+            toast({ title: next === 'custom' ? 'מותאם אישית' : `נטענה ערכה: ${LK_PROFILE_LABELS[next]}` });
+          }}>
+            <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(Object.keys(LK_PROFILE_LABELS) as LkProfileId[]).map(id => (
+                <SelectItem key={id} value={id}>{LK_PROFILE_LABELS[id]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </Card>
+
+      {/* Pending auto-learned suggestions */}
+      {suggestions.length > 0 && (
+        <Card className="p-4 space-y-3 border-primary/40">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-primary" />
+            <Label className="font-semibold">הצעות שזוהו אוטומטית ({suggestions.length})</Label>
+          </div>
+          <p className="text-xs text-muted-foreground">תיקונים שביצעת בעורך — אישור יוסיף אותם לרשימה הקבועה.</p>
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            {suggestions.map((s) => (
+              <div key={`${s.from}=>${s.to}`} className="grid grid-cols-[1fr,auto,1fr,auto,auto,auto] gap-2 items-center bg-muted/30 rounded p-2 text-sm">
+                <span dir="rtl" className="truncate">{s.from}</span>
+                <span className="text-muted-foreground">←</span>
+                <span dir="rtl" className="truncate font-medium">{s.to}</span>
+                <Badge variant="outline" className="text-xs">{s.kind === 'name' ? 'שם' : 'מילה'}</Badge>
+                <Button size="icon" variant="ghost" onClick={() => { acceptLkSuggestion(s); refreshAll(); }}>
+                  <Check className="w-4 h-4 text-primary" />
+                </Button>
+                <Button size="icon" variant="ghost" onClick={() => { dismissLkSuggestion(s.from, s.to); refreshAll(); }}>
+                  <X className="w-4 h-4 text-destructive" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Names dictionary */}
+      <Card className="p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-primary" />
+            <Label className="font-semibold">שמות פרטיים ({names.length})</Label>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => { setNames(DEFAULT_LOSHON_KODESH_NAMES); setLoshonKodeshNames(DEFAULT_LOSHON_KODESH_NAMES); toast({ title: 'אופס לברירת מחדל' }); }}>
+            <RotateCcw className="w-4 h-4 ml-1" />ברירת מחדל
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">מילון נפרד לשמות (מויישע→משה, יענקל→יעקב). רץ ראשון, לפני ההחלפות הכלליות.</p>
+        <div className="grid grid-cols-1 md:grid-cols-[1fr,1fr,auto] gap-2 items-center">
+          <Input value={newNameFrom} onChange={(e) => setNewNameFrom(e.target.value)} placeholder="הגייה (מויישע)" dir="rtl" />
+          <Input value={newNameTo} onChange={(e) => setNewNameTo(e.target.value)} placeholder="שם תקני (משה)" dir="rtl" />
+          <Button onClick={() => {
+            const f = newNameFrom.trim(); const t = newNameTo.trim();
+            if (!f || !t) { toast({ title: 'מלא את שני השדות' }); return; }
+            const next = [...names, { from: f, to: t }];
+            setNames(next); setLoshonKodeshNames(next);
+            setNewNameFrom(''); setNewNameTo('');
+          }}><Plus className="w-4 h-4 ml-1" />הוסף</Button>
+        </div>
+        <div className="space-y-1 max-h-72 overflow-y-auto">
+          {names.map((n, i) => (
+            <div key={i} className="grid grid-cols-[1fr,1fr,auto] gap-2 items-center bg-muted/20 rounded p-2">
+              <Input value={n.from} onChange={(e) => { const next = names.map((x, idx) => idx === i ? { ...x, from: e.target.value } : x); setNames(next); setLoshonKodeshNames(next); }} dir="rtl" className="h-8" />
+              <Input value={n.to} onChange={(e) => { const next = names.map((x, idx) => idx === i ? { ...x, to: e.target.value } : x); setNames(next); setLoshonKodeshNames(next); }} dir="rtl" className="h-8" />
+              <Button variant="ghost" size="icon" onClick={() => { const next = names.filter((_, idx) => idx !== i); setNames(next); setLoshonKodeshNames(next); }}>
+                <Trash2 className="w-4 h-4 text-destructive" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* AI Polish settings */}
+      <Card className="p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Brain className="w-4 h-4 text-primary" />
+            <div>
+              <div className="font-medium">שלב AI סופי</div>
+              <div className="text-xs text-muted-foreground">מריץ מודל AI על הטקסט הסופי לתיקון הגייה אשכנזית שנשארה. רץ רק כשמצב לשון הקודש פעיל.</div>
+            </div>
+          </div>
+          <Switch checked={aiPolish.enabled} onCheckedChange={(v) => { const next = { ...aiPolish, enabled: v }; setAiPolish(next); setLkAiPolishSettings(next); }} />
+        </div>
+        {aiPolish.enabled && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3 border-t">
+            <div>
+              <Label className="text-xs">מנוע</Label>
+              <Select value={aiPolish.engine} onValueChange={(v) => { const next = { ...aiPolish, engine: v as LkAiPolishSettings['engine'] }; setAiPolish(next); setLkAiPolishSettings(next); }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gemini">Gemini (ענן)</SelectItem>
+                  <SelectItem value="ollama">Ollama (מקומי)</SelectItem>
+                  <SelectItem value="off">כבוי</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">מודל</Label>
+              <Input value={aiPolish.model} onChange={(e) => { const next = { ...aiPolish, model: e.target.value }; setAiPolish(next); setLkAiPolishSettings(next); }} placeholder={aiPolish.engine === 'ollama' ? 'llama3' : 'gemini-2.5-flash'} dir="ltr" />
+            </div>
+            <div className="md:col-span-2">
+              <Label className="text-xs">פרומפט מותאם (אופציונלי)</Label>
+              <Textarea value={aiPolish.customPrompt || ''} onChange={(e) => { const next = { ...aiPolish, customPrompt: e.target.value }; setAiPolish(next); setLkAiPolishSettings(next); }} placeholder="ריק = פרומפט ברירת מחדל" dir="rtl" className="min-h-[80px] text-sm" />
+            </div>
+          </div>
+        )}
+      </Card>
+
       {/* Prompt */}
       <Card className="p-4 space-y-2">
         <div className="flex items-center justify-between">
