@@ -39,6 +39,7 @@ import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Column
 import { uploadToDrive } from "@/components/GoogleDriveBrowser";
 import { DriveFolderPicker } from "@/components/DriveFolderPicker";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
+import { TextExportMenu } from "@/components/TextExportMenu";
 import { supabase } from "@/integrations/supabase/client";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
 import { toast } from "@/hooks/use-toast";
