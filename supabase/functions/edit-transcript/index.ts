@@ -1,6 +1,7 @@
 import "../edge-runtime.d.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { logAIUsage } from "../_shared/aiUsage.ts";
 
 const ALLOWED_ORIGINS = [
   'http://localhost:8080',
@@ -151,6 +152,13 @@ serve(async (req) => {
         if (response.ok) {
           const data = await response.json();
           editedText = data.choices?.[0]?.message?.content;
+          await logAIUsage({
+            supabaseUserClient: userClient,
+            userId: user.id,
+            feature: `edit:${action}`,
+            model: aiModel,
+            usage: data.usage,
+          });
         } else if (response.status === 402 || response.status === 429) {
           console.warn(`Lovable AI returned ${response.status}, falling back to user key`);
           editedText = await callDbProxy();
