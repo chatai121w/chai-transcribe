@@ -457,6 +457,55 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
     toast({ title: "ייצוא הצליח", description: "קובץ SRT (כתוביות) הורד" });
   };
 
+  // === הורדת חבילה (ZIP) — תמלול + אודיו ===
+  const handleDownloadBundle = useCallback(async () => {
+    try {
+      const baseName = (transcriptName || audioFileName || 'transcript')
+        .replace(/\.[^.]+$/, '')
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .trim() || 'transcript';
+
+      const JSZip = (await import('jszip')).default;
+      const { saveAs } = await import('file-saver');
+      const zip = new JSZip();
+      const folder = zip.folder(baseName)!;
+
+      folder.file(`${baseName}.txt`, plainText || '');
+
+      if (audioBlob) {
+        const type = audioBlob.type || '';
+        const ext = type.includes('webm') ? 'webm'
+          : type.includes('wav') ? 'wav'
+          : type.includes('mp3') || type.includes('mpeg') ? 'mp3'
+          : type.includes('ogg') ? 'ogg'
+          : type.includes('m4a') || type.includes('mp4') ? 'm4a'
+          : (audioFileName?.split('.').pop() || 'audio');
+        folder.file(`${baseName}.${ext}`, audioBlob);
+      }
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      saveAs(blob, `${baseName}.zip`);
+      toast({
+        title: "הורדה הצליחה",
+        description: audioBlob ? "תמלול + אודיו נשמרו ב-ZIP" : "תמלול נשמר (אין אודיו זמין)",
+      });
+    } catch (err) {
+      console.error('[Bundle download]', err);
+      toast({ title: "שגיאת הורדה", description: String((err as Error)?.message || err), variant: "destructive" });
+    }
+  }, [transcriptName, audioFileName, audioBlob, plainText]);
+
+  // === סל השוואת A/B ===
+  const [cartItems, setCartItems] = useState<ABCartItem[]>(() => abCart.list());
+  useEffect(() => abCart.subscribe(() => setCartItems(abCart.list())), []);
+
+  const handleAddToCart = useCallback(() => {
+    const label = (transcriptName || audioFileName || `תמלול ${new Date().toLocaleTimeString('he-IL')}`).replace(/\.[^.]+$/, '');
+    abCart.add(label, plainText);
+    toast({ title: "נוסף לסל השוואה", description: label });
+  }, [transcriptName, audioFileName, plainText]);
+
+
   const ToolBtn = ({ icon: Icon, label, onClick, active, disabled }: {
     icon: React.ElementType; label: string; onClick: () => void; active?: boolean; disabled?: boolean;
   }) => (
