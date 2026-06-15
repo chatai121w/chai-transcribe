@@ -8,6 +8,7 @@ import { Users, Upload, Loader2, Globe, Cloud, Copy, Download, Play, Square } fr
 import { supabase } from "@/integrations/supabase/client";
 import { diarizeInBrowser, type DiarizationProgress } from "@/utils/browserDiarization";
 import { useCloudApiKeys } from "@/hooks/useCloudApiKeys";
+import { TextExportMenu } from "@/components/TextExportMenu";
 
 interface DiarizedSegment {
   text: string;
