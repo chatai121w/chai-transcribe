@@ -12,8 +12,12 @@ import {
   AlignRight, AlignCenter, AlignLeft, AlignJustify, 
   Palette, List, ListOrdered, Eraser,
   Maximize2, Minimize2, SplitSquareVertical, Eye,
-  Search, X, ChevronDown, SpellCheck, Save, Trash2
+  Search, X, ChevronDown, SpellCheck, Save, Trash2,
+  Package, GitCompare, ExternalLink, Plus
 } from "lucide-react";
+import { Link as RouterLink } from "react-router-dom";
+import { Badge } from "@/components/ui/badge";
+import { abCart, type ABCartItem } from "@/lib/abCompareCart";
 import { toast } from "@/hooks/use-toast";
 import { FloatingFormatToolbar } from "@/components/FloatingFormatToolbar";
 import {
