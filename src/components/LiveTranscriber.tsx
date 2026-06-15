@@ -148,6 +148,17 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const audioLevelSamplesRef = useRef<number[]>([]);
   const finalTextRef = useRef("");
 
+  // ─── Parallel BACKUP recorder ───
+  // A second MediaRecorder runs continuously on the SAME MediaStream and
+  // produces a single, contiguous webm — eliminating the need to stitch
+  // chunks from separate recorder sessions. Also auto-persisted to IndexedDB
+  // every 30s for crash-safety.
+  const backupRecorderRef = useRef<MediaRecorder | null>(null);
+  const backupChunksRef = useRef<Blob[]>([]);
+  const backupSeqRef = useRef(0);
+  const backupSessionIdRef = useRef<string>("");
+  const BACKUP_TIMESLICE_MS = 30_000;
+
   // Groq word-timestamp accumulation
   const cumulativeAudioSecRef = useRef(0);
   const currentGroqRecorderRef = useRef<{
