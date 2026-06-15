@@ -211,6 +211,7 @@ export function TranscriptVersionsPanel({ transcriptId, currentText, onApplyVers
                       <RotateCcw className="w-3 h-3 ml-1" />טען
                     </Button>
                   </div>
+                </div>
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground mb-2">
                   <Clock className="w-3 h-3" />
                   <span>{formatDistanceToNow(new Date(v.created_at), { addSuffix: true, locale: he })}</span>
