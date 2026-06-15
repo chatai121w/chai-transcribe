@@ -26,6 +26,7 @@ import { extractAudioSegment, probeAudioDurationSec } from "@/lib/audioSegment";
 import type { SyncAudioPlayerRef, WordTiming } from "@/components/SyncAudioPlayer";
 import { DiarizationNotes } from "@/components/DiarizationNotes";
 import { DiarizationAI } from "@/components/DiarizationAI";
+import { TextExportMenu } from "@/components/TextExportMenu";
 import {
   detectOverlaps,
   exportAsVTT,
