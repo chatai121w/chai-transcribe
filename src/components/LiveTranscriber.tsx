@@ -26,6 +26,7 @@ import { buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } 
 import { usePreRollBuffer } from "@/hooks/usePreRollBuffer";
 import { readFlag } from "@/lib/featureFlags";
 import { mergeChunksToWav } from "@/lib/mergeChunksToWav";
+import { backupAppendChunk, backupClearSession } from "@/lib/backupAudioStore";
 
 type LiveMode = "browser" | "cuda" | "groq";
 
