@@ -313,7 +313,7 @@ export default function LoshonKodeshRules({ embeddedText, defaultTab = 'rules', 
       </Card>
 
       {/* Tabs */}
-      <Tabs defaultValue="rules" className="w-full">
+      <Tabs defaultValue={defaultTab} className="w-full">
         <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="rules"><Settings2 className="w-4 h-4 ml-1" />כללים</TabsTrigger>
           <TabsTrigger value="dicts"><BookOpen className="w-4 h-4 ml-1" />מילונים</TabsTrigger>
