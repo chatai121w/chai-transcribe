@@ -24,6 +24,7 @@ import { isLoshonKodeshEnabled } from "@/lib/loshonKodesh";
 import { buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
 import { usePreRollBuffer } from "@/hooks/usePreRollBuffer";
 import { readFlag } from "@/lib/featureFlags";
+import { mergeChunksToWav } from "@/lib/mergeChunksToWav";
 
 type LiveMode = "browser" | "cuda" | "groq";
 
@@ -455,16 +456,17 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     }
   }, [appendDedupText, mode, apiKeys.groq_key, apiKeys.groq_keys_pool, getLiveBiasOptions]);
 
-  const runFinalRefinePass = useCallback(async (): Promise<string | null> => {
-    if (allChunksRef.current.length === 0) return null;
+  const runFinalRefinePass = useCallback(async (overrideBlob?: Blob): Promise<string | null> => {
+    if (!overrideBlob && allChunksRef.current.length === 0) return null;
     setIsRefining(true);
     setInterimText("משפר דיוק — refine pass...");
     try {
       const mimeType = mimeTypeRef.current;
-      const fullBlob = new Blob(allChunksRef.current, { type: mimeType });
+      const fullBlob = overrideBlob ?? new Blob(allChunksRef.current, { type: mimeType });
+      const fileExt = overrideBlob ? "wav" : "webm";
 
       const formData = new FormData();
-      formData.append("file", fullBlob, "live-final.webm");
+      formData.append("file", fullBlob, `live-final.${fileExt}`);
       formData.append("language", "he");
       formData.append("final", "1");
       const bias = getLiveBiasOptions();
@@ -501,8 +503,8 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
   // Re-transcribe the entire recording via Groq edge function as one unit.
   // Used when fullRetranscribe is ON and mode=groq.
-  const runGroqFullRetranscribe = useCallback(async (): Promise<string | null> => {
-    if (allChunksRef.current.length === 0) return null;
+  const runGroqFullRetranscribe = useCallback(async (overrideBlob?: Blob): Promise<string | null> => {
+    if (!overrideBlob && allChunksRef.current.length === 0) return null;
     const pool = apiKeys.groq_keys_pool?.filter(Boolean) || [];
     const groqKey = pool.length > 0
       ? pool[Math.floor(Math.random() * pool.length)]
@@ -515,9 +517,10 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     setInterimText("מתמלל מחדש את ההקלטה המלאה...");
     try {
       const mimeType = mimeTypeRef.current;
-      const fullBlob = new Blob(allChunksRef.current, { type: mimeType });
+      const fullBlob = overrideBlob ?? new Blob(allChunksRef.current, { type: mimeType });
+      const fileExt = overrideBlob ? "wav" : "webm";
       const fd = new FormData();
-      fd.append("file", fullBlob, "live-full.webm");
+      fd.append("file", fullBlob, `live-full.${fileExt}`);
       fd.append("apiKey", groqKey);
       fd.append("language", "he");
       fd.append("model", "whisper-large-v3");
@@ -914,11 +917,23 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       }
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
 
-      // Build audio blob from all chunks BEFORE cleanup
+      // Build a single playable WAV from all chunks (fixes the bug where the
+      // saved audio only played the first chunk because chunks from separate
+      // MediaRecorder sessions can't simply be concatenated).
       const mimeType = mimeTypeRef.current;
-      const audioBlob = allChunksRef.current.length > 0
-        ? new Blob(allChunksRef.current, { type: mimeType })
-        : undefined;
+      let mergedWav: Blob | null = null;
+      if (allChunksRef.current.length > 0) {
+        try {
+          setInterimText("מאחד את ההקלטה...");
+          mergedWav = await mergeChunksToWav(allChunksRef.current);
+        } catch (e) {
+          console.warn("[LiveTranscriber] mergeChunksToWav failed", e);
+        }
+      }
+      const audioBlob: Blob | undefined = mergedWav
+        ?? (allChunksRef.current.length > 0
+          ? new Blob(allChunksRef.current, { type: mimeType })
+          : undefined);
       const duration = Math.floor((Date.now() - startTimeRef.current - totalPausedMsRef.current) / 1000);
 
       // Full re-transcribe path (toggle ON): the whole recording is sent as one
@@ -930,15 +945,13 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         const prevTimings = [...wordTimingsRef.current];
         wordTimingsRef.current = [];
         const refinedText = mode === "groq"
-          ? await runGroqFullRetranscribe()
-          : await runFinalRefinePass();
+          ? await runGroqFullRetranscribe(mergedWav ?? undefined)
+          : await runFinalRefinePass(mergedWav ?? undefined);
         if (!refinedText && wordTimingsRef.current.length === 0) {
           wordTimingsRef.current = prevTimings;
         }
         const currentFinalText = finalTextRef.current;
         if (refinedText) {
-          // When the user explicitly asked for full re-transcribe, replace.
-          // Otherwise (legacy CUDA refine), keep the prior heuristic.
           merged = fullRetranscribeRef.current
             ? refinedText
             : (refinedText.length >= Math.max(20, Math.floor(currentFinalText.length * 0.8))
