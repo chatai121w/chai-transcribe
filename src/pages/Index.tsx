@@ -1266,8 +1266,12 @@ const Index = () => {
       const profileHotwordsStr = buildProfileHotwords();
       const profileInitPrompt = getProfileInitialPrompt();
       const profileForcesLk = isProfileLoshonKodesh();
-      const mergedCudaHotwords =
-        [preferences.cuda_hotwords || '', profileHotwordsStr].filter(Boolean).join(', ') || undefined;
+      const lkOn = isLoshonKodeshEnabled() || profileForcesLk;
+      // When LK is on, merge user-edited LK hotwords + prefer LK prompt
+      const baseHotwords = [preferences.cuda_hotwords || '', profileHotwordsStr].filter(Boolean).join(', ');
+      const mergedCudaHotwords = lkOn
+        ? (buildLoshonKodeshHotwords(baseHotwords) || undefined)
+        : (baseHotwords || undefined);
       const cudaOptions: CudaOptions = {
         preset: preferences.cuda_preset || 'balanced',
         fastMode: preferences.cuda_fast_mode,
@@ -1277,8 +1281,8 @@ const Index = () => {
         vadAggressive: preferences.cuda_vad_aggressive,
         hotwords: mergedCudaHotwords,
         paragraphThreshold: preferences.cuda_paragraph_threshold || undefined,
-        loshonKodesh: isLoshonKodeshEnabled() || profileForcesLk,
-        initialPrompt: profileInitPrompt || undefined,
+        loshonKodesh: lkOn,
+        initialPrompt: lkOn ? (getLoshonKodeshPrompt() || profileInitPrompt || undefined) : (profileInitPrompt || undefined),
       };
 
       // Use parallel mode (stage audio + preload model simultaneously) when model isn't ready
