@@ -79,6 +79,8 @@ const navItems: NavItem[] = [
   { label: "לשון הקודש", icon: ScrollText, path: "/lashon-kodesh" },
   { label: "כללי לשון הקודש", icon: ScrollText, path: "/loshon-kodesh-rules" },
   { label: "השוואת תמלולים", icon: GitCompareArrows, path: "/compare-report" },
+  { label: "השוואת A/B", icon: GitCompareArrows, path: "/ab-compare" },
+  { label: "פיצ'רים וטוגלים", icon: Layers, path: "/features" },
   { label: "הגדרות", icon: Settings, path: "/settings" },
 ];
 
