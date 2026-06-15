@@ -1080,7 +1080,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         });
       }
     }
-  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, runGroqFullRetranscribe, stopCudaCleanup, stopBrowser, flushGroqTail]);
+  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, runGroqFullRetranscribe, stopCudaCleanup, stopBrowser, flushGroqTail, stopBackupRecorder]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(finalText);
