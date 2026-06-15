@@ -1029,9 +1029,11 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       if (doFullRetranscribe || mode === "cuda") {
         const prevTimings = [...wordTimingsRef.current];
         wordTimingsRef.current = [];
+        // Prefer the contiguous backup blob for the re-transcribe pass.
+        const retranscribeBlob = backupBlob ?? mergedWav ?? undefined;
         const refinedText = mode === "groq"
-          ? await runGroqFullRetranscribe(mergedWav ?? undefined)
-          : await runFinalRefinePass(mergedWav ?? undefined);
+          ? await runGroqFullRetranscribe(retranscribeBlob)
+          : await runFinalRefinePass(retranscribeBlob);
         if (!refinedText && wordTimingsRef.current.length === 0) {
           wordTimingsRef.current = prevTimings;
         }
@@ -1049,6 +1051,12 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       }
       stopCudaCleanup();
       allChunksRef.current = [];
+      backupChunksRef.current = [];
+      // Clear the IndexedDB session — recording is safely delivered to the app
+      if (backupSessionIdRef.current) {
+        void backupClearSession(backupSessionIdRef.current);
+        backupSessionIdRef.current = "";
+      }
       if (merged.trim()) {
         onTranscriptComplete({
           text: merged.trim(),
