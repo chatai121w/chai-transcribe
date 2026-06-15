@@ -78,6 +78,16 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const chunkSecRef = useRef<number>(DEFAULT_CHUNK_SEC);
   useEffect(() => { chunkSecRef.current = chunkSec; }, [chunkSec]);
 
+  // Pre-roll buffer — auto-arm when feature flag is on, so the 2s before the
+  // user clicks "Record" are already captured. Drained into the first chunk
+  // inside startCuda (Groq mode, where each chunk is a standalone file).
+  useEffect(() => {
+    if (!readFlag("ff_pre_roll_buffer")) return;
+    void preRoll.start();
+    return () => { preRoll.stop(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Full re-transcribe on save: chunks are preview-only; on stop, the whole
   // recording is sent as one unit and replaces the chunked text.
   const [fullRetranscribe, setFullRetranscribe] = useState<boolean>(() => {
