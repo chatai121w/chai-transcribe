@@ -36,6 +36,7 @@ import {
   ScrollText,
   Scissors,
   Palette,
+  Layers,
 } from "lucide-react";
 import { openQuickCut } from "@/lib/quickCutBus";
 import { cn } from "@/lib/utils";
