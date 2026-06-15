@@ -150,7 +150,7 @@ export function TextExportMenu({
           {label && <span>{label}</span>}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" dir="rtl" className="w-52">
+      <DropdownMenuContent align="end" className="w-52" style={{ direction: "rtl" }}>
         <DropdownMenuLabel className="text-xs text-muted-foreground">ייצוא ושיתוף</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleCopy} className="text-xs gap-2 cursor-pointer">
