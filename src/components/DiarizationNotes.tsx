@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { BookmarkPlus, X, Tag, MessageSquare, Clock, Trash2 } from "lucide-react";
 import type { SegmentNote } from "@/utils/diarizationEnhancements";
+import { TextExportMenu } from "@/components/TextExportMenu";
 
 interface DiarizedSegment {
   text: string;
