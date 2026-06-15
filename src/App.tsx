@@ -284,6 +284,7 @@ const App = () => {
                 <Route path="/voice-command-admin" element={<ProtectedRoute><VoiceCommandAdmin /></ProtectedRoute>} />
                 <Route path="/system-dashboard" element={<ProtectedRoute><SystemDashboard /></ProtectedRoute>} />
                 <Route path="/lashon-kodesh" element={<ProtectedRoute><LashoKodesh /></ProtectedRoute>} />
+                <Route path="/loshon-kodesh-rules" element={<ProtectedRoute><LoshonKodeshRules /></ProtectedRoute>} />
                 <Route path="/compare-report" element={<ProtectedRoute><CompareReport /></ProtectedRoute>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
