@@ -795,6 +795,12 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       mediaRecorderRef.current.stop();
     }
     mediaRecorderRef.current = null;
+    // Force-stop backup recorder if still alive (failsafe — usually stopped via stopBackupRecorder)
+    if (backupRecorderRef.current && backupRecorderRef.current.state !== "inactive") {
+      try { backupRecorderRef.current.onstop = null as any; } catch { /* */ }
+      try { backupRecorderRef.current.stop(); } catch { /* */ }
+    }
+    backupRecorderRef.current = null;
     currentGroqRecorderRef.current = null;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
