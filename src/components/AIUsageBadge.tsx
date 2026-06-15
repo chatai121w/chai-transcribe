@@ -92,14 +92,17 @@ export function AIUsageBadge({ feature, model, label, className }: Props) {
           </div>
         )}
 
-        <div className="flex items-center justify-between pt-1 border-t border-border">
+        <div className="flex items-center justify-between pt-1 border-t border-border gap-1 flex-wrap">
           <span className="text-[10px] text-muted-foreground">שער: 1$ = ₪{fx.toFixed(2)}</span>
-          <Link to="/settings?tab=ai-pricing" onClick={() => setOpen(false)}>
-            <Button size="sm" variant="ghost" className="h-7 text-xs gap-1">
-              <SettingsIcon className="h-3 w-3" />
-              ערוך מחירון
-            </Button>
-          </Link>
+          <div className="flex items-center gap-1">
+            <AIUsageDetailsDialog feature={feature} />
+            <Link to="/settings?tab=ai-pricing" onClick={() => setOpen(false)}>
+              <Button size="sm" variant="ghost" className="h-7 text-xs gap-1">
+                <SettingsIcon className="h-3 w-3" />
+                מחירון
+              </Button>
+            </Link>
+          </div>
         </div>
       </PopoverContent>
     </Popover>
