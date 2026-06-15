@@ -6,24 +6,41 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { ScrollText, Plus, Trash2, RotateCcw, Save, Download, Upload, Sparkles } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ScrollText, Plus, Trash2, RotateCcw, Save, Download, Upload, Sparkles, Users, Brain, Check, X, Cloud } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import {
   DEFAULT_LOSHON_KODESH_PROMPT,
   DEFAULT_LOSHON_KODESH_HOTWORDS,
   DEFAULT_LOSHON_KODESH_REPLACEMENTS,
+  DEFAULT_LOSHON_KODESH_NAMES,
   getLoshonKodeshPrompt,
   setLoshonKodeshPrompt,
   getLoshonKodeshHotwordsList,
   setLoshonKodeshHotwordsList,
   getLoshonKodeshReplacements,
   setLoshonKodeshReplacements,
+  getLoshonKodeshNames,
+  setLoshonKodeshNames,
+  getLoshonKodeshProfileId,
+  setLoshonKodeshProfileId,
+  getLkAiPolishSettings,
+  setLkAiPolishSettings,
+  getLkSuggestions,
+  acceptLkSuggestion,
+  dismissLkSuggestion,
   isLoshonKodeshEnabled,
   setLoshonKodeshEnabled,
   isLoshonKodeshPostProcessEnabled,
   setLoshonKodeshPostProcessEnabled,
   applyLoshonKodeshReplacements,
+  subscribeLoshonKodeshRules,
+  LK_PROFILE_LABELS,
   type LkReplacement,
+  type LkNameEntry,
+  type LkProfileId,
+  type LkAiPolishSettings,
+  type LkSuggestion,
 } from "@/lib/loshonKodesh";
 
 export default function LoshonKodeshRules() {
@@ -35,14 +52,29 @@ export default function LoshonKodeshRules() {
   const [replacements, setReplacements] = useState<LkReplacement[]>([]);
   const [newFrom, setNewFrom] = useState("");
   const [newTo, setNewTo] = useState("");
+  const [names, setNames] = useState<LkNameEntry[]>([]);
+  const [newNameFrom, setNewNameFrom] = useState("");
+  const [newNameTo, setNewNameTo] = useState("");
+  const [profileId, setProfileId] = useState<LkProfileId>('custom');
+  const [aiPolish, setAiPolish] = useState<LkAiPolishSettings>(getLkAiPolishSettings());
+  const [suggestions, setSuggestions] = useState<LkSuggestion[]>([]);
   const [testInput, setTestInput] = useState("היום למדנו תוירה קוידשה ומוישה רבינו אוימר שאבס.");
 
-  useEffect(() => {
+  const refreshAll = () => {
     setEnabled(isLoshonKodeshEnabled());
     setPostProcess(isLoshonKodeshPostProcessEnabled());
     setPrompt(getLoshonKodeshPrompt());
     setHotwords(getLoshonKodeshHotwordsList());
     setReplacements(getLoshonKodeshReplacements());
+    setNames(getLoshonKodeshNames());
+    setProfileId(getLoshonKodeshProfileId());
+    setAiPolish(getLkAiPolishSettings());
+    setSuggestions(getLkSuggestions());
+  };
+
+  useEffect(() => {
+    refreshAll();
+    return subscribeLoshonKodeshRules(refreshAll);
   }, []);
 
   const savePrompt = () => {
