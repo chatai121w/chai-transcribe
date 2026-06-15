@@ -389,7 +389,9 @@ const Index = () => {
     const profileResult = personalPronunciationOn
       ? applyProfileCorrections(correctionResult.text)
       : { text: correctionResult.text, appliedCount: 0 };
-    const finalText = profileResult.text;
+    // Apply Loshon Kodesh phonetic→canonical replacements when LK mode is on
+    const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
+    const finalText = lkActive ? applyLoshonKodeshReplacements(profileResult.text) : profileResult.text;
     if (correctionResult.appliedCount > 0 || profileResult.appliedCount > 0) {
       debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile corrections`);
     }
