@@ -260,7 +260,7 @@ export default function LoshonKodeshRules({ embeddedText, defaultTab = 'rules', 
   };
 
   return (
-    <div dir="rtl" className="container max-w-5xl mx-auto p-4 md:p-6 space-y-4">
+    <div dir="rtl" className={embedded ? "w-full space-y-4" : "container max-w-5xl mx-auto p-4 md:p-6 space-y-4"}>
       {/* Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
