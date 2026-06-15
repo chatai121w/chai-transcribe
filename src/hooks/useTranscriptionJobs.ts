@@ -134,7 +134,16 @@ export const useTranscriptionJobs = () => {
     }
 
     try {
-      const chunks = splitFileIntoChunks(file);
+      // Smart chunking on silence boundaries when ff_smart_chunking is on.
+      // Falls back to byte chunking on decode failure or short audio.
+      const { readFlag } = await import('@/lib/featureFlags');
+      let chunks;
+      if (readFlag('ff_smart_chunking')) {
+        const { splitFileSmart } = await import('@/lib/smartChunking');
+        chunks = await splitFileSmart(file);
+      } else {
+        chunks = splitFileIntoChunks(file);
+      }
 
       const { data: job, error: jobError } = await supabase
         .from('transcription_jobs')
