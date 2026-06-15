@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card } from "@/components/ui/card";
 import { CollapsibleWidget } from "@/components/ui/CollapsibleWidget";
 import { useCloudVersions, type CloudVersion } from "@/hooks/useCloudVersions";
+import { TextExportMenu } from "@/components/TextExportMenu";
 import { formatDistanceToNow } from "date-fns";
 import { he } from "date-fns/locale";
 import DiffMatchPatch from "diff-match-patch";
@@ -152,9 +153,16 @@ export function TranscriptVersionsPanel({ transcriptId, currentText, onApplyVers
               </SelectContent>
             </Select>
             {selectedVersion && (
-              <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => applyText(selectedVersion.text)}>
-                <RotateCcw className="w-3 h-3 ml-1" />טען
-              </Button>
+              <>
+                <TextExportMenu
+                  getText={() => selectedVersion.text}
+                  filename={labelFor(selectedVersion)}
+                  subject={labelFor(selectedVersion)}
+                />
+                <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => applyText(selectedVersion.text)}>
+                  <RotateCcw className="w-3 h-3 ml-1" />טען
+                </Button>
+              </>
             )}
           </div>
           {selectedVersion && (
@@ -193,9 +201,16 @@ export function TranscriptVersionsPanel({ transcriptId, currentText, onApplyVers
                     )}
                     <Cloud className="w-3 h-3 text-blue-500" />
                   </div>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs shrink-0" onClick={() => applyText(v.text)}>
-                    <RotateCcw className="w-3 h-3 ml-1" />טען
-                  </Button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <TextExportMenu
+                      getText={() => v.text}
+                      filename={`${labelFor(v)} - v${v.version_number}`}
+                      subject={labelFor(v)}
+                    />
+                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => applyText(v.text)}>
+                      <RotateCcw className="w-3 h-3 ml-1" />טען
+                    </Button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground mb-2">
                   <Clock className="w-3 h-3" />

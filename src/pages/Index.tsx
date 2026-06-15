@@ -50,6 +50,7 @@ const LiveTranscriber = lazy(() => import("@/components/LiveTranscriber").then(m
 import type { LiveTranscriptResult } from "@/components/LiveTranscriber";
 const TranscriptEditor = lazy(() => import("@/components/TranscriptEditor").then(m => ({ default: m.TranscriptEditor })));
 import { TranscriptVersionsPanel } from "@/components/TranscriptVersionsPanel";
+import { TextExportMenu } from "@/components/TextExportMenu";
 const CloudTranscriptHistory = lazy(() => import("@/components/CloudTranscriptHistory").then(m => ({ default: m.CloudTranscriptHistory })));
 const TranscriptSummary = lazy(() => import("@/components/TranscriptSummary").then(m => ({ default: m.TranscriptSummary })));
 const ShareTranscript = lazy(() => import("@/components/ShareTranscript").then(m => ({ default: m.ShareTranscript })));
@@ -2654,6 +2655,14 @@ const Index = () => {
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 {copied ? "הועתק!" : "העתק תמלול"}
               </Button>
+              <TextExportMenu
+                getText={() => transcript}
+                filename="תמלול"
+                subject="תמלול"
+                variant="download"
+                size="sm"
+                label="ייצוא / שיתוף"
+              />
               <ShareTranscript transcript={transcript} />
             </div>
             <TranscriptSummary transcript={transcript} />
