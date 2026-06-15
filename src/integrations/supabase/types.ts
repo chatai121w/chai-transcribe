@@ -17,31 +17,49 @@ export type Database = {
       ai_usage_events: {
         Row: {
           completion_tokens: number
+          cost_usd_snapshot: number | null
           created_at: string
+          duration_ms: number | null
           feature: string
           id: string
           model: string
+          params: Json | null
+          prompt_preview: string | null
           prompt_tokens: number
+          response_preview: string | null
+          system_prompt: string | null
           total_tokens: number
           user_id: string
         }
         Insert: {
           completion_tokens?: number
+          cost_usd_snapshot?: number | null
           created_at?: string
+          duration_ms?: number | null
           feature: string
           id?: string
           model: string
+          params?: Json | null
+          prompt_preview?: string | null
           prompt_tokens?: number
+          response_preview?: string | null
+          system_prompt?: string | null
           total_tokens?: number
           user_id: string
         }
         Update: {
           completion_tokens?: number
+          cost_usd_snapshot?: number | null
           created_at?: string
+          duration_ms?: number | null
           feature?: string
           id?: string
           model?: string
+          params?: Json | null
+          prompt_preview?: string | null
           prompt_tokens?: number
+          response_preview?: string | null
+          system_prompt?: string | null
           total_tokens?: number
           user_id?: string
         }
