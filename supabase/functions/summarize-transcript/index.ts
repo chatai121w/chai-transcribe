@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { logAIUsage } from "../_shared/aiUsage.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -80,6 +81,14 @@ serve(async (req) => {
     const summary = data.choices[0].message.content;
 
     console.log('[Summarize] Summary generated successfully');
+
+    await logAIUsage({
+      supabaseUserClient: userClient,
+      userId: user.id,
+      feature: 'summary',
+      model: 'google/gemini-2.5-flash',
+      usage: data.usage,
+    });
 
     return new Response(
       JSON.stringify({ summary }),
