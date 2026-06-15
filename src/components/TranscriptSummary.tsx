@@ -95,15 +95,24 @@ export const TranscriptSummary = ({ transcript }: TranscriptSummaryProps) => {
             className="min-h-[150px] mb-3 text-right bg-accent/20"
             dir="rtl"
           />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleCopy}
-            className="w-full"
-          >
-            <Copy className="w-4 h-4 ml-2" />
-            העתק סיכום
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCopy}
+              className="flex-1"
+            >
+              <Copy className="w-4 h-4 ml-2" />
+              העתק סיכום
+            </Button>
+            <TextExportMenu
+              getText={() => summary}
+              filename="סיכום AI"
+              subject="סיכום AI"
+              size="sm"
+              label="ייצוא"
+            />
+          </div>
         </>
       )}
 
