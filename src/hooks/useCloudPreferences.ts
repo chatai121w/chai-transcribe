@@ -397,6 +397,19 @@ const useCloudPreferencesImpl = () => {
             localStorage.setItem('diarize_enabled', row.diarize_enabled ? '1' : '0');
             setPreferences(prev => ({ ...prev, diarize_enabled: row.diarize_enabled }));
           }
+          // Re-apply feature_flags JSONB last (authoritative for /features toggles)
+          try {
+            const ff = row.feature_flags as Record<string, unknown> | null;
+            if (ff && typeof ff === 'object') {
+              for (const [k, v] of Object.entries(ff)) {
+                if (k.startsWith('__')) continue;
+                if (typeof v !== 'boolean') continue;
+                localStorage.setItem(k, v ? '1' : '0');
+                localStorage.setItem(`${k}__updated_at`, String(Date.now()));
+                window.dispatchEvent(new CustomEvent('featureFlagChange', { detail: { key: k, value: v, silent: true } }));
+              }
+            }
+          } catch { /* */ }
         }
       )
       .subscribe();
