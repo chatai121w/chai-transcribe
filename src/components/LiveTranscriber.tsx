@@ -831,6 +831,12 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
       mediaRecorderRef.current.pause();
     }
+    // Pause backup recorder
+    try {
+      if (backupRecorderRef.current && backupRecorderRef.current.state === "recording") {
+        backupRecorderRef.current.pause();
+      }
+    } catch { /* */ }
     // Pause timer
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
