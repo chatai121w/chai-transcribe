@@ -162,6 +162,7 @@ const PageLoader = ({ label = 'page' }: { label?: string }) => {
 
 const LoshonKodeshSyncBridge = () => {
   useLoshonKodeshSync();
+  useFeatureFlagsCloudSync();
   return null;
 };
 
