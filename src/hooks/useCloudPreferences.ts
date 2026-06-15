@@ -282,6 +282,20 @@ const useCloudPreferencesImpl = () => {
           enabled: loaded.personal_pronunciation_enabled,
           source: 'cloud',
         });
+        // ── Re-apply feature_flags JSONB (the /features toggle page is authoritative) ──
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ff = ((data as any).feature_flags ?? null) as Record<string, unknown> | null;
+          if (ff && typeof ff === 'object') {
+            for (const [k, v] of Object.entries(ff)) {
+              if (k.startsWith('__')) continue;
+              if (typeof v !== 'boolean') continue;
+              localStorage.setItem(k, v ? '1' : '0');
+              localStorage.setItem(`${k}__updated_at`, String(Date.now()));
+              window.dispatchEvent(new CustomEvent('featureFlagChange', { detail: { key: k, value: v, silent: true } }));
+            }
+          }
+        } catch { /* */ }
         window.dispatchEvent(new CustomEvent('cloud-prefs-loaded'));
 
         // If local theme is newer than cloud's stored theme, immediately push it back
