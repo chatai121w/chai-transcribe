@@ -233,6 +233,15 @@ export function DiarizationNotes({ segments, notes, onNotesChange, speakerNames,
           }}>
             העתק הערות
           </Button>
+          <TextExportMenu
+            getText={() => sortedNotes.map(n => {
+              const seg = segments[n.segmentIdx];
+              const tagInfo = getTagInfo(n.tag);
+              return `[${formatTime(seg?.start || 0)}] [${tagInfo.label}] ${getName(seg?.speaker_label || '')} — ${n.text}`;
+            }).join('\n')}
+            filename="הערות-דוברים"
+            subject="הערות דוברים"
+          />
           <Button variant="ghost" size="sm" className="text-xs text-destructive" onClick={() => onNotesChange([])}>
             <Trash2 className="w-3 h-3 ml-1" />מחק הכל
           </Button>
