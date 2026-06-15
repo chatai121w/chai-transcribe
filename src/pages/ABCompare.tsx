@@ -491,6 +491,23 @@ export default function ABCompare() {
         </div>
       </header>
 
+      <ABCompareLab
+        onResult={(side, label, text) => {
+          if (side === "A") setSideA(prev => ({ ...prev, label, text }));
+          else setSideB(prev => ({ ...prev, label, text }));
+        }}
+        onAudio={(side, blob, name) => {
+          const url = URL.createObjectURL(blob);
+          if (side === "A") {
+            if (sideA.audioUrl) URL.revokeObjectURL(sideA.audioUrl);
+            setSideA(prev => ({ ...prev, audioUrl: url, audioName: name }));
+          } else {
+            if (sideB.audioUrl) URL.revokeObjectURL(sideB.audioUrl);
+            setSideB(prev => ({ ...prev, audioUrl: url, audioName: name }));
+          }
+        }}
+      />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SideSlot side="A" data={sideA} onChange={setSideA} audioRef={audioARef} />
         <SideSlot side="B" data={sideB} onChange={setSideB} audioRef={audioBRef} />
