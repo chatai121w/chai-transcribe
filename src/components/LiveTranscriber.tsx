@@ -26,6 +26,7 @@ import { buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } 
 import { usePreRollBuffer } from "@/hooks/usePreRollBuffer";
 import { readFlag } from "@/lib/featureFlags";
 import { mergeChunksToWav } from "@/lib/mergeChunksToWav";
+import { backupAppendChunk, backupClearSession } from "@/lib/backupAudioStore";
 
 type LiveMode = "browser" | "cuda" | "groq";
 
@@ -146,6 +147,17 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const pendingRetryRef = useRef<Blob | null>(null);
   const audioLevelSamplesRef = useRef<number[]>([]);
   const finalTextRef = useRef("");
+
+  // ─── Parallel BACKUP recorder ───
+  // A second MediaRecorder runs continuously on the SAME MediaStream and
+  // produces a single, contiguous webm — eliminating the need to stitch
+  // chunks from separate recorder sessions. Also auto-persisted to IndexedDB
+  // every 30s for crash-safety.
+  const backupRecorderRef = useRef<MediaRecorder | null>(null);
+  const backupChunksRef = useRef<Blob[]>([]);
+  const backupSeqRef = useRef(0);
+  const backupSessionIdRef = useRef<string>("");
+  const BACKUP_TIMESLICE_MS = 30_000;
 
   // Groq word-timestamp accumulation
   const cumulativeAudioSecRef = useRef(0);
@@ -464,7 +476,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     try {
       const mimeType = mimeTypeRef.current;
       const fullBlob = overrideBlob ?? new Blob(allChunksRef.current, { type: mimeType });
-      const fileExt = overrideBlob ? "wav" : "webm";
+      const fileExt = overrideBlob ? ((overrideBlob.type || '').includes('wav') ? 'wav' : 'webm') : 'webm';
 
       const formData = new FormData();
       formData.append("file", fullBlob, `live-final.${fileExt}`);
@@ -519,7 +531,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     try {
       const mimeType = mimeTypeRef.current;
       const fullBlob = overrideBlob ?? new Blob(allChunksRef.current, { type: mimeType });
-      const fileExt = overrideBlob ? "wav" : "webm";
+      const fileExt = overrideBlob ? ((overrideBlob.type || '').includes('wav') ? 'wav' : 'webm') : 'webm';
       const fd = new FormData();
       fd.append("file", fullBlob, `live-full.${fileExt}`);
       fd.append("apiKey", groqKey);
@@ -631,6 +643,29 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       mimeTypeRef.current = mimeType;
 
       const recorderStream = processedStreamRef.current ?? stream;
+
+      // ─── Start the parallel BACKUP recorder (single contiguous file) ───
+      try {
+        backupChunksRef.current = [];
+        backupSeqRef.current = 0;
+        backupSessionIdRef.current = `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const backupRec = new MediaRecorder(recorderStream, { mimeType });
+        backupRec.ondataavailable = (e) => {
+          if (!e.data || e.data.size === 0) return;
+          backupChunksRef.current.push(e.data);
+          const seq = backupSeqRef.current++;
+          // Fire-and-forget IndexedDB persistence for crash-safety
+          void backupAppendChunk(backupSessionIdRef.current, seq, e.data);
+        };
+        backupRec.start(BACKUP_TIMESLICE_MS);
+        backupRecorderRef.current = backupRec;
+        console.log(`[backup-rec] started, session=${backupSessionIdRef.current}`);
+      } catch (e) {
+        console.warn("[backup-rec] failed to start; continuing without backup", e);
+        backupRecorderRef.current = null;
+      }
+
+
 
       if (mode === "groq") {
         // Groq requires a complete, standalone media file per request.
@@ -760,6 +795,12 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       mediaRecorderRef.current.stop();
     }
     mediaRecorderRef.current = null;
+    // Force-stop backup recorder if still alive (failsafe — usually stopped via stopBackupRecorder)
+    if (backupRecorderRef.current && backupRecorderRef.current.state !== "inactive") {
+      try { backupRecorderRef.current.onstop = null as any; } catch { /* */ }
+      try { backupRecorderRef.current.stop(); } catch { /* */ }
+    }
+    backupRecorderRef.current = null;
     currentGroqRecorderRef.current = null;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
@@ -796,6 +837,12 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
       mediaRecorderRef.current.pause();
     }
+    // Pause backup recorder
+    try {
+      if (backupRecorderRef.current && backupRecorderRef.current.state === "recording") {
+        backupRecorderRef.current.pause();
+      }
+    } catch { /* */ }
     // Pause timer
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
@@ -824,6 +871,12 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "paused") {
       mediaRecorderRef.current.resume();
     }
+    // Resume backup recorder
+    try {
+      if (backupRecorderRef.current && backupRecorderRef.current.state === "paused") {
+        backupRecorderRef.current.resume();
+      }
+    } catch { /* */ }
     // Restart timer
     timerIntervalRef.current = setInterval(() => {
       setElapsedSec(Math.floor((Date.now() - startTimeRef.current - totalPausedMsRef.current) / 1000));
@@ -902,6 +955,22 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     });
   }, [sendChunk]);
 
+  // Stop the parallel backup recorder and resolve once the trailing
+  // dataavailable lands. Returns the full contiguous webm blob, or null.
+  const stopBackupRecorder = useCallback(async (): Promise<Blob | null> => {
+    const rec = backupRecorderRef.current;
+    const mime = mimeTypeRef.current;
+    if (rec && rec.state !== "inactive") {
+      await new Promise<void>((resolve) => {
+        const done = () => resolve();
+        try { rec.onstop = done; rec.stop(); } catch { resolve(); }
+      });
+    }
+    backupRecorderRef.current = null;
+    if (backupChunksRef.current.length === 0) return null;
+    return new Blob(backupChunksRef.current, { type: mime });
+  }, []);
+
   const stopListening = useCallback(async () => {
     if (mode === "cuda" || mode === "groq") {
       // Stop the chunk timer first so no new cycles trigger during flush
@@ -916,22 +985,37 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
           mediaRecorderRef.current.stop();
         }
       }
+
+      // ─── Preferred path: use the parallel BACKUP recorder's single file ───
+      // This is one contiguous MediaRecorder session → no chunk-stitching bugs,
+      // the player and waveform get a real, seekable file, and we hand the same
+      // blob to the re-transcribe pass for perfect alignment.
+      setInterimText("שומר הקלטת גיבוי...");
+      let backupBlob: Blob | null = null;
+      try {
+        backupBlob = await stopBackupRecorder();
+      } catch (e) {
+        console.warn("[LiveTranscriber] backup stop failed", e);
+      }
+
+      // Only stop tracks AFTER both recorders have stopped (so backup gets its
+      // final dataavailable). Backup already stopped above; safe to release mic.
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
 
-      // Build a single playable WAV from all chunks (fixes the bug where the
-      // saved audio only played the first chunk because chunks from separate
-      // MediaRecorder sessions can't simply be concatenated).
+      // Legacy fallback: stitch+decode the per-chunk blobs into a WAV. Only
+      // used when the backup recorder failed to start or produced nothing.
       const mimeType = mimeTypeRef.current;
       let mergedWav: Blob | null = null;
-      if (allChunksRef.current.length > 0) {
+      if (!backupBlob && allChunksRef.current.length > 0) {
         try {
-          setInterimText("מאחד את ההקלטה...");
+          setInterimText("מאחד את ההקלטה (fallback)...");
           mergedWav = await mergeChunksToWav(allChunksRef.current);
         } catch (e) {
           console.warn("[LiveTranscriber] mergeChunksToWav failed", e);
         }
       }
-      const audioBlob: Blob | undefined = mergedWav
+      const audioBlob: Blob | undefined = backupBlob
+        ?? mergedWav
         ?? (allChunksRef.current.length > 0
           ? new Blob(allChunksRef.current, { type: mimeType })
           : undefined);
@@ -945,9 +1029,11 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       if (doFullRetranscribe || mode === "cuda") {
         const prevTimings = [...wordTimingsRef.current];
         wordTimingsRef.current = [];
+        // Prefer the contiguous backup blob for the re-transcribe pass.
+        const retranscribeBlob = backupBlob ?? mergedWav ?? undefined;
         const refinedText = mode === "groq"
-          ? await runGroqFullRetranscribe(mergedWav ?? undefined)
-          : await runFinalRefinePass(mergedWav ?? undefined);
+          ? await runGroqFullRetranscribe(retranscribeBlob)
+          : await runFinalRefinePass(retranscribeBlob);
         if (!refinedText && wordTimingsRef.current.length === 0) {
           wordTimingsRef.current = prevTimings;
         }
@@ -965,6 +1051,12 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       }
       stopCudaCleanup();
       allChunksRef.current = [];
+      backupChunksRef.current = [];
+      // Clear the IndexedDB session — recording is safely delivered to the app
+      if (backupSessionIdRef.current) {
+        void backupClearSession(backupSessionIdRef.current);
+        backupSessionIdRef.current = "";
+      }
       if (merged.trim()) {
         onTranscriptComplete({
           text: merged.trim(),
@@ -988,7 +1080,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         });
       }
     }
-  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, runGroqFullRetranscribe, stopCudaCleanup, stopBrowser, flushGroqTail]);
+  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, runGroqFullRetranscribe, stopCudaCleanup, stopBrowser, flushGroqTail, stopBackupRecorder]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(finalText);
@@ -1007,6 +1099,17 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       if (chunkIntervalRef.current) { clearInterval(chunkIntervalRef.current); chunkIntervalRef.current = null; }
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
         mediaRecorderRef.current.stop();
+      }
+      // Stop backup recorder + clear its IDB session
+      if (backupRecorderRef.current && backupRecorderRef.current.state !== "inactive") {
+        try { backupRecorderRef.current.onstop = null as any; } catch { /* */ }
+        try { backupRecorderRef.current.stop(); } catch { /* */ }
+      }
+      backupRecorderRef.current = null;
+      backupChunksRef.current = [];
+      if (backupSessionIdRef.current) {
+        void backupClearSession(backupSessionIdRef.current);
+        backupSessionIdRef.current = "";
       }
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
       allChunksRef.current = [];
@@ -1033,21 +1136,26 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     toast({ title: "✅ תמלול נשמר", description: "ניתן להמשיך להקליט" });
   };
 
-  // Download audio recording locally
+  // Download audio recording locally — prefer the contiguous backup file
   const handleDownloadAudio = () => {
-    if (allChunksRef.current.length === 0) {
+    const hasBackup = backupChunksRef.current.length > 0;
+    const hasChunks = allChunksRef.current.length > 0;
+    if (!hasBackup && !hasChunks) {
       toast({ title: "אין הקלטה לשמירה", variant: "destructive" });
       return;
     }
-    const blob = new Blob(allChunksRef.current, { type: mimeTypeRef.current });
+    const blob = hasBackup
+      ? new Blob(backupChunksRef.current, { type: mimeTypeRef.current })
+      : new Blob(allChunksRef.current, { type: mimeTypeRef.current });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `live-recording-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
     a.click();
     URL.revokeObjectURL(url);
-    toast({ title: "✅ הקלטה הורדה" });
+    toast({ title: "✅ הקלטה הורדה", description: hasBackup ? "מקובץ גיבוי מקביל" : undefined });
   };
+
 
   const handleAddFolder = () => {
     const name = newFolderName.trim();
