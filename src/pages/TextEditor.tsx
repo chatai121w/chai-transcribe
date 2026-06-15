@@ -987,6 +987,7 @@ const TextEditor = () => {
               visibleTabs={visibleTabs}
               tabOrder={tabOrder}
               onVisibilityChange={(v) => {
+                cloudTabSettingsLoaded.current = true; // prevent late cloud overwrite
                 setTabSettings(prev => {
                   const next = { ...prev, visible: v };
                   updatePreference('tab_settings_json', JSON.stringify(next));
@@ -994,6 +995,7 @@ const TextEditor = () => {
                 });
               }}
               onOrderChange={(o) => {
+                cloudTabSettingsLoaded.current = true; // prevent late cloud overwrite
                 setTabSettings(prev => {
                   const next = { ...prev, order: o };
                   updatePreference('tab_settings_json', JSON.stringify(next));
