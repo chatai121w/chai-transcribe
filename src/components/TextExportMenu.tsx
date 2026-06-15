@@ -173,7 +173,7 @@ export function TextExportMenu({
         <DropdownMenuItem onClick={handleEmail} className="text-xs gap-2 cursor-pointer">
           <Mail className="w-4 h-4 text-blue-600" />שלח באימייל
         </DropdownMenuItem>
-        {typeof navigator !== "undefined" && (navigator as unknown as { share?: unknown }).share && (
+        {typeof navigator !== "undefined" && typeof (navigator as Navigator & { share?: unknown }).share === "function" && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleShareNative} className="text-xs gap-2 cursor-pointer">
