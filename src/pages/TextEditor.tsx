@@ -241,6 +241,20 @@ const TextEditor = () => {
   const playerRef = useRef<SyncAudioPlayerRef>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
+  // Loshon Kodesh embedded tab
+  const [activeTab, setActiveTab] = useState<string>("edit");
+  const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
+  const sendTextToLoshonKodesh = useCallback((opts?: { jump?: boolean }) => {
+    const t = (text || "").trim();
+    if (!t) {
+      toast({ title: "אין טקסט לשליחה", description: "כתוב או טען תמלול תחילה", variant: "destructive" });
+      return;
+    }
+    setLkEmbeddedText(t);
+    toast({ title: "הטקסט נשלח ללשון הקודש", description: "פתח את הטאב כדי לבדוק ולהמיר" });
+    if (opts?.jump) setActiveTab("loshon");
+  }, [text]);
+
   const setColumns = (v: number) => updatePreference('editor_columns', v);
   const cycleColumnView = () => {
     const next = columns === 1 ? 2 : columns === 2 ? 3 : 1;
