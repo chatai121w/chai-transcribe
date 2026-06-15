@@ -33,7 +33,7 @@ import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
 import { getApiKey, getEncryptedKey } from "@/lib/keyCrypto";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
-import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, buildLoshonKodeshHotwords, applyLoshonKodeshReplacements } from "@/lib/loshonKodesh";
+import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, buildLoshonKodeshHotwords, applyLoshonKodeshReplacements, runLkAiPolish, getLkAiPolishSettings } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
 import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
 import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSuggestion";
@@ -391,7 +391,12 @@ const Index = () => {
       : { text: correctionResult.text, appliedCount: 0 };
     // Apply Loshon Kodesh phonetic→canonical replacements when LK mode is on
     const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
-    const finalText = lkActive ? applyLoshonKodeshReplacements(profileResult.text) : profileResult.text;
+    let finalText = lkActive ? applyLoshonKodeshReplacements(profileResult.text) : profileResult.text;
+    // Optional final AI polish (Gemini / Ollama / off) — only when LK active and user enabled it
+    if (lkActive && getLkAiPolishSettings().enabled) {
+      try { finalText = await runLkAiPolish(finalText); }
+      catch (e) { debugLog.warn('Index', 'LK AI polish failed', { msg: (e as Error)?.message }); }
+    }
     if (correctionResult.appliedCount > 0 || profileResult.appliedCount > 0) {
       debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile corrections`);
     }

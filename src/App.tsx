@@ -12,6 +12,7 @@ import { ThemeShortcutListener } from "./components/ThemeShortcutListener";
 import TouchHoverReveal from "./components/TouchHoverReveal";
 import { DiarizationQueueProvider } from "./contexts/DiarizationQueueContext";
 import { CloudPreferencesProvider } from "./hooks/useCloudPreferences";
+import { useLoshonKodeshSync } from "./hooks/useLoshonKodeshSync";
 import { useTheme } from "./hooks/useTheme";
 import { debugLog } from "./lib/debugLogger";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -159,6 +160,8 @@ const PageLoader = ({ label = 'page' }: { label?: string }) => {
 const App = () => {
   // Initialize theme on app load
   useTheme();
+  // Sync Loshon Kodesh rules with cloud (cross-device)
+  useLoshonKodeshSync();
   const queryClient = useMemo(() => new QueryClient(), []);
   const [devFloatingButtons, setDevFloatingButtons] = useState<DevFloatingButtonsVisibility>(() => loadDevFloatingButtonsVisibility());
 
