@@ -667,6 +667,18 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         };
         startGroqRecorder();
 
+        // Pre-roll: drain the 2s rolling WAV buffer and transcribe it as the
+        // very first chunk so the opening syllable is not lost.
+        if (readFlag("ff_pre_roll_buffer")) {
+          const preBlob = preRoll.drainAsBlob();
+          if (preBlob && preBlob.size > LIVE_MIN_BLOB_BYTES) {
+            allChunksRef.current.push(preBlob);
+            // Bypass silence-skip for the pre-roll
+            audioLevelSamplesRef.current.push(100);
+            void sendChunk(preBlob, 0);
+          }
+        }
+
         chunkIntervalRef.current = setInterval(() => {
           const ctx = currentGroqRecorderRef.current;
           if (ctx && ctx.rec.state === "recording") ctx.rec.stop();
