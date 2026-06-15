@@ -228,6 +228,9 @@ const useCloudPreferencesImpl = () => {
           tab_settings_json: typeof (data as any).tab_settings_json === 'string'
             ? (data as any).tab_settings_json
             : JSON.stringify((data as any).tab_settings_json ?? ''),
+          text_editor_view_json: typeof (data as any).text_editor_view_json === 'string'
+            ? (data as any).text_editor_view_json
+            : JSON.stringify((data as any).text_editor_view_json ?? {}),
           default_ai_model: (data as any).default_ai_model ?? DEFAULT_PREFERENCES.default_ai_model,
           cuda_preset: (data as any).cuda_preset ?? DEFAULT_PREFERENCES.cuda_preset,
           cuda_fast_mode: (data as any).cuda_fast_mode ?? DEFAULT_PREFERENCES.cuda_fast_mode,
