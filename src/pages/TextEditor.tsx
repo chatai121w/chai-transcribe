@@ -137,6 +137,7 @@ const TextEditor = () => {
   const ALL_TABS: TabConfig[] = [
     { id: "player", label: "נגן", emoji: "🎧", group: "primary" },
     { id: "edit", label: "עריכת טקסט", group: "primary" },
+    { id: "loshon", label: "לשון הקודש", emoji: "🕮", group: "primary" },
     { id: "speakers", label: "זיהוי דוברים", group: "primary" },
     { id: "templates", label: "תבניות", group: "primary" },
     { id: "ai", label: "עריכה עם AI", group: "primary" },
