@@ -62,6 +62,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   folder_sort_asc: false,
   player_layout: 'split',
   tab_settings_json: '',
+  text_editor_view_json: '',
   default_ai_model: '',
   cuda_preset: 'balanced',
   cuda_fast_mode: true,
