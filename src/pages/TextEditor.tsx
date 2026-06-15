@@ -1112,8 +1112,16 @@ const TextEditor = () => {
               <Cloud className="w-3.5 h-3.5 text-yellow-600" />
               ייצא ל-Drive
             </Button>
+            <TextExportMenu
+              getText={() => text}
+              filename={transcript?.title || 'תמלול'}
+              subject={transcript?.title || 'תמלול'}
+              size="sm"
+              label="ייצוא/שיתוף"
+            />
           </div>
         )}
+
 
         {/* Main Content */}
         <Tabs defaultValue="edit" className="w-full" dir="rtl">
