@@ -128,6 +128,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     category: "audio",
     defaultOn: false,
     experimental: true,
+    comingSoon: true,
   },
   {
     key: "ff_audio_quality_check",
@@ -136,6 +137,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     category: "audio",
     defaultOn: false,
     experimental: true,
+    comingSoon: true,
   },
   {
     key: "ff_smart_chunking",
@@ -144,6 +146,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     category: "audio",
     defaultOn: false,
     experimental: true,
+    comingSoon: true,
   },
   {
     key: "ff_auto_resume",
@@ -151,6 +154,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     description: "ממשיך תמלול ענן אחרי ניתוק רשת זמני.",
     category: "transcription",
     defaultOn: true,
+    comingSoon: true,
   },
 
   // ── UI ────────────────────────────────────────────────────
