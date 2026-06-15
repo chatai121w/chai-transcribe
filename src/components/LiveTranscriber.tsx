@@ -1100,6 +1100,17 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
         mediaRecorderRef.current.stop();
       }
+      // Stop backup recorder + clear its IDB session
+      if (backupRecorderRef.current && backupRecorderRef.current.state !== "inactive") {
+        try { backupRecorderRef.current.onstop = null as any; } catch { /* */ }
+        try { backupRecorderRef.current.stop(); } catch { /* */ }
+      }
+      backupRecorderRef.current = null;
+      backupChunksRef.current = [];
+      if (backupSessionIdRef.current) {
+        void backupClearSession(backupSessionIdRef.current);
+        backupSessionIdRef.current = "";
+      }
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
       allChunksRef.current = [];
       stopCudaCleanup();
@@ -1125,21 +1136,26 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     toast({ title: "✅ תמלול נשמר", description: "ניתן להמשיך להקליט" });
   };
 
-  // Download audio recording locally
+  // Download audio recording locally — prefer the contiguous backup file
   const handleDownloadAudio = () => {
-    if (allChunksRef.current.length === 0) {
+    const hasBackup = backupChunksRef.current.length > 0;
+    const hasChunks = allChunksRef.current.length > 0;
+    if (!hasBackup && !hasChunks) {
       toast({ title: "אין הקלטה לשמירה", variant: "destructive" });
       return;
     }
-    const blob = new Blob(allChunksRef.current, { type: mimeTypeRef.current });
+    const blob = hasBackup
+      ? new Blob(backupChunksRef.current, { type: mimeTypeRef.current })
+      : new Blob(allChunksRef.current, { type: mimeTypeRef.current });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `live-recording-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
     a.click();
     URL.revokeObjectURL(url);
-    toast({ title: "✅ הקלטה הורדה" });
+    toast({ title: "✅ הקלטה הורדה", description: hasBackup ? "מקובץ גיבוי מקביל" : undefined });
   };
+
 
   const handleAddFolder = () => {
     const name = newFolderName.trim();
