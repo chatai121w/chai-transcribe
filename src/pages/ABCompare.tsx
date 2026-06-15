@@ -85,7 +85,7 @@ function wordDiff(a: string, b: string): DiffToken[] {
 
   const out: DiffToken[] = [];
   for (const [op, str] of diffs) {
-    const words = Array.from(str).map(ch => back[ch.charCodeAt(0) - 0xe000] || "");
+    const words = Array.from(str as string).map((ch: string) => back[ch.charCodeAt(0) - 0xe000] || "");
     out.push({ op: op as -1 | 0 | 1, text: words.join("") });
   }
   return out;
