@@ -14,8 +14,24 @@
  * traditional torani vocabulary and Ashkenazi religious context.
  * Whisper supports an `initial_prompt` (≤224 tokens). We keep it under that.
  */
+/**
+ * Whisper initial_prompt — biases the decoder toward standard Hebrew spelling
+ * even when the speaker uses Ashkenazi pronunciation. We do NOT write the
+ * phonetic forms (תוירה / קוידש / מוישה) because that would teach Whisper to
+ * emit them; instead we list the canonical target spellings the model should
+ * prefer, plus a short context sentence describing the speaker style.
+ *
+ * Mapping rules the model should apply silently:
+ *  • חולם נשמע "אוֹי" → לכתוב כ-וֹ (תוֹרה ולא תוירה, קוֹדש ולא קוידש, מוֹשה ולא מוישה)
+ *  • צירה נשמע "יי" → לכתוב כ-ֵי (אֵין, בֵּית, מֵאיר)
+ *  • קמץ נשמע "אוֹ" אצל חלק → לכתוב לפי הכתיב התקני (דָּבָר, אָדָם)
+ *  • ת' רפה נשמעת "ס" → לכתוב ת' (שבת ולא שאבס, בית ולא בייס)
+ *  • שווא נע מודגש → להתעלם מההגייה ולכתוב כתיב מלא תקני
+ */
 export const LOSHON_KODESH_INITIAL_PROMPT =
-  'שיעור תורה בלשון הקודש בהגייה אשכנזית. הקדוש ברוך הוא, רבי, גמרא, משנה, תוספות, רש"י, רמב"ם, הלכה, סוגיא, פסוק, פרשה, מסכת, דף, תורה, מצוה, ברכה, שבת, יום טוב, מקום, אבות, בני ישראל, תפילה, עבודה, גמילות חסדים, יראת שמים, אמונה, חסידות, מוסר, ישיבה.';
+  'שיעור תורה בלשון הקודש בהגייה אשכנזית. יש לתמלל בכתיב עברי תקני מלא, להתעלם מההגייה האשכנזית של החולם (אוֹי), הצירה (יי), הקמץ והת\' הרפה. ' +
+  'דוגמאות לכתיב התקני שיש להעדיף: תורה, קודש, משה, אהרון, יעקב, יוסף, שלמה, שבת, יום טוב, ברוך, ברכה, מקום, מצוה, פסוק, פרשה, ' +
+  'הקדוש ברוך הוא, הקב"ה, רבי, גמרא, משנה, תוספות, רש"י, רמב"ם, הלכה, סוגיא, מסכת, דף, ישיבה, בית מדרש, תפילה, אמונה, יראת שמים, חסידות, מוסר, תשובה.';
 
 /**
  * Curated torani hotwords list — words/phrases very common in Torah lessons
