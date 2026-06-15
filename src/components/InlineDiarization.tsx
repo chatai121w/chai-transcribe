@@ -280,8 +280,14 @@ export const InlineDiarization = ({ open, onOpenChange, audioFilePath, transcrip
                   <Download className="w-3.5 h-3.5 ml-1" />
                   הורד
                 </Button>
+                <TextExportMenu
+                  getText={() => segments.map(s => `[${s.speaker_label}] (${formatTime(s.start)}-${formatTime(s.end)})\n${s.text}`).join("\n\n")}
+                  filename="זיהוי-דוברים"
+                  subject="זיהוי דוברים"
+                />
               </div>
             </div>
+
 
             {/* Speaker stats cards */}
             <div className="grid grid-cols-2 gap-2">
