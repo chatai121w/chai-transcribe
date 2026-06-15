@@ -192,14 +192,29 @@ export function readFlag(key: string): boolean {
   }
 }
 
-export function writeFlag(key: string, value: boolean): void {
+export function writeFlag(key: string, value: boolean, opts?: { silent?: boolean }): void {
   try {
     localStorage.setItem(key, value ? "1" : "0");
+    localStorage.setItem(`${key}__updated_at`, String(Date.now()));
     // Notify same-tab listeners (storage event only fires cross-tab).
-    window.dispatchEvent(new CustomEvent("featureFlagChange", { detail: { key, value } }));
+    window.dispatchEvent(
+      new CustomEvent("featureFlagChange", {
+        detail: { key, value, silent: Boolean(opts?.silent) },
+      })
+    );
   } catch {
     /* ignore */
   }
+}
+
+/** Set of keys managed by the /features page — used by cloud-prefs to avoid clobbering. */
+export const FEATURE_FLAG_KEYS: ReadonlySet<string> = new Set(FEATURE_FLAGS.map(f => f.key));
+
+/** Snapshot all flag values currently in localStorage (for cloud push). */
+export function snapshotAllFlags(): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const f of FEATURE_FLAGS) out[f.key] = readFlag(f.key);
+  return out;
 }
 
 export function getFlagMeta(key: string): FeatureFlag | undefined {
