@@ -42,6 +42,9 @@ interface RichTextEditorProps {
   onWordCorrected?: (original: string, corrected: string) => void;
   onSaveReplaceOriginal?: () => Promise<void> | void;
   onDuplicateSave?: () => Promise<void> | void;
+  transcriptName?: string;
+  audioBlob?: Blob | null;
+  audioFileName?: string;
 }
 
 const sanitize = (html: string): string => DOMPurify.sanitize(html, {
