@@ -1400,6 +1400,15 @@ const TextEditor = () => {
             )}
           </TabsContent>
 
+          <TabsContent value="loshon" className="flex flex-col gap-3">
+            <LazyErrorBoundary label="לשון הקודש">
+              <Suspense fallback={<div className="flex items-center gap-2 text-sm text-muted-foreground p-4"><Loader2 className="w-4 h-4 animate-spin" />טוען לשון הקודש…</div>}>
+                <LoshonKodeshRules embeddedText={lkEmbeddedText} defaultTab="test" embedded />
+              </Suspense>
+            </LazyErrorBoundary>
+          </TabsContent>
+
+
           <TabsContent value="speakers" className="flex flex-col gap-3">
             <CollapsibleWidget title="זיהוי דוברים" storageKey="te_speakers">
               <LazyErrorBoundary label="זיהוי דוברים">
