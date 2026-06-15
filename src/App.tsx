@@ -89,6 +89,8 @@ const SystemDashboard   = lazyWithLog('SystemDashboard',   () => import("./pages
 const LashoKodesh       = lazyWithLog('LashoKodesh',       () => import("./pages/LashoKodesh"));
 const LoshonKodeshRules = lazyWithLog('LoshonKodeshRules', () => import("./pages/LoshonKodeshRules"));
 const CompareReport     = lazyWithLog('CompareReport',     () => import("./pages/CompareReport"));
+const Features          = lazyWithLog('Features',          () => import("./pages/Features"));
+const ABCompare         = lazyWithLog('ABCompare',         () => import("./pages/ABCompare"));
 
 // Lazy non-critical UI widgets — defer past first paint
 const SmartConsoleLazy = lazy(() => import("./components/SmartConsole").then(m => ({ default: m.SmartConsole })));
@@ -293,6 +295,8 @@ const App = () => {
                 <Route path="/lashon-kodesh" element={<ProtectedRoute><LashoKodesh /></ProtectedRoute>} />
                 <Route path="/loshon-kodesh-rules" element={<ProtectedRoute><LoshonKodeshRules /></ProtectedRoute>} />
                 <Route path="/compare-report" element={<ProtectedRoute><CompareReport /></ProtectedRoute>} />
+                <Route path="/features" element={<ProtectedRoute><Features /></ProtectedRoute>} />
+                <Route path="/ab-compare" element={<ProtectedRoute><ABCompare /></ProtectedRoute>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
