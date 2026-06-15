@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,6 +23,11 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   GitCompareArrows,
   Link2,
   Link2Off,
@@ -30,7 +36,9 @@ import {
   Trash2,
   Eye,
   EyeOff,
+  ShoppingBasket,
 } from "lucide-react";
+import { abCart, type ABCartItem } from "@/lib/abCompareCart";
 import DiffMatchPatch from "diff-match-patch";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
