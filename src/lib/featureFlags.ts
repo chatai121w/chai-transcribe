@@ -115,10 +115,9 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
   {
     key: "ff_agc_auto",
     label: "AGC אוטומטי",
-    description: "מאזן רמת קלט מיקרופון בזמן אמת.",
+    description: "AGC של הדפדפן — מאזן רמת קלט מיקרופון בזמן אמת. כיבוי = רמה גולמית.",
     category: "audio",
-    defaultOn: false,
-    experimental: true,
+    defaultOn: true,
   },
   {
     key: "ff_pre_roll_buffer",
