@@ -1128,6 +1128,27 @@ const TextEditor = () => {
               <Cloud className="w-3.5 h-3.5 text-yellow-600" />
               ייצא ל-Drive
             </Button>
+            <div className="w-px h-5 bg-border mx-1 hidden sm:block" />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1 border-yellow-500/50 hover:bg-yellow-500/10"
+              onClick={() => sendTextToLoshonKodesh()}
+              title="שלח את הטקסט לטאב לשון הקודש (השאר אותי כאן)"
+            >
+              <ShoppingBasket className="w-3.5 h-3.5 text-yellow-600" />
+              שלח ללשון הקודש
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1 border-yellow-500/50 hover:bg-yellow-500/10"
+              onClick={() => sendTextToLoshonKodesh({ jump: true })}
+              title="שלח את הטקסט וקפוץ לטאב לשון הקודש"
+            >
+              <ScrollText className="w-3.5 h-3.5 text-yellow-600" />
+              פתח לשון הקודש
+            </Button>
           </div>
         )}
 
