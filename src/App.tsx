@@ -241,6 +241,7 @@ const App = () => {
   <ErrorBoundary>
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
+      <LoshonKodeshSyncBridge />
       <CloudPreferencesProvider>
       <DesignModeProvider>
       <TooltipProvider>
