@@ -644,6 +644,29 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
       const recorderStream = processedStreamRef.current ?? stream;
 
+      // ─── Start the parallel BACKUP recorder (single contiguous file) ───
+      try {
+        backupChunksRef.current = [];
+        backupSeqRef.current = 0;
+        backupSessionIdRef.current = `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const backupRec = new MediaRecorder(recorderStream, { mimeType });
+        backupRec.ondataavailable = (e) => {
+          if (!e.data || e.data.size === 0) return;
+          backupChunksRef.current.push(e.data);
+          const seq = backupSeqRef.current++;
+          // Fire-and-forget IndexedDB persistence for crash-safety
+          void backupAppendChunk(backupSessionIdRef.current, seq, e.data);
+        };
+        backupRec.start(BACKUP_TIMESLICE_MS);
+        backupRecorderRef.current = backupRec;
+        console.log(`[backup-rec] started, session=${backupSessionIdRef.current}`);
+      } catch (e) {
+        console.warn("[backup-rec] failed to start; continuing without backup", e);
+        backupRecorderRef.current = null;
+      }
+
+
+
       if (mode === "groq") {
         // Groq requires a complete, standalone media file per request.
         // Each chunk = its own standalone webm recording. We track per-chunk
