@@ -201,10 +201,16 @@ export function TranscriptVersionsPanel({ transcriptId, currentText, onApplyVers
                     )}
                     <Cloud className="w-3 h-3 text-blue-500" />
                   </div>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs shrink-0" onClick={() => applyText(v.text)}>
-                    <RotateCcw className="w-3 h-3 ml-1" />טען
-                  </Button>
-                </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <TextExportMenu
+                      getText={() => v.text}
+                      filename={`${labelFor(v)} - v${v.version_number}`}
+                      subject={labelFor(v)}
+                    />
+                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => applyText(v.text)}>
+                      <RotateCcw className="w-3 h-3 ml-1" />טען
+                    </Button>
+                  </div>
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground mb-2">
                   <Clock className="w-3 h-3" />
                   <span>{formatDistanceToNow(new Date(v.created_at), { addSuffix: true, locale: he })}</span>
