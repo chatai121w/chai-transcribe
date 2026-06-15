@@ -299,11 +299,11 @@ const TextEditor = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.key === 'F') {
         e.preventDefault();
-        setIsPlayerFloating(p => !p);
+        togglePlayerFloating();
       }
       if (e.ctrlKey && e.shiftKey && e.key === 'E') {
         e.preventDefault();
-        setIsEqFloating(p => !p);
+        toggleEqFloating();
       }
       if (e.ctrlKey && !e.shiftKey && e.key === 'f') {
         e.preventDefault();
