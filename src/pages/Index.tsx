@@ -33,7 +33,7 @@ import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
 import { getApiKey, getEncryptedKey } from "@/lib/keyCrypto";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
-import { isLoshonKodeshEnabled, setLoshonKodeshEnabled } from "@/lib/loshonKodesh";
+import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, buildLoshonKodeshHotwords, applyLoshonKodeshReplacements } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
 import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
 import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSuggestion";
