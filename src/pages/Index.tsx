@@ -665,6 +665,27 @@ const Index = () => {
       };
     } catch { /* ignore duration detection errors */ }
 
+    // Audio quality pre-check (flag-gated). Non-blocking — warnings only.
+    try {
+      const { readFlag } = await import('@/lib/featureFlags');
+      if (!isVideo && readFlag('ff_audio_quality_check')) {
+        const { analyzeAudioFile } = await import('@/lib/audioQualityCheck');
+        analyzeAudioFile(file).then((report) => {
+          if (report.issues.length === 0) {
+            debugLog.info('AudioQuality', `✓ OK | RMS ${report.rmsDb.toFixed(1)} dB | SR ${report.sampleRate} Hz`);
+            return;
+          }
+          for (const issue of report.issues) {
+            toast({
+              title: issue.severity === 'error' ? '⚠️ בעיית אודיו חמורה' : '⚠️ אזהרת איכות אודיו',
+              description: `${issue.message}${issue.suggestion ? ' — ' + issue.suggestion : ''}`,
+              variant: issue.severity === 'error' ? 'destructive' : undefined,
+            });
+          }
+        }).catch(err => debugLog.warn('AudioQuality', 'analysis failed', err));
+      }
+    } catch { /* ignore */ }
+
     // Step 1: If video file and engine requires audio-only → extract audio
     let fileToTranscribe = file;
     if (isVideo && (VIDEO_NEEDS_EXTRACTION.has(engine) || rangeEnabled)) {
