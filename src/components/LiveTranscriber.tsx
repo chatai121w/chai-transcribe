@@ -456,16 +456,17 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     }
   }, [appendDedupText, mode, apiKeys.groq_key, apiKeys.groq_keys_pool, getLiveBiasOptions]);
 
-  const runFinalRefinePass = useCallback(async (): Promise<string | null> => {
-    if (allChunksRef.current.length === 0) return null;
+  const runFinalRefinePass = useCallback(async (overrideBlob?: Blob): Promise<string | null> => {
+    if (!overrideBlob && allChunksRef.current.length === 0) return null;
     setIsRefining(true);
     setInterimText("משפר דיוק — refine pass...");
     try {
       const mimeType = mimeTypeRef.current;
-      const fullBlob = new Blob(allChunksRef.current, { type: mimeType });
+      const fullBlob = overrideBlob ?? new Blob(allChunksRef.current, { type: mimeType });
+      const fileExt = overrideBlob ? "wav" : "webm";
 
       const formData = new FormData();
-      formData.append("file", fullBlob, "live-final.webm");
+      formData.append("file", fullBlob, `live-final.${fileExt}`);
       formData.append("language", "he");
       formData.append("final", "1");
       const bias = getLiveBiasOptions();
