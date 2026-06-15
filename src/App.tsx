@@ -86,6 +86,7 @@ const MeetingRecorder = lazyWithLog('MeetingRecorder', () => import("./pages/Mee
 const VoiceCommandAdmin = lazyWithLog('VoiceCommandAdmin', () => import("./pages/VoiceCommandAdmin"));
 const SystemDashboard   = lazyWithLog('SystemDashboard',   () => import("./pages/SystemDashboard"));
 const LashoKodesh       = lazyWithLog('LashoKodesh',       () => import("./pages/LashoKodesh"));
+const LoshonKodeshRules = lazyWithLog('LoshonKodeshRules', () => import("./pages/LoshonKodeshRules"));
 const CompareReport     = lazyWithLog('CompareReport',     () => import("./pages/CompareReport"));
 
 // Lazy non-critical UI widgets — defer past first paint
