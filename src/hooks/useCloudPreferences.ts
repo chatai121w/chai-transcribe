@@ -23,6 +23,7 @@ export interface UserPreferences {
   folder_sort_asc: boolean;
   player_layout: string;       // 'split' | 'stacked' | 'full'
   tab_settings_json: string;   // JSON string of { visible, order }
+  text_editor_view_json: string; // JSON string of TextEditor view state ({ isPlayerFloating, isEqFloating, ... })
   default_ai_model: string;    // preferred AI editing model
   // CUDA / transcription settings
   cuda_preset: string;         // 'fast' | 'balanced' | 'accurate'
@@ -61,6 +62,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   folder_sort_asc: false,
   player_layout: 'split',
   tab_settings_json: '',
+  text_editor_view_json: '',
   default_ai_model: '',
   cuda_preset: 'balanced',
   cuda_fast_mode: true,
@@ -226,6 +228,9 @@ const useCloudPreferencesImpl = () => {
           tab_settings_json: typeof (data as any).tab_settings_json === 'string'
             ? (data as any).tab_settings_json
             : JSON.stringify((data as any).tab_settings_json ?? ''),
+          text_editor_view_json: typeof (data as any).text_editor_view_json === 'string'
+            ? (data as any).text_editor_view_json
+            : JSON.stringify((data as any).text_editor_view_json ?? {}),
           default_ai_model: (data as any).default_ai_model ?? DEFAULT_PREFERENCES.default_ai_model,
           cuda_preset: (data as any).cuda_preset ?? DEFAULT_PREFERENCES.cuda_preset,
           cuda_fast_mode: (data as any).cuda_fast_mode ?? DEFAULT_PREFERENCES.cuda_fast_mode,
@@ -477,6 +482,8 @@ const useCloudPreferencesImpl = () => {
       try { customThemesParsed = JSON.parse(updated.custom_themes); } catch {}
       let tabSettingsParsed: unknown = null;
       try { if (updated.tab_settings_json) tabSettingsParsed = JSON.parse(updated.tab_settings_json); } catch {}
+      let textEditorViewParsed: unknown = {};
+      try { if (updated.text_editor_view_json) textEditorViewParsed = JSON.parse(updated.text_editor_view_json); } catch {}
 
       const { data: row, error } = await supabase
         .from('user_preferences')
@@ -498,6 +505,7 @@ const useCloudPreferencesImpl = () => {
           folder_sort_asc: updated.folder_sort_asc,
           player_layout: updated.player_layout,
           tab_settings_json: tabSettingsParsed,
+          text_editor_view_json: textEditorViewParsed,
           default_ai_model: updated.default_ai_model || null,
           cuda_preset: updated.cuda_preset,
           cuda_fast_mode: updated.cuda_fast_mode,
