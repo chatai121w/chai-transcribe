@@ -412,6 +412,73 @@ export default function ABCompare() {
             </Label>
             <Switch id="sync-toggle" checked={syncPlayers} onCheckedChange={setSyncPlayers} />
           </div>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1 relative">
+                <ShoppingBasket className="h-4 w-4" />
+                סל ההשוואה
+                {cartItems.length > 0 && (
+                  <Badge variant="secondary" className="h-4 min-w-4 px-1 text-[10px] mr-1">
+                    {cartItems.length}
+                  </Badge>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 p-2" dir="rtl" align="end">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold">פריטים בסל ({cartItems.length})</div>
+                  {cartItems.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-[11px] text-destructive"
+                      onClick={() => abCart.clear()}
+                    >
+                      רוקן
+                    </Button>
+                  )}
+                </div>
+                {cartItems.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-3 text-center">
+                    הסל ריק. הוסף תמלולים מעמוד עריכת הטקסט.
+                  </p>
+                ) : (
+                  <div className="max-h-72 overflow-y-auto space-y-1">
+                    {cartItems.map((item) => (
+                      <div key={item.id} className="flex items-center gap-1 text-xs bg-muted/40 rounded px-2 py-1">
+                        <span className="flex-1 truncate" title={item.label}>{item.label}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-1.5 text-[10px]"
+                          onClick={() => loadCartItemTo(item, "A")}
+                        >
+                          → A
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-1.5 text-[10px]"
+                          onClick={() => loadCartItemTo(item, "B")}
+                        >
+                          → B
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => abCart.remove(item.id)}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
           <Button variant="outline" size="sm" className="gap-1" onClick={swap}>
             <ArrowLeftRight className="h-4 w-4" />
             החלף
