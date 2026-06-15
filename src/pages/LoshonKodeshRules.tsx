@@ -58,7 +58,16 @@ function renderDiff(before: string, after: string) {
   return <span>{after}</span>;
 }
 
-export default function LoshonKodeshRules() {
+interface LoshonKodeshRulesProps {
+  /** When provided, the test lab pre-fills with this text (and updates when it changes). */
+  embeddedText?: string;
+  /** Which tab to open by default. */
+  defaultTab?: 'rules' | 'dicts' | 'ai' | 'test';
+  /** Skip the outer page container — render inline inside another page. */
+  embedded?: boolean;
+}
+
+export default function LoshonKodeshRules({ embeddedText, defaultTab = 'rules', embedded = false }: LoshonKodeshRulesProps = {}) {
   // Master toggles
   const [enabled, setEnabled] = useState(false);
   const [postProcess, setPostProcess] = useState(true);
@@ -84,10 +93,22 @@ export default function LoshonKodeshRules() {
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiModel, setAiModel] = useState(DEFAULT_LK_AI_MODEL);
 
-  // Test lab
-  const [testInput, setTestInput] = useState("היום למדנו תוירה קוידשה ומוישע רבינו אוימר שאבעס.");
+  // Test lab — seed from embeddedText if provided
+  const [testInput, setTestInput] = useState(
+    embeddedText && embeddedText.trim()
+      ? embeddedText
+      : "היום למדנו תוירה קוידשה ומוישע רבינו אוימר שאבעס."
+  );
   const [testAiOut, setTestAiOut] = useState<string>("");
   const [testAiLoading, setTestAiLoading] = useState(false);
+
+  // Update test input when embeddedText changes (e.g. user pushed new text from editor)
+  useEffect(() => {
+    if (embeddedText && embeddedText.trim()) {
+      setTestInput(embeddedText);
+      setTestAiOut("");
+    }
+  }, [embeddedText]);
 
   useEffect(() => {
     setEnabled(isLoshonKodeshEnabled());
