@@ -39,6 +39,9 @@ import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt,
 import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSuggestion";
 import { PronunciationProfileSelector } from "@/components/PronunciationProfileSelector";
 import { PronunciationStack } from "@/components/PronunciationStack";
+import { FeatureToggleChip } from "@/components/FeatureToggleChip";
+import { Link } from "react-router-dom";
+import { Layers } from "lucide-react";
 import { applyLearnedCorrections } from "@/utils/correctionLearning";
 import { addRecentFile } from "@/components/RecentFiles";
 
@@ -2067,6 +2070,57 @@ const Index = () => {
             <PronunciationProfileSelector onProfileChange={(id) => updatePreference('active_pronunciation_profile', id)} />
           }
         />
+
+        {/* Quick-access feature toggles — affect transcription on upload, recording, and live mode */}
+        <div
+          className="flex items-center justify-between flex-wrap gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2"
+          dir="rtl"
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+              <Layers className="w-3.5 h-3.5" />
+              תוספות מהירות:
+            </span>
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="flex items-center gap-1 text-xs">
+                <FeatureToggleChip flagKey="ff_ai_post_correction" />
+                תיקון AI סופי
+              </span>
+              <span className="flex items-center gap-1 text-xs">
+                <FeatureToggleChip flagKey="ff_names_dictionary" />
+                שמות פרטיים
+              </span>
+              <span className="flex items-center gap-1 text-xs">
+                <FeatureToggleChip flagKey="ff_smart_chunking" />
+                חיתוך חכם
+              </span>
+              <span className="flex items-center gap-1 text-xs">
+                <FeatureToggleChip flagKey="ff_pre_roll_buffer" />
+                Pre-roll
+              </span>
+              <span className="flex items-center gap-1 text-xs">
+                <FeatureToggleChip flagKey="ff_agc_auto" />
+                AGC אוטומטי
+              </span>
+              <span className="flex items-center gap-1 text-xs">
+                <FeatureToggleChip flagKey="ff_audio_quality_check" />
+                בדיקת איכות
+              </span>
+              <span className="flex items-center gap-1 text-xs">
+                <FeatureToggleChip flagKey="ff_auto_resume" />
+                המשך אוטומטי
+              </span>
+            </div>
+          </div>
+          <Link
+            to="/features"
+            className="text-xs text-primary hover:underline whitespace-nowrap"
+          >
+            כל הפיצ'רים →
+          </Link>
+        </div>
+
+
 
 
         {(engine === 'assemblyai' || engine === 'deepgram') && (
