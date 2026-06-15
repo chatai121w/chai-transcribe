@@ -26,6 +26,7 @@ import { extractAudioSegment, probeAudioDurationSec } from "@/lib/audioSegment";
 import type { SyncAudioPlayerRef, WordTiming } from "@/components/SyncAudioPlayer";
 import { DiarizationNotes } from "@/components/DiarizationNotes";
 import { DiarizationAI } from "@/components/DiarizationAI";
+import { TextExportMenu } from "@/components/TextExportMenu";
 import {
   detectOverlaps,
   exportAsVTT,
@@ -2315,6 +2316,7 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
                     <Button variant="outline" size="sm" className="text-xs" onClick={() => downloadBlob(new Blob(["\uFEFF" + mergedText], { type: "text/plain;charset=utf-8" }), `merged-${Date.now()}.txt`)}>
                       <Download className="w-3.5 h-3.5" />הורד
                     </Button>
+                    <TextExportMenu getText={() => mergedText} filename="דוברים-משולב" subject="תמלול דוברים" />
                   </div>
                 </div>
                 <div className="border rounded-lg p-3 bg-muted/20 max-h-[400px] overflow-y-auto text-sm leading-relaxed whitespace-pre-wrap" dir="rtl">{mergedText}</div>

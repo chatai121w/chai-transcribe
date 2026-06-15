@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
+import { TextExportMenu } from "@/components/TextExportMenu";
 import { Slider } from "@/components/ui/slider";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
@@ -1152,6 +1153,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
               <Button variant="ghost" size="sm" onClick={handleCopy} title="העתק">
                 <Copy className="w-4 h-4" />
               </Button>
+              <TextExportMenu getText={() => finalText} filename="תמלול-חי" subject="תמלול חי" />
               <Button variant="ghost" size="sm" onClick={handleClear} title="נקה">
                 <Trash2 className="w-4 h-4" />
               </Button>

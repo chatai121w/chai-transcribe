@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Loader2, Sparkles, TrendingUp, Hash, Wand2, Copy, ChevronDown, ChevronUp, Clock } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { TextExportMenu } from "@/components/TextExportMenu";
 import {
   analyzeSpeakerSentiment,
   detectTopics,
@@ -160,12 +161,15 @@ export function DiarizationAI({ result, speakerNames, openaiKey, onSegmentsUpdat
         {summary && (
           <div className="border rounded-xl p-3 bg-gradient-to-l from-primary/5 to-transparent space-y-2">
             <div className="text-sm leading-relaxed whitespace-pre-wrap" dir="rtl">{summary}</div>
-            <Button variant="ghost" size="sm" className="text-xs" onClick={() => {
-              navigator.clipboard.writeText(summary);
-              toast({ title: "סיכום הועתק" });
-            }}>
-              <Copy className="w-3 h-3 ml-1" />העתק
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="sm" className="text-xs" onClick={() => {
+                navigator.clipboard.writeText(summary);
+                toast({ title: "סיכום הועתק" });
+              }}>
+                <Copy className="w-3 h-3 ml-1" />העתק
+              </Button>
+              <TextExportMenu getText={() => summary} filename="סיכום-דוברים" subject="סיכום שיחה" />
+            </div>
           </div>
         )}
       </section>
