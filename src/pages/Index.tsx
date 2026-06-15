@@ -33,7 +33,7 @@ import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
 import { getApiKey, getEncryptedKey } from "@/lib/keyCrypto";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
-import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, buildLoshonKodeshHotwords, applyLoshonKodeshReplacements } from "@/lib/loshonKodesh";
+import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, buildLoshonKodeshHotwords, applyLoshonKodeshReplacements, isLkAiEnabled, isLkAiAuto, applyLkAiFix } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
 import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
 import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSuggestion";
@@ -391,7 +391,19 @@ const Index = () => {
       : { text: correctionResult.text, appliedCount: 0 };
     // Apply Loshon Kodesh phonetic→canonical replacements when LK mode is on
     const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
-    const finalText = lkActive ? applyLoshonKodeshReplacements(profileResult.text) : profileResult.text;
+    let finalText = lkActive ? applyLoshonKodeshReplacements(profileResult.text) : profileResult.text;
+    // Layer 2: optional AI fix when auto-mode is on
+    if (lkActive && isLkAiEnabled() && isLkAiAuto()) {
+      try {
+        const aiFixed = await applyLkAiFix(finalText);
+        if (aiFixed && aiFixed.trim()) {
+          finalText = aiFixed;
+          debugLog.info('Index', 'Applied Loshon Kodesh AI layer');
+        }
+      } catch (e) {
+        debugLog.warn('Index', 'LK AI fix failed, keeping rules-only result', e);
+      }
+    }
     if (correctionResult.appliedCount > 0 || profileResult.appliedCount > 0) {
       debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile corrections`);
     }
