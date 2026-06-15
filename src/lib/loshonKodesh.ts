@@ -1,46 +1,21 @@
 /**
  * Loshon Kodesh (לשון הקודש) — Ashkenazi pronunciation transcription support.
  *
- * Stage 2 of the hybrid plan: provide Whisper with a strong torani context
- * (initial_prompt) plus a curated hotwords list so it leans toward
- * traditional Hebrew/Aramaic spelling rather than modern Israeli phonetic
- * transcription of words like "מוקוים" → "מקום".
- *
- * Used by `useLocalServer` when `cudaOptions.loshonKodesh === true`.
+ * All rules (prompt, hotwords, phonetic replacements) are user-editable
+ * via the "כללי לשון הקודש" settings page and persisted to localStorage.
+ * The exported defaults below are restored when the user hits "אפס לברירת מחדל".
  */
 
-/**
- * Initial prompt fed to Whisper to bias the language model toward
- * traditional torani vocabulary and Ashkenazi religious context.
- * Whisper supports an `initial_prompt` (≤224 tokens). We keep it under that.
- */
-/**
- * Whisper initial_prompt — biases the decoder toward standard Hebrew spelling
- * even when the speaker uses Ashkenazi pronunciation. We do NOT write the
- * phonetic forms (תוירה / קוידש / מוישה) because that would teach Whisper to
- * emit them; instead we list the canonical target spellings the model should
- * prefer, plus a short context sentence describing the speaker style.
- *
- * Mapping rules the model should apply silently:
- *  • חולם נשמע "אוֹי" → לכתוב כ-וֹ (תוֹרה ולא תוירה, קוֹדש ולא קוידש, מוֹשה ולא מוישה)
- *  • צירה נשמע "יי" → לכתוב כ-ֵי (אֵין, בֵּית, מֵאיר)
- *  • קמץ נשמע "אוֹ" אצל חלק → לכתוב לפי הכתיב התקני (דָּבָר, אָדָם)
- *  • ת' רפה נשמעת "ס" → לכתוב ת' (שבת ולא שאבס, בית ולא בייס)
- *  • שווא נע מודגש → להתעלם מההגייה ולכתוב כתיב מלא תקני
- */
-export const LOSHON_KODESH_INITIAL_PROMPT =
+// ─────────────────────────────────────────────────────────────────────
+// DEFAULTS
+// ─────────────────────────────────────────────────────────────────────
+
+export const DEFAULT_LOSHON_KODESH_PROMPT =
   'שיעור תורה בלשון הקודש בהגייה אשכנזית. יש לתמלל בכתיב עברי תקני מלא, להתעלם מההגייה האשכנזית של החולם (אוֹי), הצירה (יי), הקמץ והת\' הרפה. ' +
   'דוגמאות לכתיב התקני שיש להעדיף: תורה, קודש, משה, אהרון, יעקב, יוסף, שלמה, שבת, יום טוב, ברוך, ברכה, מקום, מצוה, פסוק, פרשה, ' +
   'הקדוש ברוך הוא, הקב"ה, רבי, גמרא, משנה, תוספות, רש"י, רמב"ם, הלכה, סוגיא, מסכת, דף, ישיבה, בית מדרש, תפילה, אמונה, יראת שמים, חסידות, מוסר, תשובה.';
 
-/**
- * Curated torani hotwords list — words/phrases very common in Torah lessons
- * and Ashkenazi pronunciation. Whisper's `hotwords` mechanism boosts the
- * probability of these tokens during decoding.
- *
- * NOTE: do NOT include words with niqqud — keep them as plain ktiv male.
- */
-const TORANI_HOTWORDS = [
+export const DEFAULT_LOSHON_KODESH_HOTWORDS: string[] = [
   // Names of God / titles
   'הקדוש ברוך הוא', 'הקב"ה', 'השם יתברך', 'בורא עולם', 'אדון עולם',
   // Texts & sources
@@ -63,28 +38,139 @@ const TORANI_HOTWORDS = [
   'אפשר', 'אסור', 'מותר', 'חייב', 'פטור', 'כשר', 'פסול', 'דאורייתא', 'דרבנן',
   'לכתחילה', 'בדיעבד', 'מדאורייתא', 'מדרבנן', 'הלכה למעשה',
   // Aramaic high-freq
-  'אמר', 'תנא', 'תני', 'שמע מינה', 'דאמר', 'רבא', 'אביי', 'רב', 'ר\' יוחנן',
-  // Ashkenazi-pronounced words → standard spelling we WANT in output
-  // (boosts canonical form over phonetic mis-spellings like תוירה / קוידש / מוישה / שאבס)
+  'אמר', 'תנא', 'תני', 'שמע מינה', 'דאמר', 'רבא', 'אביי', 'רב',
+  // Standard spelling for Ashkenazi-pronounced words
   'תורה', 'קודש', 'משה', 'אהרון', 'יעקב', 'יוסף', 'יצחק', 'אברהם', 'שלמה', 'דוד',
   'ברוך', 'ברכה', 'שבת', 'שמים', 'ארץ', 'אדם', 'עולם', 'שלום', 'אומר', 'רוצה',
   'פסוק', 'מקום', 'דבר', 'אמת', 'תפילה', 'מצוה', 'נשמה', 'בורא',
 ];
 
+/** Phonetic → canonical replacements applied as post-processing on the transcript text. */
+export interface LkReplacement {
+  from: string;
+  to: string;
+  /** When true, match only whole-word occurrences. Default: true. */
+  wholeWord?: boolean;
+}
+
+export const DEFAULT_LOSHON_KODESH_REPLACEMENTS: LkReplacement[] = [
+  // חולם (oy → o)
+  { from: 'תוירה', to: 'תורה' },
+  { from: 'קוידש', to: 'קודש' },
+  { from: 'מוישה', to: 'משה' },
+  { from: 'אוימר', to: 'אומר' },
+  { from: 'רויצה', to: 'רוצה' },
+  { from: 'שוילם', to: 'שלום' },
+  { from: 'בוריך', to: 'ברוך' },
+  { from: 'דויד', to: 'דוד' },
+  { from: 'יויסף', to: 'יוסף' },
+  { from: 'יויניק', to: 'יונק' },
+  // צירה (ei → e)
+  { from: 'בייס', to: 'בית' },
+  { from: 'מייר', to: 'מאיר' },
+  // ת' רפה
+  { from: 'שאבס', to: 'שבת' },
+  { from: 'שאבעס', to: 'שבת' },
+  { from: 'גיבעס', to: 'גיבת' },
+  // קמץ (a → o)
+  { from: 'דווקא', to: 'דווקא' }, // identity (placeholder)
+];
+
+// ─────────────────────────────────────────────────────────────────────
+// LOCAL STORAGE KEYS
+// ─────────────────────────────────────────────────────────────────────
+
+const LS_ENABLED = 'loshon_kodesh_mode';
+const LS_PROMPT = 'lk_rules_prompt';
+const LS_HOTWORDS = 'lk_rules_hotwords';        // JSON array of strings
+const LS_REPLACEMENTS = 'lk_rules_replacements'; // JSON array of LkReplacement
+const LS_POSTPROCESS = 'lk_rules_postprocess';   // '1' to apply replacements
+
+// ─────────────────────────────────────────────────────────────────────
+// GETTERS / SETTERS
+// ─────────────────────────────────────────────────────────────────────
+
+export function isLoshonKodeshEnabled(): boolean {
+  try { return localStorage.getItem(LS_ENABLED) === '1'; } catch { return false; }
+}
+export function setLoshonKodeshEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem(LS_ENABLED, enabled ? '1' : '0');
+    window.dispatchEvent(new CustomEvent('lk-rules-changed'));
+  } catch { /* ignore */ }
+}
+
+export function getLoshonKodeshPrompt(): string {
+  try { return localStorage.getItem(LS_PROMPT) || DEFAULT_LOSHON_KODESH_PROMPT; }
+  catch { return DEFAULT_LOSHON_KODESH_PROMPT; }
+}
+export function setLoshonKodeshPrompt(p: string): void {
+  try {
+    localStorage.setItem(LS_PROMPT, p);
+    window.dispatchEvent(new CustomEvent('lk-rules-changed'));
+  } catch { /* ignore */ }
+}
+
+export function getLoshonKodeshHotwordsList(): string[] {
+  try {
+    const raw = localStorage.getItem(LS_HOTWORDS);
+    if (!raw) return DEFAULT_LOSHON_KODESH_HOTWORDS;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(x => typeof x === 'string' && x.trim()) : DEFAULT_LOSHON_KODESH_HOTWORDS;
+  } catch { return DEFAULT_LOSHON_KODESH_HOTWORDS; }
+}
+export function setLoshonKodeshHotwordsList(list: string[]): void {
+  try {
+    localStorage.setItem(LS_HOTWORDS, JSON.stringify(list));
+    window.dispatchEvent(new CustomEvent('lk-rules-changed'));
+  } catch { /* ignore */ }
+}
+
+export function getLoshonKodeshReplacements(): LkReplacement[] {
+  try {
+    const raw = localStorage.getItem(LS_REPLACEMENTS);
+    if (!raw) return DEFAULT_LOSHON_KODESH_REPLACEMENTS;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter(x => x && typeof x.from === 'string' && typeof x.to === 'string' && x.from)
+      : DEFAULT_LOSHON_KODESH_REPLACEMENTS;
+  } catch { return DEFAULT_LOSHON_KODESH_REPLACEMENTS; }
+}
+export function setLoshonKodeshReplacements(list: LkReplacement[]): void {
+  try {
+    localStorage.setItem(LS_REPLACEMENTS, JSON.stringify(list));
+    window.dispatchEvent(new CustomEvent('lk-rules-changed'));
+  } catch { /* ignore */ }
+}
+
+export function isLoshonKodeshPostProcessEnabled(): boolean {
+  try {
+    const v = localStorage.getItem(LS_POSTPROCESS);
+    return v === null ? true : v === '1'; // default ON
+  } catch { return true; }
+}
+export function setLoshonKodeshPostProcessEnabled(v: boolean): void {
+  try {
+    localStorage.setItem(LS_POSTPROCESS, v ? '1' : '0');
+    window.dispatchEvent(new CustomEvent('lk-rules-changed'));
+  } catch { /* ignore */ }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// BACKWARD-COMPAT EXPORTS (used elsewhere in the codebase)
+// ─────────────────────────────────────────────────────────────────────
+
+export const LOSHON_KODESH_INITIAL_PROMPT = DEFAULT_LOSHON_KODESH_PROMPT;
+
 /**
- * Build the final hotwords string to send to the server.
- * Merges the torani list with any user-supplied hotwords, deduped.
- * Whisper accepts comma-separated; faster-whisper joins them into a single
- * string passed to the decoder bias.
+ * Build the final hotwords string to send to the server. Merges user-supplied
+ * hotwords with the LK list (deduped).
  */
 export function buildLoshonKodeshHotwords(userHotwords?: string): string {
-  const user = (userHotwords || '')
-    .split(/[,，]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const user = (userHotwords || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
   const seen = new Set<string>();
   const merged: string[] = [];
-  for (const w of [...user, ...TORANI_HOTWORDS]) {
+  for (const w of [...user, ...getLoshonKodeshHotwordsList()]) {
     const key = w.replace(/\s+/g, ' ').trim();
     if (!key || seen.has(key)) continue;
     seen.add(key);
@@ -93,19 +179,40 @@ export function buildLoshonKodeshHotwords(userHotwords?: string): string {
   return merged.join(', ');
 }
 
-/** Read the Loshon Kodesh toggle from localStorage. */
-export function isLoshonKodeshEnabled(): boolean {
-  try {
-    return localStorage.getItem('loshon_kodesh_mode') === '1';
-  } catch {
-    return false;
-  }
+// ─────────────────────────────────────────────────────────────────────
+// POST-PROCESSING
+// ─────────────────────────────────────────────────────────────────────
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function setLoshonKodeshEnabled(enabled: boolean): void {
-  try {
-    localStorage.setItem('loshon_kodesh_mode', enabled ? '1' : '0');
-  } catch {
-    /* ignore */
+/**
+ * Apply the configured phonetic→canonical replacements on a transcript.
+ * Only runs when the user has post-processing enabled (default: on).
+ */
+export function applyLoshonKodeshReplacements(text: string): string {
+  if (!text) return text;
+  if (!isLoshonKodeshPostProcessEnabled()) return text;
+  let out = text;
+  for (const r of getLoshonKodeshReplacements()) {
+    if (!r.from || r.from === r.to) continue;
+    const whole = r.wholeWord !== false;
+    // Hebrew word boundary using lookarounds (no \b for non-ASCII)
+    const pattern = whole
+      ? new RegExp(`(?<![\\u0590-\\u05FFA-Za-z0-9])${escapeRegex(r.from)}(?![\\u0590-\\u05FFA-Za-z0-9])`, 'g')
+      : new RegExp(escapeRegex(r.from), 'g');
+    out = out.replace(pattern, r.to);
   }
+  return out;
+}
+
+export function subscribeLoshonKodeshRules(fn: () => void): () => void {
+  const handler = () => fn();
+  window.addEventListener('lk-rules-changed', handler);
+  window.addEventListener('storage', handler);
+  return () => {
+    window.removeEventListener('lk-rules-changed', handler);
+    window.removeEventListener('storage', handler);
+  };
 }
