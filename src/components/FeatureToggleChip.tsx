@@ -55,11 +55,16 @@ export function FeatureToggleChip({ flagKey, size = "sm", className }: Props) {
       </PopoverTrigger>
       <PopoverContent dir="rtl" align="end" className="w-72 p-3 space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
             <span className="font-medium text-sm truncate">{meta.label}</span>
             {meta.experimental && (
               <Badge variant="outline" className="text-[10px] gap-1">
                 <Sparkles className="h-3 w-3" /> ניסיוני
+              </Badge>
+            )}
+            {meta.comingSoon && (
+              <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-700 dark:text-amber-300">
+                בקרוב
               </Badge>
             )}
           </div>
