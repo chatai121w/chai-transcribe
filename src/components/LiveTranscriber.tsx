@@ -1153,6 +1153,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
               <Button variant="ghost" size="sm" onClick={handleCopy} title="העתק">
                 <Copy className="w-4 h-4" />
               </Button>
+              <TextExportMenu getText={() => finalText} filename="תמלול-חי" subject="תמלול חי" />
               <Button variant="ghost" size="sm" onClick={handleClear} title="נקה">
                 <Trash2 className="w-4 h-4" />
               </Button>
