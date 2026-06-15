@@ -1871,9 +1871,13 @@ const Index = () => {
       let lastErr: any = null;
       for (let offset = 0; offset < keyPool.length; offset++) {
         const idx = (safeStartIndex + offset) % keyPool.length;
-        const { data, error } = await supabase.functions.invoke('transcribe-google', {
-          body: { audio: base64, fileName: file.name, apiKey: keyPool[idx], language: sourceLanguage, targetLanguage: 'he' }
-        });
+        const { withAutoResume } = await import('@/lib/autoResume');
+        const { data, error } = await withAutoResume(
+          () => supabase.functions.invoke('transcribe-google', {
+            body: { audio: base64, fileName: file.name, apiKey: keyPool[idx], language: sourceLanguage, targetLanguage: 'he' }
+          }),
+          { onRetry: (a, e) => debugLog.warn('Google', `auto-resume retry #${a}`, e) },
+        );
         if (!error && data?.text) {
           setProviderActiveKey('google', keyPool, idx);
           return data.text;
