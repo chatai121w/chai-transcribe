@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollText, Plus, Trash2, RotateCcw, Save, Download, Upload, Sparkles, Loader2, BookOpen, Settings2, Wand2 } from "lucide-react";
+import { AIUsageBadge } from "@/components/AIUsageBadge";
 import { toast } from "@/hooks/use-toast";
 import {
   DEFAULT_LOSHON_KODESH_PROMPT, DEFAULT_LOSHON_KODESH_HOTWORDS, DEFAULT_LOSHON_KODESH_REPLACEMENTS,
@@ -482,7 +483,10 @@ export default function LoshonKodeshRules({ embeddedText, defaultTab = 'rules', 
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-[200px,1fr] gap-2 items-center">
-              <Label>מודל AI</Label>
+              <Label className="flex items-center gap-1">
+                מודל AI
+                <AIUsageBadge feature="loshon-kodesh" model={aiModel} />
+              </Label>
               <Select value={aiModel} onValueChange={onAiModelChange}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>

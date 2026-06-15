@@ -5,6 +5,8 @@ import { Sparkles, Loader2, Copy } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Textarea } from "@/components/ui/textarea";
+import { AIUsageBadge } from "@/components/AIUsageBadge";
+import { notifyUsageUpdated } from "@/hooks/useAIUsage";
 
 interface TranscriptSummaryProps {
   transcript: string;
