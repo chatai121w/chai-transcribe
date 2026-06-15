@@ -1374,6 +1374,9 @@ const TextEditor = () => {
                   text={text} 
                   onChange={handleEditorChange}
                   columnStyle={columnStyle}
+                  transcriptName={audioFileName}
+                  audioBlob={audioBlob}
+                  audioFileName={audioFileName}
                   onSaveReplaceOriginal={() => handleSaveAndReplaceOriginal(text, 'manual', 'עורך טקסט', 'שמירה מסרגל העורך')}
                   onDuplicateSave={() => handleDuplicateAndSave(text, 'manual', 'עורך טקסט', 'שכפול מסרגל העורך')}
                   onWordCorrected={(original, corrected) => {
