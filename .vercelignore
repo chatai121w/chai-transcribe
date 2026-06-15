@@ -1,0 +1,34 @@
+# Python virtual environments
+.venv/
+venv-whisper/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node modules (Vercel installs these during build)
+node_modules/
+
+# Local dev / build artifacts that aren't dist
+dist/
+playwright-report/
+test-results/
+
+# IDE and OS files
+.vscode/
+.idea/
+*.DS_Store
+
+# Local environment secrets (env vars are configured in Vercel dashboard)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+build_log*.txt
+server_out.txt
+server_err.txt
+
+# Git
+.git/

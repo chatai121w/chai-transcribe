@@ -1,0 +1,37 @@
+[
+  {
+    "model": "qwen2.5:14b",
+    "success_rate_pct": 100.0,
+    "avg_latency_ms": 19561.0,
+    "avg_preserve_pct": 91.26,
+    "avg_len_drift_pct": 233.68
+  },
+  {
+    "model": "gemma2:9b",
+    "success_rate_pct": 100.0,
+    "avg_latency_ms": 7021.0,
+    "avg_preserve_pct": 88.59,
+    "avg_len_drift_pct": 6.87
+  },
+  {
+    "model": "command-r:35b",
+    "success_rate_pct": 100.0,
+    "avg_latency_ms": 27511,
+    "avg_preserve_pct": 77.18,
+    "avg_len_drift_pct": 5.7
+  },
+  {
+    "model": "mistral-nemo:12b",
+    "success_rate_pct": 100.0,
+    "avg_latency_ms": 7508.0,
+    "avg_preserve_pct": 76.44,
+    "avg_len_drift_pct": 8.31
+  },
+  {
+    "model": "aya:8b",
+    "success_rate_pct": 100.0,
+    "avg_latency_ms": 5195.0,
+    "avg_preserve_pct": 32.2,
+    "avg_len_drift_pct": 28.75
+  }
+]

@@ -1,0 +1,1 @@
+ALTER TABLE public.user_preferences ADD COLUMN IF NOT EXISTS pronunciation_layout_mode TEXT NOT NULL DEFAULT 'rich';

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>מערכת תמלול מתקדמת | Smart Hebrew Transcriber</title>
+    <meta name="description" content="תמלול חכם של אודיו ווידאו לעברית עם עריכה מונעת AI – מערכת מתקדמת להמרת דיבור לטקסט">
+    <meta name="author" content="Lovable" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#1a3a6b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="תמלול" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="/pwa-512.png" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700&family=Rubik:wght@400;500;700&family=Heebo:wght@400;500;700&family=Frank+Ruhl+Libre:wght@400;500;700&subset=hebrew,latin&display=swap" />
+    <!-- Inline critical above-fold styles to prevent FOUC (flash of unstyled content) -->
+    <style>
+      :root { --background: 0 0% 100%; --foreground: 222.2 84% 4.9%; }
+      @media (prefers-color-scheme: dark) { :root { --background: 222.2 84% 4.9%; --foreground: 210 40% 98%; } }
+      body { margin: 0; background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: 'Assistant', 'Heebo', system-ui, sans-serif; }
+      #root { min-height: 100vh; }
+      /* Skeleton loader for initial paint */
+      .app-boot-skeleton { display:flex; align-items:center; justify-content:center; min-height:100vh; }
+      .app-boot-spinner { width:2rem; height:2rem; border:3px solid #e5e7eb; border-top-color:#3b82f6; border-radius:50%; animation:spin .7s linear infinite; }
+      @keyframes spin { to { transform:rotate(360deg); } }
+    </style>
+
+    
+    
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/664941aa-ae3e-4f86-9b2d-e27dfbebc112/id-preview-11d6d5c6--a1add912-bd72-490b-949a-bf5fe8ed03b5.lovable.app-1773168945929.png">
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@lovable_dev" />
+    <meta name="twitter:image" content="https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/664941aa-ae3e-4f86-9b2d-e27dfbebc112/id-preview-11d6d5c6--a1add912-bd72-490b-949a-bf5fe8ed03b5.lovable.app-1773168945929.png">
+    
+  
+  
+  
+  <meta property="og:url" content="https://smart-hebrew-transcriber.lovable.app">
+  <meta property="og:title" content="מערכת תמלול מתקדמת | Smart Hebrew Transcriber">
+  <meta name="twitter:title" content="מערכת תמלול מתקדמת | Smart Hebrew Transcriber">
+  <meta property="og:description" content="תמלול חכם של אודיו ווידאו לעברית עם עריכה מונעת AI – מערכת מתקדמת להמרת דיבור לטקסט">
+  <meta name="twitter:description" content="תמלול חכם של אודיו ווידאו לעברית עם עריכה מונעת AI – מערכת מתקדמת להמרת דיבור לטקסט">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+</head>
+
+  <body>
+    <noscript><p style="text-align:center;padding:2rem;font-family:sans-serif">אפליקציה זו דורשת JavaScript לפעולה תקינה.</p></noscript>
+    <div id="root">
+      <!-- Instant skeleton shown before React boots — removed once React mounts -->
+      <div class="app-boot-skeleton" id="boot-skeleton">
+        <div class="app-boot-spinner"></div>
+      </div>
+    </div>
+    <script>
+      // Remove boot skeleton once React takes over
+      document.addEventListener('DOMContentLoaded', () => {
+        const obs = new MutationObserver(() => {
+          const sk = document.getElementById('boot-skeleton');
+          if (sk && sk.parentElement && sk.parentElement.children.length > 1) {
+            sk.remove(); obs.disconnect();
+          }
+        });
+        const root = document.getElementById('root');
+        if (root) obs.observe(root, { childList: true });
+      });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Service Worker: register ONLY in production on the real app host.
+      // In dev/preview/iframe/localhost we actively unregister + clear caches
+      // to avoid stale chunks causing "Invalid hook call" / "Failed to fetch
+      // dynamically imported module" errors from mixed old/new bundles.
+      (function () {
+        if (!('serviceWorker' in navigator)) return;
+
+        var host = location.hostname;
+        var inIframe = window.self !== window.top;
+        var isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+        var isLovablePreview =
+          host.startsWith('id-preview--') ||
+          host.startsWith('preview--') ||
+          host.endsWith('.lovableproject.com') ||
+          host.endsWith('.lovableproject-dev.com') ||
+          host.endsWith('.beta.lovable.dev');
+        var killSwitch = location.search.indexOf('sw=off') !== -1;
+        var isDev = location.port === '5000' || location.port === '8080';
+
+        var shouldRegister = !inIframe && !isLocalhost && !isLovablePreview && !killSwitch && !isDev;
+
+        if (shouldRegister) {
+          window.addEventListener('load', function () {
+            navigator.serviceWorker.register('/sw.js').catch(function () {});
+          });
+        } else {
+          // Clean up any previously-registered SW + its caches so dev/preview
+          // never serves stale bundles.
+          navigator.serviceWorker.getRegistrations().then(function (regs) {
+            regs.forEach(function (r) {
+              // Don't touch messaging workers (firebase-messaging-sw.js etc.)
+              var url = (r.active && r.active.scriptURL) || '';
+              if (url.indexOf('/sw.js') !== -1) r.unregister();
+            });
+          }).catch(function () {});
+          if (window.caches && caches.keys) {
+            caches.keys().then(function (keys) {
+              keys.forEach(function (k) {
+                if (k.indexOf('transcriber-') === 0) caches.delete(k);
+              });
+            }).catch(function () {});
+          }
+        }
+      })();
+    </script>
+  </body>
+</html>

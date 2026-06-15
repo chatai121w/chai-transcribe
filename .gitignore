@@ -1,0 +1,60 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Python virtualenvs
+venv-whisper/
+.venv/
+
+# Test audio files
+test_*.wav
+
+# Build/install logs
+build_log*.txt
+install_log.txt
+_status.txt
+__pycache__/
+remote-urls.txt
+_remote_test.txt
+.playwright-mcp/
+
+# Debug artifacts
+server_err.txt
+server_out.txt
+server_restart_err.txt
+push_err.txt
+push_output.txt
+_git_remote.txt
+playwright-report/
+test-results/
+
+# Local repository backups
+backups/
+*.mp3
+
+# Local DBs and benchmark assets (do not commit)
+server/lk_data.db
+tools/transcription_feedback.db
+tools/*.wav
+tools/voice-command/__pycache__/

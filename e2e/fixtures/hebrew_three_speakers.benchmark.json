@@ -1,0 +1,70 @@
+{
+  "fixture": "C:\\Users\\jj121\\smart-hebrew-transcriber\\e2e\\fixtures\\hebrew_three_speakers.wav",
+  "ground_truth": [
+    {
+      "speaker_label": "דובר 1",
+      "start": 0.0,
+      "end": 3.864
+    },
+    {
+      "speaker_label": "דובר 2",
+      "start": 5.664,
+      "end": 22.8
+    },
+    {
+      "speaker_label": "דובר 3",
+      "start": 24.6,
+      "end": 61.08
+    }
+  ],
+  "results": [
+    {
+      "engine": "silence-gap",
+      "ok": true,
+      "accuracy_pct": 61.57,
+      "speaker_count": 1,
+      "method": "silence-gap",
+      "processing_time": 2.44,
+      "mapping": {
+        "דובר 1": "דובר 3"
+      }
+    },
+    {
+      "engine": "whisperx",
+      "ok": true,
+      "accuracy_pct": 22.61,
+      "speaker_count": 4,
+      "method": "whisperx+silence-gap",
+      "processing_time": 30.15,
+      "mapping": {
+        "דובר 1": "דובר 1",
+        "דובר 2": "דובר 2",
+        "דובר 3": "דובר 3"
+      }
+    },
+    {
+      "engine": "auto",
+      "ok": true,
+      "accuracy_pct": 22.61,
+      "speaker_count": 4,
+      "method": "whisperx+silence-gap",
+      "processing_time": 349.05,
+      "mapping": {
+        "דובר 1": "דובר 1",
+        "דובר 2": "דובר 2",
+        "דובר 3": "דובר 3"
+      }
+    }
+  ],
+  "best_engine": {
+    "engine": "silence-gap",
+    "ok": true,
+    "accuracy_pct": 61.57,
+    "speaker_count": 1,
+    "method": "silence-gap",
+    "processing_time": 2.44,
+    "mapping": {
+      "דובר 1": "דובר 3"
+    }
+  }
+}

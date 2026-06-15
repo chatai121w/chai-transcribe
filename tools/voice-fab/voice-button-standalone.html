@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>כפתור תמלול עברית — גרסה עצמאית</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      padding: 24px;
+    }
+
+    h1 { font-size: 1.4rem; opacity: .7; }
+
+    textarea {
+      width: 100%;
+      max-width: 520px;
+      min-height: 120px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      color: #f1f5f9;
+      font-size: 1rem;
+      padding: 12px 16px;
+      resize: vertical;
+      outline: none;
+      direction: rtl;
+    }
+    textarea:focus { border-color: #3b82f6; }
+    textarea::placeholder { color: #475569; }
+
+    /* ─── FAB wrapper ─────────────────────────────────────────── */
+    #voice-fab {
+      position: fixed;
+      bottom: 24px;
+      left: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+      z-index: 9999;
+    }
+
+    /* ─── Popover panel ──────────────────────────────────────── */
+    #fab-panel {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 18px;
+      border-radius: 20px;
+      background: rgba(0,0,0,.85);
+      border: 1px solid rgba(239,68,68,.35);
+      backdrop-filter: blur(8px);
+      font-size: 13px;
+      color: #fff;
+      white-space: nowrap;
+    }
+    #fab-panel.visible { display: flex; }
+    #fab-panel.processing {
+      border-color: rgba(59,130,246,.35);
+    }
+
+    /* ─── Level meter bars ───────────────────────────────────── */
+    #level-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 24px;
+    }
+    .bar {
+      width: 3px;
+      border-radius: 2px;
+      background: rgba(255,255,255,.12);
+      transition: height 80ms, background 80ms;
+    }
+
+    /* ─── Status label ──────────────────────────────────────── */
+    #fab-status { font-size: 12px; color: #f87171; }
+    #fab-panel.processing #fab-status { color: #93c5fd; }
+
+    /* ─── Cancel button ─────────────────────────────────────── */
+    #fab-cancel {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: rgba(255,255,255,.4);
+      font-size: 16px;
+      line-height: 1;
+      padding: 2px;
+      transition: color .15s;
+    }
+    #fab-cancel:hover { color: rgba(255,255,255,.85); }
+    #fab-panel.processing #fab-cancel { display: none; }
+
+    /* ─── Spinner (processing) ───────────────────────────────── */
+    #fab-spinner {
+      display: none;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(59,130,246,.3);
+      border-top-color: #60a5fa;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    #fab-panel.processing #fab-spinner { display: block; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── Result strip ───────────────────────────────────────── */
+    #fab-result {
+      display: none;
+      max-width: 240px;
+      padding: 6px 14px;
+      border-radius: 14px;
+      background: rgba(6,78,59,.75);
+      border: 1px solid rgba(16,185,129,.3);
+      color: #6ee7b7;
+      font-size: 12px;
+      backdrop-filter: blur(6px);
+      direction: rtl;
+    }
+    #fab-result.visible { display: block; }
+
+    /* ─── Main button ────────────────────────────────────────── */
+    #fab-btn {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+      box-shadow: 0 8px 32px rgba(59,130,246,.45);
+      transition: background .2s, box-shadow .2s, transform .1s;
+      outline: none;
+    }
+    #fab-btn:hover { background: linear-gradient(135deg, #60a5fa, #2563eb); }
+    #fab-btn:active { transform: scale(.94); }
+    #fab-btn.recording {
+      background: linear-gradient(135deg, #ef4444, #b91c1c);
+      box-shadow: 0 8px 32px rgba(239,68,68,.5);
+      animation: pulse-red 1.2s ease-in-out infinite;
+    }
+    #fab-btn.processing {
+      background: linear-gradient(135deg, #475569, #1e293b);
+      box-shadow: none;
+      cursor: not-allowed;
+    }
+
+    @keyframes pulse-red {
+      0%, 100% { box-shadow: 0 8px 32px rgba(239,68,68,.5); }
+      50%       { box-shadow: 0 8px 48px rgba(239,68,68,.9); }
+    }
+
+    /* ─── SVG icons ──────────────────────────────────────────── */
+    .icon { width: 24px; height: 24px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+</head>
+<body>
+
+  <h1>🎤 כפתור תמלול עברית</h1>
+  <p style="opacity:.5; font-size:.9rem;">לחץ על הכפתור → דבר → תומלל אוטומטית לשדה הטקסט</p>
+
+  <textarea id="output" placeholder="הטקסט המתומלל יופיע כאן…"></textarea>
+
+  <!-- ─── FAB ─────────────────────────────────────────────────────── -->
+  <div id="voice-fab">
+
+    <!-- panel -->
+    <div id="fab-panel">
+      <div id="fab-spinner"></div>
+      <div id="level-bars"></div>
+      <span id="fab-status">מקליט… לחץ לעצירה</span>
+      <button id="fab-cancel" title="ביטול">✕</button>
+    </div>
+
+    <!-- result strip -->
+    <div id="fab-result"></div>
+
+    <!-- main button -->
+    <button id="fab-btn" title="הקלטה קולית">
+      <!-- Mic icon (default) -->
+      <svg id="icon-mic" class="icon" viewBox="0 0 24 24">
+        <rect x="9" y="2" width="6" height="11" rx="3"/>
+        <path d="M19 10a7 7 0 0 1-14 0"/>
+        <line x1="12" y1="19" x2="12" y2="22"/>
+        <line x1="8"  y1="22" x2="16" y2="22"/>
+      </svg>
+      <!-- MicOff icon (recording) -->
+      <svg id="icon-mic-off" class="icon" viewBox="0 0 24 24" style="display:none">
+        <line x1="2" y1="2" x2="22" y2="22"/>
+        <path d="M18.89 13.23A7 7 0 0 0 19 10"/>
+        <path d="M5 10a7 7 0 0 0 10.77 6.21"/>
+        <path d="M15 9.34V5a3 3 0 0 0-5.94-.6"/>
+        <path d="M9 9v3a3 3 0 0 0 5.12 2.12"/>
+        <line x1="12" y1="19" x2="12" y2="22"/>
+        <line x1="8"  y1="22" x2="16" y2="22"/>
+      </svg>
+      <!-- Spinner icon (processing) -->
+      <svg id="icon-spin" class="icon" viewBox="0 0 24 24" style="display:none;animation:spin .7s linear infinite">
+        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+      </svg>
+    </button>
+  </div>
+
+<script>
+// ─── הגדרות ────────────────────────────────────────────────────────────────
+const WHISPER_PORT = 3000;
+const LANGUAGE     = "he";
+const BEAM_SIZE    = 3;
+const MAX_BARS     = 20;
+
+// ─── אלמנטים ───────────────────────────────────────────────────────────────
+const fabBtn     = document.getElementById("fab-btn");
+const fabPanel   = document.getElementById("fab-panel");
+const fabResult  = document.getElementById("fab-result");
+const fabStatus  = document.getElementById("fab-status");
+const fabCancel  = document.getElementById("fab-cancel");
+const levelBars  = document.getElementById("level-bars");
+const iconMic    = document.getElementById("icon-mic");
+const iconMicOff = document.getElementById("icon-mic-off");
+const iconSpin   = document.getElementById("icon-spin");
+const output     = document.getElementById("output");
+
+// ─── מצב ──────────────────────────────────────────────────────────────────
+let state      = "idle";   // "idle" | "recording" | "processing"
+let mediaRecorder = null;
+let audioStream   = null;
+let chunks        = [];
+let analyser      = null;
+let audioCtx      = null;
+let rafId         = null;
+let resultTimer   = null;
+
+// ─── בניית עמודות מד עוצמה ─────────────────────────────────────────────────
+for (let i = 0; i < MAX_BARS; i++) {
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  bar.style.height = (6 + Math.floor((i / MAX_BARS) * 16)) + "px";
+  levelBars.appendChild(bar);
+}
+const barEls = levelBars.querySelectorAll(".bar");
+
+// ─── עדכון UI לפי מצב ─────────────────────────────────────────────────────
+function applyState(s) {
+  state = s;
+
+  // כפתור
+  fabBtn.className = s === "recording" ? "recording"
+                   : s === "processing" ? "processing" : "";
+  fabBtn.disabled = s === "processing";
+
+  // אייקונים
+  iconMic.style.display    = s === "idle"       ? "" : "none";
+  iconMicOff.style.display = s === "recording"  ? "" : "none";
+  iconSpin.style.display   = s === "processing" ? "" : "none";
+
+  // פאנל
+  if (s === "idle") {
+    fabPanel.classList.remove("visible", "processing");
+    fabStatus.textContent = "מקליט… לחץ לעצירה";
+  } else if (s === "recording") {
+    fabPanel.classList.add("visible");
+    fabPanel.classList.remove("processing");
+    fabStatus.textContent = "מקליט… לחץ לעצירה";
+  } else {
+    fabPanel.classList.add("visible", "processing");
+    fabStatus.textContent = "מתמלל…";
+  }
+}
+
+// ─── מד עוצמה ─────────────────────────────────────────────────────────────
+function startMeter(stream) {
+  audioCtx  = new AudioContext();
+  const src = audioCtx.createMediaStreamSource(stream);
+  analyser  = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  src.connect(analyser);
+  const buf = new Uint8Array(analyser.frequencyBinCount);
+
+  function tick() {
+    analyser.getByteFrequencyData(buf);
+    const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
+    const level = Math.min(avg / 128, 1);
+
+    barEls.forEach((bar, i) => {
+      const threshold = (i + 1) / MAX_BARS;
+      const active = level >= threshold;
+      const color = threshold < 0.5  ? "#34d399"
+                  : threshold < 0.8  ? "#facc15"
+                  :                    "#f87171";
+      bar.style.background = active ? color : "rgba(255,255,255,.12)";
+      bar.style.opacity    = active ? "1" : "0.4";
+    });
+    rafId = requestAnimationFrame(tick);
+  }
+  rafId = requestAnimationFrame(tick);
+}
+
+function stopMeter() {
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  barEls.forEach(bar => {
+    bar.style.background = "rgba(255,255,255,.12)";
+    bar.style.opacity    = "0.4";
+  });
+}
+
+// ─── התחלת הקלטה ──────────────────────────────────────────────────────────
+async function startRecording() {
+  try {
+    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    chunks = [];
+
+    const mimeType = ["audio/webm;codecs=opus","audio/webm","audio/ogg;codecs=opus","audio/mp4"]
+      .find(m => MediaRecorder.isTypeSupported(m)) || "";
+    mediaRecorder = new MediaRecorder(audioStream, mimeType ? { mimeType } : {});
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    mediaRecorder.start(100);
+
+    startMeter(audioStream);
+    applyState("recording");
+  } catch (err) {
+    showToast("שגיאה", "לא ניתן לגשת למיקרופון", true);
+  }
+}
+
+// ─── עצירה + תמלול ────────────────────────────────────────────────────────
+function stopAndTranscribe() {
+  if (!mediaRecorder) return;
+  applyState("processing");
+  stopMeter();
+
+  mediaRecorder.onstop = async () => {
+    if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null; }
+
+    const blob = new Blob(chunks, { type: mediaRecorder.mimeType || "audio/webm" });
+    const form = new FormData();
+    form.append("file", blob, "voice.webm");
+    form.append("language", LANGUAGE);
+    form.append("beam_size", String(BEAM_SIZE));
+    form.append("normalize", "1");
+
+    try {
+      const res = await fetch(`http://localhost:${WHISPER_PORT}/transcribe`, {
+        method: "POST", body: form,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const text = (data.text || "").trim();
+
+      if (!text) {
+        showToast("⚠️ לא זוהה טקסט", "נסה שוב");
+        applyState("idle");
+        return;
+      }
+
+      // העתקה ללוח
+      navigator.clipboard?.writeText(text).catch(() => {});
+
+      // הדבקה לתוך אלמנט ממוקד
+      const el = document.activeElement;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
+        const start = el.selectionStart ?? el.value.length;
+        const end   = el.selectionEnd   ?? el.value.length;
+        el.value = el.value.slice(0, start) + text + el.value.slice(end);
+        el.selectionStart = el.selectionEnd = start + text.length;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      } else {
+        // fallback: הדבק לתיבת הפלט שלנו
+        output.value += (output.value ? "\n" : "") + text;
+        output.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
+      // הצג תוצאה
+      showResult(text.slice(0, 60) + (text.length > 60 ? "…" : ""));
+      showToast("✅ תומלל", text.slice(0, 80) + (text.length > 80 ? "…" : ""));
+    } catch {
+      showToast("❌ שגיאה", `שרת Whisper לא זמין (port ${WHISPER_PORT})`, true);
+    } finally {
+      applyState("idle");
+    }
+  };
+
+  mediaRecorder.stop();
+}
+
+// ─── ביטול ────────────────────────────────────────────────────────────────
+function cancelRecording() {
+  stopMeter();
+  if (mediaRecorder) { try { mediaRecorder.stop(); } catch {} mediaRecorder = null; }
+  if (audioStream)   { audioStream.getTracks().forEach(t => t.stop()); audioStream = null; }
+  applyState("idle");
+}
+
+// ─── תצוגת תוצאה ──────────────────────────────────────────────────────────
+function showResult(text) {
+  if (resultTimer) clearTimeout(resultTimer);
+  fabResult.textContent = text;
+  fabResult.classList.add("visible");
+  resultTimer = setTimeout(() => fabResult.classList.remove("visible"), 4000);
+}
+
+// ─── Toast פשוט ───────────────────────────────────────────────────────────
+function showToast(title, desc, isError) {
+  const div = document.createElement("div");
+  div.style.cssText = `
+    position:fixed; bottom:110px; left:24px; z-index:99999;
+    background:${isError ? "#7f1d1d" : "#064e3b"};
+    color:white; padding:10px 16px; border-radius:12px;
+    font-size:13px; font-family:inherit; max-width:280px;
+    box-shadow:0 4px 20px rgba(0,0,0,.5); direction:rtl;
+    animation: fadeIn .2s ease;
+  `;
+  div.innerHTML = `<strong>${title}</strong>${desc ? `<br/><span style="opacity:.75">${desc}</span>` : ""}`;
+  document.body.appendChild(div);
+  setTimeout(() => div.remove(), 3500);
+}
+
+// ─── אירועים ──────────────────────────────────────────────────────────────
+fabBtn.addEventListener("click", () => {
+  if (state === "idle")      startRecording();
+  else if (state === "recording") stopAndTranscribe();
+});
+
+fabCancel.addEventListener("click", e => {
+  e.stopPropagation();
+  cancelRecording();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Unified Vertical Mixing Console (EQ + Processing) */}
+                {eqVerticalView ? (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-10 gap-1">
+                      {[
+                        { label: 'בס', freq: '80Hz', value: eqBass, set: setEqBass, min: -12, max: 12, step: 0.5, color: 'text-red-400' },
+                        { label: 'נמוך', freq: '300Hz', value: eqLowMid, set: setEqLowMid, min: -12, max: 12, step: 0.5, color: 'text-orange-400' },
+                        { label: 'אמצע', freq: '1kHz', value: eqMid, set: setEqMid, min: -12, max: 12, step: 0.5, color: 'text-yellow-400' },
+                        { label: 'גבוה', freq: '3.5k', value: eqHighMid, set: setEqHighMid, min: -12, max: 12, step: 0.5, color: 'text-green-400' },
+                        { label: 'טרבל', freq: '10kHz', value: eqTreble, set: setEqTreble, min: -12, max: 12, step: 0.5, color: 'text-blue-400' },
+                      ].map((band) => (
+                        <div key={band.freq} className="flex flex-col items-center gap-0.5">
+                          <span className={`text-[8px] font-mono ${band.color}`}>{band.value > 0 ? '+' : ''}{band.value}</span>
+                          <div className="h-24 flex items-center">
+                            <Slider
+                              orientation="vertical"
+                              value={[band.value]}
+                              min={band.min}
+                              max={band.max}
+                              step={band.step}
+                              onValueChange={([v]) => band.set(v)}
+                              className="h-full"
+                            />
+                          </div>
+                          <span className="text-[7px] font-medium leading-tight text-center">{band.label}</span>
+                          <span className="text-[6px] text-muted-foreground">{band.freq}</span>
+                        </div>
+                      ))}
+                      {[
+                        { label: 'HP', freq: 'חתך', value: manualHighpass, min: 20, max: 400, step: 10, color: 'text-purple-400',
+                          display: `${manualHighpass}`,
+                          set: (v: number) => { setManualHighpass(v); if (isManualMode && highpassRef.current) highpassRef.current.frequency.value = v; } },
+                        { label: 'LP', freq: 'חתך', value: manualLowpass, min: 6000, max: 20000, step: 250, color: 'text-pink-400',
+                          display: `${(manualLowpass/1000).toFixed(1)}k`,
+                          set: (v: number) => { setManualLowpass(v); if (isManualMode && lowpassRef.current) lowpassRef.current.frequency.value = v; } },
+                        { label: 'חיזוק', freq: 'קול', value: manualVoiceBoost, min: 0, max: 12, step: 0.5, color: 'text-cyan-400',
+                          display: `+${manualVoiceBoost}`,
+                          set: (v: number) => { setManualVoiceBoost(v); if (isManualMode && voiceBoostRef.current) voiceBoostRef.current.gain.value = v; } },
+                        { label: 'דחיסה', freq: 'יחס', value: manualCompRatio, min: 1, max: 12, step: 0.5, color: 'text-amber-400',
+                          display: `${manualCompRatio}:1`,
+                          set: (v: number) => { setManualCompRatio(v); if (isManualMode && compressorRef.current) { compressorRef.current.ratio.value = v; compressorRef.current.threshold.value = -50 + (v > 1 ? -(v * 3) : 0); } } },
+                        { label: 'Gate', freq: 'סף', value: manualGate, min: -80, max: 0, step: 5, color: 'text-emerald-400',
+                          display: manualGate === 0 ? 'כבוי' : `${manualGate}`,
+                          set: (v: number) => setManualGate(v) },
+                      ].map((ctrl) => (
+                        <div key={ctrl.label} className="flex flex-col items-center gap-0.5 border-r border-border/30 first:border-r-0 pr-0.5">
+                          <span className={`text-[8px] font-mono ${ctrl.color}`}>{ctrl.display}</span>
+                          <div className="h-24 flex items-center">
+                            <Slider
+                              orientation="vertical"
+                              value={[ctrl.value]}
+                              min={ctrl.min}
+                              max={ctrl.max}
+                              step={ctrl.step}
+                              onValueChange={([v]) => ctrl.set(v)}
+                              className="h-full"
+                            />
+                          </div>
+                          <span className="text-[7px] font-medium leading-tight text-center">{ctrl.label}</span>
+                          <span className="text-[6px] text-muted-foreground">{ctrl.freq}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between text-[8px] text-muted-foreground px-1">
+                      <span>◀ אקולייזר (5 פסים)</span>
+                      <span>עיבוד קול ▶</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-medium text-muted-foreground">אקולייזר</p>
+                    {[
+                      { label: 'בס', freq: '80Hz', value: eqBass, set: setEqBass },
+                      { label: 'נמוך-אמצע', freq: '300Hz', value: eqLowMid, set: setEqLowMid },
+                      { label: 'אמצע', freq: '1kHz', value: eqMid, set: setEqMid },
+                      { label: 'גבוה-אמצע', freq: '3.5kHz', value: eqHighMid, set: setEqHighMid },
+                      { label: 'טרבל', freq: '10kHz', value: eqTreble, set: setEqTreble },
+                    ].map((band) => (
+                      <div key={band.freq} className="space-y-0.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono text-muted-foreground">{band.value > 0 ? '+' : ''}{band.value}dB</span>
+                          <span className="text-[10px] font-medium">{band.label} ({band.freq})</span>
+                        </div>
+                        <Slider
+                          value={[band.value]}
+                          min={-12}
+                          max={12}
+                          step={0.5}
+                          onValueChange={([v]) => band.set(v)}
+                        />
+                      </div>
+                    ))}
+                    <Separator />
+                    <p className="text-[10px] font-medium text-muted-foreground">עיבוד קול</p>
+                    {[
+                      { label: 'חתך בסים (Highpass)', value: manualHighpass, min: 20, max: 400, step: 10, display: `${manualHighpass}Hz`,
+                        set: (v: number) => { setManualHighpass(v); if (isManualMode && highpassRef.current) highpassRef.current.frequency.value = v; } },
+                      { label: 'חתך היי (Lowpass)', value: manualLowpass, min: 6000, max: 20000, step: 250, display: `${manualLowpass}Hz`,
+                        set: (v: number) => { setManualLowpass(v); if (isManualMode && lowpassRef.current) lowpassRef.current.frequency.value = v; } },
+                      { label: 'חיזוק קול', value: manualVoiceBoost, min: 0, max: 12, step: 0.5, display: `${manualVoiceBoost > 0 ? '+' : ''}${manualVoiceBoost}dB`,
+                        set: (v: number) => { setManualVoiceBoost(v); if (isManualMode && voiceBoostRef.current) voiceBoostRef.current.gain.value = v; } },
+                      { label: 'דחיסה', value: manualCompRatio, min: 1, max: 12, step: 0.5, display: `${manualCompRatio}:1`,
+                        set: (v: number) => { setManualCompRatio(v); if (isManualMode && compressorRef.current) { compressorRef.current.ratio.value = v; compressorRef.current.threshold.value = -50 + (v > 1 ? -(v * 3) : 0); } } },
+                      { label: 'סף שער רעש (Gate)', value: manualGate, min: -80, max: 0, step: 5, display: manualGate === 0 ? 'כבוי' : `${manualGate}dB`,
+                        set: (v: number) => setManualGate(v) },
+                    ].map((ctrl) => (
+                      <div key={ctrl.label} className="space-y-0.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono text-muted-foreground">{ctrl.display}</span>
+                          <span className="text-[10px] font-medium">{ctrl.label}</span>
+                        </div>
+                        <Slider
+                          value={[ctrl.value]}
+                          min={ctrl.min}
+                          max={ctrl.max}
+                          step={ctrl.step}
+                          onValueChange={([v]) => ctrl.set(v)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex justify-center gap-2">
+                  <Button variant="ghost" size="sm" className="h-6 px-3 text-[10px]" onClick={() => {
+                    setEqBass(0); setEqLowMid(0); setEqMid(0); setEqHighMid(0); setEqTreble(0);
+                  }}>
+                    אפס אקולייזר
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-6 px-3 text-[10px]" onClick={() => {
+                    setManualHighpass(80); setManualLowpass(16000); setManualVoiceBoost(0); setManualCompRatio(1); setManualGate(0);
+                  }}>
+                    אפס עיבוד
+                  </Button>
+                </div>
+
+                <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-md p-2 flex items-start gap-1.5">
+                  <Brain className="w-3 h-3 mt-0.5 shrink-0 text-primary no-theme-icon" />
+                  <span>
+                    <strong>טיפ לתמלול מדויק:</strong> השתמש ב"תמלול מדויק" או "דיבור ברור" — חיזוק תדרי דיבור (1-5kHz) מעלה משמעותית את דיוק זיהוי המילים. לקול טלפוני השתמש ב"תיקון טלפון". שלב עם הפחתת רעש ברמה 40-60% לתוצאה מיטבית.

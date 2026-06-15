@@ -1,0 +1,16 @@
+{
+  "projectId": "prj_QBapyKmZhIGvf1JqBcXsBslXqYPx",
+  "orgId": "team_He33eSQiNLut6kocvXTO3ofm",
+  "projectName": "smart-hebrew-transcriber",
+  "settings": {
+    "createdAt": 1773855064767,
+    "framework": "vite",
+    "devCommand": "npm run dev",
+    "installCommand": "npm ci",
+    "buildCommand": "npm run build",
+    "outputDirectory": "dist",
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "timeline": [
+    {
+      "speaker_label": "דובר 1",
+      "start": 0.0,
+      "end": 3.864
+    },
+    {
+      "speaker_label": "דובר 2",
+      "start": 5.664,
+      "end": 22.8
+    },
+    {
+      "speaker_label": "דובר 3",
+      "start": 24.6,
+      "end": 61.08
+    }
+  ],
+  "step": 0.1
+}

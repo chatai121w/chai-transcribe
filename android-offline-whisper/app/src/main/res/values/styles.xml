@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.OfflineHebrewWhisper" parent="@android:style/Theme.DeviceDefault" />
+</resources>

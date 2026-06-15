@@ -1,0 +1,144 @@
+/* ─── Studio Widget — breathing room ─────────────────────────────────── */
+
+/* Widget card padding */
+.studio-widget-body {
+  padding: 16px 18px 18px;
+}
+
+/* Mixer / noise panel inner cards */
+.studio-widget-body .space-y-2 > .rounded-lg.border {
+  margin-top: 0;
+}
+
+/* EQ preset buttons — slightly taller with more padding */
+.studio-widget-body button[class*="px-2 py-1 rounded-md border text-[11px]"] {
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+  gap: 5px;
+}
+
+/* EQ section header row */
+.studio-widget-body .space-y-2 > .flex.items-center.justify-between {
+  padding: 4px 0 8px;
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+  margin-bottom: 8px;
+}
+
+/* EQ preset row — more breathing */
+.studio-widget-body .flex.flex-wrap.gap-1\.5 {
+  gap: 8px;
+  padding: 6px 0;
+}
+
+/* EQ slider theme buttons */
+.studio-widget-body .flex.items-center.gap-1\.5.flex-wrap {
+  gap: 6px;
+  padding: 4px 0;
+}
+
+/* Inner rounded panels — more padding */
+.studio-widget-body .rounded-lg.border.bg-muted\/20.p-3 {
+  padding: 14px 16px;
+}
+.studio-widget-body .rounded-lg.border.bg-background\/40.p-2 {
+  padding: 14px 16px;
+}
+
+/* Space between EQ section children */
+.studio-widget-body .space-y-2 {
+  row-gap: 10px;
+}
+.studio-widget-body .space-y-3 {
+  row-gap: 14px;
+}
+
+/* ─── Studio draggable widget grid ────────────────────────────────────── */
+
+/* Smooth transitions when items snap into place */
+.studio-grid .react-grid-item.react-grid-placeholder {
+  background: hsl(var(--primary) / 0.18);
+  border: 2px dashed hsl(var(--primary));
+  border-radius: 0.75rem;
+  opacity: 1;
+  transition-duration: 100ms;
+}
+
+/* Keep a consistent visual padding around each widget, even after drag/resize */
+.studio-grid .react-grid-item {
+  box-sizing: border-box;
+  padding: 4px;
+}
+
+/* Subtle hover ring on items only when in edit mode */
+.studio-grid.is-editing .react-grid-item {
+  outline: 1px dashed hsl(var(--primary) / 0.35);
+  outline-offset: -2px;
+  border-radius: 0.75rem;
+}
+.studio-grid.is-editing .react-grid-item:hover {
+  outline-color: hsl(var(--primary) / 0.7);
+}
+
+/* Drag handle visual on the widget header */
+.studio-grid.is-editing .studio-widget-handle {
+  cursor: grab;
+  background: hsl(var(--primary) / 0.06);
+  border-radius: 0.5rem 0.5rem 0 0;
+  padding: 4px 6px;
+  margin: -6px -6px 6px -6px;
+  user-select: none;
+}
+.studio-grid.is-editing .studio-widget-handle:active {
+  cursor: grabbing;
+  background: hsl(var(--primary) / 0.15);
+}
+
+/* Always show the handle bar — visible always, more prominent in edit mode */
+.studio-grid:not(.is-editing) .studio-widget-handle {
+  cursor: grab;
+  opacity: 0.5;
+  padding: 3px 8px;
+  margin: -2px -2px 6px -2px;
+  border-radius: 0.5rem 0.5rem 0 0;
+  user-select: none;
+  transition: opacity 0.15s, background 0.15s;
+  border-bottom: 1px solid hsl(var(--border) / 0.4);
+}
+.studio-grid:not(.is-editing) .studio-widget-handle:hover {
+  opacity: 1;
+  background: hsl(var(--primary) / 0.06);
+}
+.studio-grid:not(.is-editing) .studio-widget-handle:active {
+  cursor: grabbing;
+}
+
+/* RGL resize handle — re-color so it matches our theme */
+.studio-grid .react-resizable-handle {
+  background-image: none;
+  width: 14px;
+  height: 14px;
+}
+.studio-grid.is-editing .react-resizable-handle::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid hsl(var(--primary));
+  border-bottom: 2px solid hsl(var(--primary));
+  opacity: 0.7;
+}
+.studio-grid:not(.is-editing) .react-resizable-handle {
+  display: none;
+}
+
+/* Each widget needs to fill its grid cell */
+.studio-grid .react-grid-item > .studio-widget-body {
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-radius: 0.75rem;
+  /* height is controlled by RGL — do NOT set height:100% so scrollHeight reflects content */
+}
