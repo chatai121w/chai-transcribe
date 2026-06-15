@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useAIUsage } from "@/hooks/useAIUsage";
 import { calcCostUSD, fmtUSD, fmtILS, loadUsdToIls, getPricing } from "@/lib/aiPricing";
+import { AIUsageDetailsDialog } from "@/components/AIUsageDetailsDialog";
 
 interface Props {
   feature?: string;
