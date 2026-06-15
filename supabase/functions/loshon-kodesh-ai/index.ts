@@ -73,6 +73,7 @@ serve(async (req) => {
 
     console.log(`[loshon-kodesh-ai] model=${aiModel} chars=${text.length}`);
 
+    const t0 = Date.now();
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -87,6 +88,7 @@ serve(async (req) => {
         ],
       }),
     });
+    const durationMs = Date.now() - t0;
 
     if (response.status === 429) {
       return new Response(JSON.stringify({ error: 'חרגת ממכסת הבקשות. נסה שוב מאוחר יותר.' }), {
@@ -121,7 +123,17 @@ serve(async (req) => {
       feature: 'loshon-kodesh',
       model: aiModel,
       usage: data.usage,
+      promptText: text,
+      systemPrompt,
+      responseText: out,
+      params: {
+        text_length: text.length,
+        vocabulary_size: Array.isArray(vocabulary) ? vocabulary.length : 0,
+        custom_prompt: typeof prompt === 'string' && prompt.trim().length > 0,
+      },
+      durationMs,
     });
+
 
     return new Response(JSON.stringify({ text: out }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

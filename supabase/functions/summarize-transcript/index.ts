@@ -49,6 +49,12 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY not configured');
     }
 
+    const systemPrompt = 'אתה עוזר שמסכם תמלולי אודיו בעברית. צור סיכום תמציתי של 3-5 משפטים, תוך שמירה על נקודות המפתח החשובות ביותר. הסיכום חייב להיות בעברית בלבד.';
+    const userPrompt = `סכם את הטקסט הבא:\n\n${text}`;
+    const aiModel = 'google/gemini-2.5-flash';
+    const temperature = 0.7;
+
+    const t0 = Date.now();
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -56,20 +62,15 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: aiModel,
         messages: [
-          {
-            role: 'system',
-            content: 'אתה עוזר שמסכם תמלולי אודיו בעברית. צור סיכום תמציתי של 3-5 משפטים, תוך שמירה על נקודות המפתח החשובות ביותר. הסיכום חייב להיות בעברית בלבד.'
-          },
-          {
-            role: 'user',
-            content: `סכם את הטקסט הבא:\n\n${text}`
-          }
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
         ],
-        temperature: 0.7,
+        temperature,
       }),
     });
+    const durationMs = Date.now() - t0;
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -86,9 +87,15 @@ serve(async (req) => {
       supabaseUserClient: userClient,
       userId: user.id,
       feature: 'summary',
-      model: 'google/gemini-2.5-flash',
+      model: aiModel,
       usage: data.usage,
+      promptText: text,
+      systemPrompt,
+      responseText: summary,
+      params: { temperature, text_length: text.length },
+      durationMs,
     });
+
 
     return new Response(
       JSON.stringify({ summary }),

@@ -9,7 +9,14 @@ export interface AIUsageRow {
   completion_tokens: number;
   total_tokens: number;
   created_at: string;
+  prompt_preview?: string | null;
+  system_prompt?: string | null;
+  response_preview?: string | null;
+  params?: Record<string, unknown> | null;
+  duration_ms?: number | null;
+  cost_usd_snapshot?: number | null;
 }
+
 
 export interface AIUsageStats {
   rows: AIUsageRow[];
@@ -54,7 +61,7 @@ export function useAIUsage(feature?: string) {
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       let q = supabase
         .from("ai_usage_events" as never)
-        .select("id, feature, model, prompt_tokens, completion_tokens, total_tokens, created_at")
+        .select("id, feature, model, prompt_tokens, completion_tokens, total_tokens, created_at, prompt_preview, system_prompt, response_preview, params, duration_ms, cost_usd_snapshot")
         .gte("created_at", since)
         .order("created_at", { ascending: false })
         .limit(5000);
