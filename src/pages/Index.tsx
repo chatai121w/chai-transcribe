@@ -665,6 +665,27 @@ const Index = () => {
       };
     } catch { /* ignore duration detection errors */ }
 
+    // Audio quality pre-check (flag-gated). Non-blocking — warnings only.
+    try {
+      const { readFlag } = await import('@/lib/featureFlags');
+      if (!isVideo && readFlag('ff_audio_quality_check')) {
+        const { analyzeAudioFile } = await import('@/lib/audioQualityCheck');
+        analyzeAudioFile(file).then((report) => {
+          if (report.issues.length === 0) {
+            debugLog.info('AudioQuality', `✓ OK | RMS ${report.rmsDb.toFixed(1)} dB | SR ${report.sampleRate} Hz`);
+            return;
+          }
+          for (const issue of report.issues) {
+            toast({
+              title: issue.severity === 'error' ? '⚠️ בעיית אודיו חמורה' : '⚠️ אזהרת איכות אודיו',
+              description: `${issue.message}${issue.suggestion ? ' — ' + issue.suggestion : ''}`,
+              variant: issue.severity === 'error' ? 'destructive' : undefined,
+            });
+          }
+        }).catch(err => debugLog.warn('AudioQuality', 'analysis failed', err));
+      }
+    } catch { /* ignore */ }
+
     // Step 1: If video file and engine requires audio-only → extract audio
     let fileToTranscribe = file;
     if (isVideo && (VIDEO_NEEDS_EXTRACTION.has(engine) || rangeEnabled)) {
@@ -1118,15 +1139,19 @@ const Index = () => {
       for (let offset = 0; offset < keyPool.length; offset++) {
         const idx = (safeStartIndex + offset) % keyPool.length;
         debugLog.info('Google', `Calling edge function with key #${idx + 1}/${keyPool.length}`);
-        const result = await supabase.functions.invoke('transcribe-google', {
-          body: {
-            audio: base64Audio,
-            fileName: file.name,
-            apiKey: keyPool[idx],
-            language: sourceLanguage,
-            targetLanguage: 'he'
-          }
-        });
+        const { withAutoResume } = await import('@/lib/autoResume');
+        const result = await withAutoResume(
+          () => supabase.functions.invoke('transcribe-google', {
+            body: {
+              audio: base64Audio,
+              fileName: file.name,
+              apiKey: keyPool[idx],
+              language: sourceLanguage,
+              targetLanguage: 'he'
+            }
+          }),
+          { onRetry: (a, e) => debugLog.warn('Google', `auto-resume retry #${a}`, e) },
+        );
 
         debugLog.info('Google', 'Response received', { hasData: !!result.data, hasError: !!result.error, keyIndex: idx + 1 });
 
@@ -1846,9 +1871,13 @@ const Index = () => {
       let lastErr: any = null;
       for (let offset = 0; offset < keyPool.length; offset++) {
         const idx = (safeStartIndex + offset) % keyPool.length;
-        const { data, error } = await supabase.functions.invoke('transcribe-google', {
-          body: { audio: base64, fileName: file.name, apiKey: keyPool[idx], language: sourceLanguage, targetLanguage: 'he' }
-        });
+        const { withAutoResume } = await import('@/lib/autoResume');
+        const { data, error } = await withAutoResume(
+          () => supabase.functions.invoke('transcribe-google', {
+            body: { audio: base64, fileName: file.name, apiKey: keyPool[idx], language: sourceLanguage, targetLanguage: 'he' }
+          }),
+          { onRetry: (a, e) => debugLog.warn('Google', `auto-resume retry #${a}`, e) },
+        );
         if (!error && data?.text) {
           setProviderActiveKey('google', keyPool, idx);
           return data.text;

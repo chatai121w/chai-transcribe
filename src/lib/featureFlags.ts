@@ -124,7 +124,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
   {
     key: "ff_pre_roll_buffer",
     label: "Pre-roll buffer",
-    description: "מקליט 2 שניות לפני לחיצה — מציל את ההתחלה שמיד נחתכת.",
+    description: "הוק זמין (usePreRollBuffer) אך טרם משולב בנגן ההקלטה. דורש עדכון LiveTranscriber.",
     category: "audio",
     defaultOn: false,
     experimental: true,
@@ -133,28 +133,26 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
   {
     key: "ff_audio_quality_check",
     label: "בדיקת איכות אודיו",
-    description: "לפני תמלול — בודק רעש/הד/חיתוך ומציע תיקונים.",
+    description: "לפני תמלול — בודק רעש/חיתוך/קצב דגימה ומציג אזהרה אם זוהתה בעיה.",
     category: "audio",
-    defaultOn: false,
+    defaultOn: true,
     experimental: true,
-    comingSoon: true,
   },
   {
     key: "ff_smart_chunking",
     label: "חיתוך חכם בשתיקות",
-    description: "במקום חיתוך לפי זמן קבוע — חותך על גבול שקט. דיוק טוב יותר בקצוות.",
+    description: "במקום חיתוך לפי בייטים — חותך על גבול שקט. דיוק טוב יותר בקצוות. רק לתמלול ברקע.",
     category: "audio",
     defaultOn: false,
     experimental: true,
-    comingSoon: true,
+    risk: "מאט את שלב ההכנה (פענוח אודיו + ניתוח). הקלטות קצרות יוצאות chunk אחד.",
   },
   {
     key: "ff_auto_resume",
     label: "המשך אוטומטי בנפילת רשת",
-    description: "ממשיך תמלול ענן אחרי ניתוק רשת זמני.",
+    description: "ממשיך תמלול ענן אחרי ניתוק רשת זמני (עד 4 ניסיונות עם backoff).",
     category: "transcription",
     defaultOn: true,
-    comingSoon: true,
   },
 
   // ── UI ────────────────────────────────────────────────────
