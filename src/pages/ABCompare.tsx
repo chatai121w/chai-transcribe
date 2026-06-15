@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,6 +23,11 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   GitCompareArrows,
   Link2,
   Link2Off,
@@ -30,7 +36,9 @@ import {
   Trash2,
   Eye,
   EyeOff,
+  ShoppingBasket,
 } from "lucide-react";
+import { abCart, type ABCartItem } from "@/lib/abCompareCart";
 import DiffMatchPatch from "diff-match-patch";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
@@ -267,10 +275,15 @@ export default function ABCompare() {
   const [sideB, setSideB] = useState<Side>(EMPTY_SIDE);
   const [syncPlayers, setSyncPlayers] = useState(false);
   const [showUnchanged, setShowUnchanged] = useState(true);
+  const [cartItems, setCartItems] = useState<ABCartItem[]>(() => abCart.list());
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const audioARef = useRef<HTMLAudioElement>(null);
   const audioBRef = useRef<HTMLAudioElement>(null);
   const isMirroring = useRef(false);
+
+  // Subscribe to cart changes
+  useEffect(() => abCart.subscribe(() => setCartItems(abCart.list())), []);
 
   // Restore text-only state (audio Blob URLs don't survive reload).
   useEffect(() => {
@@ -282,6 +295,30 @@ export default function ABCompare() {
       if (parsed?.B) setSideB(s => ({ ...s, label: parsed.B.label || "", text: parsed.B.text || "" }));
     } catch { /* ignore */ }
   }, []);
+
+  // Auto-load from cart when ?fromCart=1
+  useEffect(() => {
+    if (searchParams.get("fromCart") !== "1") return;
+    const items = abCart.list();
+    if (items.length >= 1) {
+      setSideA({ label: items[0].label, text: items[0].text, audioUrl: null, audioName: "" });
+    }
+    if (items.length >= 2) {
+      setSideB({ label: items[1].label, text: items[1].text, audioUrl: null, audioName: "" });
+    }
+    if (items.length > 0) {
+      toast({ title: "נטען מהסל", description: `${Math.min(items.length, 2)} פריטים` });
+    }
+    searchParams.delete("fromCart");
+    setSearchParams(searchParams, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const loadCartItemTo = (item: ABCartItem, side: "A" | "B") => {
+    const next: Side = { label: item.label, text: item.text, audioUrl: null, audioName: "" };
+    if (side === "A") setSideA(next); else setSideB(next);
+    toast({ title: `נטען לצד ${side}`, description: item.label });
+  };
+
 
   useEffect(() => {
     try {
@@ -375,6 +412,73 @@ export default function ABCompare() {
             </Label>
             <Switch id="sync-toggle" checked={syncPlayers} onCheckedChange={setSyncPlayers} />
           </div>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1 relative">
+                <ShoppingBasket className="h-4 w-4" />
+                סל ההשוואה
+                {cartItems.length > 0 && (
+                  <Badge variant="secondary" className="h-4 min-w-4 px-1 text-[10px] mr-1">
+                    {cartItems.length}
+                  </Badge>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 p-2" dir="rtl" align="end">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold">פריטים בסל ({cartItems.length})</div>
+                  {cartItems.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-[11px] text-destructive"
+                      onClick={() => abCart.clear()}
+                    >
+                      רוקן
+                    </Button>
+                  )}
+                </div>
+                {cartItems.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-3 text-center">
+                    הסל ריק. הוסף תמלולים מעמוד עריכת הטקסט.
+                  </p>
+                ) : (
+                  <div className="max-h-72 overflow-y-auto space-y-1">
+                    {cartItems.map((item) => (
+                      <div key={item.id} className="flex items-center gap-1 text-xs bg-muted/40 rounded px-2 py-1">
+                        <span className="flex-1 truncate" title={item.label}>{item.label}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-1.5 text-[10px]"
+                          onClick={() => loadCartItemTo(item, "A")}
+                        >
+                          → A
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-1.5 text-[10px]"
+                          onClick={() => loadCartItemTo(item, "B")}
+                        >
+                          → B
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => abCart.remove(item.id)}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
           <Button variant="outline" size="sm" className="gap-1" onClick={swap}>
             <ArrowLeftRight className="h-4 w-4" />
             החלף

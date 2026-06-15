@@ -12,8 +12,12 @@ import {
   AlignRight, AlignCenter, AlignLeft, AlignJustify, 
   Palette, List, ListOrdered, Eraser,
   Maximize2, Minimize2, SplitSquareVertical, Eye,
-  Search, X, ChevronDown, SpellCheck, Save, Trash2
+  Search, X, ChevronDown, SpellCheck, Save, Trash2,
+  Package, GitCompare, ExternalLink, Plus
 } from "lucide-react";
+import { Link as RouterLink } from "react-router-dom";
+import { Badge } from "@/components/ui/badge";
+import { abCart, type ABCartItem } from "@/lib/abCompareCart";
 import { toast } from "@/hooks/use-toast";
 import { FloatingFormatToolbar } from "@/components/FloatingFormatToolbar";
 import {
@@ -38,6 +42,9 @@ interface RichTextEditorProps {
   onWordCorrected?: (original: string, corrected: string) => void;
   onSaveReplaceOriginal?: () => Promise<void> | void;
   onDuplicateSave?: () => Promise<void> | void;
+  transcriptName?: string;
+  audioBlob?: Blob | null;
+  audioFileName?: string;
 }
 
 const sanitize = (html: string): string => DOMPurify.sanitize(html, {
@@ -63,7 +70,7 @@ const stripHtml = (html: string): string => {
 
 type ViewMode = 'edit' | 'preview' | 'split';
 
-export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrected, onSaveReplaceOriginal, onDuplicateSave }: RichTextEditorProps) => {
+export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrected, onSaveReplaceOriginal, onDuplicateSave, transcriptName, audioBlob, audioFileName }: RichTextEditorProps) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const [showFormatBar, setShowFormatBar] = useState(false);
   const [textColor, setTextColor] = useState("#000000");
@@ -450,6 +457,55 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
     toast({ title: "ייצוא הצליח", description: "קובץ SRT (כתוביות) הורד" });
   };
 
+  // === הורדת חבילה (ZIP) — תמלול + אודיו ===
+  const handleDownloadBundle = useCallback(async () => {
+    try {
+      const baseName = (transcriptName || audioFileName || 'transcript')
+        .replace(/\.[^.]+$/, '')
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .trim() || 'transcript';
+
+      const JSZip = (await import('jszip')).default;
+      const { saveAs } = await import('file-saver');
+      const zip = new JSZip();
+      const folder = zip.folder(baseName)!;
+
+      folder.file(`${baseName}.txt`, plainText || '');
+
+      if (audioBlob) {
+        const type = audioBlob.type || '';
+        const ext = type.includes('webm') ? 'webm'
+          : type.includes('wav') ? 'wav'
+          : type.includes('mp3') || type.includes('mpeg') ? 'mp3'
+          : type.includes('ogg') ? 'ogg'
+          : type.includes('m4a') || type.includes('mp4') ? 'm4a'
+          : (audioFileName?.split('.').pop() || 'audio');
+        folder.file(`${baseName}.${ext}`, audioBlob);
+      }
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      saveAs(blob, `${baseName}.zip`);
+      toast({
+        title: "הורדה הצליחה",
+        description: audioBlob ? "תמלול + אודיו נשמרו ב-ZIP" : "תמלול נשמר (אין אודיו זמין)",
+      });
+    } catch (err) {
+      console.error('[Bundle download]', err);
+      toast({ title: "שגיאת הורדה", description: String((err as Error)?.message || err), variant: "destructive" });
+    }
+  }, [transcriptName, audioFileName, audioBlob, plainText]);
+
+  // === סל השוואת A/B ===
+  const [cartItems, setCartItems] = useState<ABCartItem[]>(() => abCart.list());
+  useEffect(() => abCart.subscribe(() => setCartItems(abCart.list())), []);
+
+  const handleAddToCart = useCallback(() => {
+    const label = (transcriptName || audioFileName || `תמלול ${new Date().toLocaleTimeString('he-IL')}`).replace(/\.[^.]+$/, '');
+    abCart.add(label, plainText);
+    toast({ title: "נוסף לסל השוואה", description: label });
+  }, [transcriptName, audioFileName, plainText]);
+
+
   const ToolBtn = ({ icon: Icon, label, onClick, active, disabled }: {
     icon: React.ElementType; label: string; onClick: () => void; active?: boolean; disabled?: boolean;
   }) => (
@@ -719,6 +775,116 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
               </div>
             </PopoverContent>
           </Popover>
+
+          {/* הורד הכל (ZIP — תמלול + אודיו) */}
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={handleDownloadBundle}
+                >
+                  <Package className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>הורד תיקייה — תמלול + אודיו (ZIP)</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          {/* סל השוואת A/B */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 px-2 gap-1 relative" title="סל השוואת A/B">
+                <GitCompare className="w-4 h-4" />
+                {cartItems.length > 0 && (
+                  <Badge variant="secondary" className="h-4 min-w-4 px-1 text-[10px]">
+                    {cartItems.length}
+                  </Badge>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-2" dir="rtl" align="end">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold">סל השוואה ({cartItems.length})</div>
+                  {cartItems.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-[11px] text-destructive"
+                      onClick={() => abCart.clear()}
+                    >
+                      רוקן סל
+                    </Button>
+                  )}
+                </div>
+
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="w-full h-8 gap-1 text-xs"
+                  onClick={handleAddToCart}
+                  disabled={!plainText.trim()}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  הוסף את התמלול הנוכחי
+                </Button>
+
+                {cartItems.length > 0 && (
+                  <div className="max-h-48 overflow-y-auto space-y-1 border-t pt-2">
+                    {cartItems.map((item) => (
+                      <div key={item.id} className="flex items-center gap-1 text-xs bg-muted/40 rounded px-2 py-1">
+                        <span className="flex-1 truncate" title={item.label}>{item.label}</span>
+                        <span className="text-muted-foreground text-[10px]">
+                          {item.text.split(/\s+/).filter(Boolean).length} מ׳
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => abCart.remove(item.id)}
+                        >
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <RouterLink to="/ab-compare?fromCart=1" className="block">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full h-8 gap-1 text-xs"
+                    disabled={cartItems.length < 2}
+                  >
+                    <GitCompare className="w-3.5 h-3.5" />
+                    פתח השוואה
+                  </Button>
+                </RouterLink>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* קישור ישיר לעמוד ההשוואה */}
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <RouterLink to="/ab-compare">
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                    <ExternalLink className="w-4 h-4" />
+                  </Button>
+                </RouterLink>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>פתח עמוד השוואת A/B</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
 
         {/* === חיפוש === */}
