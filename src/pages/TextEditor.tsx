@@ -1132,7 +1132,7 @@ const TextEditor = () => {
         )}
 
         {/* Main Content */}
-        <Tabs defaultValue="edit" className="w-full" dir="rtl">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" dir="rtl">
           {/* Primary tabs — core workflow */}
           {(() => {
             const orderedPrimary = tabOrder
