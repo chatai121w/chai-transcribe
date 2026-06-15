@@ -2690,6 +2690,14 @@ const Index = () => {
           </div>
         )}
 
+        {transcript && (
+          <TranscriptVersionsPanel
+            transcriptId={lastSavedTranscriptIdRef.current}
+            currentText={transcript}
+            onApplyVersion={(t) => setTranscript(t)}
+          />
+        )}
+
         {/* YouTube Transcription — available when local server is connected */}
         {serverConnected && (
           <YouTubeTranscriber
