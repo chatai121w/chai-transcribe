@@ -224,11 +224,20 @@ const TextEditor = () => {
   // Player layout (cloud-synced)
   const playerLayout = (preferences.player_layout || 'split') as 'split' | 'stacked' | 'full' | 'wide' | 'eq-wide';
   const setPlayerLayout = useCallback((v: 'split' | 'stacked' | 'full' | 'wide' | 'eq-wide') => updatePreference('player_layout', v), [updatePreference]);
-  const [isPlayerFloating, setIsPlayerFloating] = useState(false);
-  const togglePlayerFloating = useCallback(() => setIsPlayerFloating(p => !p), []);
+  // Player/EQ floating state — cloud-synced via text_editor_view_json
+  const editorView = useMemo(() => {
+    try { return JSON.parse(preferences.text_editor_view_json || '{}') as { isPlayerFloating?: boolean; isEqFloating?: boolean }; }
+    catch { return {}; }
+  }, [preferences.text_editor_view_json]);
+  const isPlayerFloating = !!editorView.isPlayerFloating;
+  const isEqFloating = !!editorView.isEqFloating;
+  const updateEditorView = useCallback((patch: { isPlayerFloating?: boolean; isEqFloating?: boolean }) => {
+    const next = { ...editorView, ...patch };
+    updatePreference('text_editor_view_json', JSON.stringify(next));
+  }, [editorView, updatePreference]);
+  const togglePlayerFloating = useCallback(() => updateEditorView({ isPlayerFloating: !isPlayerFloating }), [isPlayerFloating, updateEditorView]);
   const [isMarkingActive, setIsMarkingActive] = useState(false);
-  const [isEqFloating, setIsEqFloating] = useState(false);
-  const toggleEqFloating = useCallback(() => setIsEqFloating(p => !p), []);
+  const toggleEqFloating = useCallback(() => updateEditorView({ isEqFloating: !isEqFloating }), [isEqFloating, updateEditorView]);
   const [eqPortalTarget, setEqPortalTarget] = useState<HTMLDivElement | null>(null);
 
   // Search in transcript
