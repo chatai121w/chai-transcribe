@@ -22,6 +22,8 @@ import { useCloudApiKeys } from "@/hooks/useCloudApiKeys";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { isLoshonKodeshEnabled } from "@/lib/loshonKodesh";
 import { buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
+import { usePreRollBuffer } from "@/hooks/usePreRollBuffer";
+import { readFlag } from "@/lib/featureFlags";
 
 type LiveMode = "browser" | "cuda" | "groq";
 
@@ -62,6 +64,7 @@ interface LiveTranscriberProps {
 export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveTranscriberProps) => {
   const { keys: apiKeys } = useCloudApiKeys();
   const { preferences, updatePreference, isLoaded: prefsLoaded } = useCloudPreferences();
+  const preRoll = usePreRollBuffer(2);
   const [isListening, setIsListening] = useState(false);
   const isListeningRef = useRef(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -74,6 +77,16 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const setChunkSec = useCallback((v: number) => updatePreference('live_chunk_sec', v), [updatePreference]);
   const chunkSecRef = useRef<number>(DEFAULT_CHUNK_SEC);
   useEffect(() => { chunkSecRef.current = chunkSec; }, [chunkSec]);
+
+  // Pre-roll buffer — auto-arm when feature flag is on, so the 2s before the
+  // user clicks "Record" are already captured. Drained into the first chunk
+  // inside startCuda (Groq mode, where each chunk is a standalone file).
+  useEffect(() => {
+    if (!readFlag("ff_pre_roll_buffer")) return;
+    void preRoll.start();
+    return () => { preRoll.stop(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Full re-transcribe on save: chunks are preview-only; on stop, the whole
   // recording is sent as one unit and replaces the chunked text.
@@ -653,6 +666,18 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
           rec.start();
         };
         startGroqRecorder();
+
+        // Pre-roll: drain the 2s rolling WAV buffer and transcribe it as the
+        // very first chunk so the opening syllable is not lost.
+        if (readFlag("ff_pre_roll_buffer")) {
+          const preBlob = preRoll.drainAsBlob();
+          if (preBlob && preBlob.size > LIVE_MIN_BLOB_BYTES) {
+            allChunksRef.current.push(preBlob);
+            // Bypass silence-skip for the pre-roll
+            audioLevelSamplesRef.current.push(100);
+            void sendChunk(preBlob, 0);
+          }
+        }
 
         chunkIntervalRef.current = setInterval(() => {
           const ctx = currentGroqRecorderRef.current;
