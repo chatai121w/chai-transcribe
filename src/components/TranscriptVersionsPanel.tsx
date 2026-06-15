@@ -153,9 +153,16 @@ export function TranscriptVersionsPanel({ transcriptId, currentText, onApplyVers
               </SelectContent>
             </Select>
             {selectedVersion && (
-              <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => applyText(selectedVersion.text)}>
-                <RotateCcw className="w-3 h-3 ml-1" />טען
-              </Button>
+              <>
+                <TextExportMenu
+                  getText={() => selectedVersion.text}
+                  filename={labelFor(selectedVersion)}
+                  subject={labelFor(selectedVersion)}
+                />
+                <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => applyText(selectedVersion.text)}>
+                  <RotateCcw className="w-3 h-3 ml-1" />טען
+                </Button>
+              </>
             )}
           </div>
           {selectedVersion && (
