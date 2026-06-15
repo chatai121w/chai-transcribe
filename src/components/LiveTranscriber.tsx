@@ -476,7 +476,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     try {
       const mimeType = mimeTypeRef.current;
       const fullBlob = overrideBlob ?? new Blob(allChunksRef.current, { type: mimeType });
-      const fileExt = overrideBlob ? "wav" : "webm";
+      const fileExt = overrideBlob ? ((overrideBlob.type || '').includes('wav') ? 'wav' : 'webm') : 'webm';
 
       const formData = new FormData();
       formData.append("file", fullBlob, `live-final.${fileExt}`);
