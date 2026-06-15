@@ -39,6 +39,9 @@ import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt,
 import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSuggestion";
 import { PronunciationProfileSelector } from "@/components/PronunciationProfileSelector";
 import { PronunciationStack } from "@/components/PronunciationStack";
+import { FeatureToggleChip } from "@/components/FeatureToggleChip";
+import { Link } from "react-router-dom";
+import { Layers } from "lucide-react";
 import { applyLearnedCorrections } from "@/utils/correctionLearning";
 import { addRecentFile } from "@/components/RecentFiles";
 
