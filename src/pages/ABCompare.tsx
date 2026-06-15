@@ -39,6 +39,7 @@ import {
   ShoppingBasket,
 } from "lucide-react";
 import { abCart, type ABCartItem } from "@/lib/abCompareCart";
+import { ABCompareLab } from "@/components/ABCompareLab";
 import DiffMatchPatch from "diff-match-patch";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
@@ -489,6 +490,23 @@ export default function ABCompare() {
           </Button>
         </div>
       </header>
+
+      <ABCompareLab
+        onResult={(side, label, text) => {
+          if (side === "A") setSideA(prev => ({ ...prev, label, text }));
+          else setSideB(prev => ({ ...prev, label, text }));
+        }}
+        onAudio={(side, blob, name) => {
+          const url = URL.createObjectURL(blob);
+          if (side === "A") {
+            if (sideA.audioUrl) URL.revokeObjectURL(sideA.audioUrl);
+            setSideA(prev => ({ ...prev, audioUrl: url, audioName: name }));
+          } else {
+            if (sideB.audioUrl) URL.revokeObjectURL(sideB.audioUrl);
+            setSideB(prev => ({ ...prev, audioUrl: url, audioName: name }));
+          }
+        }}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SideSlot side="A" data={sideA} onChange={setSideA} audioRef={audioARef} />
