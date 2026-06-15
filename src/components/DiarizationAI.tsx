@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Loader2, Sparkles, TrendingUp, Hash, Wand2, Copy, ChevronDown, ChevronUp, Clock } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { TextExportMenu } from "@/components/TextExportMenu";
 import {
   analyzeSpeakerSentiment,
   detectTopics,
