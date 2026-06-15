@@ -25,7 +25,7 @@ import {
 } from "./lib/devFloatingButtons";
 
 // Lazy load with logging + auto-reload on stale chunk
-function lazyWithLog(name: string, factory: () => Promise<{ default: React.ComponentType<unknown> }>) {
+function lazyWithLog(name: string, factory: () => Promise<{ default: React.ComponentType<any> }>) {
   return lazy(() => {
     const stop = debugLog.time('LazyLoad', name);
     return factory()
