@@ -36,6 +36,8 @@ export interface FeatureFlag {
   experimental?: boolean;
   /** Risk note shown next to the toggle. */
   risk?: string;
+  /** Toggle saves preference but is not yet wired into the pipeline. */
+  comingSoon?: boolean;
 }
 
 export const FEATURE_FLAGS: FeatureFlag[] = [
