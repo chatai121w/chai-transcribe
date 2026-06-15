@@ -22,6 +22,8 @@ import { useCloudApiKeys } from "@/hooks/useCloudApiKeys";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { isLoshonKodeshEnabled } from "@/lib/loshonKodesh";
 import { buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
+import { usePreRollBuffer } from "@/hooks/usePreRollBuffer";
+import { readFlag } from "@/lib/featureFlags";
 
 type LiveMode = "browser" | "cuda" | "groq";
 
