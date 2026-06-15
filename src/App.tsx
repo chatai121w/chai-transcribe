@@ -89,6 +89,8 @@ const SystemDashboard   = lazyWithLog('SystemDashboard',   () => import("./pages
 const LashoKodesh       = lazyWithLog('LashoKodesh',       () => import("./pages/LashoKodesh"));
 const LoshonKodeshRules = lazyWithLog('LoshonKodeshRules', () => import("./pages/LoshonKodeshRules"));
 const CompareReport     = lazyWithLog('CompareReport',     () => import("./pages/CompareReport"));
+const Features          = lazyWithLog('Features',          () => import("./pages/Features"));
+const ABCompare         = lazyWithLog('ABCompare',         () => import("./pages/ABCompare"));
 
 // Lazy non-critical UI widgets — defer past first paint
 const SmartConsoleLazy = lazy(() => import("./components/SmartConsole").then(m => ({ default: m.SmartConsole })));
