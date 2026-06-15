@@ -505,6 +505,7 @@ const useCloudPreferencesImpl = () => {
           folder_sort_asc: updated.folder_sort_asc,
           player_layout: updated.player_layout,
           tab_settings_json: tabSettingsParsed,
+          text_editor_view_json: textEditorViewParsed,
           default_ai_model: updated.default_ai_model || null,
           cuda_preset: updated.cuda_preset,
           cuda_fast_mode: updated.cuda_fast_mode,
