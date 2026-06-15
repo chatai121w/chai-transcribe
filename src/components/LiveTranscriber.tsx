@@ -534,13 +534,15 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
   const startCuda = useCallback(async () => {
     try {
+      const { readFlag } = await import("@/lib/featureFlags");
+      const agcOn = readFlag("ff_agc_auto");
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           sampleRate: 16000,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
+          autoGainControl: agcOn,
         },
       });
       streamRef.current = stream;
