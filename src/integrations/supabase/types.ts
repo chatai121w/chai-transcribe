@@ -725,6 +725,7 @@ export type Database = {
           source_language: string | null
           tab_settings_json: Json | null
           text_color: string | null
+          text_editor_view_json: Json | null
           theme: string | null
           updated_at: string
           user_id: string
@@ -769,6 +770,7 @@ export type Database = {
           source_language?: string | null
           tab_settings_json?: Json | null
           text_color?: string | null
+          text_editor_view_json?: Json | null
           theme?: string | null
           updated_at?: string
           user_id: string
@@ -813,6 +815,7 @@ export type Database = {
           source_language?: string | null
           tab_settings_json?: Json | null
           text_color?: string | null
+          text_editor_view_json?: Json | null
           theme?: string | null
           updated_at?: string
           user_id?: string

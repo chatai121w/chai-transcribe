@@ -1,0 +1,1 @@
+ALTER TABLE public.user_preferences ADD COLUMN IF NOT EXISTS text_editor_view_json jsonb DEFAULT '{}'::jsonb;
