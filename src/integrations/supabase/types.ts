@@ -706,6 +706,7 @@ export type Database = {
           draft_text: string | null
           editor_columns: number | null
           engine: string | null
+          feature_flags: Json
           folder_sort_asc: boolean | null
           folder_sort_key: string | null
           folder_view_mode: string | null
@@ -749,6 +750,7 @@ export type Database = {
           draft_text?: string | null
           editor_columns?: number | null
           engine?: string | null
+          feature_flags?: Json
           folder_sort_asc?: boolean | null
           folder_sort_key?: string | null
           folder_view_mode?: string | null
@@ -792,6 +794,7 @@ export type Database = {
           draft_text?: string | null
           editor_columns?: number | null
           engine?: string | null
+          feature_flags?: Json
           folder_sort_asc?: boolean | null
           folder_sort_key?: string | null
           folder_view_mode?: string | null
