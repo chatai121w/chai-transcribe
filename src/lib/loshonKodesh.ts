@@ -453,6 +453,7 @@ export async function applyLkAiFix(text: string): Promise<string> {
   if (error) throw new Error(error.message || 'שגיאת AI');
   const payload = data as { text?: string; error?: string } | null;
   if (!payload || payload.error) throw new Error(payload?.error || 'AI לא החזיר תוצאה');
+  try { window.dispatchEvent(new CustomEvent('ai-usage-updated')); } catch { /* */ }
   return payload.text || text;
 }
 
