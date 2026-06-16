@@ -244,6 +244,7 @@ const TextEditor = () => {
 
   // Loshon Kodesh embedded tab
   const [activeTab, setActiveTab] = useState<string>("edit");
+  const [comparePreselect, setComparePreselect] = useState<{ leftId: string; rightId: string } | null>(null);
   const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
   const sendTextToLoshonKodesh = useCallback((opts?: { jump?: boolean }) => {
     const t = (text || "").trim();
@@ -1484,6 +1485,20 @@ const TextEditor = () => {
                 audioFilePath={(location.state as any)?.audioFilePath || null}
                 onOpenInEditor={(t) => setText(t)}
                 onCreateCloudTranscript={ensureCloudTranscript}
+                onSendToCompare={(versionId) => {
+                  // Find an "original" baseline from merged versions
+                  const original =
+                    compareVersions.find(v => v.source === 'original') ||
+                    compareVersions[0];
+                  const target = compareVersions.find(v => v.id === versionId);
+                  if (!original || !target) {
+                    toast({ title: 'אין מספיק גרסאות להשוואה', variant: 'destructive' });
+                    return;
+                  }
+                  setComparePreselect({ leftId: original.id, rightId: target.id });
+                  setActiveTab('compare');
+                  toast({ title: 'נשלח להשוואה A/B ↔️' });
+                }}
               />
             </LazyErrorBoundary>
           </TabsContent>
@@ -1510,6 +1525,8 @@ const TextEditor = () => {
                 fontFamily={fontFamily}
                 textColor={textColor}
                 lineHeight={lineHeight}
+                preselectedLeftId={comparePreselect?.leftId}
+                preselectedRightId={comparePreselect?.rightId}
                 onApplyVersion={(newText) => {
                   setText(newText);
                 }}

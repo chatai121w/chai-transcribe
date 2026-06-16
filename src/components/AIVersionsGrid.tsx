@@ -13,9 +13,10 @@ interface Props {
   audioFilePath?: string | null;
   onOpenInEditor: (text: string) => void;
   onCreateCloudTranscript?: () => Promise<string | null>;
+  onSendToCompare?: (id: string) => void;
 }
 
-export function AIVersionsGrid({ transcriptId, audioFilePath, onOpenInEditor, onCreateCloudTranscript }: Props) {
+export function AIVersionsGrid({ transcriptId, audioFilePath, onOpenInEditor, onCreateCloudTranscript, onSendToCompare }: Props) {
   const { versions, isLoading, assignVersionsToFolder, deleteVersion, saveVersionToLocalOnly } = useCloudVersions(transcriptId);
   const [search, setSearch] = useState("");
   const [modelFilter, setModelFilter] = useState<string>("all");
@@ -156,6 +157,7 @@ export function AIVersionsGrid({ transcriptId, audioFilePath, onOpenInEditor, on
               onDelete={deleteVersion}
               onSaveLocal={handleSaveLocal}
               onAssignFolder={(id) => setFolderDialogIds([id])}
+              onSendToCompare={onSendToCompare}
             />
           ))}
         </div>
