@@ -145,9 +145,10 @@ export const useCloudVersions = (transcriptId: string | null) => {
     source: string,
     engineLabel?: string | null,
     actionLabel?: string | null,
-    options?: { audioFilePath?: string | null; folderId?: string | null },
+    options?: { audioFilePath?: string | null; folderId?: string | null; transcriptId?: string | null },
   ): Promise<CloudVersion | null> => {
-    if (!transcriptId || !user) return null;
+    const targetTranscriptId = options?.transcriptId || transcriptId;
+    if (!targetTranscriptId || !user) return null;
 
     const nextNumber = versions.length > 0
       ? Math.max(...versions.map(v => v.version_number)) + 1
@@ -157,7 +158,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
     const now = new Date().toISOString();
     const localVersion: LocalVersion = {
       id: localId,
-      transcript_id: transcriptId,
+      transcript_id: targetTranscriptId,
       user_id: user.id,
       text,
       source,
@@ -173,7 +174,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
     // Optimistic local update
     const optimistic: CloudVersion = {
       id: localId,
-      transcript_id: transcriptId,
+      transcript_id: targetTranscriptId,
       user_id: user.id,
       text,
       source,
@@ -197,7 +198,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
       const usageEventId = await findMatchingUsageEventId(actionLabel || null, engineLabel || null);
 
       const insertPayload: Record<string, unknown> = {
-        transcript_id: transcriptId,
+        transcript_id: targetTranscriptId,
         user_id: user.id,
         text,
         source,
@@ -232,7 +233,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
 
       debugLog.info('Versions', `Saved version #${nextNumber} (${source})`);
       try {
-        window.dispatchEvent(new CustomEvent('ai-version-saved', { detail: { transcriptId } }));
+        window.dispatchEvent(new CustomEvent('ai-version-saved', { detail: { transcriptId: targetTranscriptId } }));
       } catch { /* noop */ }
       return cloudVersion;
     } catch (err) {
