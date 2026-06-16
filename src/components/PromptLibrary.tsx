@@ -118,6 +118,8 @@ export const PromptLibrary = ({ text, onTextChange }: PromptLibraryProps) => {
     return (localStorage.getItem('prompt_library_view') as 'grid' | 'list') || 'grid';
   });
   const ollama = useOllama();
+  const { user } = useAuth();
+  const [cloudSynced, setCloudSynced] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('prompt_library_view', viewMode);
@@ -132,39 +134,110 @@ export const PromptLibrary = ({ text, onTextChange }: PromptLibraryProps) => {
     })),
   ];
 
+  // Load: prefer cloud, fallback to localStorage; merge & migrate.
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try { setSavedPrompts(JSON.parse(saved)); } catch { /* ignore */ }
-    }
-  }, []);
+    let cancelled = false;
+    const loadFromLocal = (): SavedPrompt[] => {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) return [];
+      try { return JSON.parse(saved) as SavedPrompt[]; } catch { return []; }
+    };
 
-  const persistPrompts = (prompts: SavedPrompt[]) => {
+    (async () => {
+      const local = loadFromLocal();
+      if (!user) {
+        if (!cancelled) setSavedPrompts(local);
+        return;
+      }
+      try {
+        const { data, error } = await (supabase as any)
+          .from('user_prompts')
+          .select('id,label,prompt,category')
+          .order('created_at', { ascending: true });
+        if (error) throw error;
+        const cloud: SavedPrompt[] = (data || []).map((r: any) => ({
+          id: r.id, label: r.label, prompt: r.prompt, category: r.category,
+        }));
+        // Migrate any local-only custom prompts to cloud (one-time)
+        const cloudLabels = new Set(cloud.map(c => c.label + '||' + c.prompt));
+        const toMigrate = local.filter(l => !cloudLabels.has(l.label + '||' + l.prompt));
+        if (toMigrate.length > 0) {
+          const rows = toMigrate.map(p => ({
+            user_id: user.id, label: p.label, prompt: p.prompt, category: p.category,
+          }));
+          const { data: inserted } = await (supabase as any)
+            .from('user_prompts').insert(rows).select('id,label,prompt,category');
+          if (inserted) {
+            for (const r of inserted) {
+              cloud.push({ id: r.id, label: r.label, prompt: r.prompt, category: r.category });
+            }
+          }
+        }
+        if (!cancelled) {
+          setSavedPrompts(cloud);
+          setCloudSynced(true);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(cloud));
+        }
+      } catch (err) {
+        console.warn('[PromptLibrary] cloud load failed, using local:', err);
+        if (!cancelled) setSavedPrompts(local);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [user]);
+
+  const persistLocal = (prompts: SavedPrompt[]) => {
     setSavedPrompts(prompts);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(prompts));
   };
 
-  const handleSavePrompt = () => {
+  const handleSavePrompt = async () => {
     if (!newLabel.trim() || !newPrompt.trim()) {
       toast({ title: "שגיאה", description: "יש למלא שם ופרומפט", variant: "destructive" });
       return;
     }
-    const prompt: SavedPrompt = {
-      id: `custom-${Date.now()}`,
-      label: newLabel.trim(),
-      prompt: newPrompt.trim(),
-      category: newCategory.trim() || 'מותאם אישי',
-    };
-    persistPrompts([...savedPrompts, prompt]);
+    const baseLabel = newLabel.trim();
+    const basePrompt = newPrompt.trim();
+    const baseCategory = newCategory.trim() || 'מותאם אישי';
+
+    let savedRow: SavedPrompt | null = null;
+    if (user) {
+      try {
+        const { data, error } = await (supabase as any)
+          .from('user_prompts')
+          .insert({ user_id: user.id, label: baseLabel, prompt: basePrompt, category: baseCategory })
+          .select('id,label,prompt,category')
+          .single();
+        if (error) throw error;
+        savedRow = { id: data.id, label: data.label, prompt: data.prompt, category: data.category };
+        setCloudSynced(true);
+      } catch (err) {
+        console.warn('[PromptLibrary] cloud save failed:', err);
+        toast({ title: "שמירה מקומית בלבד", description: "לא ניתן לשמור בענן כרגע", variant: "destructive" });
+      }
+    }
+    if (!savedRow) {
+      savedRow = { id: `custom-${Date.now()}`, label: baseLabel, prompt: basePrompt, category: baseCategory };
+    }
+    persistLocal([...savedPrompts, savedRow]);
     setNewLabel("");
     setNewPrompt("");
     setNewCategory("");
     setShowSaveDialog(false);
-    toast({ title: "נשמר", description: "הפרומפט נשמר בספרייה" });
+    toast({ title: "נשמר", description: user ? "הפרומפט נשמר בענן" : "הפרומפט נשמר מקומית" });
   };
 
-  const handleDeletePrompt = (id: string) => {
-    persistPrompts(savedPrompts.filter(p => p.id !== id));
+  const handleDeletePrompt = async (id: string) => {
+    if (user && !id.startsWith('custom-')) {
+      try {
+        const { error } = await (supabase as any).from('user_prompts').delete().eq('id', id);
+        if (error) throw error;
+      } catch (err) {
+        console.warn('[PromptLibrary] cloud delete failed:', err);
+      }
+    }
+    persistLocal(savedPrompts.filter(p => p.id !== id));
     toast({ title: "נמחק", description: "הפרומפט הוסר מהספרייה" });
   };
 
