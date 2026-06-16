@@ -126,7 +126,7 @@ const TextEditor = () => {
   const playerTimeRef = useRef(0);
   const transcriptIdRef = useRef<string | null>(null);
   const manualVersionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { updateTranscript, getAudioUrl, saveTranscript } = useCloudTranscripts();
+  const { updateTranscript, getAudioUrl, saveTranscript, transcripts } = useCloudTranscripts();
   const [syncEnabled, setSyncEnabled] = useState(true);
   const [transcriptId, setTranscriptId] = useState<string | null>(null);
   const { versions: cloudVersions, isLoading: cloudVersionsLoading, saveVersion: saveCloudVersion } = useCloudVersions(transcriptId);
@@ -620,6 +620,33 @@ const TextEditor = () => {
   const compareVersions = useMemo<TextVersion[]>(() => {
     const byId = new Map<string, TextVersion>();
 
+    const currentTranscriptId = transcriptIdRef.current || transcriptId;
+    const currentCloudTranscript = currentTranscriptId
+      ? transcripts.find(t => t.id === currentTranscriptId)
+      : undefined;
+
+    const originalText = currentCloudTranscript?.text || originalTextRef.current || text;
+    if (originalText?.trim()) {
+      byId.set('current-original', {
+        id: 'current-original',
+        text: originalText,
+        timestamp: currentCloudTranscript?.created_at ? new Date(currentCloudTranscript.created_at) : new Date(0),
+        source: 'original',
+        customPrompt: 'תמלול מקורי',
+      });
+    }
+
+    const editedText = currentCloudTranscript?.edited_text || text;
+    if (editedText?.trim() && editedText !== originalText) {
+      byId.set('current-edited', {
+        id: 'current-edited',
+        text: editedText,
+        timestamp: currentCloudTranscript?.updated_at ? new Date(currentCloudTranscript.updated_at) : new Date(),
+        source: 'manual',
+        customPrompt: 'הטקסט הנוכחי בעורך',
+      });
+    }
+
     for (const v of versions) {
       byId.set(v.id, v);
     }
@@ -636,7 +663,7 @@ const TextEditor = () => {
     }
 
     return Array.from(byId.values()).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-  }, [versions, cloudVersions]);
+  }, [versions, cloudVersions, transcripts, transcriptId, text]);
 
   const handleAiQuickAction = async (action: 'fix_errors' | 'split_paragraphs' | 'fix_and_split') => {
     if (!text.trim()) {
