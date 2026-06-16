@@ -20,6 +20,8 @@ interface AdvancedDiffViewProps {
   onApplyVersion?: (text: string) => void;
   preselectedLeftId?: string;
   preselectedRightId?: string;
+  /** Optional: send the selected version into the AI editor as input */
+  onSendToAiEditor?: (versionId: string) => void;
 }
 
 type VersionFilter = "all" | "ai" | "manual" | "original" | "cloud" | "local";
