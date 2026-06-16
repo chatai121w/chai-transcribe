@@ -106,7 +106,9 @@ export const SyncMirrorLayout = ({
 }: SyncMirrorLayoutProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const leftRichRef = useRef<HTMLDivElement>(null);
   const [isMarkingActive, setIsMarkingActive] = useState(false);
+  const [rightTopOffset, setRightTopOffset] = useState(0);
 
   const [colWidth, setColWidth] = useState(0);
   const [fullEditMode, setFullEditMode] = useState(false);
@@ -132,6 +134,30 @@ export const SyncMirrorLayout = ({
   const [localLetterSpacing, setLocalLetterSpacing] = useState(0); // px extra
   const [localFontWeight, setLocalFontWeight] = useState<number>(400);
   const [localTextColor, setLocalTextColor] = useState<string>("");
+
+  // Measure left rich-edit column's "above content" zone so the right
+  // (read-only) column can start its first line at the exact same baseline.
+  useEffect(() => {
+    if (!enableRichEdit) { setRightTopOffset(0); return; }
+    const wrapper = leftRichRef.current;
+    if (!wrapper) return;
+    let raf = 0;
+    const measure = () => {
+      const editable = wrapper.querySelector('[contenteditable="true"]') as HTMLElement | null;
+      const wrapperTop = wrapper.getBoundingClientRect().top;
+      const target = editable ?? wrapper;
+      const diff = Math.max(0, Math.round(target.getBoundingClientRect().top - wrapperTop));
+      setRightTopOffset(diff);
+    };
+    const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
+    schedule();
+    const ro = new ResizeObserver(schedule);
+    ro.observe(wrapper);
+    window.addEventListener('resize', schedule);
+    const t = window.setInterval(schedule, 800); // catch async toolbar/spell changes
+    return () => { ro.disconnect(); window.removeEventListener('resize', schedule); window.clearInterval(t); cancelAnimationFrame(raf); };
+  }, [enableRichEdit, isMarkingActive, localFontSize, localFontFamily, localLineHeight]);
+
 
   // ── User timing anchors ────────────────────────────────────────────────────
   // Map: edited word index → pinned {start, end} timing
@@ -1210,8 +1236,14 @@ export const SyncMirrorLayout = ({
       >
         {/* ── RIGHT column: תמלול מסונכרן (read-only) ── */}
         <div className="flex-1 min-w-0 flex flex-col border-s border-border/40">
-          {/* word rows */}
-          <div className="p-4" style={textStyle}>
+          {/* word rows — when rich-edit is on, pad-top dynamically to align with editor's first line */}
+          <div
+            className="px-4 pb-4"
+            style={{
+              ...textStyle,
+              paddingTop: enableRichEdit ? `${rightTopOffset || 16}px` : 16,
+            }}
+          >
             {(compareMode ? frozenLines : lines).map((line, li) => {
               const sourceLines = compareMode ? frozenLines : lines;
               const offset = sourceLines.slice(0, li).reduce((a, l) => a + l.length, 0);
@@ -1220,10 +1252,11 @@ export const SyncMirrorLayout = ({
           </div>
         </div>
 
+
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
         <div className="flex-1 min-w-0 flex flex-col">
           {enableRichEdit ? (
-            <div className="flex flex-col gap-2 p-3" dir="rtl">
+            <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
               {/* Marking toolbar (always visible) + analysis panel (when active) */}
               <TextMarkingOverlay
                 text={text}
