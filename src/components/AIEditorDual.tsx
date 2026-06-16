@@ -520,11 +520,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
     if (!initialSourceId) return;
     const v = allSourceVersions.find(x => x.id === initialSourceId);
     if (!v) return;
-    let cat: SourceCategory = 'saved';
-    if (v.id === '__current__') cat = 'current';
-    else if (v.source === 'original') cat = 'original';
-    else if (v.source.startsWith('ai-')) cat = 'ai';
-    setSourceCategory(cat);
+    // Keep "all" by default; only narrow if user is already in a specific category
     setSelectedSourceId(initialSourceId);
     // load text (without dirty-check — explicit user action from compare)
     setWorkingText(v.text);
