@@ -648,6 +648,7 @@ const TextEditor = () => {
   );
   const [drivePickerOpen, setDrivePickerOpen] = useState(false);
   const [showCompareAi, setShowCompareAi] = useState(false);
+  const [compareSubTab, setCompareSubTab] = useState("versions");
 
   const compareVersions = useMemo<TextVersion[]>(() => {
     const byId = new Map<string, TextVersion>();
@@ -696,6 +697,19 @@ const TextEditor = () => {
 
     return Array.from(byId.values()).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   }, [versions, cloudVersions, transcripts, transcriptId, text]);
+
+  const sendVersionToCompare = useCallback((versionId: string) => {
+    const original = compareVersions.find(v => v.source === 'original') || compareVersions[0];
+    const target = compareVersions.find(v => v.id === versionId);
+    if (!original || !target) {
+      toast({ title: 'אין מספיק גרסאות להשוואה', variant: 'destructive' });
+      return;
+    }
+    setComparePreselect({ leftId: original.id, rightId: target.id });
+    setCompareSubTab("versions");
+    setActiveTab('compare');
+    toast({ title: 'נשלח להשוואה' });
+  }, [compareVersions]);
 
   const handleAiQuickAction = async (action: 'fix_errors' | 'split_paragraphs' | 'fix_and_split') => {
     if (!text.trim()) {
