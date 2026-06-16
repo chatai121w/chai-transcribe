@@ -648,6 +648,7 @@ const TextEditor = () => {
   );
   const [drivePickerOpen, setDrivePickerOpen] = useState(false);
   const [showCompareAi, setShowCompareAi] = useState(false);
+  const [compareSubTab, setCompareSubTab] = useState("versions");
 
   const compareVersions = useMemo<TextVersion[]>(() => {
     const byId = new Map<string, TextVersion>();
@@ -696,6 +697,19 @@ const TextEditor = () => {
 
     return Array.from(byId.values()).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   }, [versions, cloudVersions, transcripts, transcriptId, text]);
+
+  const sendVersionToCompare = useCallback((versionId: string) => {
+    const original = compareVersions.find(v => v.source === 'original') || compareVersions[0];
+    const target = compareVersions.find(v => v.id === versionId);
+    if (!original || !target) {
+      toast({ title: 'אין מספיק גרסאות להשוואה', variant: 'destructive' });
+      return;
+    }
+    setComparePreselect({ leftId: original.id, rightId: target.id });
+    setCompareSubTab("versions");
+    setActiveTab('compare');
+    toast({ title: 'נשלח להשוואה' });
+  }, [compareVersions]);
 
   const handleAiQuickAction = async (action: 'fix_errors' | 'split_paragraphs' | 'fix_and_split') => {
     if (!text.trim()) {
@@ -1564,26 +1578,13 @@ const TextEditor = () => {
                 audioFilePath={(location.state as any)?.audioFilePath || null}
                 onOpenInEditor={(t) => setText(t)}
                 onCreateCloudTranscript={ensureCloudTranscript}
-                onSendToCompare={(versionId) => {
-                  // Find an "original" baseline from merged versions
-                  const original =
-                    compareVersions.find(v => v.source === 'original') ||
-                    compareVersions[0];
-                  const target = compareVersions.find(v => v.id === versionId);
-                  if (!original || !target) {
-                    toast({ title: 'אין מספיק גרסאות להשוואה', variant: 'destructive' });
-                    return;
-                  }
-                  setComparePreselect({ leftId: original.id, rightId: target.id });
-                  setActiveTab('compare');
-                  toast({ title: 'נשלח להשוואה A/B ↔️' });
-                }}
+                onSendToCompare={sendVersionToCompare}
               />
             </LazyErrorBoundary>
           </TabsContent>
 
           <TabsContent value="compare" className="flex flex-col gap-3">
-            <Tabs defaultValue="versions" dir="rtl">
+            <Tabs value={compareSubTab} onValueChange={setCompareSubTab} dir="rtl">
               <TabsList className="grid w-full grid-cols-2 max-w-md">
                 <TabsTrigger value="versions" className="text-xs">גרסאות (Diff)</TabsTrigger>
                 <TabsTrigger value="engines" className="text-xs">מנועי AI (A/B)</TabsTrigger>
@@ -1725,12 +1726,13 @@ const TextEditor = () => {
           <TabsContent value="history" className="flex flex-col gap-3">
             <CollapsibleWidget title="היסטוריית עריכה" storageKey="te_history">
               <LazyErrorBoundary label="היסטוריית עריכה"><TextEditHistory 
-                versions={versions}
+                versions={compareVersions}
                 onSelectVersion={handleVersionSelect}
                 selectedVersionId={selectedVersionId}
                 cloudVersions={cloudVersions}
                 cloudLoading={cloudVersionsLoading}
                 onRestoreVersion={handleRestoreVersion}
+                onCompareVersion={sendVersionToCompare}
               /></LazyErrorBoundary>
             </CollapsibleWidget>
           </TabsContent>
