@@ -404,7 +404,7 @@ const TextEditor = () => {
       if (location.state?.transcriptId) {
         // Defer to avoid calling saveCloudVersion before hook is ready
         setTimeout(() => {
-          saveCloudVersion(stateText, 'original', null, 'תמלול מקורי');
+          saveCloudVersion(stateText, 'original', null, 'תמלול מקורי', { transcriptId: location.state.transcriptId });
         }, 500);
       }
     } else {
