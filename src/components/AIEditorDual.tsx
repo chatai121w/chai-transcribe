@@ -2009,6 +2009,65 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
         </div>
       )}
 
+      {/* ── Source-picker (choose which transcript/version to edit) ── */}
+      {(versions || originalText) && (
+        <div className="mb-3 rounded-lg border border-yellow-500/40 bg-yellow-500/5">
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-yellow-500/30 bg-yellow-500/10">
+            <div className="flex items-center gap-2">
+              <GitCompareArrows className="w-3.5 h-3.5 text-yellow-700" />
+              <Label className="text-xs font-semibold">מקור הקלט לעריכה</Label>
+              {isDirty && (
+                <Badge variant="outline" className="text-[9px] h-4 px-1 text-amber-600 border-amber-400">שינויים לא שמורים</Badge>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[10px] px-1.5"
+              onClick={() => currentSourceVersion && applySourceLoad(currentSourceVersion.id)}
+              title="טען מחדש מהמקור"
+              disabled={!currentSourceVersion}
+            >
+              <RotateCw className="w-3 h-3 ml-1" />
+              רענן
+            </Button>
+          </div>
+          <div className="p-2 space-y-2">
+            <Tabs value={sourceCategory} onValueChange={(v) => setSourceCategory(v as SourceCategory)} dir="rtl">
+              <TabsList className="grid w-full grid-cols-4 h-8">
+                <TabsTrigger value="current" className="text-[11px] h-7">נוכחי</TabsTrigger>
+                <TabsTrigger value="original" className="text-[11px] h-7">מקורי</TabsTrigger>
+                <TabsTrigger value="ai" className="text-[11px] h-7">AI</TabsTrigger>
+                <TabsTrigger value="saved" className="text-[11px] h-7">שמורות</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <div className="flex items-center gap-2">
+              <Select
+                value={filteredByCategory.some(v => v.id === selectedSourceId) ? selectedSourceId : ''}
+                onValueChange={requestSourceChange}
+                disabled={filteredByCategory.length === 0}
+              >
+                <SelectTrigger className="text-xs h-8 flex-1" dir="rtl">
+                  <SelectValue placeholder={filteredByCategory.length === 0 ? 'אין גרסאות בקטגוריה זו' : 'בחר גרסה...'} />
+                </SelectTrigger>
+                <SelectContent dir="rtl">
+                  {filteredByCategory.map(v => (
+                    <SelectItem key={v.id} value={v.id} className="text-xs">
+                      {formatSourceLabel(v)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {currentSourceVersion && (
+                <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                  {currentSourceVersion.text.split(/\s+/).filter(Boolean).length.toLocaleString()} מילים
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Editable source-text preview ── */}
       <div className="mb-4 rounded-lg border bg-background/60">
         <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b bg-muted/30">
@@ -2026,7 +2085,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
                 variant="ghost"
                 size="sm"
                 className="h-6 text-[10px] px-1.5 text-muted-foreground hover:text-primary"
-                onClick={() => { setWorkingText(propText); setIsUserEditedText(false); toast({ title: 'שוחזר למקור' }); }}
+                onClick={() => { setWorkingText(propText); setLoadedSnapshot(propText); setIsUserEditedText(false); toast({ title: 'שוחזר למקור' }); }}
                 title="שחזר את הטקסט המקורי"
               >
                 <RotateCcw className="w-3 h-3 ml-1" />
@@ -2054,6 +2113,25 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
           />
         )}
       </div>
+
+      {/* ── Dirty-source-change confirmation dialog ── */}
+      <Dialog open={dirtyDialogOpen} onOpenChange={(o) => { if (!o) handleDirtyCancel(); }}>
+        <DialogContent dir="rtl" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>שינויים לא שמורים</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            ערכת את הטקסט מאז הטעינה האחרונה. מה לעשות לפני החלפת המקור?
+          </p>
+          <div className="flex flex-wrap justify-end gap-2 mt-3">
+            <Button variant="ghost" size="sm" onClick={handleDirtyCancel}>בטל</Button>
+            <Button variant="outline" size="sm" onClick={handleDirtyDiscard}>השלך והחלף</Button>
+            <Button size="sm" onClick={handleDirtySaveThenLoad} disabled={!onSaveVersion}>
+              שמור כגרסה חדשה והחלף
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Quick Save Actions (always visible near top) */}
       {(onSaveAndReplaceOriginal || onDuplicateAndSave || onSaveVersion) && (
