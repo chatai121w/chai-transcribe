@@ -1346,7 +1346,6 @@ export const SyncMirrorLayout = ({
               dir="rtl"
               style={{ paddingTop: rightTopOffset ? `${rightTopOffset}px` : undefined }}
             >
-              <div className="p-4">
                 <div className="space-y-3">
                   <div
                     ref={rightEditableRef}
@@ -1354,6 +1353,7 @@ export const SyncMirrorLayout = ({
                     className="rounded-md border border-input bg-background px-4 py-3 overflow-auto max-w-none"
                     style={{
                       ...textStyle,
+                      ...richColumnStyle,
                       textAlign: 'right',
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
@@ -1390,7 +1390,6 @@ export const SyncMirrorLayout = ({
                     })}
                   </div>
                 </div>
-              </div>
             </div>
           ) : (
             /* Legacy line-based mirror — used when rich-edit is off. */
