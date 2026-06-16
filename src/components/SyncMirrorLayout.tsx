@@ -107,6 +107,7 @@ export const SyncMirrorLayout = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const leftRichRef = useRef<HTMLDivElement>(null);
+  const leftRowsRef = useRef<HTMLDivElement>(null);
   const [isMarkingActive, setIsMarkingActive] = useState(false);
   const [rightTopOffset, setRightTopOffset] = useState(0);
   // "Precise row alignment" — when true (default), left column renders via the
@@ -150,28 +151,30 @@ export const SyncMirrorLayout = ({
   const [localFontWeight, setLocalFontWeight] = useState<number>(400);
   const [localTextColor, setLocalTextColor] = useState<string>("");
 
-  // Measure left rich-edit column's "above content" zone so the right
-  // (read-only) column can start its first line at the exact same baseline.
+  // Measure the left column's real first-text surface so the right column starts
+  // on the same pixel line even when the left side has marking/edit toolbars.
   useEffect(() => {
-    if (!effectiveRichEdit) { setRightTopOffset(0); return; }
+    if (!enableRichEdit || fullEditMode) { setRightTopOffset(0); return; }
     const wrapper = leftRichRef.current;
-    if (!wrapper) return;
+    const scroller = scrollRef.current;
+    if (!wrapper || !scroller) return;
     let raf = 0;
     const measure = () => {
       const editable = wrapper.querySelector('[contenteditable="true"]') as HTMLElement | null;
-      const wrapperTop = wrapper.getBoundingClientRect().top;
-      const target = editable ?? wrapper;
-      const diff = Math.max(0, Math.round(target.getBoundingClientRect().top - wrapperTop));
+      const target = effectiveRichEdit ? editable : leftRowsRef.current;
+      const anchor = target ?? wrapper;
+      const diff = Math.max(0, Math.round(anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top));
       setRightTopOffset(diff);
     };
     const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
     schedule();
     const ro = new ResizeObserver(schedule);
     ro.observe(wrapper);
+    ro.observe(scroller);
     window.addEventListener('resize', schedule);
     const t = window.setInterval(schedule, 800); // catch async toolbar/spell changes
     return () => { ro.disconnect(); window.removeEventListener('resize', schedule); window.clearInterval(t); cancelAnimationFrame(raf); };
-  }, [effectiveRichEdit, isMarkingActive, localFontSize, localFontFamily, localLineHeight]);
+  }, [enableRichEdit, effectiveRichEdit, fullEditMode, isMarkingActive, localFontSize, localFontFamily, localLineHeight, preciseAlign]);
 
 
   // ── User timing anchors ────────────────────────────────────────────────────
