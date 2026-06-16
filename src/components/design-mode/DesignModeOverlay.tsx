@@ -484,7 +484,7 @@ export function DesignModeOverlay() {
       >
         <div
           ref={toolbarRef}
-          className="flex items-center gap-2 rounded-xl border border-yellow-500/50 bg-background/95 backdrop-blur p-2 shadow-lg"
+          className="flex items-center gap-2 rounded-xl border-2 border-yellow-500 bg-yellow-100/95 dark:bg-yellow-900/40 backdrop-blur p-2 shadow-lg shadow-yellow-500/20"
           style={{ direction: 'rtl' }}
         >
           <span
