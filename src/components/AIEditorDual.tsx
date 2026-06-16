@@ -2176,6 +2176,9 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
               customActions.viewMode === 'grid' ? 'flex flex-wrap gap-1.5' :
               customActions.viewMode === 'list' ? 'flex flex-col gap-1' :
               customActions.viewMode === 'masonry' ? 'columns-2 md:columns-3 xl:columns-4 gap-2 space-y-2' :
+              customActions.viewMode === 'columns2' ? 'grid grid-cols-2 gap-1.5' :
+              customActions.viewMode === 'columns3' ? 'grid grid-cols-2 md:grid-cols-3 gap-1.5' :
+              customActions.viewMode === 'columns4' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5' :
               'flex flex-wrap gap-0.5'
             }>
               {group.actions.map(action => {
