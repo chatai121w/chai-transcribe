@@ -1256,7 +1256,7 @@ export const SyncMirrorLayout = ({
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
         <div className="flex-1 min-w-0 flex flex-col">
           {enableRichEdit ? (
-            <div className="flex flex-col gap-2 p-3" dir="rtl">
+            <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
               {/* Marking toolbar (always visible) + analysis panel (when active) */}
               <TextMarkingOverlay
                 text={text}
