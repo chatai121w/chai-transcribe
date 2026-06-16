@@ -1490,54 +1490,23 @@ const TextEditor = () => {
                   searchQuery={transcriptSearchOpen ? transcriptSearchQuery : undefined}
                   searchActiveIndex={transcriptSearchIdx}
                   onSearchMatchCount={setTranscriptMatchCount}
-                  onSaveReplace={() => handleSaveAndReplaceOriginal(text, 'manual', 'נגן מסונכרן', 'שמירה מהנגן')}
-                  onDuplicateSave={(newName) => handleDuplicateAndSave(text, 'manual', 'נגן מסונכרן', 'שכפול מהנגן', newName)}
+                  onSaveReplace={() => handleSaveAndReplaceOriginal(text, 'manual', 'עורך טקסט', 'שמירה מהעורך')}
+                  onDuplicateSave={(newName) => handleDuplicateAndSave(text, 'manual', 'עורך טקסט', 'שכפול מהעורך', newName)}
                   learningProfiles={learningProfiles}
                   learningEnabled={true}
                   onSaveLearning={handleSaveLearningToProfile}
-                />
-              </div>
-            )}
-
-            </LazyErrorBoundary>
-          </TabsContent>
-
-          <TabsContent value="edit" className="flex flex-col gap-3">
-            {/* Marking toolbar — always visible, text display only when active */}
-            <LazyErrorBoundary label="סימון ויזואלי">
-              <TextMarkingOverlay
-                text={text}
-                onTextChange={handleEditorChange}
-                fontSize={fontSize}
-                fontFamily={fontFamily}
-                lineHeight={lineHeight}
-                toolbarOnly={!isMarkingActive}
-                onActiveChange={setIsMarkingActive}
-              />
-            </LazyErrorBoundary>
-            {/* Editable text — hidden when marking analysis is shown */}
-            {!isMarkingActive && (
-              <div
-                style={{
-                  fontSize: `${fontSize}px`,
-                  fontFamily: fontFamily,
-                  color: textColor,
-                  lineHeight: lineHeight,
-                }}
-              >
-                <RichTextEditor 
-                  text={text} 
-                  onChange={handleEditorChange}
-                  columnStyle={columnStyle}
-                  onSaveReplaceOriginal={() => handleSaveAndReplaceOriginal(text, 'manual', 'עורך טקסט', 'שמירה מסרגל העורך')}
-                  onDuplicateSave={() => handleDuplicateAndSave(text, 'manual', 'עורך טקסט', 'שכפול מסרגל העורך')}
+                  enableRichEdit
+                  richColumnStyle={columnStyle}
                   onWordCorrected={(original, corrected) => {
                     debugLog.info('TextEditor', `Spell correction: "${original}" → "${corrected}"`);
                   }}
                 />
               </div>
             )}
+
+            </LazyErrorBoundary>
           </TabsContent>
+
 
           <TabsContent value="loshon" className="flex flex-col gap-3">
             <LazyErrorBoundary label="לשון הקודש">
