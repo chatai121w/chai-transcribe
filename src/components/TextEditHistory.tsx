@@ -133,25 +133,16 @@ const TextEditHistoryInner = ({
           )}
         </div>
 
-        <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)} className="w-auto">
-          <TabsList className="h-8">
-            <TabsTrigger value="list" className="text-xs px-3 h-7">
-              <Eye className="w-3 h-3 ml-1" />רשימה
-            </TabsTrigger>
-            <TabsTrigger value="compare" className="text-xs px-3 h-7">
-              <ArrowRightLeft className="w-3 h-3 ml-1" />השוואה
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <Badge variant="outline" className="text-xs gap-1">
+          <Eye className="w-3 h-3" /> רשימה
+        </Badge>
       </div>
 
       {cloudLoading && (
         <div className="text-center text-muted-foreground text-sm py-2">טוען גרסאות מהענן...</div>
       )}
 
-      {/* List View */}
-      {viewMode === 'list' && (
-        <ScrollArea className="h-[600px]">
+      <ScrollArea className="h-[600px]">
           <div className="space-y-3">
             {allVersions.length === 0 ? (
               <p className="text-muted-foreground text-center py-8">אין עדיין גרסאות</p>
@@ -232,8 +223,7 @@ const TextEditHistoryInner = ({
               ))
             )}
           </div>
-        </ScrollArea>
-      )}
+      </ScrollArea>
 
       {/* Compare View - Side by Side */}
       {viewMode === 'compare' && allVersions.length >= 2 && (
