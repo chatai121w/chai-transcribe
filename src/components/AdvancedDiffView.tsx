@@ -20,6 +20,8 @@ interface AdvancedDiffViewProps {
   onApplyVersion?: (text: string) => void;
   preselectedLeftId?: string;
   preselectedRightId?: string;
+  /** Optional: send the selected version into the AI editor as input */
+  onSendToAiEditor?: (versionId: string) => void;
 }
 
 type VersionFilter = "all" | "ai" | "manual" | "original" | "cloud" | "local";
@@ -126,6 +128,7 @@ export const AdvancedDiffView = ({
   onApplyVersion,
   preselectedLeftId,
   preselectedRightId,
+  onSendToAiEditor,
 }: AdvancedDiffViewProps) => {
   const defaultLeftId = useMemo(() => versions.find(v => v.source === 'original')?.id || versions[0]?.id || '', [versions]);
   const defaultRightId = useMemo(() => {
@@ -320,6 +323,17 @@ export const AdvancedDiffView = ({
                 ))}
               </SelectContent>
             </Select>
+            {onSendToAiEditor && leftId && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-[11px] px-2 shrink-0 text-yellow-700 hover:text-yellow-800 hover:bg-yellow-500/10"
+                onClick={() => onSendToAiEditor(leftId)}
+                title="שלח גרסה זו לעריכת AI"
+              >
+                שלח ל-AI
+              </Button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="default" className="shrink-0 text-xs">חדש</Badge>
@@ -331,6 +345,17 @@ export const AdvancedDiffView = ({
                 ))}
               </SelectContent>
             </Select>
+            {onSendToAiEditor && rightId && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-[11px] px-2 shrink-0 text-yellow-700 hover:text-yellow-800 hover:bg-yellow-500/10"
+                onClick={() => onSendToAiEditor(rightId)}
+                title="שלח גרסה זו לעריכת AI"
+              >
+                שלח ל-AI
+              </Button>
+            )}
           </div>
         </div>
 

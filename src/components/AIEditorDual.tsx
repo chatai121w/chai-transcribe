@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Wand2, Loader2, Sparkles, MessageSquare, BookOpen, FileText,
   Languages, Users, List, Heading, Maximize2, Minimize2, ChevronUp, ChevronDown,
@@ -45,6 +46,7 @@ import {
 } from "@/lib/hebrewGuard";
 import { useCustomActions, type CustomAction } from "@/hooks/useCustomActions";
 import type { AIEditJob } from "@/lib/aiEditQueue";
+import type { TextVersion } from "@/components/TextEditHistory";
 import DiffMatchPatch from "diff-match-patch";
 
 interface AIEditorDualProps {
@@ -54,6 +56,12 @@ interface AIEditorDualProps {
   onSaveAndReplaceOriginal?: (text: string, source: string, engineLabel: string, actionLabel: string) => Promise<void> | void;
   onDuplicateAndSave?: (text: string, source: string, engineLabel: string, actionLabel: string) => Promise<void> | void;
   onSyncToPlayer?: (editedText: string) => void;
+  /** Optional: all available versions for the source-picker (cloud + local + AI) */
+  versions?: TextVersion[];
+  /** Optional: original transcript text (shown as "מקורי" tab) */
+  originalText?: string;
+  /** Optional: pre-selected source version id (e.g. when sent from compare view) */
+  initialSourceId?: string;
 }
 
 const CLOUD_MODELS = [
@@ -440,15 +448,140 @@ const TRANSLATE_LANGS = [
   { value: 'גרמנית', label: '🇩🇪 גרמנית' },
 ];
 
-const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSaveAndReplaceOriginal, onDuplicateAndSave, onSyncToPlayer }: AIEditorDualProps) => {
+const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSaveAndReplaceOriginal, onDuplicateAndSave, onSyncToPlayer, versions, originalText, initialSourceId }: AIEditorDualProps) => {
   // Local editable working copy of the source text. User can tweak words inline before/between AI runs;
   // changes flow automatically into the next AI run because all edit code uses `text`.
   const [text, setWorkingText] = useState(propText);
   const [isUserEditedText, setIsUserEditedText] = useState(false);
+  // Snapshot of last loaded source (for isDirty detection in the source-picker)
+  const [loadedSnapshot, setLoadedSnapshot] = useState<string>(propText);
   // Sync from prop when it changes externally — but only if the user hasn't manually edited yet.
   useEffect(() => {
-    if (!isUserEditedText) setWorkingText(propText);
+    if (!isUserEditedText) {
+      setWorkingText(propText);
+      setLoadedSnapshot(propText);
+    }
   }, [propText, isUserEditedText]);
+
+  // ── Source-picker state ──
+  type SourceCategory = 'current' | 'original' | 'ai' | 'saved';
+  const [sourceCategory, setSourceCategory] = useState<SourceCategory>('current');
+  const [selectedSourceId, setSelectedSourceId] = useState<string>(initialSourceId || '__current__');
+  const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
+  const [dirtyDialogOpen, setDirtyDialogOpen] = useState(false);
+  const isDirty = text !== loadedSnapshot;
+
+  const versionsList = versions || [];
+
+  // Build the synthetic "current" / "original" entries so they appear alongside saved versions
+  const allSourceVersions = useMemo<TextVersion[]>(() => {
+    const list: TextVersion[] = [];
+    list.push({
+      id: '__current__',
+      text: propText,
+      timestamp: new Date(),
+      source: 'manual',
+      customPrompt: 'הטקסט הנוכחי בעורך',
+    });
+    if (originalText && originalText.trim() && originalText !== propText) {
+      list.push({
+        id: '__original__',
+        text: originalText,
+        timestamp: new Date(0),
+        source: 'original',
+        customPrompt: 'תמלול מקורי',
+      });
+    }
+    for (const v of versionsList) {
+      // Skip duplicates of current/original already pushed
+      if (v.text === propText && list.some(x => x.id === '__current__')) continue;
+      list.push(v);
+    }
+    return list;
+  }, [propText, originalText, versionsList]);
+
+  const filteredByCategory = useMemo(() => {
+    switch (sourceCategory) {
+      case 'current':
+        return allSourceVersions.filter(v => v.id === '__current__');
+      case 'original':
+        return allSourceVersions.filter(v => v.source === 'original');
+      case 'ai':
+        return allSourceVersions.filter(v => v.source.startsWith('ai-'));
+      case 'saved':
+        return allSourceVersions.filter(v => v.source === 'manual' && v.id !== '__current__');
+      default:
+        return allSourceVersions;
+    }
+  }, [allSourceVersions, sourceCategory]);
+
+  // Auto-categorize when initialSourceId arrives from parent (e.g. "send to AI" from compare)
+  useEffect(() => {
+    if (!initialSourceId) return;
+    const v = allSourceVersions.find(x => x.id === initialSourceId);
+    if (!v) return;
+    let cat: SourceCategory = 'saved';
+    if (v.id === '__current__') cat = 'current';
+    else if (v.source === 'original') cat = 'original';
+    else if (v.source.startsWith('ai-')) cat = 'ai';
+    setSourceCategory(cat);
+    setSelectedSourceId(initialSourceId);
+    // load text (without dirty-check — explicit user action from compare)
+    setWorkingText(v.text);
+    setLoadedSnapshot(v.text);
+    setIsUserEditedText(false);
+  }, [initialSourceId, allSourceVersions]);
+
+  const applySourceLoad = (id: string) => {
+    const v = allSourceVersions.find(x => x.id === id);
+    if (!v) return;
+    setSelectedSourceId(id);
+    setWorkingText(v.text);
+    setLoadedSnapshot(v.text);
+    setIsUserEditedText(false);
+  };
+
+  const requestSourceChange = (id: string) => {
+    if (id === selectedSourceId) return;
+    if (isDirty) {
+      setPendingSourceId(id);
+      setDirtyDialogOpen(true);
+      return;
+    }
+    applySourceLoad(id);
+  };
+
+  const handleDirtyDiscard = () => {
+    setDirtyDialogOpen(false);
+    if (pendingSourceId) applySourceLoad(pendingSourceId);
+    setPendingSourceId(null);
+  };
+  const handleDirtySaveThenLoad = () => {
+    if (onSaveVersion) {
+      onSaveVersion(text, 'manual', 'עורך', 'עריכה ידנית');
+      toast({ title: 'נשמרה גרסה חדשה' });
+    }
+    setDirtyDialogOpen(false);
+    if (pendingSourceId) applySourceLoad(pendingSourceId);
+    setPendingSourceId(null);
+  };
+  const handleDirtyCancel = () => {
+    setDirtyDialogOpen(false);
+    setPendingSourceId(null);
+  };
+
+  const currentSourceVersion = allSourceVersions.find(v => v.id === selectedSourceId);
+  const formatSourceLabel = (v: TextVersion): string => {
+    if (v.id === '__current__') return 'הטקסט הנוכחי בעורך';
+    if (v.id === '__original__') return 'תמלול מקורי';
+    const time = v.timestamp instanceof Date && v.timestamp.getTime() > 0
+      ? new Intl.DateTimeFormat('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(v.timestamp)
+      : '';
+    const tag = v.customPrompt || v.source;
+    const preview = v.text.replace(/\s+/g, ' ').slice(0, 50);
+    return `${tag}${time ? ' · ' + time : ''} — ${preview}${v.text.length > 50 ? '…' : ''}`;
+  };
+
   const [showSourceEditor, setShowSourceEditor] = useState<boolean>(() => {
     try { return localStorage.getItem('ai_editor_show_source') !== 'false'; } catch { return true; }
   });
@@ -1877,6 +2010,65 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
         </div>
       )}
 
+      {/* ── Source-picker (choose which transcript/version to edit) ── */}
+      {(versions || originalText) && (
+        <div className="mb-3 rounded-lg border border-yellow-500/40 bg-yellow-500/5">
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-yellow-500/30 bg-yellow-500/10">
+            <div className="flex items-center gap-2">
+              <GitCompareArrows className="w-3.5 h-3.5 text-yellow-700" />
+              <Label className="text-xs font-semibold">מקור הקלט לעריכה</Label>
+              {isDirty && (
+                <Badge variant="outline" className="text-[9px] h-4 px-1 text-amber-600 border-amber-400">שינויים לא שמורים</Badge>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[10px] px-1.5"
+              onClick={() => currentSourceVersion && applySourceLoad(currentSourceVersion.id)}
+              title="טען מחדש מהמקור"
+              disabled={!currentSourceVersion}
+            >
+              <RotateCw className="w-3 h-3 ml-1" />
+              רענן
+            </Button>
+          </div>
+          <div className="p-2 space-y-2">
+            <Tabs value={sourceCategory} onValueChange={(v) => setSourceCategory(v as SourceCategory)} dir="rtl">
+              <TabsList className="grid w-full grid-cols-4 h-8">
+                <TabsTrigger value="current" className="text-[11px] h-7">נוכחי</TabsTrigger>
+                <TabsTrigger value="original" className="text-[11px] h-7">מקורי</TabsTrigger>
+                <TabsTrigger value="ai" className="text-[11px] h-7">AI</TabsTrigger>
+                <TabsTrigger value="saved" className="text-[11px] h-7">שמורות</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <div className="flex items-center gap-2">
+              <Select
+                value={filteredByCategory.some(v => v.id === selectedSourceId) ? selectedSourceId : ''}
+                onValueChange={requestSourceChange}
+                disabled={filteredByCategory.length === 0}
+              >
+                <SelectTrigger className="text-xs h-8 flex-1" dir="rtl">
+                  <SelectValue placeholder={filteredByCategory.length === 0 ? 'אין גרסאות בקטגוריה זו' : 'בחר גרסה...'} />
+                </SelectTrigger>
+                <SelectContent dir="rtl">
+                  {filteredByCategory.map(v => (
+                    <SelectItem key={v.id} value={v.id} className="text-xs">
+                      {formatSourceLabel(v)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {currentSourceVersion && (
+                <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                  {currentSourceVersion.text.split(/\s+/).filter(Boolean).length.toLocaleString()} מילים
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Editable source-text preview ── */}
       <div className="mb-4 rounded-lg border bg-background/60">
         <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b bg-muted/30">
@@ -1894,7 +2086,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
                 variant="ghost"
                 size="sm"
                 className="h-6 text-[10px] px-1.5 text-muted-foreground hover:text-primary"
-                onClick={() => { setWorkingText(propText); setIsUserEditedText(false); toast({ title: 'שוחזר למקור' }); }}
+                onClick={() => { setWorkingText(propText); setLoadedSnapshot(propText); setIsUserEditedText(false); toast({ title: 'שוחזר למקור' }); }}
                 title="שחזר את הטקסט המקורי"
               >
                 <RotateCcw className="w-3 h-3 ml-1" />
@@ -1922,6 +2114,25 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
           />
         )}
       </div>
+
+      {/* ── Dirty-source-change confirmation dialog ── */}
+      <Dialog open={dirtyDialogOpen} onOpenChange={(o) => { if (!o) handleDirtyCancel(); }}>
+        <DialogContent dir="rtl" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>שינויים לא שמורים</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            ערכת את הטקסט מאז הטעינה האחרונה. מה לעשות לפני החלפת המקור?
+          </p>
+          <div className="flex flex-wrap justify-end gap-2 mt-3">
+            <Button variant="ghost" size="sm" onClick={handleDirtyCancel}>בטל</Button>
+            <Button variant="outline" size="sm" onClick={handleDirtyDiscard}>השלך והחלף</Button>
+            <Button size="sm" onClick={handleDirtySaveThenLoad} disabled={!onSaveVersion}>
+              שמור כגרסה חדשה והחלף
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Quick Save Actions (always visible near top) */}
       {(onSaveAndReplaceOriginal || onDuplicateAndSave || onSaveVersion) && (

@@ -649,6 +649,7 @@ const TextEditor = () => {
   const [drivePickerOpen, setDrivePickerOpen] = useState(false);
   const [showCompareAi, setShowCompareAi] = useState(false);
   const [compareSubTab, setCompareSubTab] = useState("versions");
+  const [aiPreselectSourceId, setAiPreselectSourceId] = useState<string | undefined>(undefined);
 
   const compareVersions = useMemo<TextVersion[]>(() => {
     const byId = new Map<string, TextVersion>();
@@ -710,6 +711,22 @@ const TextEditor = () => {
     setActiveTab('compare');
     toast({ title: 'נשלח להשוואה' });
   }, [compareVersions]);
+
+  const sendVersionToAiEditor = useCallback((versionId: string) => {
+    const target = compareVersions.find(v => v.id === versionId);
+    if (!target) {
+      toast({ title: 'גרסה לא נמצאה', variant: 'destructive' });
+      return;
+    }
+    setAiPreselectSourceId(versionId);
+    // If we're inside the compare tab, open the inline AI editor; otherwise jump to AI tab
+    if (activeTab === 'compare') {
+      setShowCompareAi(true);
+    } else {
+      setActiveTab('ai');
+    }
+    toast({ title: 'נשלח לעריכת AI' });
+  }, [compareVersions, activeTab]);
 
   const handleAiQuickAction = async (action: 'fix_errors' | 'split_paragraphs' | 'fix_and_split') => {
     if (!text.trim()) {
@@ -1569,6 +1586,9 @@ const TextEditor = () => {
                 onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
                 onDuplicateAndSave={handleDuplicateAndSave}
                 onSyncToPlayer={handleSyncToPlayer}
+                versions={compareVersions}
+                originalText={compareVersions.find(v => v.source === 'original')?.text || originalTextRef.current}
+                initialSourceId={aiPreselectSourceId}
               /></LazyErrorBoundary>
             </div>
 
@@ -1617,6 +1637,7 @@ const TextEditor = () => {
                     onApplyVersion={(newText) => {
                       setText(newText);
                     }}
+                    onSendToAiEditor={sendVersionToAiEditor}
                   /></LazyErrorBoundary>
                 ) : (
                   <div className="text-center py-6 text-muted-foreground text-sm">
@@ -1643,6 +1664,9 @@ const TextEditor = () => {
                       onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
                       onDuplicateAndSave={handleDuplicateAndSave}
                       onSyncToPlayer={handleSyncToPlayer}
+                      versions={compareVersions}
+                      originalText={compareVersions.find(v => v.source === 'original')?.text || originalTextRef.current}
+                      initialSourceId={aiPreselectSourceId}
                     /></LazyErrorBoundary>
                   </div>
                 )}
