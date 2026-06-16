@@ -447,15 +447,140 @@ const TRANSLATE_LANGS = [
   { value: 'גרמנית', label: '🇩🇪 גרמנית' },
 ];
 
-const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSaveAndReplaceOriginal, onDuplicateAndSave, onSyncToPlayer }: AIEditorDualProps) => {
+const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSaveAndReplaceOriginal, onDuplicateAndSave, onSyncToPlayer, versions, originalText, initialSourceId }: AIEditorDualProps) => {
   // Local editable working copy of the source text. User can tweak words inline before/between AI runs;
   // changes flow automatically into the next AI run because all edit code uses `text`.
   const [text, setWorkingText] = useState(propText);
   const [isUserEditedText, setIsUserEditedText] = useState(false);
+  // Snapshot of last loaded source (for isDirty detection in the source-picker)
+  const [loadedSnapshot, setLoadedSnapshot] = useState<string>(propText);
   // Sync from prop when it changes externally — but only if the user hasn't manually edited yet.
   useEffect(() => {
-    if (!isUserEditedText) setWorkingText(propText);
+    if (!isUserEditedText) {
+      setWorkingText(propText);
+      setLoadedSnapshot(propText);
+    }
   }, [propText, isUserEditedText]);
+
+  // ── Source-picker state ──
+  type SourceCategory = 'current' | 'original' | 'ai' | 'saved';
+  const [sourceCategory, setSourceCategory] = useState<SourceCategory>('current');
+  const [selectedSourceId, setSelectedSourceId] = useState<string>(initialSourceId || '__current__');
+  const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
+  const [dirtyDialogOpen, setDirtyDialogOpen] = useState(false);
+  const isDirty = text !== loadedSnapshot;
+
+  const versionsList = versions || [];
+
+  // Build the synthetic "current" / "original" entries so they appear alongside saved versions
+  const allSourceVersions = useMemo<TextVersion[]>(() => {
+    const list: TextVersion[] = [];
+    list.push({
+      id: '__current__',
+      text: propText,
+      timestamp: new Date(),
+      source: 'manual',
+      customPrompt: 'הטקסט הנוכחי בעורך',
+    });
+    if (originalText && originalText.trim() && originalText !== propText) {
+      list.push({
+        id: '__original__',
+        text: originalText,
+        timestamp: new Date(0),
+        source: 'original',
+        customPrompt: 'תמלול מקורי',
+      });
+    }
+    for (const v of versionsList) {
+      // Skip duplicates of current/original already pushed
+      if (v.text === propText && list.some(x => x.id === '__current__')) continue;
+      list.push(v);
+    }
+    return list;
+  }, [propText, originalText, versionsList]);
+
+  const filteredByCategory = useMemo(() => {
+    switch (sourceCategory) {
+      case 'current':
+        return allSourceVersions.filter(v => v.id === '__current__');
+      case 'original':
+        return allSourceVersions.filter(v => v.source === 'original');
+      case 'ai':
+        return allSourceVersions.filter(v => v.source.startsWith('ai-'));
+      case 'saved':
+        return allSourceVersions.filter(v => v.source === 'manual' && v.id !== '__current__');
+      default:
+        return allSourceVersions;
+    }
+  }, [allSourceVersions, sourceCategory]);
+
+  // Auto-categorize when initialSourceId arrives from parent (e.g. "send to AI" from compare)
+  useEffect(() => {
+    if (!initialSourceId) return;
+    const v = allSourceVersions.find(x => x.id === initialSourceId);
+    if (!v) return;
+    let cat: SourceCategory = 'saved';
+    if (v.id === '__current__') cat = 'current';
+    else if (v.source === 'original') cat = 'original';
+    else if (v.source.startsWith('ai-')) cat = 'ai';
+    setSourceCategory(cat);
+    setSelectedSourceId(initialSourceId);
+    // load text (without dirty-check — explicit user action from compare)
+    setWorkingText(v.text);
+    setLoadedSnapshot(v.text);
+    setIsUserEditedText(false);
+  }, [initialSourceId, allSourceVersions]);
+
+  const applySourceLoad = (id: string) => {
+    const v = allSourceVersions.find(x => x.id === id);
+    if (!v) return;
+    setSelectedSourceId(id);
+    setWorkingText(v.text);
+    setLoadedSnapshot(v.text);
+    setIsUserEditedText(false);
+  };
+
+  const requestSourceChange = (id: string) => {
+    if (id === selectedSourceId) return;
+    if (isDirty) {
+      setPendingSourceId(id);
+      setDirtyDialogOpen(true);
+      return;
+    }
+    applySourceLoad(id);
+  };
+
+  const handleDirtyDiscard = () => {
+    setDirtyDialogOpen(false);
+    if (pendingSourceId) applySourceLoad(pendingSourceId);
+    setPendingSourceId(null);
+  };
+  const handleDirtySaveThenLoad = () => {
+    if (onSaveVersion) {
+      onSaveVersion(text, 'manual', 'עורך', 'עריכה ידנית');
+      toast({ title: 'נשמרה גרסה חדשה' });
+    }
+    setDirtyDialogOpen(false);
+    if (pendingSourceId) applySourceLoad(pendingSourceId);
+    setPendingSourceId(null);
+  };
+  const handleDirtyCancel = () => {
+    setDirtyDialogOpen(false);
+    setPendingSourceId(null);
+  };
+
+  const currentSourceVersion = allSourceVersions.find(v => v.id === selectedSourceId);
+  const formatSourceLabel = (v: TextVersion): string => {
+    if (v.id === '__current__') return 'הטקסט הנוכחי בעורך';
+    if (v.id === '__original__') return 'תמלול מקורי';
+    const time = v.timestamp instanceof Date && v.timestamp.getTime() > 0
+      ? new Intl.DateTimeFormat('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(v.timestamp)
+      : '';
+    const tag = v.customPrompt || v.source;
+    const preview = v.text.replace(/\s+/g, ' ').slice(0, 50);
+    return `${tag}${time ? ' · ' + time : ''} — ${preview}${v.text.length > 50 ? '…' : ''}`;
+  };
+
   const [showSourceEditor, setShowSourceEditor] = useState<boolean>(() => {
     try { return localStorage.getItem('ai_editor_show_source') !== 'false'; } catch { return true; }
   });
