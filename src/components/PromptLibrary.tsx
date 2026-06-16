@@ -92,6 +92,16 @@ const PRESET_CATEGORIES = [
 
 const STORAGE_KEY = 'custom_prompts_library';
 
+const CATEGORY_ICONS: Record<string, React.ReactNode> = {
+  'אקדמי': <GraduationCap className="w-3.5 h-3.5" />,
+  'עסקי': <Briefcase className="w-3.5 h-3.5" />,
+  'חדשות ותקשורת': <Newspaper className="w-3.5 h-3.5" />,
+  'חינוך': <BookOpen className="w-3.5 h-3.5" />,
+  'רפואי ומשפטי': <Stethoscope className="w-3.5 h-3.5" />,
+  'יצירתי': <Sparkles className="w-3.5 h-3.5" />,
+  'מותאם אישי': <Star className="w-3.5 h-3.5" />,
+};
+
 export const PromptLibrary = ({ text, onTextChange }: PromptLibraryProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -102,7 +112,14 @@ export const PromptLibrary = ({ text, onTextChange }: PromptLibraryProps) => {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [activePrompt, setActivePrompt] = useState<string | null>(null);
   const [selectedEngine, setSelectedEngine] = useState('cloud');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('prompt_library_view') as 'grid' | 'list') || 'grid';
+  });
   const ollama = useOllama();
+
+  useEffect(() => {
+    localStorage.setItem('prompt_library_view', viewMode);
+  }, [viewMode]);
 
   // Engine options: cloud + each Ollama model
   const engineOptions = [
