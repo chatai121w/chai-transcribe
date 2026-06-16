@@ -145,6 +145,10 @@ export function DesignModeOverlay() {
   const [editorSize, setEditorSize] = useState(() => ({ width: initialLayout.width, height: initialLayout.height }));
   const [editorPosition, setEditorPosition] = useState(() => ({ x: initialLayout.x, y: initialLayout.y }));
   const [clickPoint, setClickPoint] = useState<{ x: number; y: number } | null>(null);
+  const [toolbarPos, setToolbarPos] = useState(() => loadToolbarPos());
+  const [clickThrough, setClickThrough] = useState<boolean>(() => {
+    try { return localStorage.getItem(CLICK_THROUGH_KEY) === '1'; } catch { return false; }
+  });
   const editorSizeRef = useRef(editorSize);
   editorSizeRef.current = editorSize;
   const toolbarRef = useRef<HTMLDivElement | null>(null);
