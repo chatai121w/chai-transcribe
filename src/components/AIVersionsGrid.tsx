@@ -157,6 +157,7 @@ export function AIVersionsGrid({ transcriptId, audioFilePath, onOpenInEditor, on
               onDelete={deleteVersion}
               onSaveLocal={handleSaveLocal}
               onAssignFolder={(id) => setFolderDialogIds([id])}
+              onSendToCompare={onSendToCompare}
             />
           ))}
         </div>
