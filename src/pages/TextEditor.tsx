@@ -244,6 +244,7 @@ const TextEditor = () => {
 
   // Loshon Kodesh embedded tab
   const [activeTab, setActiveTab] = useState<string>("edit");
+  const [comparePreselect, setComparePreselect] = useState<{ leftId: string; rightId: string } | null>(null);
   const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
   const sendTextToLoshonKodesh = useCallback((opts?: { jump?: boolean }) => {
     const t = (text || "").trim();
