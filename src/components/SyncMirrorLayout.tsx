@@ -1395,9 +1395,7 @@ export const SyncMirrorLayout = ({
               {!isMarkingActive && (
                 <div
                   style={{
-                    fontSize: `${localFontSize}px`,
-                    fontFamily: localFontFamily,
-                    lineHeight: localLineHeight,
+                    ...textStyle,
                     ...(localTextColor ? { color: localTextColor } : {}),
                     ...richColumnStyle,
                   }}
