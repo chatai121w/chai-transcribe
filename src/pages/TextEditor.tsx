@@ -1726,7 +1726,7 @@ const TextEditor = () => {
           <TabsContent value="history" className="flex flex-col gap-3">
             <CollapsibleWidget title="היסטוריית עריכה" storageKey="te_history">
               <LazyErrorBoundary label="היסטוריית עריכה"><TextEditHistory 
-                versions={versions}
+                versions={compareVersions}
                 onSelectVersion={handleVersionSelect}
                 selectedVersionId={selectedVersionId}
                 cloudVersions={cloudVersions}
