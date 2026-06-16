@@ -111,6 +111,9 @@ export interface LocalVersion {
   action_label?: string | null;
   version_number: number;
   created_at: string;
+  ai_usage_event_id?: string | null;
+  folder_id?: string | null;
+  audio_file_path?: string | null;
   _dirty?: boolean;
 }
 
