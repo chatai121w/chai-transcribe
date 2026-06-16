@@ -251,24 +251,14 @@ async function postProcessText(text: string, t: TogglesState): Promise<string> {
   }
   if (t.ai_polish) {
     try {
-      // Call via raw fetch so a 500 (e.g. missing AI key) doesn't bubble as an unhandled error
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
-      const url = `https://stbxtixtbxilyurdyova.supabase.co/functions/v1/edit-transcript`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          apikey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN0Ynh0aXh0YnhpbHl1cmR5b3ZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MDk4NDcsImV4cCI6MjA5NzA4NTg0N30.8eyIBbRWtPQkNi1P2M6gQ87CeOGoO61UCcJ20y5PEKk",
-        },
-        body: JSON.stringify({ text: out, action: "fix_errors", model: "gemini-2.5-flash" }),
+      // Use Lovable AI Gateway via dedicated edge function — no user API key required
+      const { data, error } = await supabase.functions.invoke("ai-polish", {
+        body: { text: out },
       });
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        if (data && typeof data.text === "string") out = data.text;
-      } else {
-        console.warn("[ABLab] ai_polish skipped:", res.status, await res.text().catch(() => ""));
+      if (!error && data && typeof (data as any).text === "string" && (data as any).text.trim()) {
+        out = (data as any).text;
+      } else if (error) {
+        console.warn("[ABLab] ai_polish skipped:", error);
       }
     } catch (e) {
       console.warn("[ABLab] ai_polish error (ignored):", e);
