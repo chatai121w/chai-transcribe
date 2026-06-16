@@ -1451,6 +1451,14 @@ const TextEditor = () => {
                 onSyncToPlayer={handleSyncToPlayer}
               /></LazyErrorBoundary>
             </div>
+
+            <LazyErrorBoundary label="גרסאות AI">
+              <AIVersionsGrid
+                transcriptId={transcriptId}
+                audioFilePath={(location.state as any)?.audioFilePath || null}
+                onOpenInEditor={(t) => setText(t)}
+              />
+            </LazyErrorBoundary>
           </TabsContent>
 
           <TabsContent value="compare" className="flex flex-col gap-3">
