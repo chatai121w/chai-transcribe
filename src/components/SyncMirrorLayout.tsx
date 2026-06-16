@@ -100,9 +100,13 @@ export const SyncMirrorLayout = ({
   learningProfiles = [],
   learningEnabled = true,
   onSaveLearning,
+  enableRichEdit = false,
+  onWordCorrected,
+  richColumnStyle,
 }: SyncMirrorLayoutProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [isMarkingActive, setIsMarkingActive] = useState(false);
 
   const [colWidth, setColWidth] = useState(0);
   const [fullEditMode, setFullEditMode] = useState(false);
