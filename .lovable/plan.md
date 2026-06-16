@@ -1,79 +1,65 @@
 
-## מה נבנה
+# איחוד כל מסכי ה"השוואה" באפליקציה
 
-מתחת לפאנל "עריכה עם AI" בעורך הטקסט תתווסף **תצוגת רשת של כל גרסאות ה-AI** שנעשו על התמלול הנוכחי. כל כרטיס יציג את התוצאה, הפרומפט שנשלח, המודל, הטוקנים והעלות, ויאפשר שמירה/מחיקה ושיוך לתיקיה — כולל יצירת תיקיה חדשה והעתקת האודיו המקורי לאותה תיקיה.
+## מה קיים היום (הבלאגן)
 
-## מבנה הנתונים
+**בסיידבר — 2 כניסות נפרדות שגורמות לבלבול:**
+1. `השוואת מנועים` → `/diarization/compare` — השוואת מנועי **זיהוי דוברים** (`DiarizationComparePage`)
+2. `השוואת תמלולים` → `/compare-report` — הרצת 12 מנועי **תמלול** על אודיו והשוואה (`CompareReport`)
 
-### חיבור versions ↔ ai_usage_events
-- מוסיפים עמודה `ai_usage_event_id uuid` ל-`transcript_versions` (FK ל-`ai_usage_events.id`).
-- כל פעולת AI (`edit-transcript`, `loshon-kodesh-ai`, `summarize-transcript`, וה-RPC `edit_transcript_proxy`) שיוצרת גרסה חדשה — תשמור את `id` של ה-usage event ותכניס אותו ל-version.
-- כך כל גרסה יודעת בדיוק איזה פרומפט / מודל / טוקנים / עלות הביאו לה.
+**בעורך הטקסט (TextEditor) — 2 טאבים נפרדים:**
+3. טאב `A/B` (id=`ab`) → `EngineCompare` — מריץ את הטקסט הנוכחי דרך 2 מודלי LLM ומשווה את הפלט
+4. טאב `השוואה` (id=`compare`) → `AdvancedDiffView` — Diff בין גרסאות (מקורי / AI / ידני / ענן)
 
-### שיוך לתיקיה כקבוצה
-- מוסיפים ל-`transcript_versions` עמודות אופציונליות:
-  - `folder_id uuid` — תיקיה שאליה שויכה הגרסה
-  - `audio_file_path text` — העתקה (shared reference) של האודיו של התמלול המקור
-- כשמשייכים קבוצת גרסאות לתיקיה — מעדכנים את כולן ב-`folder_id` זהה, וה-`audio_file_path` מועתק מהתמלול המרכזי (אותו path ב-bucket `permanent-audio`, ללא שכפול בייטים).
+**קוד מת:**
+5. `src/components/TextComparisonMulti.tsx` — מיובא ב-`TextEditor.tsx` אבל לעולם לא נרנדר.
+6. `src/components/TextComparison.tsx` — לא מיובא משום מקום.
 
-## UI חדש
+(נשמרים: `EnhanceCompare` ב-VoiceStudio ו-`DiarizationCompare` בתוך `SpeakerDiarization` — אלו רכיבי השוואה ייעודיים בתוך עמודים אחרים, לא טאבים כפולים.)
 
-### `AIVersionsGrid.tsx` (חדש)
-מתחת ל-`AIEditPanel` ב-`TextEditor.tsx`. רשת רספונסיבית של כרטיסים, אחד לכל גרסת AI של התמלול הפעיל:
+## המטרה
+
+מקום אחד ברור לכל סוג השוואה — בלי לאבד שום פיצ'ר.
+
+## תוכנית האיחוד
+
+### 1) סיידבר — כניסה אחת בלבד: "השוואות" → `/compare`
+- עמוד חדש `src/pages/ComparisonsHub.tsx` עם `Tabs` עליונים:
+  - **תמלולים (אודיו)** — מרנדר את גוף `CompareReport` הקיים.
+  - **זיהוי דוברים** — מרנדר את גוף `DiarizationComparePage` הקיים.
+- ה-Tabs יקראו את ה-tab מה-URL (`?tab=transcripts` / `?tab=diarization`) כדי לשמר deep-links.
+- בסיידבר: להשאיר פריט אחד `השוואות` (icon `GitCompareArrows`). מוחקים את שתי הכניסות הישנות.
+- ב-`App.tsx`: ה-routes `/diarization/compare` ו-`/compare-report` נשארים — אבל הופכים ל-redirect ל-`/compare?tab=...` כדי שלא לשבור קישורים/היסטוריה.
+
+### 2) עורך הטקסט — טאב אחד "השוואה" עם תת-טאבים
+- מסירים את הטאב `ab` מהמערך `allTabs` (שורה 152) ומ-`TabsContent`.
+- בטאב `compare` הקיים מוסיפים `Tabs` פנימיים:
+  - **גרסאות (Diff)** — `AdvancedDiffView` הקיים בדיוק כפי שהוא (כולל `onSendToAdvancedCompare` ו-`preselected*`).
+  - **מנועי AI (A/B)** — `EngineCompare text={text}` הקיים.
+- כל ההגדרות/תצורות של `TabSettingsManager` ימשיכו לעבוד; ניצור migration קטן ב-`loadTabSettings` שמסיר אוטומטית `ab` מ-`visible`/`order` אם הוא קיים, כדי שלמשתמשים קיימים לא יישאר טאב יתום.
+- כפתור "שלח להשוואה A/B" בכרטיסי AI (שכבר מפנה ל-`activeTab='compare'`) ימשיך לעבוד; פשוט יפתח גם את התת-טאב "גרסאות" כברירת מחדל.
+
+### 3) ניקוי קוד מת
+- מחיקת `src/components/TextComparison.tsx` ו-`src/components/TextComparisonMulti.tsx`.
+- מחיקת ה-import של `TextComparisonMulti` מ-`TextEditor.tsx`.
+
+## מה לא משתנה (חשוב)
+- כל הלוגיקה של `CompareReport`, `DiarizationComparePage`, `EngineCompare`, `AdvancedDiffView` — לא נוגעים בה. רק עוטפים/מעבירים.
+- `EnhanceCompare` (VoiceStudio) ו-`DiarizationCompare` (בתוך `SpeakerDiarization`) — לא נוגעים בהם, אלו לא טאבים כפולים אלא רכיבים פנימיים של עמודים אחרים.
+- שמירה בענן, ה-`compareVersions` memo, ה-event `ai-version-saved`, ה-`transcriptId` persistence — הכל נשאר.
+
+## פריסת קבצים סופית
 
 ```text
-┌─ AIVersionCard ──────────────────────┐
-│ [Gemini 2.5 Flash] [improve] 14:32   │
-│ ─────────────────────────────────────│
-│ tabs: [תוצאה] [פרומפט] [נתונים]      │
-│  • תוצאה: preview של הטקסט (scroll) │
-│  • פרומפט: system + user prompt     │
-│  • נתונים: tokens · עלות · משך      │
-│ ─────────────────────────────────────│
-│ [💾 שמור בענן] [📥 שמור לוקלי]      │
-│ [📁 שייך לתיקיה ▾] [👁 פתח] [🗑]    │
-└──────────────────────────────────────┘
+src/pages/ComparisonsHub.tsx        ← חדש (מאחד את שני עמודי הסיידבר)
+src/pages/CompareReport.tsx         ← נשאר, מיוצא גם כ-named ל-ComparisonsHub
+src/pages/DiarizationComparePage.tsx ← נשאר, מיוצא גם כ-named ל-ComparisonsHub
+src/App.tsx                          ← /compare חדש; /compare-report ו-/diarization/compare → redirect
+src/components/AppSidebar.tsx        ← פריט יחיד "השוואות"
+src/pages/TextEditor.tsx             ← טאב "compare" יחיד עם תת-טאבים; מסיר "ab"
+src/components/TextComparison.tsx        ← נמחק
+src/components/TextComparisonMulti.tsx   ← נמחק
 ```
 
-- **שמור בענן** — מסמן `_dirty=false` ודוחף ל-`transcript_versions` (אם זמני).
-- **שמור לוקלי** — שומר ב-Dexie (`db.versions`) דרך `useCloudVersions`.
-- **שייך לתיקיה** — תפריט שמשתמש ב-`useFolderTree` עם:
-  - בחירה מתיקיה קיימת
-  - "➕ צור תיקיה חדשה…" שמוסיף folder ומשייך אליו
-  - checkbox "שייך גם את האודיו המקורי" (ברירת מחדל מסומן)
-- **פתח** — מעלה את הגרסה לעורך הראשי (כפי שכבר עובד היום ב-version history).
-
-### `AIVersionFolderDialog.tsx` (חדש)
-מודאל לבחירה/יצירת תיקיה. תומך בבחירת **קבוצת גרסאות** (checkboxes על הכרטיסים) ושיוך מרובה בלחיצה אחת.
-
-### בורר תצוגה
-בראש הרשת: כפתורי סינון לפי מודל, פיצ'ר (improve/grammar/translate…), וחיפוש בפרומפט. ברירת מחדל: כל הגרסאות של ה-transcript הנוכחי, מהחדש לישן.
-
-## שינויי קוד
-
-| קובץ | שינוי |
-|------|-------|
-| `supabase/migrations/<new>.sql` | הוספת `ai_usage_event_id`, `folder_id`, `audio_file_path` ל-`transcript_versions` + index על `(transcript_id, created_at)` |
-| `src/integrations/supabase/types.ts` | רענון טיפוסים |
-| `src/lib/localDb.ts` | הוספת השדות החדשים ל-`LocalVersion` + version bump של Dexie |
-| `supabase/functions/_shared/aiUsage.ts` | `logAIUsage` יחזיר את ה-`id` שנוצר |
-| `supabase/functions/{edit-transcript,loshon-kodesh-ai,summarize-transcript}/index.ts` | להעביר את ה-`ai_usage_event_id` ל-version שנשמרת |
-| `edit_transcript_proxy` (DB function) | אותו דבר ברמת ה-SQL |
-| `src/hooks/useCloudVersions.ts` | תמיכה ב-`ai_usage_event_id`, `folder_id`, `audio_file_path` + פונקציות `assignVersionsToFolder`, `saveVersionToCloud`, `saveVersionToLocal` |
-| `src/components/AIVersionsGrid.tsx` | **חדש** — הרשת עם הכרטיסים, טאבים וכפתורי פעולה |
-| `src/components/AIVersionCard.tsx` | **חדש** — כרטיס יחיד |
-| `src/components/AIVersionFolderDialog.tsx` | **חדש** — בחירת/יצירת תיקיה לקבוצה |
-| `src/pages/TextEditor.tsx` | שילוב `<AIVersionsGrid transcriptId={…}/>` מתחת לפאנל ה-AI |
-
-## נקודות חשובות
-
-- **שמירת הקשר** — כל גרסת AI נטענת תמיד דרך `transcript_id` של התמלול המרכזי; אין דאטה מנותק.
-- **תיקיה כקבוצה** — folder_id זהה לכל הגרסאות שנבחרו יחד, כך שב-`Folders.tsx` הן יוצגו תחת אותה תיקיה (אפשר להוסיף בעתיד תצוגת "קבוצה" גם שם, מחוץ לתחום הזה).
-- **אודיו** — לא משכפלים בייטים, רק שומרים את אותו `audio_file_path` של ה-bucket `permanent-audio`. RLS הקיימת על הbucket מספיקה.
-- **RTL** — כל הקומפוננטות עם `dir="rtl"` ו-utility classes קיימות.
-- **עלות** — מציגים את `cost_usd_snapshot` הקיים מה-event, ואם null מחשבים דינמית מ-`aiPricing.ts`.
-
-## מחוץ לתחום
-- שינוי תצוגת התיקיות עצמה (`Folders.tsx`) — בעתיד.
-- שיתוף קבוצת גרסאות עם משתמש אחר.
-- ייצוא של קבוצה כקובץ אחד.
+## סיכון ובדיקה
+- אחרי המימוש: לפתוח את `/compare` ולאמת שתי תת-לשוניות, לפתוח עורך טקסט ולאמת ש-Diff וגם EngineCompare זמינים תחת "השוואה", ולוודא שכפתור "שלח להשוואה" מהכרטיס פותח את ה-Diff עם הגרסאות הנכונות.
