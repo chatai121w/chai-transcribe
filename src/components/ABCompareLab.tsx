@@ -31,6 +31,7 @@ import {
   getLoshonKodeshNames,
 } from "@/lib/loshonKodesh";
 import { applyLearnedCorrections } from "@/utils/correctionLearning";
+import { getApiKey } from "@/lib/keyCrypto";
 
 // ── Toggle definitions ──────────────────────────────────────────
 
@@ -227,10 +228,29 @@ async function postProcessText(text: string, t: TogglesState): Promise<string> {
 
 // ── Transcription call ──────────────────────────────────────────
 
+
+function getApiKeyFor(engine: "groq" | "openai"): string {
+  const storageKey = engine === "groq" ? "groq_api_key" : "openai_api_key";
+  try {
+    const k = getApiKey(storageKey);
+    if (k) return k;
+  } catch { /* ignore */ }
+  return localStorage.getItem(storageKey) || "";
+}
+
 async function transcribe(blob: Blob, fileName: string, engine: "groq" | "openai"): Promise<string> {
+  const apiKey = getApiKeyFor(engine);
+  if (!apiKey) {
+    throw new Error(
+      engine === "groq"
+        ? "חסר מפתח Groq — הוסף אותו בהגדרות → מפתחות API"
+        : "חסר מפתח OpenAI — הוסף אותו בהגדרות → מפתחות API"
+    );
+  }
   const form = new FormData();
   form.append("file", blob, fileName);
   form.append("language", "he");
+  form.append("apiKey", apiKey);
   const slug = engine === "groq" ? "transcribe-groq" : "transcribe-openai";
   const { data, error } = await supabase.functions.invoke(slug, { body: form });
   if (error) throw new Error(error.message || "transcription failed");
