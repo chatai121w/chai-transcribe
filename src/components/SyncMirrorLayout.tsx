@@ -414,6 +414,61 @@ export const SyncMirrorLayout = ({
     return result;
   }, [compareMode, frozenTimings, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
 
+  // ── Baseline (original) snapshot — set once on first non-empty mount, persisted ──
+  const BASELINE_KEY = 'sync_mirror_baseline_v1';
+  const baselineInitRef = useRef(false);
+  const [baselineText, setBaselineText] = useState<string>(() => {
+    try { return localStorage.getItem(BASELINE_KEY) || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    if (baselineInitRef.current) return;
+    if (!text || !text.trim()) return;
+    baselineInitRef.current = true;
+    if (!baselineText) {
+      try { localStorage.setItem(BASELINE_KEY, text); } catch {}
+      setBaselineText(text);
+    }
+  }, [text, baselineText]);
+
+  const hasBaseline = !!baselineText && baselineText.trim().length > 0;
+  const isModifiedFromBaseline = hasBaseline && baselineText.trim() !== text.trim();
+
+  const restoreToBaseline = useCallback(() => {
+    if (!hasBaseline) return;
+    if (!confirm('להחזיר את הטקסט לגרסת הבסיס? כל השינויים מאז יאבדו.')) return;
+    onTextChange(baselineText);
+    toast({ title: 'הוחזר לגרסת בסיס', description: 'הטקסט שוחזר למצב המקורי שנשמר.' });
+  }, [hasBaseline, baselineText, onTextChange]);
+
+  const setNewBaseline = useCallback(() => {
+    if (!text || !text.trim()) return;
+    try { localStorage.setItem(BASELINE_KEY, text); } catch {}
+    setBaselineText(text);
+    toast({ title: 'בסיס חדש נקבע', description: 'הטקסט הנוכחי הוגדר כגרסת הבסיס.' });
+  }, [text]);
+
+  const compareToBaseline = useCallback(() => {
+    if (!hasBaseline) return;
+    // Snapshot the baseline as the frozen panel and enter compare mode
+    const words = baselineText.trim().split(/\s+/).filter(Boolean);
+    const baselineTimings: WordTiming[] = words.map((word, i) => ({ word, start: i, end: i + 1 }));
+    setFrozenTimings(baselineTimings);
+    setCompareMode(true);
+    toast({ title: 'משווה לגרסת בסיס', description: 'הצד הימני מציג כעת את גרסת הבסיס.' });
+  }, [hasBaseline, baselineText]);
+
+  // Wrap onSaveReplace with a unified local+cloud toast
+  const handleSaveLocalAndCloud = useCallback(() => {
+    if (!onSaveReplace) return;
+    try {
+      onSaveReplace();
+      toast({ title: 'נשמר ✓', description: 'מקומי + ענן יחד.' });
+    } catch (e) {
+      toast({ title: 'השמירה נכשלה', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
+    }
+  }, [onSaveReplace]);
+
+
   // ── Full-text editing overlay ───────────────────────────────────────────────
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
