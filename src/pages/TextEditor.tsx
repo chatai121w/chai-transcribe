@@ -1716,11 +1716,6 @@ const TextEditor = () => {
             </CollapsibleWidget>
           </TabsContent>
 
-          <TabsContent value="ab" className="flex flex-col gap-3">
-            <CollapsibleWidget title="השוואת מנועים" storageKey="te_ab_compare">
-              <LazyErrorBoundary label="השוואת מנועים"><EngineCompare text={text} /></LazyErrorBoundary>
-            </CollapsibleWidget>
-          </TabsContent>
 
           <TabsContent value="analytics" className="flex flex-col gap-3">
             <CollapsibleWidget title="אנליטיקס" storageKey="te_analytics">
