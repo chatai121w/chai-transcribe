@@ -126,7 +126,7 @@ const TextEditor = () => {
   const playerTimeRef = useRef(0);
   const transcriptIdRef = useRef<string | null>(null);
   const manualVersionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { updateTranscript, getAudioUrl } = useCloudTranscripts();
+  const { updateTranscript, getAudioUrl, saveTranscript } = useCloudTranscripts();
   const [syncEnabled, setSyncEnabled] = useState(true);
   const [transcriptId, setTranscriptId] = useState<string | null>(null);
   const { versions: cloudVersions, isLoading: cloudVersionsLoading, saveVersion: saveCloudVersion } = useCloudVersions(transcriptId);
