@@ -204,6 +204,7 @@ export const AdvancedDiffView = ({
 
     const left = leftVersion.text;
     const right = rightVersion.text;
+    setAlignedRows(buildFallbackRows(left, right));
 
     Promise.all([
       runDiff('char', left, right),
@@ -215,15 +216,17 @@ export const AdvancedDiffView = ({
       setDiffPending(false);
     }).catch(() => {
       if (diffReqRef.current !== reqId) return;
+      setAlignedRows(buildFallbackRows(left, right));
       setDiffPending(false);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftVersion?.id, rightVersion?.id]);
+  }, [leftVersion?.id, rightVersion?.id, leftVersion?.text, rightVersion?.text]);
 
   const stats = useMemo(() => {
     let added = 0, removed = 0, unchanged = 0;
     let addedWords = 0, removedWords = 0;
-    for (const [op, text] of diffs) {
+    const effectiveDiffs = diffs.length > 0 ? diffs : ([[leftVersion?.text === rightVersion?.text ? 0 : -1, leftVersion?.text || ''], [1, rightVersion?.text || '']] as DiffOp[]);
+    for (const [op, text] of effectiveDiffs) {
       const words = text.split(/\s+/).filter(w => w).length;
       if (op === 1) { added += text.length; addedWords += words; }
       else if (op === -1) { removed += text.length; removedWords += words; }
