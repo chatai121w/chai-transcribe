@@ -242,7 +242,9 @@ const TextEditor = () => {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // Loshon Kodesh embedded tab
-  const [activeTab, setActiveTab] = useState<string>("edit");
+  const [activeTab, setActiveTab] = useState<string>("player");
+  // Migrate stale "edit" tab → "player" (the two tabs were unified)
+  useEffect(() => { if (activeTab === "edit") setActiveTab("player"); }, [activeTab]);
   const [comparePreselect, setComparePreselect] = useState<{ leftId: string; rightId: string } | null>(null);
   const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
   const sendTextToLoshonKodesh = useCallback((opts?: { jump?: boolean }) => {
