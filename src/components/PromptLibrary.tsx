@@ -235,6 +235,27 @@ export const PromptLibrary = ({ text, onTextChange }: PromptLibraryProps) => {
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-md border bg-muted/30 p-0.5">
+            <Button
+              variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-7 px-2"
+              onClick={() => setViewMode('grid')}
+              title="תצוגת רשת"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+            </Button>
+            <Button
+              variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-7 px-2"
+              onClick={() => setViewMode('list')}
+              title="תצוגת רשימה"
+            >
+              <List className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+
           <Select value={selectedEngine} onValueChange={setSelectedEngine}>
             <SelectTrigger className="w-[180px] text-xs" dir="rtl">
               <SelectValue />
