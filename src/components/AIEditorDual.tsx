@@ -2186,7 +2186,11 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
                 if (action.id === 'translate' || action.id === 'tone') return null;
                 const IconComp = getIconComponent(action.icon);
                 return (
-                  <div key={action.id} className={customActions.viewMode === 'masonry' ? 'group relative mb-2 break-inside-avoid' : 'group relative inline-flex'}>
+                  <div key={action.id} className={
+                    customActions.viewMode === 'masonry' ? 'group relative mb-2 break-inside-avoid' :
+                    (customActions.viewMode === 'columns2' || customActions.viewMode === 'columns3' || customActions.viewMode === 'columns4') ? 'group relative flex w-full' :
+                    'group relative inline-flex'
+                  }>
                     {customActions.viewMode === 'list' ? (
                       <div className="flex items-center gap-2 w-full">
                         <Button
