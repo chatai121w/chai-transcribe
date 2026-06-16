@@ -18,6 +18,7 @@ import {
   CheckCheck, Volume2, AlignJustify, Quote, Cpu, Save, Gauge, Trophy,
   Eye, EyeOff, GitCompareArrows, Download, PlayCircle, StopCircle, RotateCcw, Trash2,
   Pencil, Plus, LayoutGrid, LayoutList, Rows3, RotateCw, ShieldCheck, Star, Settings, GripVertical, Filter, ArrowUpDown, Plug,
+  Columns2, Columns3, Columns4, Repeat,
   type LucideIcon
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
