@@ -18,6 +18,7 @@ import {
   CheckCheck, Volume2, AlignJustify, Quote, Cpu, Save, Gauge, Trophy,
   Eye, EyeOff, GitCompareArrows, Download, PlayCircle, StopCircle, RotateCcw, Trash2,
   Pencil, Plus, LayoutGrid, LayoutList, Rows3, RotateCw, ShieldCheck, Star, Settings, GripVertical, Filter, ArrowUpDown, Plug,
+  Columns2, Columns3, Columns4, Repeat,
   type LucideIcon
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
@@ -2119,6 +2120,30 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
               onClick={() => customActions.setViewMode('masonry')}
               title="תצוגת אבנים"
             ><AlignJustify className="w-3.5 h-3.5" /></Button>
+            <Button
+              variant={customActions.viewMode === 'columns2' ? 'default' : 'ghost'}
+              size="sm" className="h-7 w-7 p-0"
+              onClick={() => customActions.setViewMode('columns2')}
+              title="2 עמודות (רוחב מלא)"
+            ><Columns2 className="w-3.5 h-3.5" /></Button>
+            <Button
+              variant={customActions.viewMode === 'columns3' ? 'default' : 'ghost'}
+              size="sm" className="h-7 w-7 p-0"
+              onClick={() => customActions.setViewMode('columns3')}
+              title="3 עמודות (רוחב מלא)"
+            ><Columns3 className="w-3.5 h-3.5" /></Button>
+            <Button
+              variant={customActions.viewMode === 'columns4' ? 'default' : 'ghost'}
+              size="sm" className="h-7 w-7 p-0"
+              onClick={() => customActions.setViewMode('columns4')}
+              title="4 עמודות (רוחב מלא)"
+            ><Columns4 className="w-3.5 h-3.5" /></Button>
+            <Button
+              variant="ghost"
+              size="sm" className="h-7 w-7 p-0"
+              onClick={() => customActions.cycleViewMode()}
+              title="החלף תצוגה"
+            ><Repeat className="w-3.5 h-3.5" /></Button>
           </div>
           <div className="flex items-center gap-1">
             <Button
@@ -2151,6 +2176,9 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
               customActions.viewMode === 'grid' ? 'flex flex-wrap gap-1.5' :
               customActions.viewMode === 'list' ? 'flex flex-col gap-1' :
               customActions.viewMode === 'masonry' ? 'columns-2 md:columns-3 xl:columns-4 gap-2 space-y-2' :
+              customActions.viewMode === 'columns2' ? 'grid grid-cols-2 gap-1.5' :
+              customActions.viewMode === 'columns3' ? 'grid grid-cols-2 md:grid-cols-3 gap-1.5' :
+              customActions.viewMode === 'columns4' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5' :
               'flex flex-wrap gap-0.5'
             }>
               {group.actions.map(action => {
@@ -2158,7 +2186,11 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
                 if (action.id === 'translate' || action.id === 'tone') return null;
                 const IconComp = getIconComponent(action.icon);
                 return (
-                  <div key={action.id} className={customActions.viewMode === 'masonry' ? 'group relative mb-2 break-inside-avoid' : 'group relative inline-flex'}>
+                  <div key={action.id} className={
+                    customActions.viewMode === 'masonry' ? 'group relative mb-2 break-inside-avoid' :
+                    (customActions.viewMode === 'columns2' || customActions.viewMode === 'columns3' || customActions.viewMode === 'columns4') ? 'group relative flex w-full' :
+                    'group relative inline-flex'
+                  }>
                     {customActions.viewMode === 'list' ? (
                       <div className="flex items-center gap-2 w-full">
                         <Button
@@ -2219,7 +2251,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
                           variant={lastAction === action.id ? "default" : "secondary"}
                           size="sm"
                           disabled={isLoading || noText}
-                          className="text-xs"
+                          className={`text-xs ${(customActions.viewMode === 'columns2' || customActions.viewMode === 'columns3' || customActions.viewMode === 'columns4') ? 'w-full justify-start' : ''}`}
                           onClick={() => selectAction(action.id as EditAction)}
                         >
                           <IconComp className="w-3 h-3 ml-1" />
@@ -2243,6 +2275,9 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
           <div className={
             customActions.viewMode === 'grid' ? 'flex flex-wrap gap-1.5' :
             customActions.viewMode === 'list' ? 'flex flex-col gap-1' :
+            customActions.viewMode === 'columns2' ? 'grid grid-cols-2 gap-1.5' :
+            customActions.viewMode === 'columns3' ? 'grid grid-cols-2 md:grid-cols-3 gap-1.5' :
+            customActions.viewMode === 'columns4' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5' :
             'flex flex-wrap gap-0.5'
           }>
             {/* Translate with language picker */}

@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_editor_custom_actions: {
+        Row: {
+          payload: Json
+          updated_at: string
+          user_id: string
+          view_mode: string | null
+        }
+        Insert: {
+          payload?: Json
+          updated_at?: string
+          user_id: string
+          view_mode?: string | null
+        }
+        Update: {
+          payload?: Json
+          updated_at?: string
+          user_id?: string
+          view_mode?: string | null
+        }
+        Relationships: []
+      }
       api_key_usage_events: {
         Row: {
           created_at: string
