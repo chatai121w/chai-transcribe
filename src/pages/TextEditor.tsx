@@ -1664,6 +1664,9 @@ const TextEditor = () => {
                       onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
                       onDuplicateAndSave={handleDuplicateAndSave}
                       onSyncToPlayer={handleSyncToPlayer}
+                      versions={compareVersions}
+                      originalText={compareVersions.find(v => v.source === 'original')?.text || originalTextRef.current}
+                      initialSourceId={aiPreselectSourceId}
                     /></LazyErrorBoundary>
                   </div>
                 )}
