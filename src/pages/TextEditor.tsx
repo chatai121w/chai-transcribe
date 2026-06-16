@@ -13,7 +13,7 @@ import { TextStyleControl } from "@/components/TextStyleControl";
 // Lazy-loaded heavy components
 const SyncAudioPlayer = lazy(() => import("@/components/SyncAudioPlayer").then(m => ({ default: m.SyncAudioPlayer })));
 const AIEditorDual = lazy(() => import("@/components/AIEditorDual").then(m => ({ default: m.AIEditorDual })));
-const TextComparisonMulti = lazy(() => import("@/components/TextComparisonMulti").then(m => ({ default: m.TextComparisonMulti })));
+
 const EditingTemplates = lazy(() => import("@/components/EditingTemplates").then(m => ({ default: m.EditingTemplates })));
 const AdvancedDiffView = lazy(() => import("@/components/AdvancedDiffView").then(m => ({ default: m.AdvancedDiffView })));
 // TextStyleControl is in the header (always rendered) — must be eager to avoid triggering outer Suspense
@@ -149,7 +149,7 @@ const TextEditor = () => {
     { id: "learning", label: "למידה", group: "secondary" },
     { id: "vocab", label: "מילון", group: "secondary" },
     { id: "summary", label: "סיכום", group: "secondary" },
-    { id: "ab", label: "A/B", group: "secondary" },
+    
     { id: "analytics", label: "אנליטיקה", group: "secondary" },
     { id: "compare", label: "השוואה", group: "secondary" },
     { id: "history", label: "היסטוריה", group: "secondary" },
@@ -1583,61 +1583,76 @@ const TextEditor = () => {
           </TabsContent>
 
           <TabsContent value="compare" className="flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
-              <p className="text-xs text-muted-foreground">
-                במסך הזה אפשר גם להשוות בין כל הגרסאות (מקומי + ענן) וגם להריץ עריכת AI ישירות.
-              </p>
-              <Button
-                variant={showCompareAi ? "default" : "outline"}
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => setShowCompareAi((v) => !v)}
-              >
-                {showCompareAi ? "הסתר עריכת AI" : "עריכת AI במסך ההשוואה"}
-              </Button>
-            </div>
+            <Tabs defaultValue="versions" dir="rtl">
+              <TabsList className="grid w-full grid-cols-2 max-w-md">
+                <TabsTrigger value="versions" className="text-xs">גרסאות (Diff)</TabsTrigger>
+                <TabsTrigger value="engines" className="text-xs">מנועי AI (A/B)</TabsTrigger>
+              </TabsList>
 
-            {compareVersions.length >= 2 ? (
-              <LazyErrorBoundary label="השוואה מתקדמת"><AdvancedDiffView 
-                versions={compareVersions}
-                fontSize={fontSize}
-                fontFamily={fontFamily}
-                textColor={textColor}
-                lineHeight={lineHeight}
-                preselectedLeftId={comparePreselect?.leftId}
-                preselectedRightId={comparePreselect?.rightId}
-                onApplyVersion={(newText) => {
-                  setText(newText);
-                }}
-              /></LazyErrorBoundary>
-            ) : (
-              <div className="text-center py-6 text-muted-foreground text-sm">
-                יש צורך בלפחות שתי גרסאות כדי להשוות
-              </div>
-            )}
+              <TabsContent value="versions" className="flex flex-col gap-3 mt-3">
+                <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">
+                    השוואה בין כל הגרסאות (מקומי + ענן) — וגם אפשרות להריץ עריכת AI ישירות מכאן.
+                  </p>
+                  <Button
+                    variant={showCompareAi ? "default" : "outline"}
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setShowCompareAi((v) => !v)}
+                  >
+                    {showCompareAi ? "הסתר עריכת AI" : "עריכת AI במסך ההשוואה"}
+                  </Button>
+                </div>
 
-            {showCompareAi && (
-              <div
-                style={{
-                  fontSize: `${fontSize}px`,
-                  fontFamily: fontFamily,
-                  color: textColor,
-                  lineHeight: lineHeight,
-                }}
-              >
-                <LazyErrorBoundary label="עורך AI בתוך השוואה"><AIEditorDual
-                  text={text}
-                  onTextChange={(newText, source, customPrompt) => {
-                    setText(newText);
-                    addVersion(newText, source as TextVersion['source'], customPrompt);
-                  }}
-                  onSaveVersion={handleSaveVersion}
-                  onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
-                  onDuplicateAndSave={handleDuplicateAndSave}
-                  onSyncToPlayer={handleSyncToPlayer}
-                /></LazyErrorBoundary>
-              </div>
-            )}
+                {compareVersions.length >= 2 ? (
+                  <LazyErrorBoundary label="השוואה מתקדמת"><AdvancedDiffView 
+                    versions={compareVersions}
+                    fontSize={fontSize}
+                    fontFamily={fontFamily}
+                    textColor={textColor}
+                    lineHeight={lineHeight}
+                    preselectedLeftId={comparePreselect?.leftId}
+                    preselectedRightId={comparePreselect?.rightId}
+                    onApplyVersion={(newText) => {
+                      setText(newText);
+                    }}
+                  /></LazyErrorBoundary>
+                ) : (
+                  <div className="text-center py-6 text-muted-foreground text-sm">
+                    יש צורך בלפחות שתי גרסאות כדי להשוות
+                  </div>
+                )}
+
+                {showCompareAi && (
+                  <div
+                    style={{
+                      fontSize: `${fontSize}px`,
+                      fontFamily: fontFamily,
+                      color: textColor,
+                      lineHeight: lineHeight,
+                    }}
+                  >
+                    <LazyErrorBoundary label="עורך AI בתוך השוואה"><AIEditorDual
+                      text={text}
+                      onTextChange={(newText, source, customPrompt) => {
+                        setText(newText);
+                        addVersion(newText, source as TextVersion['source'], customPrompt);
+                      }}
+                      onSaveVersion={handleSaveVersion}
+                      onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
+                      onDuplicateAndSave={handleDuplicateAndSave}
+                      onSyncToPlayer={handleSyncToPlayer}
+                    /></LazyErrorBoundary>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="engines" className="flex flex-col gap-3 mt-3">
+                <CollapsibleWidget title="השוואת מנועי AI" storageKey="te_ab_compare">
+                  <LazyErrorBoundary label="השוואת מנועים"><EngineCompare text={text} /></LazyErrorBoundary>
+                </CollapsibleWidget>
+              </TabsContent>
+            </Tabs>
           </TabsContent>
 
           <TabsContent value="pipeline" className="flex flex-col gap-3">
