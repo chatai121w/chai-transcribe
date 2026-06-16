@@ -123,6 +123,17 @@ export function AIVersionCard({ version, selected, onSelectChange, onOpen, onDel
         <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => onAssignFolder(version.id)}>
           <FolderInput className="w-3 h-3" /> תיקייה
         </Button>
+        {onSendToCompare && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs gap-1 text-yellow-600 hover:text-yellow-700"
+            title="שלח להשוואה A/B מול המקור"
+            onClick={() => onSendToCompare(version.id)}
+          >
+            <GitCompareArrows className="w-3 h-3" /> A/B
+          </Button>
+        )}
         <Button
           size="sm"
           variant="ghost"
