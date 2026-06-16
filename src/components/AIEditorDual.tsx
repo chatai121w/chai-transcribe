@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Wand2, Loader2, Sparkles, MessageSquare, BookOpen, FileText,
   Languages, Users, List, Heading, Maximize2, Minimize2, ChevronUp, ChevronDown,
