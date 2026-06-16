@@ -164,7 +164,7 @@ export const SyncMirrorLayout = ({
       const firstPreciseLine = leftRowsRef.current?.querySelector<HTMLElement>('[data-line="0"]') ?? null;
       const target = effectiveRichEdit ? editable : firstPreciseLine;
       const anchor = target ?? wrapper;
-      const diff = Math.max(0, Math.round(anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top));
+      const diff = Math.max(0, Math.round(anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop));
       setRightTopOffset(diff);
     };
     const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
