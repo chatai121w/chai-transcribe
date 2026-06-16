@@ -29,6 +29,8 @@ import { addDictionaryReplacement, addIgnoredWord } from "@/utils/hebrewGrammarD
 import { WordContextMenu } from "@/components/WordContextMenu";
 import { alignEditedToWhisper } from "@/lib/whisperAlignment";
 import { getWordHighlightStyle, isWordApproved } from "@/lib/personalPronunciationModel";
+import { RichTextEditor } from "@/components/RichTextEditor";
+import { TextMarkingOverlay } from "@/components/TextMarkingOverlay";
 
 interface SyncMirrorLayoutProps {
   wordTimings: WordTiming[];
