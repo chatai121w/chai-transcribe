@@ -45,6 +45,7 @@ import {
 } from "@/lib/hebrewGuard";
 import { useCustomActions, type CustomAction } from "@/hooks/useCustomActions";
 import type { AIEditJob } from "@/lib/aiEditQueue";
+import type { TextVersion } from "@/components/TextEditHistory";
 import DiffMatchPatch from "diff-match-patch";
 
 interface AIEditorDualProps {
@@ -54,6 +55,12 @@ interface AIEditorDualProps {
   onSaveAndReplaceOriginal?: (text: string, source: string, engineLabel: string, actionLabel: string) => Promise<void> | void;
   onDuplicateAndSave?: (text: string, source: string, engineLabel: string, actionLabel: string) => Promise<void> | void;
   onSyncToPlayer?: (editedText: string) => void;
+  /** Optional: all available versions for the source-picker (cloud + local + AI) */
+  versions?: TextVersion[];
+  /** Optional: original transcript text (shown as "מקורי" tab) */
+  originalText?: string;
+  /** Optional: pre-selected source version id (e.g. when sent from compare view) */
+  initialSourceId?: string;
 }
 
 const CLOUD_MODELS = [
