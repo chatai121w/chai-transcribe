@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { X, Undo2, Eye, EyeOff, Trash2, MousePointerClick, Minimize2, Maximize2, Pipette, Plus } from 'lucide-react';
+import { X, Undo2, Eye, EyeOff, Trash2, MousePointerClick, Minimize2, Maximize2, Pipette, Plus, Hand, GripVertical } from 'lucide-react';
 import { DesignModeSaveMenu } from './DesignModeSaveMenu';
 
 interface PendingChange {
@@ -31,6 +31,21 @@ type EditorLayout = {
 
 const DESIGN_MODE_EDITOR_LAYOUT_KEY = 'design_mode_editor_layout_v1';
 const COLOR_FAVORITES_KEY = 'design_mode_color_favorites_v1';
+const TOOLBAR_POS_KEY = 'design_mode_toolbar_pos_v1';
+const CLICK_THROUGH_KEY = 'design_mode_click_through_v1';
+
+function loadToolbarPos(): { x: number; y: number } {
+  try {
+    const raw = localStorage.getItem(TOOLBAR_POS_KEY);
+    if (raw) {
+      const p = JSON.parse(raw);
+      const x = clamp(Number(p.x) || 16, 4, Math.max(4, window.innerWidth - 200));
+      const y = clamp(Number(p.y) || 16, 4, Math.max(4, window.innerHeight - 60));
+      return { x, y };
+    }
+  } catch { /* ignore */ }
+  return { x: 16, y: 16 };
+}
 
 function loadColorFavorites(): string[] {
   try {
@@ -130,6 +145,10 @@ export function DesignModeOverlay() {
   const [editorSize, setEditorSize] = useState(() => ({ width: initialLayout.width, height: initialLayout.height }));
   const [editorPosition, setEditorPosition] = useState(() => ({ x: initialLayout.x, y: initialLayout.y }));
   const [clickPoint, setClickPoint] = useState<{ x: number; y: number } | null>(null);
+  const [toolbarPos, setToolbarPos] = useState(() => loadToolbarPos());
+  const [clickThrough, setClickThrough] = useState<boolean>(() => {
+    try { return localStorage.getItem(CLICK_THROUGH_KEY) === '1'; } catch { return false; }
+  });
   const editorSizeRef = useRef(editorSize);
   editorSizeRef.current = editorSize;
   const toolbarRef = useRef<HTMLDivElement | null>(null);
@@ -224,6 +243,11 @@ export function DesignModeOverlay() {
       setSelectedEl(null);
       return;
     }
+    if (clickThrough) {
+      // Free-navigation mode: keep toolbar visible but stop intercepting clicks/hover.
+      setHoverRect(null);
+      return;
+    }
 
     const resolveElementTarget = (target: EventTarget | null): Element | null => {
       if (!target) return null;
@@ -305,7 +329,15 @@ export function DesignModeOverlay() {
       document.removeEventListener('click', swallow, true);
       document.removeEventListener('keydown', onKey);
     };
-  }, [enabled, selectedEl, setEnabled, undoLast]);
+  }, [enabled, clickThrough, selectedEl, setEnabled, undoLast]);
+
+  // Persist toolbar position and click-through state.
+  useEffect(() => {
+    try { localStorage.setItem(TOOLBAR_POS_KEY, JSON.stringify(toolbarPos)); } catch { /* ignore */ }
+  }, [toolbarPos]);
+  useEffect(() => {
+    try { localStorage.setItem(CLICK_THROUGH_KEY, clickThrough ? '1' : '0'); } catch { /* ignore */ }
+  }, [clickThrough]);
 
   if (!enabled) return null;
 
@@ -440,32 +472,57 @@ export function DesignModeOverlay() {
         </div>
       )}
 
-      {/* Floating toolbar */}
-      <div
-        ref={toolbarRef}
-        className="fixed top-4 left-4 z-[99999] flex items-center gap-2 rounded-xl border border-yellow-500/50 bg-background/95 backdrop-blur p-2 shadow-lg"
-        style={{ direction: 'rtl' }}
+      {/* Floating toolbar — draggable via the grip handle */}
+      <Rnd
+        size={{ width: 'auto' as unknown as number, height: 'auto' as unknown as number }}
+        position={toolbarPos}
+        enableResizing={false}
+        bounds="window"
+        dragHandleClassName="design-mode-toolbar-drag-handle"
+        onDragStop={(_, d) => setToolbarPos({ x: d.x, y: d.y })}
+        style={{ zIndex: 99999 }}
       >
-        <span className="text-xs font-semibold text-yellow-600 px-2 flex items-center gap-1">
-          <MousePointerClick className="h-3.5 w-3.5" /> מצב עיצוב חי
-        </span>
-        <Button size="sm" variant="ghost" onClick={undoLast} disabled={overrides.length === 0} title="ביטול אחרון (Ctrl+Z)">
-          <Undo2 className="h-3.5 w-3.5" />
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => setCollapsed(c => !c)} title="מזער">
-          {collapsed ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-        </Button>
-        <span className="text-[10px] text-muted-foreground">{overrides.length} שינויים</span>
-        {overrides.length > 0 && (
-          <Button size="sm" variant="ghost" onClick={() => { if (confirm('למחוק את כל השינויים?')) clearAll(); }} title="נקה הכל">
-            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+        <div
+          ref={toolbarRef}
+          className="flex items-center gap-2 rounded-xl border border-yellow-500/50 bg-background/95 backdrop-blur p-2 shadow-lg"
+          style={{ direction: 'rtl' }}
+        >
+          <span
+            className="design-mode-toolbar-drag-handle text-xs font-semibold text-yellow-600 px-2 flex items-center gap-1 select-none"
+            style={{ cursor: 'grab' }}
+            title="גרור את הסרגל"
+          >
+            <GripVertical className="h-3.5 w-3.5 opacity-60" />
+            <MousePointerClick className="h-3.5 w-3.5" /> מצב עיצוב חי
+          </span>
+          <Button
+            size="sm"
+            variant={clickThrough ? 'default' : 'ghost'}
+            onClick={() => setClickThrough(v => !v)}
+            title={clickThrough ? 'חזרה לעריכה (לכידת לחיצות)' : 'מעבר חופשי — לחיצות עוברות לאפליקציה'}
+            className={clickThrough ? 'bg-yellow-500 text-black hover:bg-yellow-500/90' : ''}
+          >
+            <Hand className="h-3.5 w-3.5 ml-1" />
+            <span className="text-[11px]">{clickThrough ? 'מעבר חופשי' : 'מעבר חופשי'}</span>
           </Button>
-        )}
-        <DesignModeSaveMenu />
-        <Button size="sm" variant="outline" onClick={() => setEnabled(false)} title="יציאה (Esc)">
-          <X className="h-3.5 w-3.5 ml-1" /> יציאה
-        </Button>
-      </div>
+          <Button size="sm" variant="ghost" onClick={undoLast} disabled={overrides.length === 0} title="ביטול אחרון (Ctrl+Z)">
+            <Undo2 className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setCollapsed(c => !c)} title="מזער">
+            {collapsed ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+          </Button>
+          <span className="text-[10px] text-muted-foreground">{overrides.length} שינויים</span>
+          {overrides.length > 0 && (
+            <Button size="sm" variant="ghost" onClick={() => { if (confirm('למחוק את כל השינויים?')) clearAll(); }} title="נקה הכל">
+              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+            </Button>
+          )}
+          <DesignModeSaveMenu />
+          <Button size="sm" variant="outline" onClick={() => setEnabled(false)} title="יציאה (Esc)">
+            <X className="h-3.5 w-3.5 ml-1" /> יציאה
+          </Button>
+        </div>
+      </Rnd>
 
       {!collapsed && (
         <div className="fixed bottom-4 left-4 z-[99999] text-[11px] text-muted-foreground bg-background/95 backdrop-blur border border-border/50 rounded-md px-3 py-1.5">
