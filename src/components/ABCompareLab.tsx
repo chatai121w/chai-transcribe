@@ -79,6 +79,9 @@ const DEFAULT_B: TogglesState = {
   ai_polish: false,
 };
 
+const TRANSCRIPTION_SAMPLE_RATE = 16000;
+const MAX_TRANSCRIPTION_AUDIO_BYTES = 24 * 1024 * 1024;
+
 // ── Audio helpers (WebAudio) ────────────────────────────────────
 
 async function decodeAudio(blob: Blob): Promise<AudioBuffer> {
@@ -181,14 +184,45 @@ function normalizePeak(buffer: AudioBuffer, targetDb = -1): AudioBuffer {
   return buffer;
 }
 
+function downmixAndResample(buffer: AudioBuffer, targetSampleRate = TRANSCRIPTION_SAMPLE_RATE): AudioBuffer {
+  const targetLength = Math.max(1, Math.ceil(buffer.duration * targetSampleRate));
+  const Ctx = (window.OfflineAudioContext || (window as any).webkitOfflineAudioContext) as typeof OfflineAudioContext;
+  const offline = new Ctx(1, targetLength, targetSampleRate);
+  const out = offline.createBuffer(1, targetLength, targetSampleRate);
+  const outData = out.getChannelData(0);
+  const ratio = buffer.sampleRate / targetSampleRate;
+
+  for (let i = 0; i < targetLength; i++) {
+    const sourceIndex = i * ratio;
+    const i0 = Math.floor(sourceIndex);
+    const i1 = Math.min(buffer.length - 1, i0 + 1);
+    const frac = sourceIndex - i0;
+    let sample = 0;
+
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+      const data = buffer.getChannelData(c);
+      sample += data[i0] + (data[i1] - data[i0]) * frac;
+    }
+
+    outData[i] = sample / buffer.numberOfChannels;
+  }
+
+  return out;
+}
+
 async function preprocessAudio(blob: Blob, name: string, t: TogglesState): Promise<{ blob: Blob; name: string }> {
   if (!t.vad_trim && !t.agc_normalize) return { blob, name };
   const buf = await decodeAudio(blob);
   let out = buf;
   if (t.vad_trim) out = trimSilence(out);
   if (t.agc_normalize) out = normalizePeak(out);
+  const transcriptionReady = downmixAndResample(out);
+  const wavBlob = encodeWav(transcriptionReady);
   const base = name.replace(/\.[^.]+$/, "") || "audio";
-  return { blob: encodeWav(out), name: `${base}.wav` };
+  if (wavBlob.size > MAX_TRANSCRIPTION_AUDIO_BYTES && blob.size < wavBlob.size) {
+    return { blob, name };
+  }
+  return { blob: wavBlob, name: `${base}.16k.wav` };
 }
 
 // ── Text post-processing ────────────────────────────────────────
