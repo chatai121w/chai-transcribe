@@ -1483,6 +1483,7 @@ const TextEditor = () => {
                 transcriptId={transcriptId}
                 audioFilePath={(location.state as any)?.audioFilePath || null}
                 onOpenInEditor={(t) => setText(t)}
+                onCreateCloudTranscript={ensureCloudTranscript}
               />
             </LazyErrorBoundary>
           </TabsContent>
