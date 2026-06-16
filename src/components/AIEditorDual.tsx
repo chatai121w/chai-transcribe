@@ -1,4 +1,5 @@
 import { useState, useMemo, memo, useEffect, useRef } from "react";
+import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -464,8 +465,8 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
   }, [propText, isUserEditedText]);
 
   // ── Source-picker state ──
-  type SourceCategory = 'current' | 'original' | 'ai' | 'saved';
-  const [sourceCategory, setSourceCategory] = useState<SourceCategory>('current');
+  type SourceCategory = 'all' | 'current' | 'original' | 'ai' | 'saved';
+  const [sourceCategory, setSourceCategory] = useState<SourceCategory>('all');
   const [selectedSourceId, setSelectedSourceId] = useState<string>(initialSourceId || '__current__');
   const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
   const [dirtyDialogOpen, setDirtyDialogOpen] = useState(false);
@@ -520,11 +521,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
     if (!initialSourceId) return;
     const v = allSourceVersions.find(x => x.id === initialSourceId);
     if (!v) return;
-    let cat: SourceCategory = 'saved';
-    if (v.id === '__current__') cat = 'current';
-    else if (v.source === 'original') cat = 'original';
-    else if (v.source.startsWith('ai-')) cat = 'ai';
-    setSourceCategory(cat);
+    // Keep "all" by default; only narrow if user is already in a specific category
     setSelectedSourceId(initialSourceId);
     // load text (without dirty-check — explicit user action from compare)
     setWorkingText(v.text);
@@ -2033,16 +2030,44 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
               רענן
             </Button>
           </div>
-          <div className="p-2 space-y-2">
-            <Tabs value={sourceCategory} onValueChange={(v) => setSourceCategory(v as SourceCategory)} dir="rtl">
-              <TabsList className="grid w-full grid-cols-4 h-8">
-                <TabsTrigger value="current" className="text-[11px] h-7">נוכחי</TabsTrigger>
-                <TabsTrigger value="original" className="text-[11px] h-7">מקורי</TabsTrigger>
-                <TabsTrigger value="ai" className="text-[11px] h-7">AI</TabsTrigger>
-                <TabsTrigger value="saved" className="text-[11px] h-7">שמורות</TabsTrigger>
-              </TabsList>
-            </Tabs>
+          <div className="p-2">
             <div className="flex items-center gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0 shrink-0 relative"
+                    title={`סינון: ${sourceCategory === 'all' ? 'הכל' : sourceCategory === 'current' ? 'נוכחי' : sourceCategory === 'original' ? 'מקורי' : sourceCategory === 'ai' ? 'AI' : 'שמורות'}`}
+                  >
+                    <Filter className="w-3.5 h-3.5" />
+                    {sourceCategory !== 'all' && (
+                      <span className="absolute -top-1 -left-1 w-2 h-2 rounded-full bg-yellow-500" />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent dir="rtl" align="end" className="w-44 p-1">
+                  {([
+                    { v: 'all', label: 'הכל' },
+                    { v: 'current', label: 'נוכחי' },
+                    { v: 'original', label: 'מקורי' },
+                    { v: 'ai', label: 'AI' },
+                    { v: 'saved', label: 'שמורות' },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.v}
+                      type="button"
+                      onClick={() => setSourceCategory(opt.v as SourceCategory)}
+                      className={cn(
+                        'w-full text-right text-xs px-2 py-1.5 rounded hover:bg-muted',
+                        sourceCategory === opt.v && 'bg-yellow-500/15 font-semibold text-yellow-800'
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
               <Select
                 value={filteredByCategory.some(v => v.id === selectedSourceId) ? selectedSourceId : ''}
                 onValueChange={requestSourceChange}
