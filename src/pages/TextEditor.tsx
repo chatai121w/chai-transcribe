@@ -1485,6 +1485,20 @@ const TextEditor = () => {
                 audioFilePath={(location.state as any)?.audioFilePath || null}
                 onOpenInEditor={(t) => setText(t)}
                 onCreateCloudTranscript={ensureCloudTranscript}
+                onSendToCompare={(versionId) => {
+                  // Find an "original" baseline from merged versions
+                  const original =
+                    compareVersions.find(v => v.source === 'original') ||
+                    compareVersions[0];
+                  const target = compareVersions.find(v => v.id === versionId);
+                  if (!original || !target) {
+                    toast({ title: 'אין מספיק גרסאות להשוואה', variant: 'destructive' });
+                    return;
+                  }
+                  setComparePreselect({ leftId: original.id, rightId: target.id });
+                  setActiveTab('compare');
+                  toast({ title: 'נשלח להשוואה A/B ↔️' });
+                }}
               />
             </LazyErrorBoundary>
           </TabsContent>
