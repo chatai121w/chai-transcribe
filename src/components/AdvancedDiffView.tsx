@@ -225,7 +225,11 @@ export const AdvancedDiffView = ({
   const stats = useMemo(() => {
     let added = 0, removed = 0, unchanged = 0;
     let addedWords = 0, removedWords = 0;
-    const effectiveDiffs = diffs.length > 0 ? diffs : ([[leftVersion?.text === rightVersion?.text ? 0 : -1, leftVersion?.text || ''], [1, rightVersion?.text || '']] as DiffOp[]);
+    const effectiveDiffs = diffs.length > 0
+      ? diffs
+      : leftVersion?.text === rightVersion?.text
+        ? ([[0, leftVersion?.text || '']] as DiffOp[])
+        : ([[-1, leftVersion?.text || ''], [1, rightVersion?.text || '']] as DiffOp[]);
     for (const [op, text] of effectiveDiffs) {
       const words = text.split(/\s+/).filter(w => w).length;
       if (op === 1) { added += text.length; addedWords += words; }
