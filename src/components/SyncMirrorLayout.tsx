@@ -1236,8 +1236,14 @@ export const SyncMirrorLayout = ({
       >
         {/* ── RIGHT column: תמלול מסונכרן (read-only) ── */}
         <div className="flex-1 min-w-0 flex flex-col border-s border-border/40">
-          {/* word rows */}
-          <div className="p-4" style={textStyle}>
+          {/* word rows — when rich-edit is on, pad-top dynamically to align with editor's first line */}
+          <div
+            className="px-4 pb-4"
+            style={{
+              ...textStyle,
+              paddingTop: enableRichEdit ? `${rightTopOffset || 16}px` : 16,
+            }}
+          >
             {(compareMode ? frozenLines : lines).map((line, li) => {
               const sourceLines = compareMode ? frozenLines : lines;
               const offset = sourceLines.slice(0, li).reduce((a, l) => a + l.length, 0);
@@ -1245,6 +1251,7 @@ export const SyncMirrorLayout = ({
             })}
           </div>
         </div>
+
 
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
         <div className="flex-1 min-w-0 flex flex-col">
