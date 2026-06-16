@@ -63,14 +63,28 @@ export function DesignModeSaveMenu() {
     }
   };
 
-  /** Save → overwrite active custom theme with the current overrides. */
+  const { user } = useAuth();
+
+  /** Save → overwrite active custom theme, OR save globally if active is built-in/community. */
   const handleSave = async () => {
-    if (isBuiltInActive || isCommunityActive) {
-      toast.info('הערכה הפעילה מובנית — שומר כערכה חדשה במקום');
-      return handleSaveAsNew();
-    }
     setBusy(true);
     try {
+      // Built-in or community theme → save as GLOBAL overrides (no new theme).
+      if (isBuiltInActive || isCommunityActive) {
+        // Local persistence already happened on every change (design_overrides_v1).
+        // Now sync to cloud in the background with retry + warning toast on failure.
+        toast.success(`נשמר במחשב (${overrides.length} שינויים) — מסנכרן לענן…`);
+        if (user?.id) {
+          syncGlobalOverridesToCloud(user.id, overrides).then(ok => {
+            if (ok) toast.success('סונכרן לענן ✓');
+            else toast.warning('שינויים שמורים מקומית — סנכרון לענן נכשל. ננסה שוב בהפעלה הבאה.');
+          });
+        } else {
+          toast.warning('שינויים שמורים מקומית בלבד — לא מחובר לחשבון.');
+        }
+        return;
+      }
+      // Custom theme → overwrite it.
       const updated = { ...activeTheme, elementOverrides: [...overrides], isCustom: true };
       saveCustomTheme(updated);
       const next = customThemes.some(t => t.id === updated.id)
