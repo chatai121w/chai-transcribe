@@ -111,21 +111,10 @@ export const SyncMirrorLayout = ({
   const leftRowsRef = useRef<HTMLDivElement>(null);
   const [isMarkingActive, setIsMarkingActive] = useState(false);
   const [rightTopOffset, setRightTopOffset] = useState(0);
-  // "Precise row alignment" — when true (default), left column renders via the
-  // SAME canvas-measured `lines` as the right column, guaranteeing row-for-row
-  // horizontal alignment at any viewport. When false, falls back to free-form
-  // contentEditable rich editing (line breaks differ between columns).
-  const [preciseAlign, setPreciseAlign] = useState<boolean>(() => {
-    try { return localStorage.getItem('sync_mirror_precise_align') !== '0'; } catch { return true; }
-  });
-  const togglePreciseAlign = () => {
-    setPreciseAlign(v => {
-      const next = !v;
-      try { localStorage.setItem('sync_mirror_precise_align', next ? '1' : '0'); } catch {}
-      return next;
-    });
-  };
-  const effectiveRichEdit = enableRichEdit && !preciseAlign;
+  // Unified mode: when enableRichEdit, LEFT is always the free-form RichTextEditor
+  // and RIGHT is a flowing read-only mirror that shares identical CSS+width so
+  // word-wrap points align line-for-line automatically.
+  const rightEditableRef = useRef<HTMLDivElement>(null);
 
   const [colWidth, setColWidth] = useState(0);
   const [fullEditMode, setFullEditMode] = useState(false);
@@ -162,11 +151,12 @@ export const SyncMirrorLayout = ({
     let raf = 0;
     const measure = () => {
       const editable = wrapper.querySelector('[contenteditable="true"]') as HTMLElement | null;
-      const firstPreciseLine = leftRowsRef.current?.querySelector<HTMLElement>('[data-line="0"]') ?? null;
-      const target = effectiveRichEdit ? editable : firstPreciseLine;
-      const anchor = target ?? wrapper;
-      const diff = Math.max(0, Math.round(anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop));
-      setRightTopOffset(diff);
+      const anchor = editable ?? wrapper;
+      const leftTop = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      const rightEl = rightEditableRef.current;
+      if (!rightEl) { setRightTopOffset(Math.max(0, Math.round(leftTop))); return; }
+      const rightTop = rightEl.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      setRightTopOffset(prev => Math.max(0, Math.round(prev + (leftTop - rightTop))));
     };
     const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
     schedule();
@@ -174,9 +164,9 @@ export const SyncMirrorLayout = ({
     ro.observe(wrapper);
     ro.observe(scroller);
     window.addEventListener('resize', schedule);
-    const t = window.setInterval(schedule, 800); // catch async toolbar/spell changes
+    const t = window.setInterval(schedule, 800);
     return () => { ro.disconnect(); window.removeEventListener('resize', schedule); window.clearInterval(t); cancelAnimationFrame(raf); };
-  }, [enableRichEdit, effectiveRichEdit, fullEditMode, isMarkingActive, localFontSize, localFontFamily, localLineHeight, preciseAlign]);
+  }, [enableRichEdit, fullEditMode, isMarkingActive, localFontSize, localFontFamily, localLineHeight, text]);
 
 
   // ── User timing anchors ────────────────────────────────────────────────────
@@ -306,10 +296,13 @@ export const SyncMirrorLayout = ({
 
   // ── Auto-scroll to active line ──────────────────────────────────────────────
   useEffect(() => {
-    if (activeLineIdx < 0 || !syncEnabled) return;
-    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-line="${activeLineIdx}"]`);
-    el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [activeLineIdx, syncEnabled]);
+    if (!syncEnabled) return;
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const wordEl = activeIdx >= 0 ? scroller.querySelector<HTMLElement>(`[data-word-idx="${activeIdx}"]`) : null;
+    const lineEl = activeLineIdx >= 0 ? scroller.querySelector<HTMLElement>(`[data-line="${activeLineIdx}"]`) : null;
+    (wordEl ?? lineEl)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [activeIdx, activeLineIdx, syncEnabled]);
 
   // ── Search highlighting ─────────────────────────────────────────────────────
   const searchMatchList = useMemo(() => {
@@ -1323,21 +1316,6 @@ export const SyncMirrorLayout = ({
               </PopoverContent>
             </Popover>
 
-            {/* Precise row alignment toggle (only meaningful when rich-edit is enabled) */}
-            {enableRichEdit && (
-              <Button
-                size="sm"
-                variant={preciseAlign ? "default" : "outline"}
-                className="h-6 text-[10px] px-1.5 gap-0.5"
-                onClick={togglePreciseAlign}
-                title={preciseAlign
-                  ? "יישור שורות מדויק פעיל — שני הצדדים מתיישרים שורה-מול-שורה בכל גודל מסך. לחץ למעבר לעריכה חופשית."
-                  : "עריכה חופשית פעילה — שורות לא מובטחות זו מול זו. לחץ לחזרה ליישור מדויק."}
-              >
-                <Rows3 className="w-2.5 h-2.5" />
-                {preciseAlign ? "יישור מדויק" : "עריכה חופשית"}
-              </Button>
-            )}
             {/* Full edit button */}
             <Button
               size="sm"
@@ -1360,26 +1338,79 @@ export const SyncMirrorLayout = ({
       >
         {/* ── RIGHT column: תמלול מסונכרן (read-only) ── */}
         <div className="flex-1 min-w-0 flex flex-col border-s border-border/40">
-          {/* word rows — when rich-edit is on, pad-top dynamically to align with editor's first line */}
-          <div
-            className="px-4 pb-4"
-            style={{
-              ...textStyle,
-              paddingTop: enableRichEdit ? `${rightTopOffset || 16}px` : 16,
-            }}
-          >
-            {(compareMode ? frozenLines : lines).map((line, li) => {
-              const sourceLines = compareMode ? frozenLines : lines;
-              const offset = sourceLines.slice(0, li).reduce((a, l) => a + l.length, 0);
-              return renderLine(line, offset, li, "right");
-            })}
-          </div>
+          {enableRichEdit ? (
+            /* Live flowing mirror — identical wrapper structure & CSS as
+               RichTextEditor on the left so word-wrap aligns naturally. */
+            <div
+              className="flex flex-col gap-2 p-3"
+              dir="rtl"
+              style={{ paddingTop: rightTopOffset ? `${rightTopOffset}px` : undefined }}
+            >
+              <div className="p-4">
+                <div className="space-y-3">
+                  <div
+                    ref={rightEditableRef}
+                    dir="rtl"
+                    className="rounded-md border border-input bg-background px-4 py-3 overflow-auto max-w-none"
+                    style={{
+                      ...textStyle,
+                      textAlign: 'right',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      minHeight: 500,
+                    }}
+                  >
+                    {(compareMode ? frozenTimings : displayTimings).map((wt, globalIdx) => {
+                      const isActive = globalIdx === activeIdx;
+                      const isSearchActive = globalIdx === activeSearchGlobalIdx;
+                      const isSearchMatch = !isSearchActive && searchMatchList.includes(globalIdx);
+                      const isActiveVisible = isActive && rightWordHighlightOn;
+                      return (
+                        <React.Fragment key={globalIdx}>
+                          <span
+                            data-word-idx={globalIdx}
+                            style={isActiveVisible ? getActiveWordStyle(wordHighlightMode) : undefined}
+                            className={cn(
+                              "cursor-pointer transition-colors px-[1px]",
+                              !isActiveVisible && "rounded-sm",
+                              isActiveVisible && wordHighlightMode === 'word' && "font-bold",
+                              isActiveVisible && wordHighlightMode === 'underline' && "font-semibold",
+                              isActiveVisible && wordHighlightMode === 'glow' && "rounded-sm font-bold",
+                              !isActive && isSearchActive && "bg-yellow-400 dark:bg-yellow-600 rounded-sm",
+                              !isActive && isSearchMatch && "bg-yellow-200 dark:bg-yellow-800 rounded-sm",
+                            )}
+                            onClick={() => onWordClick(wt.start)}
+                            title={`קליק לקפיצה (${wt.start.toFixed(1)}s)`}
+                          >
+                            {wt.word}
+                          </span>
+                          {' '}
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Legacy line-based mirror — used when rich-edit is off. */
+            <div
+              className="px-4 pb-4"
+              style={{ ...textStyle, paddingTop: 16 }}
+            >
+              {(compareMode ? frozenLines : lines).map((line, li) => {
+                const sourceLines = compareMode ? frozenLines : lines;
+                const offset = sourceLines.slice(0, li).reduce((a, l) => a + l.length, 0);
+                return renderLine(line, offset, li, "right");
+              })}
+            </div>
+          )}
         </div>
 
 
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
         <div className="flex-1 min-w-0 flex flex-col">
-          {effectiveRichEdit ? (
+          {enableRichEdit ? (
             <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
               {/* Marking toolbar (always visible) + analysis panel (when active) */}
               <TextMarkingOverlay
@@ -1412,31 +1443,14 @@ export const SyncMirrorLayout = ({
               )}
             </div>
           ) : (
-            /* Precise-alignment view: identical line breaks as the right column.
-               Editing happens through right-click WordContextMenu (and the
-               marking toolbar above when enableRichEdit is on). */
+            /* Read-only line view when rich-edit is disabled by the caller. */
             <div className="flex flex-col" ref={leftRichRef}>
-              {enableRichEdit && (
-                <div className="px-3 pt-2" dir="rtl">
-                  <TextMarkingOverlay
-                    text={text}
-                    onTextChange={onTextChange}
-                    fontSize={localFontSize}
-                    fontFamily={localFontFamily}
-                    lineHeight={localLineHeight}
-                    toolbarOnly={!isMarkingActive}
-                    onActiveChange={setIsMarkingActive}
-                  />
-                </div>
-              )}
-              {!isMarkingActive && (
-                <div ref={leftRowsRef} className="p-4" style={textStyle}>
-                  {lines.map((line, li) => {
-                    const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
-                    return renderLine(line, offset, li, "left");
-                  })}
-                </div>
-              )}
+              <div ref={leftRowsRef} className="p-4" style={textStyle}>
+                {lines.map((line, li) => {
+                  const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
+                  return renderLine(line, offset, li, "left");
+                })}
+              </div>
             </div>
           )}
         </div>
