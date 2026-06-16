@@ -31,6 +31,21 @@ type EditorLayout = {
 
 const DESIGN_MODE_EDITOR_LAYOUT_KEY = 'design_mode_editor_layout_v1';
 const COLOR_FAVORITES_KEY = 'design_mode_color_favorites_v1';
+const TOOLBAR_POS_KEY = 'design_mode_toolbar_pos_v1';
+const CLICK_THROUGH_KEY = 'design_mode_click_through_v1';
+
+function loadToolbarPos(): { x: number; y: number } {
+  try {
+    const raw = localStorage.getItem(TOOLBAR_POS_KEY);
+    if (raw) {
+      const p = JSON.parse(raw);
+      const x = clamp(Number(p.x) || 16, 4, Math.max(4, window.innerWidth - 200));
+      const y = clamp(Number(p.y) || 16, 4, Math.max(4, window.innerHeight - 60));
+      return { x, y };
+    }
+  } catch { /* ignore */ }
+  return { x: 16, y: 16 };
+}
 
 function loadColorFavorites(): string[] {
   try {
