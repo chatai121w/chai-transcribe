@@ -506,8 +506,11 @@ export type Database = {
       transcript_versions: {
         Row: {
           action_label: string | null
+          ai_usage_event_id: string | null
+          audio_file_path: string | null
           created_at: string
           engine_label: string | null
+          folder_id: string | null
           id: string
           source: string
           text: string
@@ -518,8 +521,11 @@ export type Database = {
         }
         Insert: {
           action_label?: string | null
+          ai_usage_event_id?: string | null
+          audio_file_path?: string | null
           created_at?: string
           engine_label?: string | null
+          folder_id?: string | null
           id?: string
           source?: string
           text: string
@@ -530,8 +536,11 @@ export type Database = {
         }
         Update: {
           action_label?: string | null
+          ai_usage_event_id?: string | null
+          audio_file_path?: string | null
           created_at?: string
           engine_label?: string | null
+          folder_id?: string | null
           id?: string
           source?: string
           text?: string
@@ -541,6 +550,20 @@ export type Database = {
           word_count?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "transcript_versions_ai_usage_event_id_fkey"
+            columns: ["ai_usage_event_id"]
+            isOneToOne: false
+            referencedRelation: "ai_usage_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transcript_versions_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "transcript_versions_transcript_id_fkey"
             columns: ["transcript_id"]

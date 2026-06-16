@@ -36,6 +36,7 @@ const SpeakerDiarization = lazy(() => import("@/components/SpeakerDiarization").
 const FloatingPlayerPortal = lazy(() => import("@/components/FloatingPlayerPortal").then(m => ({ default: m.FloatingPlayerPortal })));
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })));
 const LoshonKodeshRules = lazy(() => import("@/pages/LoshonKodeshRules"));
+const AIVersionsGrid = lazy(() => import("@/components/AIVersionsGrid").then(m => ({ default: m.AIVersionsGrid })));
 import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle } from "lucide-react";
 import { uploadToDrive } from "@/components/GoogleDriveBrowser";
 import { DriveFolderPicker } from "@/components/DriveFolderPicker";
@@ -1450,6 +1451,14 @@ const TextEditor = () => {
                 onSyncToPlayer={handleSyncToPlayer}
               /></LazyErrorBoundary>
             </div>
+
+            <LazyErrorBoundary label="גרסאות AI">
+              <AIVersionsGrid
+                transcriptId={transcriptId}
+                audioFilePath={(location.state as any)?.audioFilePath || null}
+                onOpenInEditor={(t) => setText(t)}
+              />
+            </LazyErrorBoundary>
           </TabsContent>
 
           <TabsContent value="compare" className="flex flex-col gap-3">
