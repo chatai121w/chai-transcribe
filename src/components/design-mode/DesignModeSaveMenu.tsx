@@ -14,6 +14,27 @@ import { BUILT_IN_THEMES, useTheme } from '@/hooks/useTheme';
 import { useCommunityThemes } from '@/hooks/useCommunityThemes';
 import { useCloudPreferences } from '@/hooks/useCloudPreferences';
 import { useDesignMode } from './DesignModeProvider';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+
+/** Persist current design overrides globally — local already done; cloud with retry. */
+async function syncGlobalOverridesToCloud(userId: string, overrides: unknown[], attempt = 1): Promise<boolean> {
+  try {
+    const { error } = await (supabase.from('user_preferences') as any).upsert(
+      { user_id: userId, design_overrides: overrides, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    if (attempt < 4) {
+      await new Promise(r => setTimeout(r, 1500 * attempt));
+      return syncGlobalOverridesToCloud(userId, overrides, attempt + 1);
+    }
+    console.warn('[design-save] cloud sync failed after retries', e);
+    return false;
+  }
+}
 
 /**
  * Save menu for Live Design Mode.
