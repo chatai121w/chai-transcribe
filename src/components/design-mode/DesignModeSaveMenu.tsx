@@ -14,6 +14,27 @@ import { BUILT_IN_THEMES, useTheme } from '@/hooks/useTheme';
 import { useCommunityThemes } from '@/hooks/useCommunityThemes';
 import { useCloudPreferences } from '@/hooks/useCloudPreferences';
 import { useDesignMode } from './DesignModeProvider';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+
+/** Persist current design overrides globally — local already done; cloud with retry. */
+async function syncGlobalOverridesToCloud(userId: string, overrides: unknown[], attempt = 1): Promise<boolean> {
+  try {
+    const { error } = await (supabase.from('user_preferences') as any).upsert(
+      { user_id: userId, design_overrides: overrides, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    if (attempt < 4) {
+      await new Promise(r => setTimeout(r, 1500 * attempt));
+      return syncGlobalOverridesToCloud(userId, overrides, attempt + 1);
+    }
+    console.warn('[design-save] cloud sync failed after retries', e);
+    return false;
+  }
+}
 
 /**
  * Save menu for Live Design Mode.
@@ -42,14 +63,28 @@ export function DesignModeSaveMenu() {
     }
   };
 
-  /** Save → overwrite active custom theme with the current overrides. */
+  const { user } = useAuth();
+
+  /** Save → overwrite active custom theme, OR save globally if active is built-in/community. */
   const handleSave = async () => {
-    if (isBuiltInActive || isCommunityActive) {
-      toast.info('הערכה הפעילה מובנית — שומר כערכה חדשה במקום');
-      return handleSaveAsNew();
-    }
     setBusy(true);
     try {
+      // Built-in or community theme → save as GLOBAL overrides (no new theme).
+      if (isBuiltInActive || isCommunityActive) {
+        // Local persistence already happened on every change (design_overrides_v1).
+        // Now sync to cloud in the background with retry + warning toast on failure.
+        toast.success(`נשמר במחשב (${overrides.length} שינויים) — מסנכרן לענן…`);
+        if (user?.id) {
+          syncGlobalOverridesToCloud(user.id, overrides).then(ok => {
+            if (ok) toast.success('סונכרן לענן ✓');
+            else toast.warning('שינויים שמורים מקומית — סנכרון לענן נכשל. ננסה שוב בהפעלה הבאה.');
+          });
+        } else {
+          toast.warning('שינויים שמורים מקומית בלבד — לא מחובר לחשבון.');
+        }
+        return;
+      }
+      // Custom theme → overwrite it.
       const updated = { ...activeTheme, elementOverrides: [...overrides], isCustom: true };
       saveCustomTheme(updated);
       const next = customThemes.some(t => t.id === updated.id)
@@ -136,14 +171,16 @@ export function DesignModeSaveMenu() {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={handleSave}
-          disabled={busy || (!hasChanges && !isBuiltInActive && !isCommunityActive)}
+          disabled={busy || !hasChanges}
           className="flex flex-row-reverse items-center justify-between gap-2"
         >
           <Save className="h-4 w-4" />
           <div className="text-right">
-            <div>שמור (דרוס את הערכה הפעילה)</div>
+            <div>{isBuiltInActive || isCommunityActive ? 'שמור שינויים (גלובלי + ענן)' : 'שמור (דרוס את הערכה הפעילה)'}</div>
             <div className="text-[10px] text-muted-foreground">
-              {isBuiltInActive || isCommunityActive ? 'מובנית — ייפתח שמור כחדשה' : `${overrides.length} שינויים`}
+              {isBuiltInActive || isCommunityActive
+                ? `${overrides.length} שינויים — נשמרים מעל כל הערכות`
+                : `${overrides.length} שינויים`}
             </div>
           </div>
         </DropdownMenuItem>
