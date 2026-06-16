@@ -649,6 +649,7 @@ const TextEditor = () => {
   const [drivePickerOpen, setDrivePickerOpen] = useState(false);
   const [showCompareAi, setShowCompareAi] = useState(false);
   const [compareSubTab, setCompareSubTab] = useState("versions");
+  const [aiPreselectSourceId, setAiPreselectSourceId] = useState<string | undefined>(undefined);
 
   const compareVersions = useMemo<TextVersion[]>(() => {
     const byId = new Map<string, TextVersion>();
