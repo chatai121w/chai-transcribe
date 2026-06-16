@@ -278,6 +278,8 @@ export function ABCompareLab({ onResult, onAudio }: Props) {
   const [togglesB, setTogglesB] = useState<TogglesState>(DEFAULT_B);
   const [runningA, setRunningA] = useState(false);
   const [runningB, setRunningB] = useState(false);
+  const [progressA, setProgressA] = useState<{ pct: number; stage: string }>({ pct: 0, stage: "" });
+  const [progressB, setProgressB] = useState<{ pct: number; stage: string }>({ pct: 0, stage: "" });
   const sharedInputRef = useRef<HTMLInputElement>(null);
   const aInputRef = useRef<HTMLInputElement>(null);
   const bInputRef = useRef<HTMLInputElement>(null);
@@ -297,42 +299,69 @@ export function ABCompareLab({ onResult, onAudio }: Props) {
     }
     const toggles = side === "A" ? togglesA : togglesB;
     const setRunning = side === "A" ? setRunningA : setRunningB;
-    setRunning(true);
-    try {
-      // 1) Push audio into the side player so user can listen
-      onAudio(side, audio.blob, audio.name);
+    const setProgress = side === "A" ? setProgressA : setProgressB;
+    const updateProgress = (pct: number, stage: string) => setProgress({ pct, stage });
 
-      // 2) Preprocess
+    setRunning(true);
+    updateProgress(2, "מתחיל…");
+
+    // Simulated progress ticker during the long transcription step
+    let tickerStop = false;
+    const startTicker = (from: number, to: number, durationMs: number, stage: string) => {
+      const startedAt = Date.now();
+      const tick = () => {
+        if (tickerStop) return;
+        const elapsed = Date.now() - startedAt;
+        const ratio = Math.min(1, elapsed / durationMs);
+        const pct = from + (to - from) * ratio;
+        setProgress({ pct, stage });
+        if (ratio < 1) setTimeout(tick, 250);
+      };
+      tick();
+    };
+
+    try {
+      onAudio(side, audio.blob, audio.name);
+      updateProgress(8, "מעבד אודיו…");
       const pre = await preprocessAudio(audio.blob, audio.name, toggles);
 
-      // 3) Transcribe
+      updateProgress(20, "שולח לתמלול…");
+      // Estimate transcription duration ~ 1s per 100KB, min 4s, max 120s
+      const estMs = Math.min(120000, Math.max(4000, pre.blob.size / 100));
+      startTicker(20, 75, estMs, "מתמלל…");
       const raw = await transcribe(pre.blob, pre.name, engine);
+      tickerStop = true;
 
-      // 4) Post-process
+      updateProgress(80, toggles.ai_polish ? "תיקון AI…" : "מסיים…");
       const finalText = await postProcessText(raw, toggles);
 
-      // 5) Build label from active toggles
+      updateProgress(95, "מציג תוצאה…");
       const activeKeys = TOGGLES.filter(t => toggles[t.key]).map(t => t.label);
       const label = activeKeys.length === 0
         ? `${engine} · ללא השבחות`
         : `${engine} · ${activeKeys.join(" + ")}`;
 
       onResult(side, label, finalText);
+      updateProgress(100, "הסתיים ✓");
       toast({ title: `הסתיים — צד ${side}`, description: `${finalText.length} תווים` });
     } catch (e) {
+      tickerStop = true;
+      updateProgress(0, "");
       toast({
         title: `שגיאה — צד ${side}`,
         description: e instanceof Error ? e.message : String(e),
         variant: "destructive",
       });
     } finally {
+      tickerStop = true;
       setRunning(false);
+      // Clear bar after a short delay so user sees the "done" state
+      setTimeout(() => setProgress({ pct: 0, stage: "" }), 2500);
     }
   };
 
   const handleRunBoth = async () => {
-    await handleRun("A");
-    await handleRun("B");
+    await Promise.all([handleRun("A"), handleRun("B")]);
   };
 
   const FilePicker = ({
