@@ -109,6 +109,21 @@ export const SyncMirrorLayout = ({
   const leftRichRef = useRef<HTMLDivElement>(null);
   const [isMarkingActive, setIsMarkingActive] = useState(false);
   const [rightTopOffset, setRightTopOffset] = useState(0);
+  // "Precise row alignment" — when true (default), left column renders via the
+  // SAME canvas-measured `lines` as the right column, guaranteeing row-for-row
+  // horizontal alignment at any viewport. When false, falls back to free-form
+  // contentEditable rich editing (line breaks differ between columns).
+  const [preciseAlign, setPreciseAlign] = useState<boolean>(() => {
+    try { return localStorage.getItem('sync_mirror_precise_align') !== '0'; } catch { return true; }
+  });
+  const togglePreciseAlign = () => {
+    setPreciseAlign(v => {
+      const next = !v;
+      try { localStorage.setItem('sync_mirror_precise_align', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
+  const effectiveRichEdit = enableRichEdit && !preciseAlign;
 
   const [colWidth, setColWidth] = useState(0);
   const [fullEditMode, setFullEditMode] = useState(false);
