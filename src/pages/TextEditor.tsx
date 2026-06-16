@@ -540,9 +540,35 @@ const TextEditor = () => {
     }
   };
 
-  const handleSaveVersion = (text: string, source: string, engineLabel: string, actionLabel: string) => {
+  const ensureCloudTranscript = useCallback(async (): Promise<string | null> => {
+    if (transcriptIdRef.current) return transcriptIdRef.current;
+    if (transcriptId) return transcriptId;
+    const baseText = (text || '').trim();
+    if (!baseText) {
+      toast({ title: 'אין טקסט לשמירה', variant: 'destructive' });
+      return null;
+    }
+    const navEngine = (location.state as any)?.engine;
+    const engineName = typeof navEngine === 'string' && navEngine ? navEngine : 'manual';
+    try {
+      const created = await saveTranscript(baseText, engineName);
+      if (created?.id) {
+        transcriptIdRef.current = created.id;
+        setTranscriptId(created.id);
+        toast({ title: 'התמלול נשמר בענן ☁️' });
+        return created.id;
+      }
+    } catch (e: any) {
+      toast({ title: 'שמירה לענן נכשלה', description: e?.message, variant: 'destructive' });
+    }
+    return null;
+  }, [transcriptId, text, saveTranscript, location.state]);
+
+  const handleSaveVersion = async (text: string, source: string, engineLabel: string, actionLabel: string) => {
     // Save version to cloud WITHOUT replacing the main text
-    if (transcriptId) {
+    let id = transcriptId;
+    if (!id) id = await ensureCloudTranscript();
+    if (id) {
       saveCloudVersion(text, source, engineLabel, actionLabel);
       toast({ title: 'גרסה נשמרה בענן ☁️', description: `${engineLabel} — ${actionLabel}` });
     } else {
