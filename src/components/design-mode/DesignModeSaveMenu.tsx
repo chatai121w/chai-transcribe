@@ -171,14 +171,16 @@ export function DesignModeSaveMenu() {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={handleSave}
-          disabled={busy || (!hasChanges && !isBuiltInActive && !isCommunityActive)}
+          disabled={busy || !hasChanges}
           className="flex flex-row-reverse items-center justify-between gap-2"
         >
           <Save className="h-4 w-4" />
           <div className="text-right">
-            <div>שמור (דרוס את הערכה הפעילה)</div>
+            <div>{isBuiltInActive || isCommunityActive ? 'שמור שינויים (גלובלי + ענן)' : 'שמור (דרוס את הערכה הפעילה)'}</div>
             <div className="text-[10px] text-muted-foreground">
-              {isBuiltInActive || isCommunityActive ? 'מובנית — ייפתח שמור כחדשה' : `${overrides.length} שינויים`}
+              {isBuiltInActive || isCommunityActive
+                ? `${overrides.length} שינויים — נשמרים מעל כל הערכות`
+                : `${overrides.length} שינויים`}
             </div>
           </div>
         </DropdownMenuItem>
