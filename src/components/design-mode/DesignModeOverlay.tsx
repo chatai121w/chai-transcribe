@@ -329,7 +329,15 @@ export function DesignModeOverlay() {
       document.removeEventListener('click', swallow, true);
       document.removeEventListener('keydown', onKey);
     };
-  }, [enabled, selectedEl, setEnabled, undoLast]);
+  }, [enabled, clickThrough, selectedEl, setEnabled, undoLast]);
+
+  // Persist toolbar position and click-through state.
+  useEffect(() => {
+    try { localStorage.setItem(TOOLBAR_POS_KEY, JSON.stringify(toolbarPos)); } catch { /* ignore */ }
+  }, [toolbarPos]);
+  useEffect(() => {
+    try { localStorage.setItem(CLICK_THROUGH_KEY, clickThrough ? '1' : '0'); } catch { /* ignore */ }
+  }, [clickThrough]);
 
   if (!enabled) return null;
 
