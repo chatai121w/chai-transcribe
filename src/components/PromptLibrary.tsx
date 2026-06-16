@@ -20,10 +20,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { BookMarked, Plus, Trash2, Play, Save, Search, Loader2, Cpu, LayoutGrid, List, GraduationCap, Briefcase, Newspaper, BookOpen, Stethoscope, Sparkles, Star } from "lucide-react";
+import { BookMarked, Plus, Trash2, Play, Save, Search, Loader2, Cpu, LayoutGrid, List, GraduationCap, Briefcase, Newspaper, BookOpen, Stethoscope, Sparkles, Star, Cloud, CloudOff } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
 import { useOllama, isOllamaModel, getOllamaModelName } from "@/hooks/useOllama";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface PromptLibraryProps {
   text: string;
