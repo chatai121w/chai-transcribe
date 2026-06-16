@@ -12,9 +12,10 @@ interface Props {
   transcriptId: string | null;
   audioFilePath?: string | null;
   onOpenInEditor: (text: string) => void;
+  onCreateCloudTranscript?: () => Promise<string | null>;
 }
 
-export function AIVersionsGrid({ transcriptId, audioFilePath, onOpenInEditor }: Props) {
+export function AIVersionsGrid({ transcriptId, audioFilePath, onOpenInEditor, onCreateCloudTranscript }: Props) {
   const { versions, isLoading, assignVersionsToFolder, deleteVersion, saveVersionToLocalOnly } = useCloudVersions(transcriptId);
   const [search, setSearch] = useState("");
   const [modelFilter, setModelFilter] = useState<string>("all");
