@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Trash2, Eye, FolderInput, Cloud, HardDrive, Sparkles } from "lucide-react";
+import { Trash2, Eye, FolderInput, Cloud, HardDrive, Sparkles, GitCompareArrows } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { calcCostUSD, fmtUSD } from "@/lib/aiPricing";
 import type { CloudVersion } from "@/hooks/useCloudVersions";
@@ -19,9 +19,10 @@ interface Props {
   onDelete: (id: string) => void;
   onSaveLocal: (v: CloudVersion) => void;
   onAssignFolder: (id: string) => void;
+  onSendToCompare?: (id: string) => void;
 }
 
-export function AIVersionCard({ version, selected, onSelectChange, onOpen, onDelete, onSaveLocal, onAssignFolder }: Props) {
+export function AIVersionCard({ version, selected, onSelectChange, onOpen, onDelete, onSaveLocal, onAssignFolder, onSendToCompare }: Props) {
   const [usage, setUsage] = useState<AIUsageRow | null>(null);
 
   useEffect(() => {
