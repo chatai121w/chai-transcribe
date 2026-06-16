@@ -29,6 +29,8 @@ import { addDictionaryReplacement, addIgnoredWord } from "@/utils/hebrewGrammarD
 import { WordContextMenu } from "@/components/WordContextMenu";
 import { alignEditedToWhisper } from "@/lib/whisperAlignment";
 import { getWordHighlightStyle, isWordApproved } from "@/lib/personalPronunciationModel";
+import { RichTextEditor } from "@/components/RichTextEditor";
+import { TextMarkingOverlay } from "@/components/TextMarkingOverlay";
 
 interface SyncMirrorLayoutProps {
   wordTimings: WordTiming[];
@@ -54,6 +56,13 @@ interface SyncMirrorLayoutProps {
     mode: 'quick' | 'advanced';
     note?: string;
   }) => Promise<boolean | void> | boolean | void;
+  /** When true, the LEFT column renders the full text editor (TextMarkingOverlay + RichTextEditor)
+   *  instead of the per-word click/right-click view. */
+  enableRichEdit?: boolean;
+  /** Fired when RichTextEditor auto-corrects a word (for logging/learning). */
+  onWordCorrected?: (original: string, corrected: string) => void;
+  /** Optional column style passed to RichTextEditor. */
+  richColumnStyle?: React.CSSProperties;
 }
 
 function normalizeWord(w: string) {
@@ -91,9 +100,13 @@ export const SyncMirrorLayout = ({
   learningProfiles = [],
   learningEnabled = true,
   onSaveLearning,
+  enableRichEdit = false,
+  onWordCorrected,
+  richColumnStyle,
 }: SyncMirrorLayoutProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [isMarkingActive, setIsMarkingActive] = useState(false);
 
   const [colWidth, setColWidth] = useState(0);
   const [fullEditMode, setFullEditMode] = useState(false);
@@ -1209,13 +1222,49 @@ export const SyncMirrorLayout = ({
 
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
         <div className="flex-1 min-w-0 flex flex-col">
-          {/* word rows */}
-          <div className="p-4" style={textStyle}>
-            {lines.map((line, li) => {
-              const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
-              return renderLine(line, offset, li, "left");
-            })}
-          </div>
+          {enableRichEdit ? (
+            <div className="flex flex-col gap-2 p-3" dir="rtl">
+              {/* Marking toolbar (always visible) + analysis panel (when active) */}
+              <TextMarkingOverlay
+                text={text}
+                onTextChange={onTextChange}
+                fontSize={localFontSize}
+                fontFamily={localFontFamily}
+                lineHeight={localLineHeight}
+                toolbarOnly={!isMarkingActive}
+                onActiveChange={setIsMarkingActive}
+              />
+              {/* RichTextEditor — full editing surface */}
+              {!isMarkingActive && (
+                <div
+                  style={{
+                    fontSize: `${localFontSize}px`,
+                    fontFamily: localFontFamily,
+                    lineHeight: localLineHeight,
+                    ...(localTextColor ? { color: localTextColor } : {}),
+                    ...richColumnStyle,
+                  }}
+                >
+                  <RichTextEditor
+                    text={text}
+                    onChange={onTextChange}
+                    columnStyle={richColumnStyle}
+                    onSaveReplaceOriginal={onSaveReplace}
+                    onDuplicateSave={onDuplicateSave ? () => onDuplicateSave('') : undefined}
+                    onWordCorrected={onWordCorrected}
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            /* word rows (legacy click/right-click view) */
+            <div className="p-4" style={textStyle}>
+              {lines.map((line, li) => {
+                const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
+                return renderLine(line, offset, li, "left");
+              })}
+            </div>
+          )}
         </div>
       </div>
       </>}

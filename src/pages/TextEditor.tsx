@@ -137,8 +137,7 @@ const TextEditor = () => {
 
   // Tab settings (visibility + order)
   const ALL_TABS: TabConfig[] = [
-    { id: "player", label: "נגן", emoji: "🎧", group: "primary" },
-    { id: "edit", label: "עריכת טקסט", group: "primary" },
+    { id: "player", label: "עורך טקסט", emoji: "🎧", group: "primary" },
     { id: "loshon", label: "לשון הקודש", emoji: "🕮", group: "primary" },
     { id: "speakers", label: "זיהוי דוברים", group: "primary" },
     { id: "templates", label: "תבניות", group: "primary" },
@@ -243,7 +242,9 @@ const TextEditor = () => {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // Loshon Kodesh embedded tab
-  const [activeTab, setActiveTab] = useState<string>("edit");
+  const [activeTab, setActiveTab] = useState<string>("player");
+  // Migrate stale "edit" tab → "player" (the two tabs were unified)
+  useEffect(() => { if (activeTab === "edit") setActiveTab("player"); }, [activeTab]);
   const [comparePreselect, setComparePreselect] = useState<{ leftId: string; rightId: string } | null>(null);
   const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
   const sendTextToLoshonKodesh = useCallback((opts?: { jump?: boolean }) => {
@@ -1327,7 +1328,7 @@ const TextEditor = () => {
           })()}
 
           <TabsContent value="player" className="flex flex-col gap-3">
-            <LazyErrorBoundary label="נגן מסונכרן">
+            <LazyErrorBoundary label="עורך טקסט">
 
             {/* ── Toolbar: layout controls ── */}
             <div className="flex items-center justify-between gap-3" dir="rtl">
@@ -1489,54 +1490,23 @@ const TextEditor = () => {
                   searchQuery={transcriptSearchOpen ? transcriptSearchQuery : undefined}
                   searchActiveIndex={transcriptSearchIdx}
                   onSearchMatchCount={setTranscriptMatchCount}
-                  onSaveReplace={() => handleSaveAndReplaceOriginal(text, 'manual', 'נגן מסונכרן', 'שמירה מהנגן')}
-                  onDuplicateSave={(newName) => handleDuplicateAndSave(text, 'manual', 'נגן מסונכרן', 'שכפול מהנגן', newName)}
+                  onSaveReplace={() => handleSaveAndReplaceOriginal(text, 'manual', 'עורך טקסט', 'שמירה מהעורך')}
+                  onDuplicateSave={(newName) => handleDuplicateAndSave(text, 'manual', 'עורך טקסט', 'שכפול מהעורך', newName)}
                   learningProfiles={learningProfiles}
                   learningEnabled={true}
                   onSaveLearning={handleSaveLearningToProfile}
-                />
-              </div>
-            )}
-
-            </LazyErrorBoundary>
-          </TabsContent>
-
-          <TabsContent value="edit" className="flex flex-col gap-3">
-            {/* Marking toolbar — always visible, text display only when active */}
-            <LazyErrorBoundary label="סימון ויזואלי">
-              <TextMarkingOverlay
-                text={text}
-                onTextChange={handleEditorChange}
-                fontSize={fontSize}
-                fontFamily={fontFamily}
-                lineHeight={lineHeight}
-                toolbarOnly={!isMarkingActive}
-                onActiveChange={setIsMarkingActive}
-              />
-            </LazyErrorBoundary>
-            {/* Editable text — hidden when marking analysis is shown */}
-            {!isMarkingActive && (
-              <div
-                style={{
-                  fontSize: `${fontSize}px`,
-                  fontFamily: fontFamily,
-                  color: textColor,
-                  lineHeight: lineHeight,
-                }}
-              >
-                <RichTextEditor 
-                  text={text} 
-                  onChange={handleEditorChange}
-                  columnStyle={columnStyle}
-                  onSaveReplaceOriginal={() => handleSaveAndReplaceOriginal(text, 'manual', 'עורך טקסט', 'שמירה מסרגל העורך')}
-                  onDuplicateSave={() => handleDuplicateAndSave(text, 'manual', 'עורך טקסט', 'שכפול מסרגל העורך')}
+                  enableRichEdit
+                  richColumnStyle={columnStyle}
                   onWordCorrected={(original, corrected) => {
                     debugLog.info('TextEditor', `Spell correction: "${original}" → "${corrected}"`);
                   }}
                 />
               </div>
             )}
+
+            </LazyErrorBoundary>
           </TabsContent>
+
 
           <TabsContent value="loshon" className="flex flex-col gap-3">
             <LazyErrorBoundary label="לשון הקודש">
