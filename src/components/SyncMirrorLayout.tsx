@@ -1222,13 +1222,49 @@ export const SyncMirrorLayout = ({
 
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
         <div className="flex-1 min-w-0 flex flex-col">
-          {/* word rows */}
-          <div className="p-4" style={textStyle}>
-            {lines.map((line, li) => {
-              const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
-              return renderLine(line, offset, li, "left");
-            })}
-          </div>
+          {enableRichEdit ? (
+            <div className="flex flex-col gap-2 p-3" dir="rtl">
+              {/* Marking toolbar (always visible) + analysis panel (when active) */}
+              <TextMarkingOverlay
+                text={text}
+                onTextChange={onTextChange}
+                fontSize={localFontSize}
+                fontFamily={localFontFamily}
+                lineHeight={localLineHeight}
+                toolbarOnly={!isMarkingActive}
+                onActiveChange={setIsMarkingActive}
+              />
+              {/* RichTextEditor — full editing surface */}
+              {!isMarkingActive && (
+                <div
+                  style={{
+                    fontSize: `${localFontSize}px`,
+                    fontFamily: localFontFamily,
+                    lineHeight: localLineHeight,
+                    ...(localTextColor ? { color: localTextColor } : {}),
+                    ...richColumnStyle,
+                  }}
+                >
+                  <RichTextEditor
+                    text={text}
+                    onChange={onTextChange}
+                    columnStyle={richColumnStyle}
+                    onSaveReplaceOriginal={onSaveReplace}
+                    onDuplicateSave={onDuplicateSave ? () => onDuplicateSave('') : undefined}
+                    onWordCorrected={onWordCorrected}
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            /* word rows (legacy click/right-click view) */
+            <div className="p-4" style={textStyle}>
+              {lines.map((line, li) => {
+                const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
+                return renderLine(line, offset, li, "left");
+              })}
+            </div>
+          )}
         </div>
       </div>
       </>}
