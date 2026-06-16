@@ -110,29 +110,6 @@ export const SyncMirrorLayout = ({
   const [isMarkingActive, setIsMarkingActive] = useState(false);
   const [rightTopOffset, setRightTopOffset] = useState(0);
 
-  // Measure left rich-edit column's "above content" zone so the right
-  // (read-only) column can start its first line at the exact same baseline.
-  useEffect(() => {
-    if (!enableRichEdit) { setRightTopOffset(0); return; }
-    const wrapper = leftRichRef.current;
-    if (!wrapper) return;
-    let raf = 0;
-    const measure = () => {
-      const editable = wrapper.querySelector('[contenteditable="true"]') as HTMLElement | null;
-      const wrapperTop = wrapper.getBoundingClientRect().top;
-      const target = editable ?? wrapper;
-      const diff = Math.max(0, Math.round(target.getBoundingClientRect().top - wrapperTop));
-      setRightTopOffset(diff);
-    };
-    const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
-    schedule();
-    const ro = new ResizeObserver(schedule);
-    ro.observe(wrapper);
-    window.addEventListener('resize', schedule);
-    const t = window.setInterval(schedule, 800); // catch async toolbar/spell changes
-    return () => { ro.disconnect(); window.removeEventListener('resize', schedule); window.clearInterval(t); cancelAnimationFrame(raf); };
-  }, [enableRichEdit, isMarkingActive, localFontSize, localFontFamily, localLineHeight]);
-
   const [colWidth, setColWidth] = useState(0);
   const [fullEditMode, setFullEditMode] = useState(false);
   const [editDraft, setEditDraft] = useState(text);
@@ -157,6 +134,30 @@ export const SyncMirrorLayout = ({
   const [localLetterSpacing, setLocalLetterSpacing] = useState(0); // px extra
   const [localFontWeight, setLocalFontWeight] = useState<number>(400);
   const [localTextColor, setLocalTextColor] = useState<string>("");
+
+  // Measure left rich-edit column's "above content" zone so the right
+  // (read-only) column can start its first line at the exact same baseline.
+  useEffect(() => {
+    if (!enableRichEdit) { setRightTopOffset(0); return; }
+    const wrapper = leftRichRef.current;
+    if (!wrapper) return;
+    let raf = 0;
+    const measure = () => {
+      const editable = wrapper.querySelector('[contenteditable="true"]') as HTMLElement | null;
+      const wrapperTop = wrapper.getBoundingClientRect().top;
+      const target = editable ?? wrapper;
+      const diff = Math.max(0, Math.round(target.getBoundingClientRect().top - wrapperTop));
+      setRightTopOffset(diff);
+    };
+    const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
+    schedule();
+    const ro = new ResizeObserver(schedule);
+    ro.observe(wrapper);
+    window.addEventListener('resize', schedule);
+    const t = window.setInterval(schedule, 800); // catch async toolbar/spell changes
+    return () => { ro.disconnect(); window.removeEventListener('resize', schedule); window.clearInterval(t); cancelAnimationFrame(raf); };
+  }, [enableRichEdit, isMarkingActive, localFontSize, localFontFamily, localLineHeight]);
+
 
   // ── User timing anchors ────────────────────────────────────────────────────
   // Map: edited word index → pinned {start, end} timing
