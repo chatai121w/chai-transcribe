@@ -79,8 +79,21 @@ export function AIVersionsGrid({ transcriptId, audioFilePath, onOpenInEditor, on
 
   if (!transcriptId) {
     return (
-      <div className="rounded-lg border bg-muted/20 p-4 text-center text-sm text-muted-foreground" dir="rtl">
-        שמור את התמלול בענן כדי לראות כאן את כל גרסאות ה-AI
+      <div className="rounded-lg border bg-muted/20 p-4 text-center text-sm text-muted-foreground flex flex-col items-center gap-3" dir="rtl">
+        <span>כדי להציג ולהשוות גרסאות AI יש לשמור תחילה את התמלול בענן.</span>
+        {onCreateCloudTranscript && (
+          <Button
+            size="sm"
+            className="h-8 text-xs gap-1"
+            onClick={async () => {
+              const id = await onCreateCloudTranscript();
+              if (id) toast({ title: 'התמלול נשמר בענן ☁️' });
+            }}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            שמור את התמלול בענן עכשיו
+          </Button>
+        )}
       </div>
     );
   }
