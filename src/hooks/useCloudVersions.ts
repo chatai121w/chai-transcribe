@@ -30,6 +30,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
     if (!transcriptId || !user) return;
     setIsLoading(true);
     try {
+      let localVersions: CloudVersion[] = [];
       // 1) Local first
       if (await isDbAvailable()) {
         const local = await db.versions
@@ -37,7 +38,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
           .equals(transcriptId)
           .sortBy('version_number');
         if (local.length > 0) {
-          setVersions(local.map(l => ({
+          localVersions = local.map(l => ({
             id: l.id,
             transcript_id: l.transcript_id,
             user_id: l.user_id,
@@ -51,7 +52,8 @@ export const useCloudVersions = (transcriptId: string | null) => {
             ai_usage_event_id: l.ai_usage_event_id ?? null,
             folder_id: l.folder_id ?? null,
             audio_file_path: l.audio_file_path ?? null,
-          })));
+          }));
+          setVersions(localVersions);
         }
       }
 
@@ -64,7 +66,10 @@ export const useCloudVersions = (transcriptId: string | null) => {
 
       if (error) throw error;
       const cloud = (data || []) as CloudVersion[];
-      setVersions(cloud);
+      const merged = new Map<string, CloudVersion>();
+      for (const v of localVersions) merged.set(v.id, v);
+      for (const v of cloud) merged.set(v.id, v);
+      setVersions(Array.from(merged.values()).sort((a, b) => a.version_number - b.version_number));
 
       // Sync to local
       if (await isDbAvailable() && cloud.length > 0) {
@@ -96,6 +101,15 @@ export const useCloudVersions = (transcriptId: string | null) => {
   useEffect(() => {
     fetchVersions();
   }, [fetchVersions]);
+
+  useEffect(() => {
+    const onSaved = (event: Event) => {
+      const detail = (event as CustomEvent<{ transcriptId?: string }>).detail;
+      if (!detail?.transcriptId || detail.transcriptId === transcriptId) fetchVersions();
+    };
+    window.addEventListener('ai-version-saved', onSaved as EventListener);
+    return () => window.removeEventListener('ai-version-saved', onSaved as EventListener);
+  }, [fetchVersions, transcriptId]);
 
   // Try to find the most recent matching ai_usage_event for linking
   const findMatchingUsageEventId = useCallback(async (
