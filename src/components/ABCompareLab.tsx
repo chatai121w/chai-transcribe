@@ -506,38 +506,37 @@ export function ABCompareLab({ onResult, onAudio }: Props) {
         )}
       </div>
 
-      {/* Toggles per side */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div className="rounded-md border p-3 bg-background/60">
-          <div className="flex items-center justify-between mb-2">
-            <Badge variant="default">A</Badge>
-            <Button
-              size="sm"
-              className="h-8 gap-1"
-              onClick={() => handleRun("A")}
-              disabled={runningA || !audioFor("A")}
-            >
-              {runningA ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-              הרץ A
-            </Button>
-          </div>
-          {renderToggles("A")}
-        </div>
-        <div className="rounded-md border p-3 bg-background/60">
-          <div className="flex items-center justify-between mb-2">
-            <Badge variant="secondary">B</Badge>
-            <Button
-              size="sm"
-              className="h-8 gap-1"
-              onClick={() => handleRun("B")}
-              disabled={runningB || !audioFor("B")}
-            >
-              {runningB ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-              הרץ B
-            </Button>
-          </div>
-          {renderToggles("B")}
-        </div>
+        {(["A", "B"] as const).map(side => {
+          const running = side === "A" ? runningA : runningB;
+          const prog = side === "A" ? progressA : progressB;
+          return (
+            <div key={side} className="rounded-md border p-3 bg-background/60 space-y-2">
+              <div className="flex items-center justify-between">
+                <Badge variant={side === "A" ? "default" : "secondary"}>{side}</Badge>
+                <Button
+                  size="sm"
+                  className="h-8 gap-1"
+                  onClick={() => handleRun(side)}
+                  disabled={running || !audioFor(side)}
+                >
+                  {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                  הרץ {side}
+                </Button>
+              </div>
+              {(running || prog.pct > 0) && (
+                <div className="space-y-1">
+                  <Progress value={prog.pct} className="h-2" />
+                  <div className="flex justify-between text-[10px] text-muted-foreground">
+                    <span>{prog.stage}</span>
+                    <span>{Math.round(prog.pct)}%</span>
+                  </div>
+                </div>
+              )}
+              {renderToggles(side)}
+            </div>
+          );
+        })}
       </div>
 
       <div className="flex justify-center">
