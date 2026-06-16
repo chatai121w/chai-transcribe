@@ -139,6 +139,16 @@ serve(async (req) => {
               (err as any).noRetry = true;
               throw err;
             }
+            if (response.status === 413) {
+              const err = new Error('REQUEST_TOO_LARGE');
+              (err as any).noRetry = true;
+              throw err;
+            }
+            if (response.status === 400) {
+              const err = new Error(`BAD_REQUEST: ${errorText.slice(0, 300)}`);
+              (err as any).noRetry = true;
+              throw err;
+            }
             if (response.status >= 500) {
               throw new Error(`SERVER_ERROR_${response.status}`);
             }
@@ -193,6 +203,18 @@ serve(async (req) => {
     if (msg === 'AUTH_ERROR') {
       return new Response(JSON.stringify({ error: 'מפתח Groq שגוי או חסר.' }), {
         status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (msg === 'REQUEST_TOO_LARGE') {
+      return new Response(JSON.stringify({ error: 'קובץ האודיו גדול מדי ל-Groq. נסה להפעיל חיתוך שתיקות, להעלות קובץ קצר יותר, או להשתמש בקובץ MP3/M4A דחוס.' }), {
+        status: 413,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (msg.startsWith('BAD_REQUEST:')) {
+      return new Response(JSON.stringify({ error: 'Groq דחה את קובץ האודיו או הפורמט שלו.' }), {
+        status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
