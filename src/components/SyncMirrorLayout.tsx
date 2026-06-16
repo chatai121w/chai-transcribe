@@ -1229,6 +1229,21 @@ export const SyncMirrorLayout = ({
               </PopoverContent>
             </Popover>
 
+            {/* Precise row alignment toggle (only meaningful when rich-edit is enabled) */}
+            {enableRichEdit && (
+              <Button
+                size="sm"
+                variant={preciseAlign ? "default" : "outline"}
+                className="h-6 text-[10px] px-1.5 gap-0.5"
+                onClick={togglePreciseAlign}
+                title={preciseAlign
+                  ? "יישור שורות מדויק פעיל — שני הצדדים מתיישרים שורה-מול-שורה בכל גודל מסך. לחץ למעבר לעריכה חופשית."
+                  : "עריכה חופשית פעילה — שורות לא מובטחות זו מול זו. לחץ לחזרה ליישור מדויק."}
+              >
+                <Rows3 className="w-2.5 h-2.5" />
+                {preciseAlign ? "יישור מדויק" : "עריכה חופשית"}
+              </Button>
+            )}
             {/* Full edit button */}
             <Button
               size="sm"
