@@ -185,18 +185,34 @@ const TextEditHistoryInner = ({
                         </div>
                       </div>
                       {onRestoreVersion && version.source !== 'original' && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-xs h-7"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRestoreVersion(version.text);
-                          }}
-                        >
-                          <RotateCcw className="w-3 h-3 ml-1" />
-                          שחזר
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          {onCompareVersion && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-xs h-7"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onCompareVersion(version.id);
+                              }}
+                            >
+                              <GitCompareArrows className="w-3 h-3 ml-1" />
+                              השווה
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-xs h-7"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRestoreVersion(version.text);
+                            }}
+                          >
+                            <RotateCcw className="w-3 h-3 ml-1" />
+                            שחזר
+                          </Button>
+                        </div>
                       )}
                     </div>
 
@@ -225,105 +241,6 @@ const TextEditHistoryInner = ({
           </div>
       </ScrollArea>
 
-      {/* Compare View - Side by Side */}
-      {viewMode === 'compare' && allVersions.length >= 2 && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="shrink-0 text-xs">בסיס</Badge>
-              <Select value={effectiveLeftId} onValueChange={setLeftId}>
-                <SelectTrigger className="text-xs h-8" dir="rtl"><SelectValue /></SelectTrigger>
-                <SelectContent dir="rtl">
-                  {allVersions.map((v, i) => (
-                    <SelectItem key={v.id} value={v.id} className="text-xs">
-                      #{i + 1} {getVersionLabel(v)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="default" className="shrink-0 text-xs">חדש</Badge>
-              <Select value={effectiveRightId} onValueChange={setRightId}>
-                <SelectTrigger className="text-xs h-8" dir="rtl"><SelectValue /></SelectTrigger>
-                <SelectContent dir="rtl">
-                  {allVersions.map((v, i) => (
-                    <SelectItem key={v.id} value={v.id} className="text-xs">
-                      #{i + 1} {getVersionLabel(v)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 text-xs p-2 bg-muted/30 rounded-lg">
-            <span className="text-muted-foreground">דמיון:</span>
-            <div className="flex items-center gap-1.5">
-              <div className="w-24 h-2 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${stats.similarity}%`,
-                    backgroundColor: stats.similarity > 80 ? 'hsl(var(--primary))' : stats.similarity > 50 ? 'hsl(40 90% 50%)' : 'hsl(var(--destructive))'
-                  }}
-                />
-              </div>
-              <span className="font-bold">{stats.similarity}%</span>
-            </div>
-            <span className="text-green-600 dark:text-green-400">+{stats.addedWords} מילים</span>
-            <span className="text-destructive">-{stats.removedWords} מילים</span>
-            {onRestoreVersion && rightVersion && (
-              <div className="flex-1 flex justify-end">
-                <Button size="sm" className="h-7 text-xs" onClick={() => onRestoreVersion(rightVersion.text)}>
-                  <RotateCcw className="w-3 h-3 ml-1" />
-                  שחזר גרסה זו
-                </Button>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card className="overflow-hidden">
-              <div className="px-4 py-2 border-b bg-destructive/5 flex items-center justify-between">
-                <span className="text-sm font-medium">{leftVersion ? getVersionLabel(leftVersion) : 'בסיס'}</span>
-                <span className="text-xs text-muted-foreground">{leftVersion?.text.length || 0} תווים</span>
-              </div>
-              <ScrollArea className="h-[500px] p-4">
-                <pre className="whitespace-pre-wrap text-right" dir="rtl">
-                  {renderSideBySide('left')}
-                </pre>
-              </ScrollArea>
-            </Card>
-            <Card className="overflow-hidden">
-              <div className="px-4 py-2 border-b bg-green-500/5 flex items-center justify-between">
-                <span className="text-sm font-medium">{rightVersion ? getVersionLabel(rightVersion) : 'חדש'}</span>
-                <span className="text-xs text-muted-foreground">{rightVersion?.text.length || 0} תווים</span>
-              </div>
-              <ScrollArea className="h-[500px] p-4">
-                <pre className="whitespace-pre-wrap text-right" dir="rtl">
-                  {renderSideBySide('right')}
-                </pre>
-              </ScrollArea>
-            </Card>
-          </div>
-
-          <div className="flex gap-4 justify-end text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-3 h-3 rounded bg-destructive/20 border border-destructive/30" /> נמחק
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-3 h-3 rounded bg-green-500/20 border border-green-500/30" /> נוסף
-            </span>
-          </div>
-        </div>
-      )}
-
-      {viewMode === 'compare' && allVersions.length < 2 && (
-        <div className="text-center py-12 text-muted-foreground">
-          יש צורך בלפחות שתי גרסאות כדי להשוות
-        </div>
-      )}
     </Card>
   );
 };
