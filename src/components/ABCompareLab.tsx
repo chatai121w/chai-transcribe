@@ -180,13 +180,14 @@ function normalizePeak(buffer: AudioBuffer, targetDb = -1): AudioBuffer {
   return buffer;
 }
 
-async function preprocessAudio(blob: Blob, t: TogglesState): Promise<{ blob: Blob; name: string }> {
-  if (!t.vad_trim && !t.agc_normalize) return { blob, name: "audio.bin" };
+async function preprocessAudio(blob: Blob, name: string, t: TogglesState): Promise<{ blob: Blob; name: string }> {
+  if (!t.vad_trim && !t.agc_normalize) return { blob, name };
   const buf = await decodeAudio(blob);
   let out = buf;
   if (t.vad_trim) out = trimSilence(out);
   if (t.agc_normalize) out = normalizePeak(out);
-  return { blob: encodeWav(out), name: "preprocessed.wav" };
+  const base = name.replace(/\.[^.]+$/, "") || "audio";
+  return { blob: encodeWav(out), name: `${base}.wav` };
 }
 
 // ── Text post-processing ────────────────────────────────────────
@@ -301,7 +302,7 @@ export function ABCompareLab({ onResult, onAudio }: Props) {
       onAudio(side, audio.blob, audio.name);
 
       // 2) Preprocess
-      const pre = await preprocessAudio(audio.blob, toggles);
+      const pre = await preprocessAudio(audio.blob, audio.name, toggles);
 
       // 3) Transcribe
       const raw = await transcribe(pre.blob, pre.name, engine);
