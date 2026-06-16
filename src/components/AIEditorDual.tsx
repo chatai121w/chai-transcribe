@@ -2120,6 +2120,30 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
               onClick={() => customActions.setViewMode('masonry')}
               title="תצוגת אבנים"
             ><AlignJustify className="w-3.5 h-3.5" /></Button>
+            <Button
+              variant={customActions.viewMode === 'columns2' ? 'default' : 'ghost'}
+              size="sm" className="h-7 w-7 p-0"
+              onClick={() => customActions.setViewMode('columns2')}
+              title="2 עמודות (רוחב מלא)"
+            ><Columns2 className="w-3.5 h-3.5" /></Button>
+            <Button
+              variant={customActions.viewMode === 'columns3' ? 'default' : 'ghost'}
+              size="sm" className="h-7 w-7 p-0"
+              onClick={() => customActions.setViewMode('columns3')}
+              title="3 עמודות (רוחב מלא)"
+            ><Columns3 className="w-3.5 h-3.5" /></Button>
+            <Button
+              variant={customActions.viewMode === 'columns4' ? 'default' : 'ghost'}
+              size="sm" className="h-7 w-7 p-0"
+              onClick={() => customActions.setViewMode('columns4')}
+              title="4 עמודות (רוחב מלא)"
+            ><Columns4 className="w-3.5 h-3.5" /></Button>
+            <Button
+              variant="ghost"
+              size="sm" className="h-7 w-7 p-0"
+              onClick={() => customActions.cycleViewMode()}
+              title="החלף תצוגה"
+            ><Repeat className="w-3.5 h-3.5" /></Button>
           </div>
           <div className="flex items-center gap-1">
             <Button
