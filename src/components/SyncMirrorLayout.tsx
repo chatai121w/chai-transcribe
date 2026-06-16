@@ -996,13 +996,47 @@ export const SyncMirrorLayout = ({
                 size="sm"
                 variant="default"
                 className="h-6 text-[10px] px-2 gap-0.5"
-                onClick={onSaveReplace}
-                title="דורס ושומר את המקור"
+                onClick={handleSaveLocalAndCloud}
+                title="שמור — מקומי + ענן יחד"
               >
                 <Save className="w-2.5 h-2.5" />
                 שמור
               </Button>
             )}
+
+            {/* Baseline controls — restore / compare / set-new */}
+            <div className="inline-flex items-center gap-0.5 ms-0.5 ps-1 border-s border-border/40">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 w-6 p-0"
+                onClick={restoreToBaseline}
+                disabled={!isModifiedFromBaseline}
+                title={hasBaseline ? (isModifiedFromBaseline ? 'החזר לגרסת בסיס' : 'הטקסט זהה לבסיס') : 'אין בסיס שמור'}
+              >
+                <History className="w-3 h-3" />
+              </Button>
+              <Button
+                size="sm"
+                variant={compareMode ? 'default' : 'outline'}
+                className="h-6 w-6 p-0"
+                onClick={compareMode ? toggleCompareMode : compareToBaseline}
+                disabled={!hasBaseline}
+                title={compareMode ? 'סיים השוואה' : 'השווה לגרסת בסיס'}
+              >
+                <GitCompare className="w-3 h-3" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 w-6 p-0"
+                onClick={setNewBaseline}
+                title="קבע את הטקסט הנוכחי כבסיס חדש"
+              >
+                <Bookmark className="w-3 h-3" />
+              </Button>
+            </div>
+
             {onDuplicateSave && (
               <Button
                 size="sm"
