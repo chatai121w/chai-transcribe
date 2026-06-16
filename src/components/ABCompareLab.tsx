@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Upload, FlaskConical, Play, Loader2, Trash2 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -277,6 +278,8 @@ export function ABCompareLab({ onResult, onAudio }: Props) {
   const [togglesB, setTogglesB] = useState<TogglesState>(DEFAULT_B);
   const [runningA, setRunningA] = useState(false);
   const [runningB, setRunningB] = useState(false);
+  const [progressA, setProgressA] = useState<{ pct: number; stage: string }>({ pct: 0, stage: "" });
+  const [progressB, setProgressB] = useState<{ pct: number; stage: string }>({ pct: 0, stage: "" });
   const sharedInputRef = useRef<HTMLInputElement>(null);
   const aInputRef = useRef<HTMLInputElement>(null);
   const bInputRef = useRef<HTMLInputElement>(null);
@@ -296,42 +299,69 @@ export function ABCompareLab({ onResult, onAudio }: Props) {
     }
     const toggles = side === "A" ? togglesA : togglesB;
     const setRunning = side === "A" ? setRunningA : setRunningB;
-    setRunning(true);
-    try {
-      // 1) Push audio into the side player so user can listen
-      onAudio(side, audio.blob, audio.name);
+    const setProgress = side === "A" ? setProgressA : setProgressB;
+    const updateProgress = (pct: number, stage: string) => setProgress({ pct, stage });
 
-      // 2) Preprocess
+    setRunning(true);
+    updateProgress(2, "מתחיל…");
+
+    // Simulated progress ticker during the long transcription step
+    let tickerStop = false;
+    const startTicker = (from: number, to: number, durationMs: number, stage: string) => {
+      const startedAt = Date.now();
+      const tick = () => {
+        if (tickerStop) return;
+        const elapsed = Date.now() - startedAt;
+        const ratio = Math.min(1, elapsed / durationMs);
+        const pct = from + (to - from) * ratio;
+        setProgress({ pct, stage });
+        if (ratio < 1) setTimeout(tick, 250);
+      };
+      tick();
+    };
+
+    try {
+      onAudio(side, audio.blob, audio.name);
+      updateProgress(8, "מעבד אודיו…");
       const pre = await preprocessAudio(audio.blob, audio.name, toggles);
 
-      // 3) Transcribe
+      updateProgress(20, "שולח לתמלול…");
+      // Estimate transcription duration ~ 1s per 100KB, min 4s, max 120s
+      const estMs = Math.min(120000, Math.max(4000, pre.blob.size / 100));
+      startTicker(20, 75, estMs, "מתמלל…");
       const raw = await transcribe(pre.blob, pre.name, engine);
+      tickerStop = true;
 
-      // 4) Post-process
+      updateProgress(80, toggles.ai_polish ? "תיקון AI…" : "מסיים…");
       const finalText = await postProcessText(raw, toggles);
 
-      // 5) Build label from active toggles
+      updateProgress(95, "מציג תוצאה…");
       const activeKeys = TOGGLES.filter(t => toggles[t.key]).map(t => t.label);
       const label = activeKeys.length === 0
         ? `${engine} · ללא השבחות`
         : `${engine} · ${activeKeys.join(" + ")}`;
 
       onResult(side, label, finalText);
+      updateProgress(100, "הסתיים ✓");
       toast({ title: `הסתיים — צד ${side}`, description: `${finalText.length} תווים` });
     } catch (e) {
+      tickerStop = true;
+      updateProgress(0, "");
       toast({
         title: `שגיאה — צד ${side}`,
         description: e instanceof Error ? e.message : String(e),
         variant: "destructive",
       });
     } finally {
+      tickerStop = true;
       setRunning(false);
+      // Clear bar after a short delay so user sees the "done" state
+      setTimeout(() => setProgress({ pct: 0, stage: "" }), 2500);
     }
   };
 
   const handleRunBoth = async () => {
-    await handleRun("A");
-    await handleRun("B");
+    await Promise.all([handleRun("A"), handleRun("B")]);
   };
 
   const FilePicker = ({
@@ -476,38 +506,37 @@ export function ABCompareLab({ onResult, onAudio }: Props) {
         )}
       </div>
 
-      {/* Toggles per side */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div className="rounded-md border p-3 bg-background/60">
-          <div className="flex items-center justify-between mb-2">
-            <Badge variant="default">A</Badge>
-            <Button
-              size="sm"
-              className="h-8 gap-1"
-              onClick={() => handleRun("A")}
-              disabled={runningA || !audioFor("A")}
-            >
-              {runningA ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-              הרץ A
-            </Button>
-          </div>
-          {renderToggles("A")}
-        </div>
-        <div className="rounded-md border p-3 bg-background/60">
-          <div className="flex items-center justify-between mb-2">
-            <Badge variant="secondary">B</Badge>
-            <Button
-              size="sm"
-              className="h-8 gap-1"
-              onClick={() => handleRun("B")}
-              disabled={runningB || !audioFor("B")}
-            >
-              {runningB ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-              הרץ B
-            </Button>
-          </div>
-          {renderToggles("B")}
-        </div>
+        {(["A", "B"] as const).map(side => {
+          const running = side === "A" ? runningA : runningB;
+          const prog = side === "A" ? progressA : progressB;
+          return (
+            <div key={side} className="rounded-md border p-3 bg-background/60 space-y-2">
+              <div className="flex items-center justify-between">
+                <Badge variant={side === "A" ? "default" : "secondary"}>{side}</Badge>
+                <Button
+                  size="sm"
+                  className="h-8 gap-1"
+                  onClick={() => handleRun(side)}
+                  disabled={running || !audioFor(side)}
+                >
+                  {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                  הרץ {side}
+                </Button>
+              </div>
+              {(running || prog.pct > 0) && (
+                <div className="space-y-1">
+                  <Progress value={prog.pct} className="h-2" />
+                  <div className="flex justify-between text-[10px] text-muted-foreground">
+                    <span>{prog.stage}</span>
+                    <span>{Math.round(prog.pct)}%</span>
+                  </div>
+                </div>
+              )}
+              {renderToggles(side)}
+            </div>
+          );
+        })}
       </div>
 
       <div className="flex justify-center">
