@@ -20,7 +20,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { BookMarked, Plus, Trash2, Play, Save, Search, Loader2, Cpu } from "lucide-react";
+import { BookMarked, Plus, Trash2, Play, Save, Search, Loader2, Cpu, LayoutGrid, List, GraduationCap, Briefcase, Newspaper, BookOpen, Stethoscope, Sparkles, Star } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
 import { useOllama, isOllamaModel, getOllamaModelName } from "@/hooks/useOllama";
