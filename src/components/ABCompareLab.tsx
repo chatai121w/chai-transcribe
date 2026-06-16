@@ -302,7 +302,7 @@ export function ABCompareLab({ onResult, onAudio }: Props) {
       onAudio(side, audio.blob, audio.name);
 
       // 2) Preprocess
-      const pre = await preprocessAudio(audio.blob, toggles);
+      const pre = await preprocessAudio(audio.blob, audio.name, toggles);
 
       // 3) Transcribe
       const raw = await transcribe(pre.blob, pre.name, engine);
