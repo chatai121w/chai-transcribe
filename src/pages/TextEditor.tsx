@@ -1525,6 +1525,8 @@ const TextEditor = () => {
                 fontFamily={fontFamily}
                 textColor={textColor}
                 lineHeight={lineHeight}
+                preselectedLeftId={comparePreselect?.leftId}
+                preselectedRightId={comparePreselect?.rightId}
                 onApplyVersion={(newText) => {
                   setText(newText);
                 }}
