@@ -161,7 +161,8 @@ export const SyncMirrorLayout = ({
     let raf = 0;
     const measure = () => {
       const editable = wrapper.querySelector('[contenteditable="true"]') as HTMLElement | null;
-      const target = effectiveRichEdit ? editable : leftRowsRef.current;
+      const firstPreciseLine = leftRowsRef.current?.querySelector<HTMLElement>('[data-line="0"]') ?? null;
+      const target = effectiveRichEdit ? editable : firstPreciseLine;
       const anchor = target ?? wrapper;
       const diff = Math.max(0, Math.round(anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top));
       setRightTopOffset(diff);
