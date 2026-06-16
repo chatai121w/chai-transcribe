@@ -70,14 +70,13 @@ const navItems: NavItem[] = [
   { label: "עורך טקסט", icon: FileText, path: "/text-editor" },
   { label: "בנצ'מארק", icon: BarChart3, path: "/benchmark" },
   { label: "זיהוי דוברים", icon: Users, path: "/diarization" },
-  { label: "השוואת מנועים", icon: GitCompareArrows, path: "/diarization/compare" },
+  { label: "השוואות", icon: GitCompareArrows, path: "/compare" },
   { label: "ממיר ל-MP3", icon: Music, path: "/video-to-mp3" },
   { label: "הרמוניקיה", icon: AudioLines, path: "/harmonika" },
   { label: "התקנת שרת", icon: Server, path: "/setup" },
   { label: "לוח בקרה", icon: Bot, path: "/system-dashboard" },
   { label: "לשון הקודש", icon: ScrollText, path: "/lashon-kodesh" },
   { label: "כללי לשון הקודש", icon: ScrollText, path: "/loshon-kodesh-rules" },
-  { label: "השוואת תמלולים", icon: GitCompareArrows, path: "/compare-report" },
   { label: "הגדרות", icon: Settings, path: "/settings" },
 ];
 
