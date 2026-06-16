@@ -228,7 +228,6 @@ async function postProcessText(text: string, t: TogglesState): Promise<string> {
 
 // ── Transcription call ──────────────────────────────────────────
 
-import { getApiKey } from "@/lib/keyCrypto";
 
 function getApiKeyFor(engine: "groq" | "openai"): string {
   const storageKey = engine === "groq" ? "groq_api_key" : "openai_api_key";
