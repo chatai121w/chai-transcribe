@@ -432,10 +432,19 @@ const TextEditor = () => {
       }
     }
 
-    // Track transcript ID for cloud saves
+    // Track transcript ID for cloud saves — persist it so re-entering the editor restores compare/AI versions.
     if (location.state?.transcriptId) {
       transcriptIdRef.current = location.state.transcriptId;
       setTranscriptId(location.state.transcriptId);
+      try { localStorage.setItem('current_transcript_id', location.state.transcriptId); } catch { /* noop */ }
+    } else {
+      try {
+        const saved = localStorage.getItem('current_transcript_id');
+        if (saved) {
+          transcriptIdRef.current = saved;
+          setTranscriptId(saved);
+        }
+      } catch { /* noop */ }
     }
 
     // Load audio URL from navigation state or resolve from Supabase Storage
@@ -566,6 +575,7 @@ const TextEditor = () => {
       if (created?.id) {
         transcriptIdRef.current = created.id;
         setTranscriptId(created.id);
+        try { localStorage.setItem('current_transcript_id', created.id); } catch { /* noop */ }
         toast({ title: 'התמלול נשמר בענן ☁️' });
         return created.id;
       }
