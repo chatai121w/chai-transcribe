@@ -56,6 +56,13 @@ interface SyncMirrorLayoutProps {
     mode: 'quick' | 'advanced';
     note?: string;
   }) => Promise<boolean | void> | boolean | void;
+  /** When true, the LEFT column renders the full text editor (TextMarkingOverlay + RichTextEditor)
+   *  instead of the per-word click/right-click view. */
+  enableRichEdit?: boolean;
+  /** Fired when RichTextEditor auto-corrects a word (for logging/learning). */
+  onWordCorrected?: (original: string, corrected: string) => void;
+  /** Optional column style passed to RichTextEditor. */
+  richColumnStyle?: React.CSSProperties;
 }
 
 function normalizeWord(w: string) {
