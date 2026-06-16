@@ -296,10 +296,13 @@ export const SyncMirrorLayout = ({
 
   // ── Auto-scroll to active line ──────────────────────────────────────────────
   useEffect(() => {
-    if (activeLineIdx < 0 || !syncEnabled) return;
-    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-line="${activeLineIdx}"]`);
-    el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [activeLineIdx, syncEnabled]);
+    if (!syncEnabled) return;
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const wordEl = activeIdx >= 0 ? scroller.querySelector<HTMLElement>(`[data-word-idx="${activeIdx}"]`) : null;
+    const lineEl = activeLineIdx >= 0 ? scroller.querySelector<HTMLElement>(`[data-line="${activeLineIdx}"]`) : null;
+    (wordEl ?? lineEl)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [activeIdx, activeLineIdx, syncEnabled]);
 
   // ── Search highlighting ─────────────────────────────────────────────────────
   const searchMatchList = useMemo(() => {
