@@ -6,6 +6,8 @@ import {
   applyOverridesToDom,
   initDesignOverrides,
 } from '@/lib/designOverrides';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Ctx {
   enabled: boolean;
@@ -21,6 +23,7 @@ const DesignModeContext = createContext<Ctx | null>(null);
 export function DesignModeProvider({ children }: { children: React.ReactNode }) {
   const [enabled, setEnabled] = useState(false);
   const [overrides, setOverrides] = useState<DesignOverride[]>([]);
+  const { user } = useAuth();
 
   useEffect(() => {
     initDesignOverrides();
@@ -31,6 +34,29 @@ export function DesignModeProvider({ children }: { children: React.ReactNode }) 
       setEnabled(true);
     }
   }, []);
+
+  // Pull cloud-saved global overrides once user is known. Last-write-wins by createdAt.
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      try {
+        const { data, error } = await (supabase.from('user_preferences') as any)
+          .select('design_overrides')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (error || !data) return;
+        const cloud = Array.isArray(data.design_overrides) ? data.design_overrides as DesignOverride[] : [];
+        if (cloud.length === 0) return;
+        const local = loadOverrides();
+        const cloudMax = Math.max(0, ...cloud.map(o => o.createdAt || 0));
+        const localMax = Math.max(0, ...local.map(o => o.createdAt || 0));
+        if (cloudMax > localMax) {
+          saveOverrides(cloud);
+          setOverrides(cloud);
+        }
+      } catch (e) { console.warn('[design-mode] cloud fetch failed', e); }
+    })();
+  }, [user?.id]);
 
   // Toggle body class for cursor + disable interactions
   useEffect(() => {
