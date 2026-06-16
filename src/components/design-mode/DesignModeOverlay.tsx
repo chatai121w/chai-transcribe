@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { X, Undo2, Eye, EyeOff, Trash2, MousePointerClick, Minimize2, Maximize2, Pipette, Plus } from 'lucide-react';
+import { X, Undo2, Eye, EyeOff, Trash2, MousePointerClick, Minimize2, Maximize2, Pipette, Plus, Hand, GripVertical } from 'lucide-react';
 import { DesignModeSaveMenu } from './DesignModeSaveMenu';
 
 interface PendingChange {
