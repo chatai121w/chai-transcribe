@@ -1578,26 +1578,13 @@ const TextEditor = () => {
                 audioFilePath={(location.state as any)?.audioFilePath || null}
                 onOpenInEditor={(t) => setText(t)}
                 onCreateCloudTranscript={ensureCloudTranscript}
-                onSendToCompare={(versionId) => {
-                  // Find an "original" baseline from merged versions
-                  const original =
-                    compareVersions.find(v => v.source === 'original') ||
-                    compareVersions[0];
-                  const target = compareVersions.find(v => v.id === versionId);
-                  if (!original || !target) {
-                    toast({ title: 'אין מספיק גרסאות להשוואה', variant: 'destructive' });
-                    return;
-                  }
-                  setComparePreselect({ leftId: original.id, rightId: target.id });
-                  setActiveTab('compare');
-                  toast({ title: 'נשלח להשוואה A/B ↔️' });
-                }}
+                onSendToCompare={sendVersionToCompare}
               />
             </LazyErrorBoundary>
           </TabsContent>
 
           <TabsContent value="compare" className="flex flex-col gap-3">
-            <Tabs defaultValue="versions" dir="rtl">
+            <Tabs value={compareSubTab} onValueChange={setCompareSubTab} dir="rtl">
               <TabsList className="grid w-full grid-cols-2 max-w-md">
                 <TabsTrigger value="versions" className="text-xs">גרסאות (Diff)</TabsTrigger>
                 <TabsTrigger value="engines" className="text-xs">מנועי AI (A/B)</TabsTrigger>
@@ -1745,6 +1732,7 @@ const TextEditor = () => {
                 cloudVersions={cloudVersions}
                 cloudLoading={cloudVersionsLoading}
                 onRestoreVersion={handleRestoreVersion}
+                onCompareVersion={sendVersionToCompare}
               /></LazyErrorBoundary>
             </CollapsibleWidget>
           </TabsContent>
