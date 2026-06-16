@@ -796,14 +796,18 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
               <div
                 dir="rtl"
                 className={cn(
-                  "rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-4 py-3 text-right",
-                  "overflow-auto prose prose-sm max-w-none",
+                  "rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-4 py-3",
+                  "overflow-auto max-w-none",
                   isFullscreen ? "min-h-[calc(100vh-200px)]" : "min-h-[500px]"
                 )}
                 style={{
                   fontFamily: 'inherit',
                   fontSize: 'inherit',
-                  lineHeight: '1.8',
+                  lineHeight: 'inherit',
+                  letterSpacing: 'inherit',
+                  wordSpacing: 'inherit',
+                  fontWeight: 'inherit',
+                  textAlign: 'right',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                   ...columnStyle,
