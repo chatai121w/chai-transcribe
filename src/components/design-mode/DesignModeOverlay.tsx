@@ -243,6 +243,11 @@ export function DesignModeOverlay() {
       setSelectedEl(null);
       return;
     }
+    if (clickThrough) {
+      // Free-navigation mode: keep toolbar visible but stop intercepting clicks/hover.
+      setHoverRect(null);
+      return;
+    }
 
     const resolveElementTarget = (target: EventTarget | null): Element | null => {
       if (!target) return null;
