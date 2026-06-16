@@ -2251,7 +2251,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
                           variant={lastAction === action.id ? "default" : "secondary"}
                           size="sm"
                           disabled={isLoading || noText}
-                          className="text-xs"
+                          className={`text-xs ${(customActions.viewMode === 'columns2' || customActions.viewMode === 'columns3' || customActions.viewMode === 'columns4') ? 'w-full justify-start' : ''}`}
                           onClick={() => selectAction(action.id as EditAction)}
                         >
                           <IconComp className="w-3 h-3 ml-1" />
