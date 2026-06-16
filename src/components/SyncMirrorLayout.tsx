@@ -151,11 +151,12 @@ export const SyncMirrorLayout = ({
     let raf = 0;
     const measure = () => {
       const editable = wrapper.querySelector('[contenteditable="true"]') as HTMLElement | null;
-      const firstPreciseLine = leftRowsRef.current?.querySelector<HTMLElement>('[data-line="0"]') ?? null;
-      const target = effectiveRichEdit ? editable : firstPreciseLine;
-      const anchor = target ?? wrapper;
-      const diff = Math.max(0, Math.round(anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop));
-      setRightTopOffset(diff);
+      const anchor = editable ?? wrapper;
+      const leftTop = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      const rightEl = rightEditableRef.current;
+      if (!rightEl) { setRightTopOffset(Math.max(0, Math.round(leftTop))); return; }
+      const rightTop = rightEl.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      setRightTopOffset(prev => Math.max(0, Math.round(prev + (leftTop - rightTop))));
     };
     const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
     schedule();
@@ -163,9 +164,9 @@ export const SyncMirrorLayout = ({
     ro.observe(wrapper);
     ro.observe(scroller);
     window.addEventListener('resize', schedule);
-    const t = window.setInterval(schedule, 800); // catch async toolbar/spell changes
+    const t = window.setInterval(schedule, 800);
     return () => { ro.disconnect(); window.removeEventListener('resize', schedule); window.clearInterval(t); cancelAnimationFrame(raf); };
-  }, [enableRichEdit, effectiveRichEdit, fullEditMode, isMarkingActive, localFontSize, localFontFamily, localLineHeight, preciseAlign]);
+  }, [enableRichEdit, fullEditMode, isMarkingActive, localFontSize, localFontFamily, localLineHeight, text]);
 
 
   // ── User timing anchors ────────────────────────────────────────────────────
