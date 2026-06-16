@@ -1,14 +1,11 @@
-import { useState, useMemo, memo } from "react";
+import { useMemo, memo } from "react";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { History, Clock, Type, ArrowRightLeft, Eye, RotateCcw, Cloud, HardDrive } from "lucide-react";
+import { History, Clock, Type, Eye, RotateCcw, Cloud, HardDrive, GitCompareArrows } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { he } from "date-fns/locale";
-import DiffMatchPatch from "diff-match-patch";
 import type { CloudVersion } from "@/hooks/useCloudVersions";
 
 export interface TextVersion {
@@ -60,6 +57,7 @@ interface TextEditHistoryProps {
   cloudVersions?: CloudVersion[];
   cloudLoading?: boolean;
   onRestoreVersion?: (text: string) => void;
+  onCompareVersion?: (id: string) => void;
 }
 
 function mergeVersions(local: TextVersion[], cloud: CloudVersion[]): DisplayVersion[] {
