@@ -330,89 +330,180 @@ export const PromptLibrary = ({ text, onTextChange }: PromptLibraryProps) => {
         />
       </div>
 
-      <ScrollArea className="h-[500px]">
-        <Accordion type="multiple" defaultValue={['אקדמי', 'עסקי']} className="space-y-1">
-          {/* Saved custom prompts */}
-          {Object.keys(savedByCategory).length > 0 && Object.entries(savedByCategory).map(([cat, prompts]) => {
-            const filtered = filterPrompts(prompts);
-            if (filtered.length === 0) return null;
-            return (
-              <AccordionItem key={`saved-${cat}`} value={`saved-${cat}`}>
-                <AccordionTrigger className="text-sm font-semibold">
-                  {cat}
-                  <Badge variant="outline" className="mr-2 text-xs">{filtered.length} שלך</Badge>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="space-y-2">
-                    {filtered.map((p) => (
-                      <div key={p.id} className="flex items-start gap-2 p-2 rounded border bg-primary/5">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium">{p.label}</p>
-                          <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{p.prompt}</p>
+      <ScrollArea className="h-[500px] pe-2">
+        {viewMode === 'grid' ? (
+          <div className="space-y-5">
+            {/* Saved custom prompts */}
+            {Object.keys(savedByCategory).length > 0 && Object.entries(savedByCategory).map(([cat, prompts]) => {
+              const filtered = filterPrompts(prompts);
+              if (filtered.length === 0) return null;
+              return (
+                <div key={`saved-grid-${cat}`} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs gap-1">
+                      <Star className="w-3 h-3" /> {cat}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">{filtered.length} שלך</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {filtered.map(p => (
+                      <div
+                        key={p.id}
+                        className="group relative flex items-start gap-2 p-2.5 rounded-lg border bg-primary/5 hover:bg-primary/10 transition-colors text-right"
+                      >
+                        <button
+                          onClick={() => handleRunPrompt(p.prompt, p.label)}
+                          disabled={isProcessing || !text.trim()}
+                          className="absolute inset-0 rounded-lg disabled:cursor-not-allowed disabled:opacity-60"
+                          title="הפעל פרומפט"
+                          aria-label={`הפעל ${p.label}`}
+                        />
+                        <div className="mt-0.5 text-primary shrink-0 relative">
+                          {activePrompt === p.label
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Star className="w-3.5 h-3.5" />}
                         </div>
-                        <div className="flex gap-1 shrink-0">
+                        <div className="min-w-0 flex-1 relative">
+                          <p className="font-medium text-sm truncate">{p.label}</p>
+                          <p className="text-[11px] text-muted-foreground line-clamp-2 leading-snug">{p.prompt}</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeletePrompt(p.id); }}
+                          className="relative opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive shrink-0"
+                          title="מחק"
+                          aria-label="מחק פרומפט"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Preset categories */}
+            {PRESET_CATEGORIES.map(({ category, prompts }) => {
+              const filtered = filterPrompts(prompts);
+              if (filtered.length === 0) return null;
+              const icon = CATEGORY_ICONS[category] || <BookMarked className="w-3.5 h-3.5" />;
+              return (
+                <div key={`grid-${category}`} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs gap-1">
+                      {icon} {category}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">{filtered.length}</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {filtered.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleRunPrompt(p.prompt, p.label)}
+                        disabled={isProcessing || !text.trim()}
+                        className="flex items-start gap-2 p-2.5 rounded-lg border bg-card hover:bg-accent/40 transition-colors text-right disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={p.prompt}
+                      >
+                        <div className="mt-0.5 text-primary shrink-0">
+                          {activePrompt === p.label
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : icon}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-sm truncate">{p.label}</p>
+                          <p className="text-[11px] text-muted-foreground line-clamp-2 leading-snug">{p.prompt}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <Accordion type="multiple" defaultValue={['אקדמי', 'עסקי']} className="space-y-1">
+            {/* Saved custom prompts */}
+            {Object.keys(savedByCategory).length > 0 && Object.entries(savedByCategory).map(([cat, prompts]) => {
+              const filtered = filterPrompts(prompts);
+              if (filtered.length === 0) return null;
+              return (
+                <AccordionItem key={`saved-${cat}`} value={`saved-${cat}`}>
+                  <AccordionTrigger className="text-sm font-semibold">
+                    {cat}
+                    <Badge variant="outline" className="mr-2 text-xs">{filtered.length} שלך</Badge>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-2">
+                      {filtered.map((p) => (
+                        <div key={p.id} className="flex items-start gap-2 p-2 rounded border bg-primary/5">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">{p.label}</p>
+                            <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{p.prompt}</p>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRunPrompt(p.prompt, p.label)}
+                              disabled={isProcessing || !text.trim()}
+                              title="הפעל"
+                            >
+                              {activePrompt === p.label ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeletePrompt(p.id)}
+                              title="מחק"
+                            >
+                              <Trash2 className="w-3 h-3 text-destructive" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              );
+            })}
+
+            {/* Preset categories */}
+            {PRESET_CATEGORIES.map(({ category, prompts }) => {
+              const filtered = filterPrompts(prompts);
+              if (filtered.length === 0) return null;
+              return (
+                <AccordionItem key={category} value={category}>
+                  <AccordionTrigger className="text-sm font-semibold">
+                    {category}
+                    <Badge variant="secondary" className="mr-2 text-xs">{filtered.length}</Badge>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-2">
+                      {filtered.map((p) => (
+                        <div key={p.id} className="flex items-start gap-2 p-2 rounded border hover:bg-accent/10 transition-colors">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">{p.label}</p>
+                            <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{p.prompt}</p>
+                          </div>
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleRunPrompt(p.prompt, p.label)}
                             disabled={isProcessing || !text.trim()}
                             title="הפעל"
+                            className="shrink-0"
                           >
                             {activePrompt === p.label ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeletePrompt(p.id)}
-                            title="מחק"
-                          >
-                            <Trash2 className="w-3 h-3 text-destructive" />
-                          </Button>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            );
-          })}
-
-          {/* Preset categories */}
-          {PRESET_CATEGORIES.map(({ category, prompts }) => {
-            const filtered = filterPrompts(prompts);
-            if (filtered.length === 0) return null;
-            return (
-              <AccordionItem key={category} value={category}>
-                <AccordionTrigger className="text-sm font-semibold">
-                  {category}
-                  <Badge variant="secondary" className="mr-2 text-xs">{filtered.length}</Badge>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="space-y-2">
-                    {filtered.map((p) => (
-                      <div key={p.id} className="flex items-start gap-2 p-2 rounded border hover:bg-accent/10 transition-colors">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium">{p.label}</p>
-                          <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{p.prompt}</p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRunPrompt(p.prompt, p.label)}
-                          disabled={isProcessing || !text.trim()}
-                          title="הפעל"
-                          className="shrink-0"
-                        >
-                          {activePrompt === p.label ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            );
-          })}
-        </Accordion>
+                      ))}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              );
+            })}
+          </Accordion>
+        )}
       </ScrollArea>
 
       {!text.trim() && (
