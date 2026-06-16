@@ -204,6 +204,7 @@ export const AdvancedDiffView = ({
 
     const left = leftVersion.text;
     const right = rightVersion.text;
+    setDiffs([]);
     setAlignedRows(buildFallbackRows(left, right));
 
     Promise.all([
