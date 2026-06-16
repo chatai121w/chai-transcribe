@@ -153,7 +153,7 @@ export const SyncMirrorLayout = ({
   // Measure left rich-edit column's "above content" zone so the right
   // (read-only) column can start its first line at the exact same baseline.
   useEffect(() => {
-    if (!enableRichEdit) { setRightTopOffset(0); return; }
+    if (!effectiveRichEdit) { setRightTopOffset(0); return; }
     const wrapper = leftRichRef.current;
     if (!wrapper) return;
     let raf = 0;
@@ -171,7 +171,7 @@ export const SyncMirrorLayout = ({
     window.addEventListener('resize', schedule);
     const t = window.setInterval(schedule, 800); // catch async toolbar/spell changes
     return () => { ro.disconnect(); window.removeEventListener('resize', schedule); window.clearInterval(t); cancelAnimationFrame(raf); };
-  }, [enableRichEdit, isMarkingActive, localFontSize, localFontFamily, localLineHeight]);
+  }, [effectiveRichEdit, isMarkingActive, localFontSize, localFontFamily, localLineHeight]);
 
 
   // ── User timing anchors ────────────────────────────────────────────────────
