@@ -18,6 +18,8 @@ interface AdvancedDiffViewProps {
   textColor?: string;
   lineHeight?: number;
   onApplyVersion?: (text: string) => void;
+  preselectedLeftId?: string;
+  preselectedRightId?: string;
 }
 
 type VersionFilter = "all" | "ai" | "manual" | "original" | "cloud" | "local";
