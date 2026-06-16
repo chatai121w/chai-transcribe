@@ -217,6 +217,9 @@ export const useCloudVersions = (transcriptId: string | null) => {
       }
 
       debugLog.info('Versions', `Saved version #${nextNumber} (${source})`);
+      try {
+        window.dispatchEvent(new CustomEvent('ai-version-saved', { detail: { transcriptId } }));
+      } catch { /* noop */ }
       return cloudVersion;
     } catch (err) {
       debugLog.error('Versions', 'Error saving version to cloud', err instanceof Error ? err.message : String(err));
