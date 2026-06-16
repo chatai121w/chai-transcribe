@@ -1,4 +1,5 @@
 import { useState, useMemo, memo, useEffect, useRef } from "react";
+import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
