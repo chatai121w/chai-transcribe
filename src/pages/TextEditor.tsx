@@ -1637,6 +1637,7 @@ const TextEditor = () => {
                     onApplyVersion={(newText) => {
                       setText(newText);
                     }}
+                    onSendToAiEditor={sendVersionToAiEditor}
                   /></LazyErrorBoundary>
                 ) : (
                   <div className="text-center py-6 text-muted-foreground text-sm">
