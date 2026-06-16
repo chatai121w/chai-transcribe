@@ -551,7 +551,7 @@ const TextEditor = () => {
         let id = transcriptIdRef.current || transcriptId;
         if (!id) id = await ensureCloudTranscript();
         if (id) {
-          await saveCloudVersion(newText, source, customPrompt || null, sourceLabels[source] || source);
+          await saveCloudVersion(newText, source, customPrompt || null, sourceLabels[source] || source, { transcriptId: id });
         }
       } catch (e) {
         console.error('[addVersion] persist failed', e);
@@ -590,7 +590,7 @@ const TextEditor = () => {
     let id = transcriptId;
     if (!id) id = await ensureCloudTranscript();
     if (id) {
-      saveCloudVersion(text, source, engineLabel, actionLabel);
+      saveCloudVersion(text, source, engineLabel, actionLabel, { transcriptId: id });
       toast({ title: 'גרסה נשמרה בענן ☁️', description: `${engineLabel} — ${actionLabel}` });
     } else {
       toast({ title: 'לא ניתן לשמור', description: 'יש צורך בתמלול שמור בענן', variant: 'destructive' });
@@ -861,8 +861,8 @@ const TextEditor = () => {
 
     setText(editedText);
     if (syncedTimings) setWordTimings(syncedTimings);
-    if (transcriptId) {
-      saveCloudVersion(editedText, source, engineLabel, `${actionLabel} • החלפת מקור`);
+    if (id) {
+      saveCloudVersion(editedText, source, engineLabel, `${actionLabel} • החלפת מקור`, { transcriptId: id });
     }
 
     toast({
@@ -921,8 +921,8 @@ const TextEditor = () => {
       return;
     }
 
-    if (transcriptId) {
-      saveCloudVersion(editedText, source, engineLabel, `${actionLabel} • שכפל ושמור`);
+    if (id) {
+      saveCloudVersion(editedText, source, engineLabel, `${actionLabel} • שכפל ושמור`, { transcriptId: id });
     }
 
     toast({
