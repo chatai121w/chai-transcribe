@@ -180,13 +180,14 @@ function normalizePeak(buffer: AudioBuffer, targetDb = -1): AudioBuffer {
   return buffer;
 }
 
-async function preprocessAudio(blob: Blob, t: TogglesState): Promise<{ blob: Blob; name: string }> {
-  if (!t.vad_trim && !t.agc_normalize) return { blob, name: "audio.bin" };
+async function preprocessAudio(blob: Blob, name: string, t: TogglesState): Promise<{ blob: Blob; name: string }> {
+  if (!t.vad_trim && !t.agc_normalize) return { blob, name };
   const buf = await decodeAudio(blob);
   let out = buf;
   if (t.vad_trim) out = trimSilence(out);
   if (t.agc_normalize) out = normalizePeak(out);
-  return { blob: encodeWav(out), name: "preprocessed.wav" };
+  const base = name.replace(/\.[^.]+$/, "") || "audio";
+  return { blob: encodeWav(out), name: `${base}.wav` };
 }
 
 // ── Text post-processing ────────────────────────────────────────
