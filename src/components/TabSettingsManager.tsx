@@ -29,24 +29,50 @@ const STORAGE_KEY = "tab_settings";
 export function getDefaultTabConfig(): { visible: string[]; order: string[] } {
   const allIds = [
     "player", "edit", "speakers", "templates", "ai", "pipeline", "prompts",
-    "ollama", "learning", "vocab", "summary", "ab", "analytics", "compare", "history",
+    "ollama", "learning", "vocab", "summary", "analytics", "compare", "history",
   ];
   return { visible: allIds, order: allIds };
 }
+
+// Remove legacy/removed tab ids (e.g. "ab" merged into "compare") from persisted settings.
+const REMOVED_TAB_IDS = new Set<string>(["ab"]);
+const stripRemoved = (ids: string[] | undefined): string[] =>
+  Array.isArray(ids) ? ids.filter((id) => !REMOVED_TAB_IDS.has(id)) : [];
 
 export function loadTabSettings(): { visible: string[]; order: string[] } {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (parsed.visible && parsed.order) return parsed;
+      if (parsed.visible && parsed.order) {
+        const cleaned = {
+          visible: stripRemoved(parsed.visible),
+          order: stripRemoved(parsed.order),
+        };
+        // Persist the migration so we don't re-clean on every load.
+        if (
+          cleaned.visible.length !== parsed.visible.length ||
+          cleaned.order.length !== parsed.order.length
+        ) {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+          } catch {}
+        }
+        return cleaned;
+      }
     }
   } catch {}
   return getDefaultTabConfig();
 }
 
 export function saveTabSettings(visible: string[], order: string[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ visible, order }));
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      visible: stripRemoved(visible),
+      order: stripRemoved(order),
+    })
+  );
 }
 
 export function TabSettingsManager({
