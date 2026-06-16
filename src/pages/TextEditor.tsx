@@ -575,6 +575,7 @@ const TextEditor = () => {
       if (created?.id) {
         transcriptIdRef.current = created.id;
         setTranscriptId(created.id);
+        try { localStorage.setItem('current_transcript_id', created.id); } catch { /* noop */ }
         toast({ title: 'התמלול נשמר בענן ☁️' });
         return created.id;
       }
