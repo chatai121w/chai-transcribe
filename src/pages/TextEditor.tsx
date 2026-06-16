@@ -535,10 +535,20 @@ const TextEditor = () => {
     setVersions(prev => [...prev, newVersion]);
     setSelectedVersionId(newVersion.id);
     setText(newText);
-    // Also save to cloud versions
-    if (transcriptId) {
-      saveCloudVersion(newText, source, customPrompt || null, sourceLabels[source] || source);
-    }
+    // Persist immediately to local + cloud so re-renders never lose AI output.
+    // If no cloud transcript yet, create one first then save the version.
+    (async () => {
+      try {
+        let id = transcriptIdRef.current || transcriptId;
+        if (!id) id = await ensureCloudTranscript();
+        if (id) {
+          await saveCloudVersion(newText, source, customPrompt || null, sourceLabels[source] || source);
+        }
+      } catch (e) {
+        console.error('[addVersion] persist failed', e);
+        toast({ title: 'שמירת גרסה נכשלה', description: 'נשמר מקומית בלבד', variant: 'destructive' });
+      }
+    })();
   };
 
   const ensureCloudTranscript = useCallback(async (): Promise<string | null> => {
