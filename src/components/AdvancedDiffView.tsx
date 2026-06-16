@@ -128,6 +128,7 @@ export const AdvancedDiffView = ({
   onApplyVersion,
   preselectedLeftId,
   preselectedRightId,
+  onSendToAiEditor,
 }: AdvancedDiffViewProps) => {
   const defaultLeftId = useMemo(() => versions.find(v => v.source === 'original')?.id || versions[0]?.id || '', [versions]);
   const defaultRightId = useMemo(() => {
