@@ -464,8 +464,8 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
   }, [propText, isUserEditedText]);
 
   // ── Source-picker state ──
-  type SourceCategory = 'current' | 'original' | 'ai' | 'saved';
-  const [sourceCategory, setSourceCategory] = useState<SourceCategory>('current');
+  type SourceCategory = 'all' | 'current' | 'original' | 'ai' | 'saved';
+  const [sourceCategory, setSourceCategory] = useState<SourceCategory>('all');
   const [selectedSourceId, setSelectedSourceId] = useState<string>(initialSourceId || '__current__');
   const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
   const [dirtyDialogOpen, setDirtyDialogOpen] = useState(false);
