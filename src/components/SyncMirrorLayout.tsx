@@ -1274,7 +1274,7 @@ export const SyncMirrorLayout = ({
             className="px-4 pb-4"
             style={{
               ...textStyle,
-              paddingTop: effectiveRichEdit ? `${rightTopOffset || 16}px` : 16,
+              paddingTop: enableRichEdit ? `${rightTopOffset || 16}px` : 16,
             }}
           >
             {(compareMode ? frozenLines : lines).map((line, li) => {
@@ -1341,7 +1341,7 @@ export const SyncMirrorLayout = ({
                 </div>
               )}
               {!isMarkingActive && (
-                <div className="p-4" style={textStyle}>
+                <div ref={leftRowsRef} className="p-4" style={textStyle}>
                   {lines.map((line, li) => {
                     const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
                     return renderLine(line, offset, li, "left");
