@@ -31,6 +31,7 @@ import {
   getLoshonKodeshNames,
 } from "@/lib/loshonKodesh";
 import { applyLearnedCorrections } from "@/utils/correctionLearning";
+import { getApiKey } from "@/lib/keyCrypto";
 
 // ── Toggle definitions ──────────────────────────────────────────
 
