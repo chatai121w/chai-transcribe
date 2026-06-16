@@ -712,6 +712,22 @@ const TextEditor = () => {
     toast({ title: 'נשלח להשוואה' });
   }, [compareVersions]);
 
+  const sendVersionToAiEditor = useCallback((versionId: string) => {
+    const target = compareVersions.find(v => v.id === versionId);
+    if (!target) {
+      toast({ title: 'גרסה לא נמצאה', variant: 'destructive' });
+      return;
+    }
+    setAiPreselectSourceId(versionId);
+    // If we're inside the compare tab, open the inline AI editor; otherwise jump to AI tab
+    if (activeTab === 'compare') {
+      setShowCompareAi(true);
+    } else {
+      setActiveTab('ai');
+    }
+    toast({ title: 'נשלח לעריכת AI' });
+  }, [compareVersions, activeTab]);
+
   const handleAiQuickAction = async (action: 'fix_errors' | 'split_paragraphs' | 'fix_and_split') => {
     if (!text.trim()) {
       toast({ title: "אין טקסט לעיבוד", variant: "destructive" });
