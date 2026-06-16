@@ -1328,7 +1328,7 @@ const TextEditor = () => {
           })()}
 
           <TabsContent value="player" className="flex flex-col gap-3">
-            <LazyErrorBoundary label="נגן מסונכרן">
+            <LazyErrorBoundary label="עורך טקסט">
 
             {/* ── Toolbar: layout controls ── */}
             <div className="flex items-center justify-between gap-3" dir="rtl">
