@@ -503,6 +503,38 @@ const TextEditor = () => {
 
   }, [location.state, tryRecoverAudioFromDexie, setOwnedAudioFromBlob, getAudioUrl, audioFileName]);
 
+  // Direct entry fallback: when /text-editor opens without navigation state,
+  // restore the latest cloud transcript so compare/history are not empty.
+  useEffect(() => {
+    if (transcriptIdRef.current || transcriptId) return;
+    if (location.state?.text || !transcripts.length) return;
+
+    const latest = [...transcripts].sort(
+      (a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime()
+    )[0];
+    if (!latest?.id || !latest.text?.trim()) return;
+
+    const editorText = latest.edited_text || latest.text;
+    transcriptIdRef.current = latest.id;
+    setTranscriptId(latest.id);
+    originalTextRef.current = latest.text;
+    setText(editorText);
+
+    const initialVersion: TextVersion = {
+      id: 'current-original',
+      text: latest.text,
+      timestamp: new Date(latest.created_at),
+      source: 'original',
+      customPrompt: 'תמלול מקורי',
+    };
+    setVersions(prev => prev.length ? prev : [initialVersion]);
+    setSelectedVersionId(initialVersion.id);
+    try {
+      localStorage.setItem('current_transcript_id', latest.id);
+      localStorage.setItem('current_editing_text', editorText);
+    } catch { /* noop */ }
+  }, [transcripts, transcriptId, location.state, setText]);
+
   // Auto-save text and versions to localStorage + debounce cloud save
   const cloudSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
