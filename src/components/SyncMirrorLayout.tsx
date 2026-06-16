@@ -1256,7 +1256,7 @@ export const SyncMirrorLayout = ({
             className="px-4 pb-4"
             style={{
               ...textStyle,
-              paddingTop: enableRichEdit ? `${rightTopOffset || 16}px` : 16,
+              paddingTop: effectiveRichEdit ? `${rightTopOffset || 16}px` : 16,
             }}
           >
             {(compareMode ? frozenLines : lines).map((line, li) => {
@@ -1270,7 +1270,7 @@ export const SyncMirrorLayout = ({
 
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
         <div className="flex-1 min-w-0 flex flex-col">
-          {enableRichEdit ? (
+          {effectiveRichEdit ? (
             <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
               {/* Marking toolbar (always visible) + analysis panel (when active) */}
               <TextMarkingOverlay
@@ -1305,12 +1305,31 @@ export const SyncMirrorLayout = ({
               )}
             </div>
           ) : (
-            /* word rows (legacy click/right-click view) */
-            <div className="p-4" style={textStyle}>
-              {lines.map((line, li) => {
-                const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
-                return renderLine(line, offset, li, "left");
-              })}
+            /* Precise-alignment view: identical line breaks as the right column.
+               Editing happens through right-click WordContextMenu (and the
+               marking toolbar above when enableRichEdit is on). */
+            <div className="flex flex-col" ref={leftRichRef}>
+              {enableRichEdit && (
+                <div className="px-3 pt-2" dir="rtl">
+                  <TextMarkingOverlay
+                    text={text}
+                    onTextChange={onTextChange}
+                    fontSize={localFontSize}
+                    fontFamily={localFontFamily}
+                    lineHeight={localLineHeight}
+                    toolbarOnly={!isMarkingActive}
+                    onActiveChange={setIsMarkingActive}
+                  />
+                </div>
+              )}
+              {!isMarkingActive && (
+                <div className="p-4" style={textStyle}>
+                  {lines.map((line, li) => {
+                    const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
+                    return renderLine(line, offset, li, "left");
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
