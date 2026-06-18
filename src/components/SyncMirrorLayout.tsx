@@ -1394,7 +1394,10 @@ export const SyncMirrorLayout = ({
           <TextMarkingOverlay
             text={text}
             onTextChange={(v) => {
-              if (lockedPane === 'left' && lockedPane === 'right') return;
+              if (lockedPane === 'left' || lockedPane === 'right') {
+                toast({ title: 'הצד הזה נעול', description: 'שחרר את הנעילה כדי לערוך' });
+                return;
+              }
               onTextChange(v);
             }}
             fontSize={localFontSize}
