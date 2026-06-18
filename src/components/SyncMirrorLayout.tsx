@@ -818,6 +818,42 @@ export const SyncMirrorLayout = ({
     );
   };
 
+  // Render a padded row (real line or phantom) with an edit-marker dot in the gutter.
+  const renderPaddedRow = (
+    row: { line: WordTiming[] | null; edited: boolean },
+    rowIdx: number,
+    side: 'left' | 'right',
+    sourceLines: WordTiming[][],
+    realLineIdx: number, // index in sourceLines that this row corresponds to, or -1 for phantom
+  ) => {
+    const isPhantom = row.line === null;
+    const offset = realLineIdx >= 0
+      ? sourceLines.slice(0, realLineIdx).reduce((a, l) => a + l.length, 0)
+      : 0;
+    const dot = row.edited ? (
+      <span
+        aria-hidden
+        className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-[#0a1d3f] dark:bg-blue-300"
+        style={side === 'left' ? { left: -10 } : { right: -10 }}
+        title="שורה שנערכה"
+      />
+    ) : null;
+    if (isPhantom) {
+      return (
+        <div key={`p-${rowIdx}`} className="relative" style={{ minHeight: '1.4em' }}>
+          {dot}
+          <div className="min-h-[1.4em] py-[1px]" />
+        </div>
+      );
+    }
+    return (
+      <div key={`r-${rowIdx}`} className="relative">
+        {dot}
+        {renderLine(row.line!, offset, realLineIdx, side)}
+      </div>
+    );
+  };
+
   // ── Empty state ─────────────────────────────────────────────────────────────
   if (!displayTimings.length) {
     return (
