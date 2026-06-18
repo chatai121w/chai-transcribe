@@ -1615,7 +1615,7 @@ export const SyncMirrorLayout = ({
             // of pushing rows downward. The locked side stays at its natural
             // (narrower) width.
             flex: alignmentMode === 'mirrored-padded'
-              ? (lockedPane === 'right' ? '1 1 0' : '1.6 1 0')
+              ? (lockedPane === 'right' ? '1 1 0' : `${editableRatio} 1 0`)
               : '1 1 0',
           }}
         >
