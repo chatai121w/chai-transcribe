@@ -1689,7 +1689,7 @@ export const SyncMirrorLayout = ({
           )}
           style={{
             flex: alignmentMode === 'mirrored-padded'
-              ? (lockedPane === 'left' ? '1 1 0' : '1.6 1 0')
+              ? (lockedPane === 'left' ? '1 1 0' : `${editableRatio} 1 0`)
               : '1 1 0',
           }}
         >
