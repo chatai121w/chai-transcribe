@@ -38,6 +38,12 @@ interface RichTextEditorProps {
   onWordCorrected?: (original: string, corrected: string) => void;
   onSaveReplaceOriginal?: () => Promise<void> | void;
   onDuplicateSave?: () => Promise<void> | void;
+  /** Controlled horizontal text alignment. When provided together with
+   *  `onTextAlignChange`, the alignment buttons broadcast the change to the
+   *  parent (so a mirror layout can apply the same alignment to BOTH
+   *  columns) instead of running execCommand on the local selection. */
+  textAlign?: 'right' | 'left' | 'center' | 'justify';
+  onTextAlignChange?: (align: 'right' | 'left' | 'center' | 'justify') => void;
 }
 
 const sanitize = (html: string): string => DOMPurify.sanitize(html, {
@@ -63,7 +69,7 @@ const stripHtml = (html: string): string => {
 
 type ViewMode = 'edit' | 'preview' | 'split';
 
-export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrected, onSaveReplaceOriginal, onDuplicateSave }: RichTextEditorProps) => {
+export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrected, onSaveReplaceOriginal, onDuplicateSave, textAlign, onTextAlignChange }: RichTextEditorProps) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const [showFormatBar, setShowFormatBar] = useState(false);
   const [textColor, setTextColor] = useState("#000000");
@@ -622,10 +628,20 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
           <Separator orientation="vertical" className="h-6 mx-1" />
 
           {/* === יישור === */}
-          <ToolBtn icon={AlignRight} label="יישור לימין" onClick={() => execCommand('justifyRight')} />
-          <ToolBtn icon={AlignCenter} label="מרכוז" onClick={() => execCommand('justifyCenter')} />
-          <ToolBtn icon={AlignLeft} label="יישור לשמאל" onClick={() => execCommand('justifyLeft')} />
-          <ToolBtn icon={AlignJustify} label="יישור לשני הצדדים" onClick={() => execCommand('justifyFull')} />
+          {(() => {
+            const handleAlign = (a: 'right' | 'left' | 'center' | 'justify') => {
+              if (onTextAlignChange) onTextAlignChange(a);
+              else execCommand(a === 'right' ? 'justifyRight' : a === 'left' ? 'justifyLeft' : a === 'center' ? 'justifyCenter' : 'justifyFull');
+            };
+            return (
+              <>
+                <ToolBtn icon={AlignRight} label="יישור לימין" active={textAlign === 'right'} onClick={() => handleAlign('right')} />
+                <ToolBtn icon={AlignCenter} label="מרכוז" active={textAlign === 'center'} onClick={() => handleAlign('center')} />
+                <ToolBtn icon={AlignLeft} label="יישור לשמאל" active={textAlign === 'left'} onClick={() => handleAlign('left')} />
+                <ToolBtn icon={AlignJustify} label="יישור לשני הצדדים (שני הצדדים)" active={textAlign === 'justify'} onClick={() => handleAlign('justify')} />
+              </>
+            );
+          })()}
 
           <Separator orientation="vertical" className="h-6 mx-1" />
 
@@ -775,7 +791,7 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
                     letterSpacing: 'inherit',
                     wordSpacing: 'inherit',
                     fontWeight: 'inherit',
-                    textAlign: 'right',
+                    textAlign: textAlign ?? 'right',
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
                     ...columnStyle,
@@ -807,7 +823,7 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
                   letterSpacing: 'inherit',
                   wordSpacing: 'inherit',
                   fontWeight: 'inherit',
-                  textAlign: 'right',
+                  textAlign: textAlign ?? 'right',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                   ...columnStyle,
