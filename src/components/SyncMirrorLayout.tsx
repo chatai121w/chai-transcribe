@@ -187,6 +187,39 @@ export const SyncMirrorLayout = ({
   }, [lockedPane, onTextChange]);
   const navyClass = 'text-[#0a1d3f] dark:text-blue-300';
 
+  // ── Mirrored-padded alignment mode ─────────────────────────────────────────
+  // When ON and a side is locked: edits in the editable side keep both columns
+  // line-aligned 1:1 by injecting phantom (empty) rows into whichever side is
+  // shorter at that point in the diff. Lines that differ from the locked
+  // snapshot get a blue dot in the gutter.
+  type AlignmentMode = 'free' | 'mirrored-padded';
+  const [alignmentMode, setAlignmentMode] = useState<AlignmentMode>(() => {
+    try { return (localStorage.getItem('sync_mirror_alignment_mode') as AlignmentMode) || 'free'; } catch { return 'free'; }
+  });
+  const toggleAlignmentMode = useCallback(() => {
+    setAlignmentMode(prev => {
+      const next: AlignmentMode = prev === 'mirrored-padded' ? 'free' : 'mirrored-padded';
+      try { localStorage.setItem('sync_mirror_alignment_mode', next); } catch {}
+      toast({ title: next === 'mirrored-padded' ? 'יישור 1:1 הופעל' : 'יישור 1:1 כובה' });
+      return next;
+    });
+  }, []);
+
+  // Snapshot of the locked side's text taken at the moment of locking.
+  const [lockedSnapshotText, setLockedSnapshotText] = useState<string>('');
+  // Re-snapshot whenever the lock turns on
+  const prevLockedRef = useRef<'right' | 'left' | null>(null);
+  useEffect(() => {
+    if (lockedPane && prevLockedRef.current !== lockedPane) {
+      setLockedSnapshotText(text);
+    } else if (!lockedPane) {
+      setLockedSnapshotText('');
+    }
+    prevLockedRef.current = lockedPane;
+    // intentionally do NOT depend on `text` — we only snapshot on lock change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedPane]);
+
   // Measure the left column's real first-text surface so the right column starts
   // on the same pixel line even when the left side has marking/edit toolbars.
   useEffect(() => {
