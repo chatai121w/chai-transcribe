@@ -1606,6 +1606,17 @@ export const SyncMirrorLayout = ({
               {lockedPane === 'right' ? 'נעול' : 'פתוח'}
             </button>
           </div>
+          {/* Mirror toolbar — visually identical strip to the left RichTextEditor toolbar.
+              Keeps both columns aligned at the same vertical offset so matching rows
+              line up at the same height. Only alignment buttons are interactive
+              (broadcasting via sharedTextAlign). */}
+          {effectiveRichEdit && !paddedAlignment && (
+            <div className="flex flex-col gap-2 p-3" dir="rtl" style={{ pointerEvents: 'auto' }}>
+              <div style={{ ...textStyle, ...(localTextColor ? { color: localTextColor } : {}), ...richColumnStyle }}>
+                <RichTextEditorMirror textAlign={sharedTextAlign} onTextAlignChange={setSharedTextAlign} />
+              </div>
+            </div>
+          )}
           {/* word rows — when rich-edit is on, pad-top dynamically to align with editor's first line */}
           <div
             className="px-4 pb-4"
