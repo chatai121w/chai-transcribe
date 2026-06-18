@@ -152,6 +152,41 @@ export const SyncMirrorLayout = ({
   const [localFontWeight, setLocalFontWeight] = useState<number>(400);
   const [localTextColor, setLocalTextColor] = useState<string>("");
 
+  // ── Pane control: which side is the "active" one (drives icon tint) and lock state ──
+  const [activePane, setActivePaneState] = useState<'right' | 'left'>(() => {
+    try { return (localStorage.getItem('sync_mirror_active_pane') as 'right' | 'left') || 'left'; } catch { return 'left'; }
+  });
+  const [lockedPane, setLockedPaneState] = useState<'right' | 'left' | null>(() => {
+    try {
+      const v = localStorage.getItem('sync_mirror_locked_pane');
+      return v === 'right' || v === 'left' ? v : null;
+    } catch { return null; }
+  });
+  const setActivePane = useCallback((p: 'right' | 'left') => {
+    setActivePaneState(p);
+    try { localStorage.setItem('sync_mirror_active_pane', p); } catch {}
+  }, []);
+  const toggleLock = useCallback((p: 'right' | 'left') => {
+    setLockedPaneState(prev => {
+      const next = prev === p ? null : p;
+      try {
+        if (next) localStorage.setItem('sync_mirror_locked_pane', next);
+        else localStorage.removeItem('sync_mirror_locked_pane');
+      } catch {}
+      toast({ title: next ? `צד ${p === 'right' ? 'ימין' : 'שמאל'} ננעל` : 'הנעילה בוטלה' });
+      return next;
+    });
+  }, []);
+  // Guarded onTextChange — blocks edits originating from a locked pane.
+  const handleTextChangeFromPane = useCallback((side: 'right' | 'left', next: string) => {
+    if (lockedPane === side) {
+      toast({ title: 'הצד הזה נעול', description: 'שחרר את הנעילה כדי לערוך' });
+      return;
+    }
+    onTextChange(next);
+  }, [lockedPane, onTextChange]);
+  const navyClass = 'text-[#0a1d3f] dark:text-blue-300';
+
   // Measure the left column's real first-text surface so the right column starts
   // on the same pixel line even when the left side has marking/edit toolbars.
   useEffect(() => {
