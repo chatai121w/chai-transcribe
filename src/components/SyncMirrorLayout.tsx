@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, Lock, Unlock, CircleDot, Circle } from "lucide-react";
+import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -187,6 +187,39 @@ export const SyncMirrorLayout = ({
   }, [lockedPane, onTextChange]);
   const navyClass = 'text-[#0a1d3f] dark:text-blue-300';
 
+  // ── Mirrored-padded alignment mode ─────────────────────────────────────────
+  // When ON and a side is locked: edits in the editable side keep both columns
+  // line-aligned 1:1 by injecting phantom (empty) rows into whichever side is
+  // shorter at that point in the diff. Lines that differ from the locked
+  // snapshot get a blue dot in the gutter.
+  type AlignmentMode = 'free' | 'mirrored-padded';
+  const [alignmentMode, setAlignmentMode] = useState<AlignmentMode>(() => {
+    try { return (localStorage.getItem('sync_mirror_alignment_mode') as AlignmentMode) || 'free'; } catch { return 'free'; }
+  });
+  const toggleAlignmentMode = useCallback(() => {
+    setAlignmentMode(prev => {
+      const next: AlignmentMode = prev === 'mirrored-padded' ? 'free' : 'mirrored-padded';
+      try { localStorage.setItem('sync_mirror_alignment_mode', next); } catch {}
+      toast({ title: next === 'mirrored-padded' ? 'יישור 1:1 הופעל' : 'יישור 1:1 כובה' });
+      return next;
+    });
+  }, []);
+
+  // Snapshot of the locked side's text taken at the moment of locking.
+  const [lockedSnapshotText, setLockedSnapshotText] = useState<string>('');
+  // Re-snapshot whenever the lock turns on
+  const prevLockedRef = useRef<'right' | 'left' | null>(null);
+  useEffect(() => {
+    if (lockedPane && prevLockedRef.current !== lockedPane) {
+      setLockedSnapshotText(text);
+    } else if (!lockedPane) {
+      setLockedSnapshotText('');
+    }
+    prevLockedRef.current = lockedPane;
+    // intentionally do NOT depend on `text` — we only snapshot on lock change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedPane]);
+
   // Measure the left column's real first-text surface so the right column starts
   // on the same pixel line even when the left side has marking/edit toolbars.
   useEffect(() => {
@@ -318,6 +351,81 @@ export const SyncMirrorLayout = ({
     if (line.length) result.push(line);
     return result;
   }, [displayTimings, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
+
+  // ── Snapshot lines (the locked side's frozen view) ──────────────────────────
+  const snapshotLines = useMemo((): WordTiming[][] => {
+    if (!lockedSnapshotText.trim()) return [];
+    const words = lockedSnapshotText.trim().split(/\s+/).filter(Boolean);
+    const snapTimings: WordTiming[] = words.map((word, i) => ({ word, start: i, end: i + 1 }));
+    const effectiveWidth = colWidth > 0 ? colWidth : 400;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return [snapTimings];
+    ctx.font = `${localFontWeight} ${localFontSize}px ${localFontFamily}`;
+    const spaceW = ctx.measureText(' ').width + 1 + localWordSpacing;
+    const result: WordTiming[][] = [];
+    let line: WordTiming[] = [];
+    let w = 0;
+    for (const wt of snapTimings) {
+      const ww = ctx.measureText(wt.word).width + spaceW + wt.word.length * localLetterSpacing;
+      if (w + ww > effectiveWidth && line.length > 0) {
+        result.push(line); line = [wt]; w = ww;
+      } else { line.push(wt); w += ww; }
+    }
+    if (line.length) result.push(line);
+    return result;
+  }, [lockedSnapshotText, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
+
+  // ── Padded alignment via line-level LCS ────────────────────────────────────
+  // Returns two arrays of identical length where each slot is either a real
+  // line (WordTiming[]) or null (= phantom/empty row). `edited` marks rows
+  // that differ from the snapshot — those get the blue dot in the gutter.
+  type PaddedRow = { line: WordTiming[] | null; edited: boolean };
+  const paddedAlignment = useMemo((): { current: PaddedRow[]; snapshot: PaddedRow[] } | null => {
+    if (alignmentMode !== 'mirrored-padded' || !lockedPane || !snapshotLines.length || !lines.length) {
+      return null;
+    }
+    const keyOf = (l: WordTiming[]) => l.map(w => w.word).join(' ').trim();
+    const A = snapshotLines.map(keyOf); // snapshot
+    const B = lines.map(keyOf);          // current
+    // LCS DP
+    const n = A.length, m = B.length;
+    const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = 1; i <= n; i++) {
+      for (let j = 1; j <= m; j++) {
+        dp[i][j] = A[i - 1] === B[j - 1]
+          ? dp[i - 1][j - 1] + 1
+          : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+    const ops: Array<{ t: 'eq' | 'del' | 'ins'; a?: number; b?: number }> = [];
+    let i = n, j = m;
+    while (i > 0 && j > 0) {
+      if (A[i - 1] === B[j - 1]) { ops.push({ t: 'eq', a: i - 1, b: j - 1 }); i--; j--; }
+      else if (dp[i - 1][j] >= dp[i][j - 1]) { ops.push({ t: 'del', a: i - 1 }); i--; }
+      else { ops.push({ t: 'ins', b: j - 1 }); j--; }
+    }
+    while (i > 0) { ops.push({ t: 'del', a: i - 1 }); i--; }
+    while (j > 0) { ops.push({ t: 'ins', b: j - 1 }); j--; }
+    ops.reverse();
+    const snapOut: PaddedRow[] = [];
+    const curOut: PaddedRow[] = [];
+    for (const op of ops) {
+      if (op.t === 'eq') {
+        snapOut.push({ line: snapshotLines[op.a!], edited: false });
+        curOut.push({ line: lines[op.b!], edited: false });
+      } else if (op.t === 'del') {
+        // line exists only in snapshot → phantom in current
+        snapOut.push({ line: snapshotLines[op.a!], edited: true });
+        curOut.push({ line: null, edited: true });
+      } else {
+        // line exists only in current (new/edited) → phantom in snapshot
+        snapOut.push({ line: null, edited: true });
+        curOut.push({ line: lines[op.b!], edited: true });
+      }
+    }
+    return { current: curOut, snapshot: snapOut };
+  }, [alignmentMode, lockedPane, snapshotLines, lines]);
 
   // ── Active word index (timing sync) ────────────────────────────────────────
   const activeIdx = useMemo(() => {
@@ -706,6 +814,42 @@ export const SyncMirrorLayout = ({
             </React.Fragment>
           );
         })}
+      </div>
+    );
+  };
+
+  // Render a padded row (real line or phantom) with an edit-marker dot in the gutter.
+  const renderPaddedRow = (
+    row: { line: WordTiming[] | null; edited: boolean },
+    rowIdx: number,
+    side: 'left' | 'right',
+    sourceLines: WordTiming[][],
+    realLineIdx: number, // index in sourceLines that this row corresponds to, or -1 for phantom
+  ) => {
+    const isPhantom = row.line === null;
+    const offset = realLineIdx >= 0
+      ? sourceLines.slice(0, realLineIdx).reduce((a, l) => a + l.length, 0)
+      : 0;
+    const dot = row.edited ? (
+      <span
+        aria-hidden
+        className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-[#0a1d3f] dark:bg-blue-300"
+        style={side === 'left' ? { left: -10 } : { right: -10 }}
+        title="שורה שנערכה"
+      />
+    ) : null;
+    if (isPhantom) {
+      return (
+        <div key={`p-${rowIdx}`} className="relative" style={{ minHeight: '1.4em' }}>
+          {dot}
+          <div className="min-h-[1.4em] py-[1px]" />
+        </div>
+      );
+    }
+    return (
+      <div key={`r-${rowIdx}`} className="relative">
+        {dot}
+        {renderLine(row.line!, offset, realLineIdx, side)}
       </div>
     );
   };
@@ -1373,6 +1517,19 @@ export const SyncMirrorLayout = ({
                 {preciseAlign ? "יישור מדויק" : "עריכה חופשית"}
               </Button>
             )}
+            {/* Mirrored-padded alignment toggle — keeps both columns line-aligned 1:1 by injecting phantom rows */}
+            <Button
+              size="sm"
+              variant={alignmentMode === 'mirrored-padded' ? "default" : "outline"}
+              className="h-6 text-[10px] px-1.5 gap-0.5"
+              onClick={toggleAlignmentMode}
+              title={alignmentMode === 'mirrored-padded'
+                ? "יישור 1:1 פעיל — שני הצדדים נשארים מסונכרנים שורה-מול-שורה גם אחרי עריכה (דורש נעילת צד). לחץ לכיבוי."
+                : "יישור 1:1 — כשצד אחד נעול, עריכה בצד השני מוסיפה שורות-רפאים אוטומטית כדי לשמור על יישור."}
+            >
+              <AlignJustify className="w-2.5 h-2.5" />
+              {alignmentMode === 'mirrored-padded' ? 'יישור 1:1' : 'יישור חופשי'}
+            </Button>
             {/* Full edit button */}
             <Button
               size="sm"
@@ -1445,7 +1602,15 @@ export const SyncMirrorLayout = ({
               pointerEvents: lockedPane === 'right' ? 'none' : undefined,
             }}
           >
-            {(compareMode ? frozenLines : lines).map((line, li) => {
+            {paddedAlignment && !compareMode ? (() => {
+              const rows = lockedPane === 'right' ? paddedAlignment.snapshot : paddedAlignment.current;
+              const src = lockedPane === 'right' ? snapshotLines : lines;
+              let srcIdx = -1;
+              return rows.map((row, ri) => {
+                if (row.line) srcIdx++;
+                return renderPaddedRow(row, ri, 'left', src, row.line ? srcIdx : -1);
+              });
+            })() : (compareMode ? frozenLines : lines).map((line, li) => {
               const sourceLines = compareMode ? frozenLines : lines;
               const offset = sourceLines.slice(0, li).reduce((a, l) => a + l.length, 0);
               // Render right column with FULL "left"-side rendering so it mirrors 1:1
@@ -1485,7 +1650,7 @@ export const SyncMirrorLayout = ({
             </button>
           </div>
           <div style={{ pointerEvents: lockedPane === 'left' ? 'none' : undefined }} className="flex-1 min-h-0 flex flex-col">
-          {effectiveRichEdit ? (
+          {effectiveRichEdit && !paddedAlignment ? (
             <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
               {/* Marking toolbar has been lifted above both columns (see top of layout). */}
               {/* RichTextEditor — full editing surface */}
@@ -1517,7 +1682,15 @@ export const SyncMirrorLayout = ({
 
               {!isMarkingActive && (
                 <div ref={leftRowsRef} className="p-4" style={textStyle}>
-                  {lines.map((line, li) => {
+                  {paddedAlignment && !compareMode ? (() => {
+                    const rows = lockedPane === 'left' ? paddedAlignment.snapshot : paddedAlignment.current;
+                    const src = lockedPane === 'left' ? snapshotLines : lines;
+                    let srcIdx = -1;
+                    return rows.map((row, ri) => {
+                      if (row.line) srcIdx++;
+                      return renderPaddedRow(row, ri, 'left', src, row.line ? srcIdx : -1);
+                    });
+                  })() : lines.map((line, li) => {
                     const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
                     return renderLine(line, offset, li, "left");
                   })}
