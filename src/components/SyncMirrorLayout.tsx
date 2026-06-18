@@ -1658,10 +1658,17 @@ export const SyncMirrorLayout = ({
 
 
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
-        <div className={cn(
-          "flex-1 min-w-0 flex flex-col relative transition-opacity",
-          lockedPane === 'left' && "opacity-90 bg-muted/30",
-        )}>
+        <div
+          className={cn(
+            "min-w-0 flex flex-col relative transition-opacity",
+            lockedPane === 'left' && "opacity-90 bg-muted/30",
+          )}
+          style={{
+            flex: alignmentMode === 'mirrored-padded'
+              ? (lockedPane === 'left' ? '1 1 0' : '1.6 1 0')
+              : '1 1 0',
+          }}
+        >
           {/* Per-column control strip: active selector + lock */}
           <div className="flex items-center gap-1 px-2 py-1 border-b border-border/30 bg-background/60" dir="rtl">
             <button
