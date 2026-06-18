@@ -1701,19 +1701,51 @@ export const SyncMirrorLayout = ({
           </div>
         </div>
 
+        {/* ── Draggable column divider — drag to resize, double-click to reset to auto ── */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          title="גרור לשינוי רוחב העמודות · קליק כפול לאיפוס לאוטומטי"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            const container = scrollRef.current;
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+            const onMove = (ev: PointerEvent) => {
+              const rightWidth = rect.right - ev.clientX;
+              let pct = (rightWidth / rect.width) * 100;
+              pct = Math.max(15, Math.min(85, pct));
+              setManualSplit(pct);
+            };
+            const onUp = () => {
+              window.removeEventListener('pointermove', onMove);
+              window.removeEventListener('pointerup', onUp);
+              document.body.style.userSelect = '';
+              document.body.style.cursor = '';
+            };
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'col-resize';
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
+          }}
+          onDoubleClick={() => setManualSplit(null)}
+          className="group/divider relative shrink-0 w-1.5 cursor-col-resize bg-border/40 hover:bg-primary/50 transition-colors"
+        >
+          <div className="absolute inset-y-0 -left-1 -right-1" />
+          <div className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 h-8 w-1 rounded-full bg-foreground/20 group-hover/divider:bg-primary/80 transition-colors" />
+        </div>
 
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
         <div
+          ref={leftColRef}
           className={cn(
             "min-w-0 flex flex-col relative transition-opacity",
             lockedPane === 'left' && "opacity-90 bg-muted/30",
           )}
-          style={{
-            flex: alignmentMode === 'mirrored-padded'
-              ? (lockedPane === 'left' ? '1 1 0' : `${editableRatio} 1 0`)
-              : '1 1 0',
-          }}
+          style={{ flex: `0 0 ${leftPct}%` }}
         >
+
           {/* Per-column control strip: active selector + lock */}
           <div className="flex items-center gap-1 px-2 py-1 border-b border-border/30 bg-background/60" dir="rtl">
             <button
