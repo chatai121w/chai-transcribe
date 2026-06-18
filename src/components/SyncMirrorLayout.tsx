@@ -642,6 +642,18 @@ export const SyncMirrorLayout = ({
   };
 
   // ── Shared text style ───────────────────────────────────────────────────────
+  // Shared horizontal alignment — controlled here so BOTH columns (left RichTextEditor
+  // and right renderLine column) get the same alignment. When set to 'justify', each
+  // visual line stretches to fill the column width on both sides, so matching lines
+  // line up at the same vertical height.
+  const [sharedTextAlign, setSharedTextAlign] = useState<'right' | 'left' | 'center' | 'justify'>(() => {
+    if (typeof window === 'undefined') return 'right';
+    return (localStorage.getItem('sync.mirror.textAlign') as 'right' | 'left' | 'center' | 'justify') || 'right';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('sync.mirror.textAlign', sharedTextAlign); } catch {}
+  }, [sharedTextAlign]);
+
   const textStyle: React.CSSProperties = {
     fontFamily: localFontFamily,
     fontSize: `${localFontSize}px`,
@@ -649,6 +661,7 @@ export const SyncMirrorLayout = ({
     wordSpacing: `${localWordSpacing}px`,
     letterSpacing: `${localLetterSpacing}px`,
     fontWeight: localFontWeight,
+    textAlign: sharedTextAlign,
     ...(localTextColor ? { color: localTextColor } : {}),
   };
 
