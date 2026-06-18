@@ -206,29 +206,39 @@ export const SyncMirrorLayout = ({
     });
   }, []);
 
-  // Auto-adjust the editable column's width ratio based on the available
-  // container width. Wider screens get a larger ratio so newly-typed words
-  // have more trailing room and don't push lines down. Narrower screens get
-  // a smaller ratio so the locked column stays readable.
-  const [editableRatio, setEditableRatio] = useState<number>(1.6);
+  // Column width split between the two columns.
+  // `manualSplit` = percentage of the RIGHT column (15–85). null = auto.
+  // Auto: in mirrored-padded mode with a lock, source side ~40% / editor ~60%;
+  // otherwise 50/50. The user can drag a divider to override and the choice
+  // is persisted in localStorage.
+  const SPLIT_KEY = 'sync_mirror_col_split_v1';
+  const [manualSplit, setManualSplit] = useState<number | null>(() => {
+    try {
+      const v = localStorage.getItem(SPLIT_KEY);
+      const n = v ? parseFloat(v) : NaN;
+      return Number.isFinite(n) && n >= 15 && n <= 85 ? n : null;
+    } catch { return null; }
+  });
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const compute = () => {
-      const w = el.clientWidth || window.innerWidth;
-      // Smooth curve: 1.2 @ ~700px → 1.6 @ ~1100px → 2.0 @ ~1500px → 2.4 cap
-      let r: number;
-      if (w < 700) r = 1.2;
-      else if (w > 1700) r = 2.4;
-      else r = 1.2 + ((w - 700) / 1000) * 1.2;
-      setEditableRatio(Number(r.toFixed(2)));
-    };
-    compute();
-    const ro = new ResizeObserver(compute);
-    ro.observe(el);
-    window.addEventListener('resize', compute);
-    return () => { ro.disconnect(); window.removeEventListener('resize', compute); };
-  }, []);
+    try {
+      if (manualSplit == null) localStorage.removeItem(SPLIT_KEY);
+      else localStorage.setItem(SPLIT_KEY, String(manualSplit));
+    } catch {}
+  }, [manualSplit]);
+  const autoRightPct = useMemo(() => {
+    if (alignmentMode !== 'mirrored-padded' || !lockedPane) return 50;
+    return lockedPane === 'right' ? 40 : 60;
+  }, [alignmentMode, lockedPane]);
+  const rightPct = manualSplit ?? autoRightPct;
+  const leftPct = 100 - rightPct;
+
+  // Refs to each column's content area so we can measure the NARROW column's
+  // real text width and use it as the wrapping basis for `lines`. This way
+  // both columns render the same line breaks aligned to the source's width,
+  // and the wider (editor) column has trailing whitespace per line for inline
+  // word additions without pushing rows down.
+  const rightColRef = useRef<HTMLDivElement>(null);
+  const leftColRef = useRef<HTMLDivElement>(null);
 
   // Snapshot of the locked side's text taken at the moment of locking.
   const [lockedSnapshotText, setLockedSnapshotText] = useState<string>('');
@@ -332,17 +342,34 @@ export const SyncMirrorLayout = ({
     return alignEditedToWhisper(words, wordTimings, anchorsArr.length ? anchorsArr : undefined);
   }, [text, wordTimings, alignMode, userAnchors]);
 
-  // ── ResizeObserver: watch container width → column width ───────────────────
+  // ── ResizeObserver: track the NARROWER column's actual content width and
+  // use it as the wrapping basis for `lines`. This keeps both columns visually
+  // aligned at the source-column width; the wider editor column simply has
+  // trailing whitespace per line for inline edits without pushing rows down.
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      // Two equal flex columns, each with 16px horizontal padding
-      setColWidth(Math.floor(entry.contentRect.width / 2) - 32);
-    });
-    ro.observe(el);
+    const rEl = rightColRef.current;
+    const lEl = leftColRef.current;
+    if (!rEl && !lEl) return;
+    const compute = () => {
+      const rW = rEl?.clientWidth ?? 0;
+      const lW = lEl?.clientWidth ?? 0;
+      // Prefer the locked side as the source-of-truth wrapping width.
+      // Without a lock, use the smaller of the two so neither side overflows.
+      let basis = 0;
+      if (lockedPane === 'right' && rW) basis = rW;
+      else if (lockedPane === 'left' && lW) basis = lW;
+      else if (rW && lW) basis = Math.min(rW, lW);
+      else basis = rW || lW;
+      // Subtract ~32px for the column's px-4 horizontal padding.
+      setColWidth(Math.max(120, Math.floor(basis) - 32));
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    if (rEl) ro.observe(rEl);
+    if (lEl) ro.observe(lEl);
     return () => ro.disconnect();
-  }, []);
+  }, [lockedPane, rightPct]);
+
 
   // ── Canvas-measured line breaks ─────────────────────────────────────────────
   const lines = useMemo((): WordTiming[][] => {
@@ -1605,20 +1632,14 @@ export const SyncMirrorLayout = ({
       >
         {/* ── RIGHT column — full mirror, fully editable (unless locked) ── */}
         <div
+          ref={rightColRef}
           className={cn(
             "min-w-0 flex flex-col border-s border-border/40 relative transition-opacity",
             lockedPane === 'right' && "opacity-90 bg-muted/30",
           )}
-          style={{
-            // In mirrored-padded mode, the editable side gets extra width so
-            // newly-typed words fill the trailing whitespace of a line instead
-            // of pushing rows downward. The locked side stays at its natural
-            // (narrower) width.
-            flex: alignmentMode === 'mirrored-padded'
-              ? (lockedPane === 'right' ? '1 1 0' : `${editableRatio} 1 0`)
-              : '1 1 0',
-          }}
+          style={{ flex: `0 0 ${rightPct}%` }}
         >
+
           {/* Per-column control strip: active selector + lock */}
           <div className="flex items-center gap-1 px-2 py-1 border-b border-border/30 bg-background/60" dir="rtl">
             <button
@@ -1680,19 +1701,51 @@ export const SyncMirrorLayout = ({
           </div>
         </div>
 
+        {/* ── Draggable column divider — drag to resize, double-click to reset to auto ── */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          title="גרור לשינוי רוחב העמודות · קליק כפול לאיפוס לאוטומטי"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            const container = scrollRef.current;
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+            const onMove = (ev: PointerEvent) => {
+              const rightWidth = rect.right - ev.clientX;
+              let pct = (rightWidth / rect.width) * 100;
+              pct = Math.max(15, Math.min(85, pct));
+              setManualSplit(pct);
+            };
+            const onUp = () => {
+              window.removeEventListener('pointermove', onMove);
+              window.removeEventListener('pointerup', onUp);
+              document.body.style.userSelect = '';
+              document.body.style.cursor = '';
+            };
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'col-resize';
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
+          }}
+          onDoubleClick={() => setManualSplit(null)}
+          className="group/divider relative shrink-0 w-1.5 cursor-col-resize bg-border/40 hover:bg-primary/50 transition-colors"
+        >
+          <div className="absolute inset-y-0 -left-1 -right-1" />
+          <div className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 h-8 w-1 rounded-full bg-foreground/20 group-hover/divider:bg-primary/80 transition-colors" />
+        </div>
 
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
         <div
+          ref={leftColRef}
           className={cn(
             "min-w-0 flex flex-col relative transition-opacity",
             lockedPane === 'left' && "opacity-90 bg-muted/30",
           )}
-          style={{
-            flex: alignmentMode === 'mirrored-padded'
-              ? (lockedPane === 'left' ? '1 1 0' : `${editableRatio} 1 0`)
-              : '1 1 0',
-          }}
+          style={{ flex: `0 0 ${leftPct}%` }}
         >
+
           {/* Per-column control strip: active selector + lock */}
           <div className="flex items-center gap-1 px-2 py-1 border-b border-border/30 bg-background/60" dir="rtl">
             <button
