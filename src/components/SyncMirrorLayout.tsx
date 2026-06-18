@@ -1481,6 +1481,19 @@ export const SyncMirrorLayout = ({
                 {preciseAlign ? "יישור מדויק" : "עריכה חופשית"}
               </Button>
             )}
+            {/* Mirrored-padded alignment toggle — keeps both columns line-aligned 1:1 by injecting phantom rows */}
+            <Button
+              size="sm"
+              variant={alignmentMode === 'mirrored-padded' ? "default" : "outline"}
+              className="h-6 text-[10px] px-1.5 gap-0.5"
+              onClick={toggleAlignmentMode}
+              title={alignmentMode === 'mirrored-padded'
+                ? "יישור 1:1 פעיל — שני הצדדים נשארים מסונכרנים שורה-מול-שורה גם אחרי עריכה (דורש נעילת צד). לחץ לכיבוי."
+                : "יישור 1:1 — כשצד אחד נעול, עריכה בצד השני מוסיפה שורות-רפאים אוטומטית כדי לשמור על יישור."}
+            >
+              <AlignJustify className="w-2.5 h-2.5" />
+              {alignmentMode === 'mirrored-padded' ? 'יישור 1:1' : 'יישור חופשי'}
+            </Button>
             {/* Full edit button */}
             <Button
               size="sm"
