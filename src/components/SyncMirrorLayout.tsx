@@ -1602,7 +1602,15 @@ export const SyncMirrorLayout = ({
               pointerEvents: lockedPane === 'right' ? 'none' : undefined,
             }}
           >
-            {(compareMode ? frozenLines : lines).map((line, li) => {
+            {paddedAlignment && !compareMode ? (() => {
+              const rows = lockedPane === 'right' ? paddedAlignment.snapshot : paddedAlignment.current;
+              const src = lockedPane === 'right' ? snapshotLines : lines;
+              let srcIdx = -1;
+              return rows.map((row, ri) => {
+                if (row.line) srcIdx++;
+                return renderPaddedRow(row, ri, 'left', src, row.line ? srcIdx : -1);
+              });
+            })() : (compareMode ? frozenLines : lines).map((line, li) => {
               const sourceLines = compareMode ? frozenLines : lines;
               const offset = sourceLines.slice(0, li).reduce((a, l) => a + l.length, 0);
               // Render right column with FULL "left"-side rendering so it mirrors 1:1
