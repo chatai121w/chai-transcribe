@@ -763,19 +763,15 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
                   contentEditable
                   dir="rtl"
                   className={cn(
-                    "rounded-md border border-input bg-background px-4 py-3",
+                    "rounded-md border border-input bg-background px-4 py-3 text-right",
                     "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                    "overflow-auto max-w-none",
+                    "overflow-auto prose prose-sm max-w-none",
                     isFullscreen ? "min-h-[calc(100vh-200px)]" : "min-h-[500px]"
                   )}
                   style={{
                     fontFamily: 'inherit',
                     fontSize: 'inherit',
-                    lineHeight: 'inherit',
-                    letterSpacing: 'inherit',
-                    wordSpacing: 'inherit',
-                    fontWeight: 'inherit',
-                    textAlign: 'right',
+                    lineHeight: '1.8',
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
                     ...columnStyle,
@@ -796,18 +792,14 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
               <div
                 dir="rtl"
                 className={cn(
-                  "rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-4 py-3",
-                  "overflow-auto max-w-none",
+                  "rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-4 py-3 text-right",
+                  "overflow-auto prose prose-sm max-w-none",
                   isFullscreen ? "min-h-[calc(100vh-200px)]" : "min-h-[500px]"
                 )}
                 style={{
                   fontFamily: 'inherit',
                   fontSize: 'inherit',
-                  lineHeight: 'inherit',
-                  letterSpacing: 'inherit',
-                  wordSpacing: 'inherit',
-                  fontWeight: 'inherit',
-                  textAlign: 'right',
+                  lineHeight: '1.8',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                   ...columnStyle,

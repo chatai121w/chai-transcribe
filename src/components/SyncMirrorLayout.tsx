@@ -20,8 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare } from "lucide-react";
-import { toast } from "@/hooks/use-toast";
+import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import type { WordTiming } from "./SyncAudioPlayer";
@@ -413,61 +412,6 @@ export const SyncMirrorLayout = ({
     if (line.length) result.push(line);
     return result;
   }, [compareMode, frozenTimings, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
-
-  // ── Baseline (original) snapshot — set once on first non-empty mount, persisted ──
-  const BASELINE_KEY = 'sync_mirror_baseline_v1';
-  const baselineInitRef = useRef(false);
-  const [baselineText, setBaselineText] = useState<string>(() => {
-    try { return localStorage.getItem(BASELINE_KEY) || ''; } catch { return ''; }
-  });
-  useEffect(() => {
-    if (baselineInitRef.current) return;
-    if (!text || !text.trim()) return;
-    baselineInitRef.current = true;
-    if (!baselineText) {
-      try { localStorage.setItem(BASELINE_KEY, text); } catch {}
-      setBaselineText(text);
-    }
-  }, [text, baselineText]);
-
-  const hasBaseline = !!baselineText && baselineText.trim().length > 0;
-  const isModifiedFromBaseline = hasBaseline && baselineText.trim() !== text.trim();
-
-  const restoreToBaseline = useCallback(() => {
-    if (!hasBaseline) return;
-    if (!confirm('להחזיר את הטקסט לגרסת הבסיס? כל השינויים מאז יאבדו.')) return;
-    onTextChange(baselineText);
-    toast({ title: 'הוחזר לגרסת בסיס', description: 'הטקסט שוחזר למצב המקורי שנשמר.' });
-  }, [hasBaseline, baselineText, onTextChange]);
-
-  const setNewBaseline = useCallback(() => {
-    if (!text || !text.trim()) return;
-    try { localStorage.setItem(BASELINE_KEY, text); } catch {}
-    setBaselineText(text);
-    toast({ title: 'בסיס חדש נקבע', description: 'הטקסט הנוכחי הוגדר כגרסת הבסיס.' });
-  }, [text]);
-
-  const compareToBaseline = useCallback(() => {
-    if (!hasBaseline) return;
-    // Snapshot the baseline as the frozen panel and enter compare mode
-    const words = baselineText.trim().split(/\s+/).filter(Boolean);
-    const baselineTimings: WordTiming[] = words.map((word, i) => ({ word, start: i, end: i + 1 }));
-    setFrozenTimings(baselineTimings);
-    setCompareMode(true);
-    toast({ title: 'משווה לגרסת בסיס', description: 'הצד הימני מציג כעת את גרסת הבסיס.' });
-  }, [hasBaseline, baselineText]);
-
-  // Wrap onSaveReplace with a unified local+cloud toast
-  const handleSaveLocalAndCloud = useCallback(() => {
-    if (!onSaveReplace) return;
-    try {
-      onSaveReplace();
-      toast({ title: 'נשמר ✓', description: 'מקומי + ענן יחד.' });
-    } catch (e) {
-      toast({ title: 'השמירה נכשלה', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
-    }
-  }, [onSaveReplace]);
-
 
   // ── Full-text editing overlay ───────────────────────────────────────────────
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -996,47 +940,13 @@ export const SyncMirrorLayout = ({
                 size="sm"
                 variant="default"
                 className="h-6 text-[10px] px-2 gap-0.5"
-                onClick={handleSaveLocalAndCloud}
-                title="שמור — מקומי + ענן יחד"
+                onClick={onSaveReplace}
+                title="דורס ושומר את המקור"
               >
                 <Save className="w-2.5 h-2.5" />
                 שמור
               </Button>
             )}
-
-            {/* Baseline controls — restore / compare / set-new */}
-            <div className="inline-flex items-center gap-0.5 ms-0.5 ps-1 border-s border-border/40">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 w-6 p-0"
-                onClick={restoreToBaseline}
-                disabled={!isModifiedFromBaseline}
-                title={hasBaseline ? (isModifiedFromBaseline ? 'החזר לגרסת בסיס' : 'הטקסט זהה לבסיס') : 'אין בסיס שמור'}
-              >
-                <History className="w-3 h-3" />
-              </Button>
-              <Button
-                size="sm"
-                variant={compareMode ? 'default' : 'outline'}
-                className="h-6 w-6 p-0"
-                onClick={compareMode ? toggleCompareMode : compareToBaseline}
-                disabled={!hasBaseline}
-                title={compareMode ? 'סיים השוואה' : 'השווה לגרסת בסיס'}
-              >
-                <GitCompare className="w-3 h-3" />
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 w-6 p-0"
-                onClick={setNewBaseline}
-                title="קבע את הטקסט הנוכחי כבסיס חדש"
-              >
-                <Bookmark className="w-3 h-3" />
-              </Button>
-            </div>
-
             {onDuplicateSave && (
               <Button
                 size="sm"
@@ -1395,7 +1305,9 @@ export const SyncMirrorLayout = ({
               {!isMarkingActive && (
                 <div
                   style={{
-                    ...textStyle,
+                    fontSize: `${localFontSize}px`,
+                    fontFamily: localFontFamily,
+                    lineHeight: localLineHeight,
                     ...(localTextColor ? { color: localTextColor } : {}),
                     ...richColumnStyle,
                   }}
