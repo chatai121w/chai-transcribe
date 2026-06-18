@@ -25,7 +25,7 @@ import {
 } from "./lib/devFloatingButtons";
 
 // Lazy load with logging + auto-reload on stale chunk
-function lazyWithLog(name: string, factory: () => Promise<{ default: React.ComponentType<unknown> }>) {
+function lazyWithLog(name: string, factory: () => Promise<{ default: React.ComponentType<any> }>) {
   return lazy(() => {
     const stop = debugLog.time('LazyLoad', name);
     return factory()
@@ -86,7 +86,9 @@ const MeetingRecorder = lazyWithLog('MeetingRecorder', () => import("./pages/Mee
 const VoiceCommandAdmin = lazyWithLog('VoiceCommandAdmin', () => import("./pages/VoiceCommandAdmin"));
 const SystemDashboard   = lazyWithLog('SystemDashboard',   () => import("./pages/SystemDashboard"));
 const LashoKodesh       = lazyWithLog('LashoKodesh',       () => import("./pages/LashoKodesh"));
+const LoshonKodeshRules = lazyWithLog('LoshonKodeshRules', () => import("./pages/LoshonKodeshRules"));
 const CompareReport     = lazyWithLog('CompareReport',     () => import("./pages/CompareReport"));
+const ComparisonsHub    = lazyWithLog('ComparisonsHub',    () => import("./pages/ComparisonsHub"));
 
 // Lazy non-critical UI widgets — defer past first paint
 const SmartConsoleLazy = lazy(() => import("./components/SmartConsole").then(m => ({ default: m.SmartConsole })));
@@ -275,7 +277,9 @@ const App = () => {
                 <Route path="/voice-studio" element={<ProtectedRoute><VoiceStudio /></ProtectedRoute>} />
                 <Route path="/audacity-lab" element={<ProtectedRoute><AudacityLab /></ProtectedRoute>} />
                 <Route path="/diarization" element={<ProtectedRoute><Diarization /></ProtectedRoute>} />
-                <Route path="/diarization/compare" element={<ProtectedRoute><DiarizationCompare /></ProtectedRoute>} />
+                <Route path="/compare" element={<ProtectedRoute><ComparisonsHub /></ProtectedRoute>} />
+                <Route path="/diarization/compare" element={<Navigate to="/compare?tab=diarization" replace />} />
+                <Route path="/compare-report" element={<Navigate to="/compare?tab=transcripts" replace />} />
                 <Route path="/video-to-mp3" element={<ProtectedRoute><VideoToMp3 /></ProtectedRoute>} />
                 <Route path="/audio-clean" element={<ProtectedRoute><AudioCleanLab /></ProtectedRoute>} />
                 <Route path="/harmonika" element={<ProtectedRoute><Harmonika /></ProtectedRoute>} />
@@ -283,7 +287,7 @@ const App = () => {
                 <Route path="/voice-command-admin" element={<ProtectedRoute><VoiceCommandAdmin /></ProtectedRoute>} />
                 <Route path="/system-dashboard" element={<ProtectedRoute><SystemDashboard /></ProtectedRoute>} />
                 <Route path="/lashon-kodesh" element={<ProtectedRoute><LashoKodesh /></ProtectedRoute>} />
-                <Route path="/compare-report" element={<ProtectedRoute><CompareReport /></ProtectedRoute>} />
+                <Route path="/loshon-kodesh-rules" element={<ProtectedRoute><LoshonKodeshRules /></ProtectedRoute>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>

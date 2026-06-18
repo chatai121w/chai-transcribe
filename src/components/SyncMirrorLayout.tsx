@@ -20,7 +20,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain } from "lucide-react";
+import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import type { WordTiming } from "./SyncAudioPlayer";
@@ -29,6 +30,8 @@ import { addDictionaryReplacement, addIgnoredWord } from "@/utils/hebrewGrammarD
 import { WordContextMenu } from "@/components/WordContextMenu";
 import { alignEditedToWhisper } from "@/lib/whisperAlignment";
 import { getWordHighlightStyle, isWordApproved } from "@/lib/personalPronunciationModel";
+import { RichTextEditor } from "@/components/RichTextEditor";
+import { TextMarkingOverlay } from "@/components/TextMarkingOverlay";
 
 interface SyncMirrorLayoutProps {
   wordTimings: WordTiming[];
@@ -54,6 +57,13 @@ interface SyncMirrorLayoutProps {
     mode: 'quick' | 'advanced';
     note?: string;
   }) => Promise<boolean | void> | boolean | void;
+  /** When true, the LEFT column renders the full text editor (TextMarkingOverlay + RichTextEditor)
+   *  instead of the per-word click/right-click view. */
+  enableRichEdit?: boolean;
+  /** Fired when RichTextEditor auto-corrects a word (for logging/learning). */
+  onWordCorrected?: (original: string, corrected: string) => void;
+  /** Optional column style passed to RichTextEditor. */
+  richColumnStyle?: React.CSSProperties;
 }
 
 function normalizeWord(w: string) {
@@ -91,9 +101,31 @@ export const SyncMirrorLayout = ({
   learningProfiles = [],
   learningEnabled = true,
   onSaveLearning,
+  enableRichEdit = false,
+  onWordCorrected,
+  richColumnStyle,
 }: SyncMirrorLayoutProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const leftRichRef = useRef<HTMLDivElement>(null);
+  const leftRowsRef = useRef<HTMLDivElement>(null);
+  const [isMarkingActive, setIsMarkingActive] = useState(false);
+  const [rightTopOffset, setRightTopOffset] = useState(0);
+  // "Precise row alignment" — when true (default), left column renders via the
+  // SAME canvas-measured `lines` as the right column, guaranteeing row-for-row
+  // horizontal alignment at any viewport. When false, falls back to free-form
+  // contentEditable rich editing (line breaks differ between columns).
+  const [preciseAlign, setPreciseAlign] = useState<boolean>(() => {
+    try { return localStorage.getItem('sync_mirror_precise_align') !== '0'; } catch { return true; }
+  });
+  const togglePreciseAlign = () => {
+    setPreciseAlign(v => {
+      const next = !v;
+      try { localStorage.setItem('sync_mirror_precise_align', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
+  const effectiveRichEdit = enableRichEdit && !preciseAlign;
 
   const [colWidth, setColWidth] = useState(0);
   const [fullEditMode, setFullEditMode] = useState(false);
@@ -119,6 +151,33 @@ export const SyncMirrorLayout = ({
   const [localLetterSpacing, setLocalLetterSpacing] = useState(0); // px extra
   const [localFontWeight, setLocalFontWeight] = useState<number>(400);
   const [localTextColor, setLocalTextColor] = useState<string>("");
+
+  // Measure the left column's real first-text surface so the right column starts
+  // on the same pixel line even when the left side has marking/edit toolbars.
+  useEffect(() => {
+    if (!enableRichEdit || fullEditMode) { setRightTopOffset(0); return; }
+    const wrapper = leftRichRef.current;
+    const scroller = scrollRef.current;
+    if (!wrapper || !scroller) return;
+    let raf = 0;
+    const measure = () => {
+      const editable = wrapper.querySelector('[contenteditable="true"]') as HTMLElement | null;
+      const firstPreciseLine = leftRowsRef.current?.querySelector<HTMLElement>('[data-line="0"]') ?? null;
+      const target = effectiveRichEdit ? editable : firstPreciseLine;
+      const anchor = target ?? wrapper;
+      const diff = Math.max(0, Math.round(anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop));
+      setRightTopOffset(diff);
+    };
+    const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
+    schedule();
+    const ro = new ResizeObserver(schedule);
+    ro.observe(wrapper);
+    ro.observe(scroller);
+    window.addEventListener('resize', schedule);
+    const t = window.setInterval(schedule, 800); // catch async toolbar/spell changes
+    return () => { ro.disconnect(); window.removeEventListener('resize', schedule); window.clearInterval(t); cancelAnimationFrame(raf); };
+  }, [enableRichEdit, effectiveRichEdit, fullEditMode, isMarkingActive, localFontSize, localFontFamily, localLineHeight, preciseAlign]);
+
 
   // ── User timing anchors ────────────────────────────────────────────────────
   // Map: edited word index → pinned {start, end} timing
@@ -354,6 +413,61 @@ export const SyncMirrorLayout = ({
     if (line.length) result.push(line);
     return result;
   }, [compareMode, frozenTimings, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
+
+  // ── Baseline (original) snapshot — set once on first non-empty mount, persisted ──
+  const BASELINE_KEY = 'sync_mirror_baseline_v1';
+  const baselineInitRef = useRef(false);
+  const [baselineText, setBaselineText] = useState<string>(() => {
+    try { return localStorage.getItem(BASELINE_KEY) || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    if (baselineInitRef.current) return;
+    if (!text || !text.trim()) return;
+    baselineInitRef.current = true;
+    if (!baselineText) {
+      try { localStorage.setItem(BASELINE_KEY, text); } catch {}
+      setBaselineText(text);
+    }
+  }, [text, baselineText]);
+
+  const hasBaseline = !!baselineText && baselineText.trim().length > 0;
+  const isModifiedFromBaseline = hasBaseline && baselineText.trim() !== text.trim();
+
+  const restoreToBaseline = useCallback(() => {
+    if (!hasBaseline) return;
+    if (!confirm('להחזיר את הטקסט לגרסת הבסיס? כל השינויים מאז יאבדו.')) return;
+    onTextChange(baselineText);
+    toast({ title: 'הוחזר לגרסת בסיס', description: 'הטקסט שוחזר למצב המקורי שנשמר.' });
+  }, [hasBaseline, baselineText, onTextChange]);
+
+  const setNewBaseline = useCallback(() => {
+    if (!text || !text.trim()) return;
+    try { localStorage.setItem(BASELINE_KEY, text); } catch {}
+    setBaselineText(text);
+    toast({ title: 'בסיס חדש נקבע', description: 'הטקסט הנוכחי הוגדר כגרסת הבסיס.' });
+  }, [text]);
+
+  const compareToBaseline = useCallback(() => {
+    if (!hasBaseline) return;
+    // Snapshot the baseline as the frozen panel and enter compare mode
+    const words = baselineText.trim().split(/\s+/).filter(Boolean);
+    const baselineTimings: WordTiming[] = words.map((word, i) => ({ word, start: i, end: i + 1 }));
+    setFrozenTimings(baselineTimings);
+    setCompareMode(true);
+    toast({ title: 'משווה לגרסת בסיס', description: 'הצד הימני מציג כעת את גרסת הבסיס.' });
+  }, [hasBaseline, baselineText]);
+
+  // Wrap onSaveReplace with a unified local+cloud toast
+  const handleSaveLocalAndCloud = useCallback(() => {
+    if (!onSaveReplace) return;
+    try {
+      onSaveReplace();
+      toast({ title: 'נשמר ✓', description: 'מקומי + ענן יחד.' });
+    } catch (e) {
+      toast({ title: 'השמירה נכשלה', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
+    }
+  }, [onSaveReplace]);
+
 
   // ── Full-text editing overlay ───────────────────────────────────────────────
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -882,13 +996,47 @@ export const SyncMirrorLayout = ({
                 size="sm"
                 variant="default"
                 className="h-6 text-[10px] px-2 gap-0.5"
-                onClick={onSaveReplace}
-                title="דורס ושומר את המקור"
+                onClick={handleSaveLocalAndCloud}
+                title="שמור — מקומי + ענן יחד"
               >
                 <Save className="w-2.5 h-2.5" />
                 שמור
               </Button>
             )}
+
+            {/* Baseline controls — restore / compare / set-new */}
+            <div className="inline-flex items-center gap-0.5 ms-0.5 ps-1 border-s border-border/40">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 w-6 p-0"
+                onClick={restoreToBaseline}
+                disabled={!isModifiedFromBaseline}
+                title={hasBaseline ? (isModifiedFromBaseline ? 'החזר לגרסת בסיס' : 'הטקסט זהה לבסיס') : 'אין בסיס שמור'}
+              >
+                <History className="w-3 h-3" />
+              </Button>
+              <Button
+                size="sm"
+                variant={compareMode ? 'default' : 'outline'}
+                className="h-6 w-6 p-0"
+                onClick={compareMode ? toggleCompareMode : compareToBaseline}
+                disabled={!hasBaseline}
+                title={compareMode ? 'סיים השוואה' : 'השווה לגרסת בסיס'}
+              >
+                <GitCompare className="w-3 h-3" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 w-6 p-0"
+                onClick={setNewBaseline}
+                title="קבע את הטקסט הנוכחי כבסיס חדש"
+              >
+                <Bookmark className="w-3 h-3" />
+              </Button>
+            </div>
+
             {onDuplicateSave && (
               <Button
                 size="sm"
@@ -1175,6 +1323,21 @@ export const SyncMirrorLayout = ({
               </PopoverContent>
             </Popover>
 
+            {/* Precise row alignment toggle (only meaningful when rich-edit is enabled) */}
+            {enableRichEdit && (
+              <Button
+                size="sm"
+                variant={preciseAlign ? "default" : "outline"}
+                className="h-6 text-[10px] px-1.5 gap-0.5"
+                onClick={togglePreciseAlign}
+                title={preciseAlign
+                  ? "יישור שורות מדויק פעיל — שני הצדדים מתיישרים שורה-מול-שורה בכל גודל מסך. לחץ למעבר לעריכה חופשית."
+                  : "עריכה חופשית פעילה — שורות לא מובטחות זו מול זו. לחץ לחזרה ליישור מדויק."}
+              >
+                <Rows3 className="w-2.5 h-2.5" />
+                {preciseAlign ? "יישור מדויק" : "עריכה חופשית"}
+              </Button>
+            )}
             {/* Full edit button */}
             <Button
               size="sm"
@@ -1197,8 +1360,14 @@ export const SyncMirrorLayout = ({
       >
         {/* ── RIGHT column: תמלול מסונכרן (read-only) ── */}
         <div className="flex-1 min-w-0 flex flex-col border-s border-border/40">
-          {/* word rows */}
-          <div className="p-4" style={textStyle}>
+          {/* word rows — when rich-edit is on, pad-top dynamically to align with editor's first line */}
+          <div
+            className="px-4 pb-4"
+            style={{
+              ...textStyle,
+              paddingTop: enableRichEdit ? `${rightTopOffset || 16}px` : 16,
+            }}
+          >
             {(compareMode ? frozenLines : lines).map((line, li) => {
               const sourceLines = compareMode ? frozenLines : lines;
               const offset = sourceLines.slice(0, li).reduce((a, l) => a + l.length, 0);
@@ -1207,15 +1376,69 @@ export const SyncMirrorLayout = ({
           </div>
         </div>
 
+
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
         <div className="flex-1 min-w-0 flex flex-col">
-          {/* word rows */}
-          <div className="p-4" style={textStyle}>
-            {lines.map((line, li) => {
-              const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
-              return renderLine(line, offset, li, "left");
-            })}
-          </div>
+          {effectiveRichEdit ? (
+            <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
+              {/* Marking toolbar (always visible) + analysis panel (when active) */}
+              <TextMarkingOverlay
+                text={text}
+                onTextChange={onTextChange}
+                fontSize={localFontSize}
+                fontFamily={localFontFamily}
+                lineHeight={localLineHeight}
+                toolbarOnly={!isMarkingActive}
+                onActiveChange={setIsMarkingActive}
+              />
+              {/* RichTextEditor — full editing surface */}
+              {!isMarkingActive && (
+                <div
+                  style={{
+                    ...textStyle,
+                    ...(localTextColor ? { color: localTextColor } : {}),
+                    ...richColumnStyle,
+                  }}
+                >
+                  <RichTextEditor
+                    text={text}
+                    onChange={onTextChange}
+                    columnStyle={richColumnStyle}
+                    onSaveReplaceOriginal={onSaveReplace}
+                    onDuplicateSave={onDuplicateSave ? () => onDuplicateSave('') : undefined}
+                    onWordCorrected={onWordCorrected}
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Precise-alignment view: identical line breaks as the right column.
+               Editing happens through right-click WordContextMenu (and the
+               marking toolbar above when enableRichEdit is on). */
+            <div className="flex flex-col" ref={leftRichRef}>
+              {enableRichEdit && (
+                <div className="px-3 pt-2" dir="rtl">
+                  <TextMarkingOverlay
+                    text={text}
+                    onTextChange={onTextChange}
+                    fontSize={localFontSize}
+                    fontFamily={localFontFamily}
+                    lineHeight={localLineHeight}
+                    toolbarOnly={!isMarkingActive}
+                    onActiveChange={setIsMarkingActive}
+                  />
+                </div>
+              )}
+              {!isMarkingActive && (
+                <div ref={leftRowsRef} className="p-4" style={textStyle}>
+                  {lines.map((line, li) => {
+                    const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
+                    return renderLine(line, offset, li, "left");
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
       </>}

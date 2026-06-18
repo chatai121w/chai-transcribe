@@ -33,7 +33,7 @@ import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
 import { getApiKey, getEncryptedKey } from "@/lib/keyCrypto";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
-import { isLoshonKodeshEnabled, setLoshonKodeshEnabled } from "@/lib/loshonKodesh";
+import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, buildLoshonKodeshHotwords, applyLoshonKodeshReplacements, isLkAiEnabled, isLkAiAuto, applyLkAiFix } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
 import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
 import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSuggestion";
@@ -389,7 +389,21 @@ const Index = () => {
     const profileResult = personalPronunciationOn
       ? applyProfileCorrections(correctionResult.text)
       : { text: correctionResult.text, appliedCount: 0 };
-    const finalText = profileResult.text;
+    // Apply Loshon Kodesh phonetic→canonical replacements when LK mode is on
+    const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
+    let finalText = lkActive ? applyLoshonKodeshReplacements(profileResult.text) : profileResult.text;
+    // Layer 2: optional AI fix when auto-mode is on
+    if (lkActive && isLkAiEnabled() && isLkAiAuto()) {
+      try {
+        const aiFixed = await applyLkAiFix(finalText);
+        if (aiFixed && aiFixed.trim()) {
+          finalText = aiFixed;
+          debugLog.info('Index', 'Applied Loshon Kodesh AI layer');
+        }
+      } catch (e) {
+        debugLog.warn('Index', 'LK AI fix failed, keeping rules-only result', e);
+      }
+    }
     if (correctionResult.appliedCount > 0 || profileResult.appliedCount > 0) {
       debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile corrections`);
     }
@@ -1266,8 +1280,12 @@ const Index = () => {
       const profileHotwordsStr = buildProfileHotwords();
       const profileInitPrompt = getProfileInitialPrompt();
       const profileForcesLk = isProfileLoshonKodesh();
-      const mergedCudaHotwords =
-        [preferences.cuda_hotwords || '', profileHotwordsStr].filter(Boolean).join(', ') || undefined;
+      const lkOn = isLoshonKodeshEnabled() || profileForcesLk;
+      // When LK is on, merge user-edited LK hotwords + prefer LK prompt
+      const baseHotwords = [preferences.cuda_hotwords || '', profileHotwordsStr].filter(Boolean).join(', ');
+      const mergedCudaHotwords = lkOn
+        ? (buildLoshonKodeshHotwords(baseHotwords) || undefined)
+        : (baseHotwords || undefined);
       const cudaOptions: CudaOptions = {
         preset: preferences.cuda_preset || 'balanced',
         fastMode: preferences.cuda_fast_mode,
@@ -1277,8 +1295,8 @@ const Index = () => {
         vadAggressive: preferences.cuda_vad_aggressive,
         hotwords: mergedCudaHotwords,
         paragraphThreshold: preferences.cuda_paragraph_threshold || undefined,
-        loshonKodesh: isLoshonKodeshEnabled() || profileForcesLk,
-        initialPrompt: profileInitPrompt || undefined,
+        loshonKodesh: lkOn,
+        initialPrompt: lkOn ? (getLoshonKodeshPrompt() || profileInitPrompt || undefined) : (profileInitPrompt || undefined),
       };
 
       // Use parallel mode (stage audio + preload model simultaneously) when model isn't ready

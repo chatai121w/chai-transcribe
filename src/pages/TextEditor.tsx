@@ -13,7 +13,7 @@ import { TextStyleControl } from "@/components/TextStyleControl";
 // Lazy-loaded heavy components
 const SyncAudioPlayer = lazy(() => import("@/components/SyncAudioPlayer").then(m => ({ default: m.SyncAudioPlayer })));
 const AIEditorDual = lazy(() => import("@/components/AIEditorDual").then(m => ({ default: m.AIEditorDual })));
-const TextComparisonMulti = lazy(() => import("@/components/TextComparisonMulti").then(m => ({ default: m.TextComparisonMulti })));
+
 const EditingTemplates = lazy(() => import("@/components/EditingTemplates").then(m => ({ default: m.EditingTemplates })));
 const AdvancedDiffView = lazy(() => import("@/components/AdvancedDiffView").then(m => ({ default: m.AdvancedDiffView })));
 // TextStyleControl is in the header (always rendered) — must be eager to avoid triggering outer Suspense
@@ -35,7 +35,9 @@ const AnalyticsDashboard = lazy(() => import("@/components/AnalyticsDashboard").
 const SpeakerDiarization = lazy(() => import("@/components/SpeakerDiarization").then(m => ({ default: m.SpeakerDiarization })));
 const FloatingPlayerPortal = lazy(() => import("@/components/FloatingPlayerPortal").then(m => ({ default: m.FloatingPlayerPortal })));
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })));
-import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type } from "lucide-react";
+const LoshonKodeshRules = lazy(() => import("@/pages/LoshonKodeshRules"));
+const AIVersionsGrid = lazy(() => import("@/components/AIVersionsGrid").then(m => ({ default: m.AIVersionsGrid })));
+import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle } from "lucide-react";
 import { uploadToDrive } from "@/components/GoogleDriveBrowser";
 import { DriveFolderPicker } from "@/components/DriveFolderPicker";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
@@ -124,7 +126,7 @@ const TextEditor = () => {
   const playerTimeRef = useRef(0);
   const transcriptIdRef = useRef<string | null>(null);
   const manualVersionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { updateTranscript, getAudioUrl } = useCloudTranscripts();
+  const { updateTranscript, getAudioUrl, saveTranscript, transcripts } = useCloudTranscripts();
   const [syncEnabled, setSyncEnabled] = useState(true);
   const [transcriptId, setTranscriptId] = useState<string | null>(null);
   const { versions: cloudVersions, isLoading: cloudVersionsLoading, saveVersion: saveCloudVersion } = useCloudVersions(transcriptId);
@@ -135,8 +137,8 @@ const TextEditor = () => {
 
   // Tab settings (visibility + order)
   const ALL_TABS: TabConfig[] = [
-    { id: "player", label: "נגן", emoji: "🎧", group: "primary" },
-    { id: "edit", label: "עריכת טקסט", group: "primary" },
+    { id: "player", label: "עורך טקסט", emoji: "🎧", group: "primary" },
+    { id: "loshon", label: "לשון הקודש", emoji: "🕮", group: "primary" },
     { id: "speakers", label: "זיהוי דוברים", group: "primary" },
     { id: "templates", label: "תבניות", group: "primary" },
     { id: "ai", label: "עריכה עם AI", group: "primary" },
@@ -146,7 +148,7 @@ const TextEditor = () => {
     { id: "learning", label: "למידה", group: "secondary" },
     { id: "vocab", label: "מילון", group: "secondary" },
     { id: "summary", label: "סיכום", group: "secondary" },
-    { id: "ab", label: "A/B", group: "secondary" },
+    
     { id: "analytics", label: "אנליטיקה", group: "secondary" },
     { id: "compare", label: "השוואה", group: "secondary" },
     { id: "history", label: "היסטוריה", group: "secondary" },
@@ -238,6 +240,23 @@ const TextEditor = () => {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const playerRef = useRef<SyncAudioPlayerRef>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  // Loshon Kodesh embedded tab
+  const [activeTab, setActiveTab] = useState<string>("player");
+  // Migrate stale "edit" tab → "player" (the two tabs were unified)
+  useEffect(() => { if (activeTab === "edit") setActiveTab("player"); }, [activeTab]);
+  const [comparePreselect, setComparePreselect] = useState<{ leftId: string; rightId: string } | null>(null);
+  const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
+  const sendTextToLoshonKodesh = useCallback((opts?: { jump?: boolean }) => {
+    const t = (text || "").trim();
+    if (!t) {
+      toast({ title: "אין טקסט לשליחה", description: "כתוב או טען תמלול תחילה", variant: "destructive" });
+      return;
+    }
+    setLkEmbeddedText(t);
+    toast({ title: "הטקסט נשלח ללשון הקודש", description: "פתח את הטאב כדי לבדוק ולהמיר" });
+    if (opts?.jump) setActiveTab("loshon");
+  }, [text]);
 
   const setColumns = (v: number) => updatePreference('editor_columns', v);
   const cycleColumnView = () => {
@@ -386,7 +405,7 @@ const TextEditor = () => {
       if (location.state?.transcriptId) {
         // Defer to avoid calling saveCloudVersion before hook is ready
         setTimeout(() => {
-          saveCloudVersion(stateText, 'original', null, 'תמלול מקורי');
+          saveCloudVersion(stateText, 'original', null, 'תמלול מקורי', { transcriptId: location.state.transcriptId });
         }, 500);
       }
     } else {
@@ -414,10 +433,19 @@ const TextEditor = () => {
       }
     }
 
-    // Track transcript ID for cloud saves
+    // Track transcript ID for cloud saves — persist it so re-entering the editor restores compare/AI versions.
     if (location.state?.transcriptId) {
       transcriptIdRef.current = location.state.transcriptId;
       setTranscriptId(location.state.transcriptId);
+      try { localStorage.setItem('current_transcript_id', location.state.transcriptId); } catch { /* noop */ }
+    } else {
+      try {
+        const saved = localStorage.getItem('current_transcript_id');
+        if (saved) {
+          transcriptIdRef.current = saved;
+          setTranscriptId(saved);
+        }
+      } catch { /* noop */ }
     }
 
     // Load audio URL from navigation state or resolve from Supabase Storage
@@ -476,6 +504,38 @@ const TextEditor = () => {
 
   }, [location.state, tryRecoverAudioFromDexie, setOwnedAudioFromBlob, getAudioUrl, audioFileName]);
 
+  // Direct entry fallback: when /text-editor opens without navigation state,
+  // restore the latest cloud transcript so compare/history are not empty.
+  useEffect(() => {
+    if (transcriptIdRef.current || transcriptId) return;
+    if (location.state?.text || !transcripts.length) return;
+
+    const latest = [...transcripts].sort(
+      (a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime()
+    )[0];
+    if (!latest?.id || !latest.text?.trim()) return;
+
+    const editorText = latest.edited_text || latest.text;
+    transcriptIdRef.current = latest.id;
+    setTranscriptId(latest.id);
+    originalTextRef.current = latest.text;
+    setText(editorText);
+
+    const initialVersion: TextVersion = {
+      id: 'current-original',
+      text: latest.text,
+      timestamp: new Date(latest.created_at),
+      source: 'original',
+      customPrompt: 'תמלול מקורי',
+    };
+    setVersions(prev => prev.length ? prev : [initialVersion]);
+    setSelectedVersionId(initialVersion.id);
+    try {
+      localStorage.setItem('current_transcript_id', latest.id);
+      localStorage.setItem('current_editing_text', editorText);
+    } catch { /* noop */ }
+  }, [transcripts, transcriptId, location.state, setText]);
+
   // Auto-save text and versions to localStorage + debounce cloud save
   const cloudSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -517,16 +577,53 @@ const TextEditor = () => {
     setVersions(prev => [...prev, newVersion]);
     setSelectedVersionId(newVersion.id);
     setText(newText);
-    // Also save to cloud versions
-    if (transcriptId) {
-      saveCloudVersion(newText, source, customPrompt || null, sourceLabels[source] || source);
-    }
+    // Persist immediately to local + cloud so re-renders never lose AI output.
+    // If no cloud transcript yet, create one first then save the version.
+    (async () => {
+      try {
+        let id = transcriptIdRef.current || transcriptId;
+        if (!id) id = await ensureCloudTranscript();
+        if (id) {
+          await saveCloudVersion(newText, source, customPrompt || null, sourceLabels[source] || source, { transcriptId: id });
+        }
+      } catch (e) {
+        console.error('[addVersion] persist failed', e);
+        toast({ title: 'שמירת גרסה נכשלה', description: 'נשמר מקומית בלבד', variant: 'destructive' });
+      }
+    })();
   };
 
-  const handleSaveVersion = (text: string, source: string, engineLabel: string, actionLabel: string) => {
+  const ensureCloudTranscript = useCallback(async (): Promise<string | null> => {
+    if (transcriptIdRef.current) return transcriptIdRef.current;
+    if (transcriptId) return transcriptId;
+    const baseText = (text || '').trim();
+    if (!baseText) {
+      toast({ title: 'אין טקסט לשמירה', variant: 'destructive' });
+      return null;
+    }
+    const navEngine = (location.state as any)?.engine;
+    const engineName = typeof navEngine === 'string' && navEngine ? navEngine : 'manual';
+    try {
+      const created = await saveTranscript(baseText, engineName);
+      if (created?.id) {
+        transcriptIdRef.current = created.id;
+        setTranscriptId(created.id);
+        try { localStorage.setItem('current_transcript_id', created.id); } catch { /* noop */ }
+        toast({ title: 'התמלול נשמר בענן ☁️' });
+        return created.id;
+      }
+    } catch (e: any) {
+      toast({ title: 'שמירה לענן נכשלה', description: e?.message, variant: 'destructive' });
+    }
+    return null;
+  }, [transcriptId, text, saveTranscript, location.state]);
+
+  const handleSaveVersion = async (text: string, source: string, engineLabel: string, actionLabel: string) => {
     // Save version to cloud WITHOUT replacing the main text
-    if (transcriptId) {
-      saveCloudVersion(text, source, engineLabel, actionLabel);
+    let id = transcriptId;
+    if (!id) id = await ensureCloudTranscript();
+    if (id) {
+      saveCloudVersion(text, source, engineLabel, actionLabel, { transcriptId: id });
       toast({ title: 'גרסה נשמרה בענן ☁️', description: `${engineLabel} — ${actionLabel}` });
     } else {
       toast({ title: 'לא ניתן לשמור', description: 'יש צורך בתמלול שמור בענן', variant: 'destructive' });
@@ -552,9 +649,38 @@ const TextEditor = () => {
   );
   const [drivePickerOpen, setDrivePickerOpen] = useState(false);
   const [showCompareAi, setShowCompareAi] = useState(false);
+  const [compareSubTab, setCompareSubTab] = useState("versions");
+  const [aiPreselectSourceId, setAiPreselectSourceId] = useState<string | undefined>(undefined);
 
   const compareVersions = useMemo<TextVersion[]>(() => {
     const byId = new Map<string, TextVersion>();
+
+    const currentTranscriptId = transcriptIdRef.current || transcriptId;
+    const currentCloudTranscript = currentTranscriptId
+      ? transcripts.find(t => t.id === currentTranscriptId)
+      : undefined;
+
+    const originalText = currentCloudTranscript?.text || originalTextRef.current || text;
+    if (originalText?.trim()) {
+      byId.set('current-original', {
+        id: 'current-original',
+        text: originalText,
+        timestamp: currentCloudTranscript?.created_at ? new Date(currentCloudTranscript.created_at) : new Date(0),
+        source: 'original',
+        customPrompt: 'תמלול מקורי',
+      });
+    }
+
+    const editedText = currentCloudTranscript?.edited_text || text;
+    if (editedText?.trim() && editedText !== originalText) {
+      byId.set('current-edited', {
+        id: 'current-edited',
+        text: editedText,
+        timestamp: currentCloudTranscript?.updated_at ? new Date(currentCloudTranscript.updated_at) : new Date(),
+        source: 'manual',
+        customPrompt: 'הטקסט הנוכחי בעורך',
+      });
+    }
 
     for (const v of versions) {
       byId.set(v.id, v);
@@ -572,7 +698,36 @@ const TextEditor = () => {
     }
 
     return Array.from(byId.values()).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-  }, [versions, cloudVersions]);
+  }, [versions, cloudVersions, transcripts, transcriptId, text]);
+
+  const sendVersionToCompare = useCallback((versionId: string) => {
+    const original = compareVersions.find(v => v.source === 'original') || compareVersions[0];
+    const target = compareVersions.find(v => v.id === versionId);
+    if (!original || !target) {
+      toast({ title: 'אין מספיק גרסאות להשוואה', variant: 'destructive' });
+      return;
+    }
+    setComparePreselect({ leftId: original.id, rightId: target.id });
+    setCompareSubTab("versions");
+    setActiveTab('compare');
+    toast({ title: 'נשלח להשוואה' });
+  }, [compareVersions]);
+
+  const sendVersionToAiEditor = useCallback((versionId: string) => {
+    const target = compareVersions.find(v => v.id === versionId);
+    if (!target) {
+      toast({ title: 'גרסה לא נמצאה', variant: 'destructive' });
+      return;
+    }
+    setAiPreselectSourceId(versionId);
+    // If we're inside the compare tab, open the inline AI editor; otherwise jump to AI tab
+    if (activeTab === 'compare') {
+      setShowCompareAi(true);
+    } else {
+      setActiveTab('ai');
+    }
+    toast({ title: 'נשלח לעריכת AI' });
+  }, [compareVersions, activeTab]);
 
   const handleAiQuickAction = async (action: 'fix_errors' | 'split_paragraphs' | 'fix_and_split') => {
     if (!text.trim()) {
@@ -770,8 +925,8 @@ const TextEditor = () => {
 
     setText(editedText);
     if (syncedTimings) setWordTimings(syncedTimings);
-    if (transcriptId) {
-      saveCloudVersion(editedText, source, engineLabel, `${actionLabel} • החלפת מקור`);
+    if (id) {
+      saveCloudVersion(editedText, source, engineLabel, `${actionLabel} • החלפת מקור`, { transcriptId: id });
     }
 
     toast({
@@ -830,8 +985,8 @@ const TextEditor = () => {
       return;
     }
 
-    if (transcriptId) {
-      saveCloudVersion(editedText, source, engineLabel, `${actionLabel} • שכפל ושמור`);
+    if (id) {
+      saveCloudVersion(editedText, source, engineLabel, `${actionLabel} • שכפל ושמור`, { transcriptId: id });
     }
 
     toast({
@@ -1112,11 +1267,32 @@ const TextEditor = () => {
               <Cloud className="w-3.5 h-3.5 text-yellow-600" />
               ייצא ל-Drive
             </Button>
+            <div className="w-px h-5 bg-border mx-1 hidden sm:block" />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1 border-yellow-500/50 hover:bg-yellow-500/10"
+              onClick={() => sendTextToLoshonKodesh()}
+              title="שלח את הטקסט לטאב לשון הקודש (השאר אותי כאן)"
+            >
+              <ShoppingBasket className="w-3.5 h-3.5 text-yellow-600" />
+              שלח ללשון הקודש
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1 border-yellow-500/50 hover:bg-yellow-500/10"
+              onClick={() => sendTextToLoshonKodesh({ jump: true })}
+              title="שלח את הטקסט וקפוץ לטאב לשון הקודש"
+            >
+              <ScrollText className="w-3.5 h-3.5 text-yellow-600" />
+              פתח לשון הקודש
+            </Button>
           </div>
         )}
 
         {/* Main Content */}
-        <Tabs defaultValue="edit" className="w-full" dir="rtl">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" dir="rtl">
           {/* Primary tabs — core workflow */}
           {(() => {
             const orderedPrimary = tabOrder
@@ -1152,7 +1328,7 @@ const TextEditor = () => {
           })()}
 
           <TabsContent value="player" className="flex flex-col gap-3">
-            <LazyErrorBoundary label="נגן מסונכרן">
+            <LazyErrorBoundary label="עורך טקסט">
 
             {/* ── Toolbar: layout controls ── */}
             <div className="flex items-center justify-between gap-3" dir="rtl">
@@ -1314,54 +1490,32 @@ const TextEditor = () => {
                   searchQuery={transcriptSearchOpen ? transcriptSearchQuery : undefined}
                   searchActiveIndex={transcriptSearchIdx}
                   onSearchMatchCount={setTranscriptMatchCount}
-                  onSaveReplace={() => handleSaveAndReplaceOriginal(text, 'manual', 'נגן מסונכרן', 'שמירה מהנגן')}
-                  onDuplicateSave={(newName) => handleDuplicateAndSave(text, 'manual', 'נגן מסונכרן', 'שכפול מהנגן', newName)}
+                  onSaveReplace={() => handleSaveAndReplaceOriginal(text, 'manual', 'עורך טקסט', 'שמירה מהעורך')}
+                  onDuplicateSave={(newName) => handleDuplicateAndSave(text, 'manual', 'עורך טקסט', 'שכפול מהעורך', newName)}
                   learningProfiles={learningProfiles}
                   learningEnabled={true}
                   onSaveLearning={handleSaveLearningToProfile}
-                />
-              </div>
-            )}
-
-            </LazyErrorBoundary>
-          </TabsContent>
-
-          <TabsContent value="edit" className="flex flex-col gap-3">
-            {/* Marking toolbar — always visible, text display only when active */}
-            <LazyErrorBoundary label="סימון ויזואלי">
-              <TextMarkingOverlay
-                text={text}
-                onTextChange={handleEditorChange}
-                fontSize={fontSize}
-                fontFamily={fontFamily}
-                lineHeight={lineHeight}
-                toolbarOnly={!isMarkingActive}
-                onActiveChange={setIsMarkingActive}
-              />
-            </LazyErrorBoundary>
-            {/* Editable text — hidden when marking analysis is shown */}
-            {!isMarkingActive && (
-              <div
-                style={{
-                  fontSize: `${fontSize}px`,
-                  fontFamily: fontFamily,
-                  color: textColor,
-                  lineHeight: lineHeight,
-                }}
-              >
-                <RichTextEditor 
-                  text={text} 
-                  onChange={handleEditorChange}
-                  columnStyle={columnStyle}
-                  onSaveReplaceOriginal={() => handleSaveAndReplaceOriginal(text, 'manual', 'עורך טקסט', 'שמירה מסרגל העורך')}
-                  onDuplicateSave={() => handleDuplicateAndSave(text, 'manual', 'עורך טקסט', 'שכפול מסרגל העורך')}
+                  enableRichEdit
+                  richColumnStyle={columnStyle}
                   onWordCorrected={(original, corrected) => {
                     debugLog.info('TextEditor', `Spell correction: "${original}" → "${corrected}"`);
                   }}
                 />
               </div>
             )}
+
+            </LazyErrorBoundary>
           </TabsContent>
+
+
+          <TabsContent value="loshon" className="flex flex-col gap-3">
+            <LazyErrorBoundary label="לשון הקודש">
+              <Suspense fallback={<div className="flex items-center gap-2 text-sm text-muted-foreground p-4"><Loader2 className="w-4 h-4 animate-spin" />טוען לשון הקודש…</div>}>
+                <LoshonKodeshRules embeddedText={lkEmbeddedText} defaultTab="test" embedded />
+              </Suspense>
+            </LazyErrorBoundary>
+          </TabsContent>
+
 
           <TabsContent value="speakers" className="flex flex-col gap-3">
             <CollapsibleWidget title="זיהוי דוברים" storageKey="te_speakers">
@@ -1402,64 +1556,98 @@ const TextEditor = () => {
                 onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
                 onDuplicateAndSave={handleDuplicateAndSave}
                 onSyncToPlayer={handleSyncToPlayer}
+                versions={compareVersions}
+                originalText={compareVersions.find(v => v.source === 'original')?.text || originalTextRef.current}
+                initialSourceId={aiPreselectSourceId}
               /></LazyErrorBoundary>
             </div>
+
+            <LazyErrorBoundary label="גרסאות AI">
+              <AIVersionsGrid
+                transcriptId={transcriptId}
+                audioFilePath={(location.state as any)?.audioFilePath || null}
+                onOpenInEditor={(t) => setText(t)}
+                onCreateCloudTranscript={ensureCloudTranscript}
+                onSendToCompare={sendVersionToCompare}
+              />
+            </LazyErrorBoundary>
           </TabsContent>
 
           <TabsContent value="compare" className="flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
-              <p className="text-xs text-muted-foreground">
-                במסך הזה אפשר גם להשוות בין כל הגרסאות (מקומי + ענן) וגם להריץ עריכת AI ישירות.
-              </p>
-              <Button
-                variant={showCompareAi ? "default" : "outline"}
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => setShowCompareAi((v) => !v)}
-              >
-                {showCompareAi ? "הסתר עריכת AI" : "עריכת AI במסך ההשוואה"}
-              </Button>
-            </div>
+            <Tabs value={compareSubTab} onValueChange={setCompareSubTab} dir="rtl">
+              <TabsList className="grid w-full grid-cols-2 max-w-md">
+                <TabsTrigger value="versions" className="text-xs">גרסאות (Diff)</TabsTrigger>
+                <TabsTrigger value="engines" className="text-xs">מנועי AI (A/B)</TabsTrigger>
+              </TabsList>
 
-            {compareVersions.length >= 2 ? (
-              <LazyErrorBoundary label="השוואה מתקדמת"><AdvancedDiffView 
-                versions={compareVersions}
-                fontSize={fontSize}
-                fontFamily={fontFamily}
-                textColor={textColor}
-                lineHeight={lineHeight}
-                onApplyVersion={(newText) => {
-                  setText(newText);
-                }}
-              /></LazyErrorBoundary>
-            ) : (
-              <div className="text-center py-6 text-muted-foreground text-sm">
-                יש צורך בלפחות שתי גרסאות כדי להשוות
-              </div>
-            )}
+              <TabsContent value="versions" className="flex flex-col gap-3 mt-3">
+                <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">
+                    השוואה בין כל הגרסאות (מקומי + ענן) — וגם אפשרות להריץ עריכת AI ישירות מכאן.
+                  </p>
+                  <Button
+                    variant={showCompareAi ? "default" : "outline"}
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setShowCompareAi((v) => !v)}
+                  >
+                    {showCompareAi ? "הסתר עריכת AI" : "עריכת AI במסך ההשוואה"}
+                  </Button>
+                </div>
 
-            {showCompareAi && (
-              <div
-                style={{
-                  fontSize: `${fontSize}px`,
-                  fontFamily: fontFamily,
-                  color: textColor,
-                  lineHeight: lineHeight,
-                }}
-              >
-                <LazyErrorBoundary label="עורך AI בתוך השוואה"><AIEditorDual
-                  text={text}
-                  onTextChange={(newText, source, customPrompt) => {
-                    setText(newText);
-                    addVersion(newText, source as TextVersion['source'], customPrompt);
-                  }}
-                  onSaveVersion={handleSaveVersion}
-                  onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
-                  onDuplicateAndSave={handleDuplicateAndSave}
-                  onSyncToPlayer={handleSyncToPlayer}
-                /></LazyErrorBoundary>
-              </div>
-            )}
+                {compareVersions.length >= 2 ? (
+                  <LazyErrorBoundary label="השוואה מתקדמת"><AdvancedDiffView 
+                    versions={compareVersions}
+                    fontSize={fontSize}
+                    fontFamily={fontFamily}
+                    textColor={textColor}
+                    lineHeight={lineHeight}
+                    preselectedLeftId={comparePreselect?.leftId}
+                    preselectedRightId={comparePreselect?.rightId}
+                    onApplyVersion={(newText) => {
+                      setText(newText);
+                    }}
+                    onSendToAiEditor={sendVersionToAiEditor}
+                  /></LazyErrorBoundary>
+                ) : (
+                  <div className="text-center py-6 text-muted-foreground text-sm">
+                    יש צורך בלפחות שתי גרסאות כדי להשוות
+                  </div>
+                )}
+
+                {showCompareAi && (
+                  <div
+                    style={{
+                      fontSize: `${fontSize}px`,
+                      fontFamily: fontFamily,
+                      color: textColor,
+                      lineHeight: lineHeight,
+                    }}
+                  >
+                    <LazyErrorBoundary label="עורך AI בתוך השוואה"><AIEditorDual
+                      text={text}
+                      onTextChange={(newText, source, customPrompt) => {
+                        setText(newText);
+                        addVersion(newText, source as TextVersion['source'], customPrompt);
+                      }}
+                      onSaveVersion={handleSaveVersion}
+                      onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
+                      onDuplicateAndSave={handleDuplicateAndSave}
+                      onSyncToPlayer={handleSyncToPlayer}
+                      versions={compareVersions}
+                      originalText={compareVersions.find(v => v.source === 'original')?.text || originalTextRef.current}
+                      initialSourceId={aiPreselectSourceId}
+                    /></LazyErrorBoundary>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="engines" className="flex flex-col gap-3 mt-3">
+                <CollapsibleWidget title="השוואת מנועי AI" storageKey="te_ab_compare">
+                  <LazyErrorBoundary label="השוואת מנועים"><EngineCompare text={text} /></LazyErrorBoundary>
+                </CollapsibleWidget>
+              </TabsContent>
+            </Tabs>
           </TabsContent>
 
           <TabsContent value="pipeline" className="flex flex-col gap-3">
@@ -1523,11 +1711,6 @@ const TextEditor = () => {
             </CollapsibleWidget>
           </TabsContent>
 
-          <TabsContent value="ab" className="flex flex-col gap-3">
-            <CollapsibleWidget title="השוואת מנועים" storageKey="te_ab_compare">
-              <LazyErrorBoundary label="השוואת מנועים"><EngineCompare text={text} /></LazyErrorBoundary>
-            </CollapsibleWidget>
-          </TabsContent>
 
           <TabsContent value="analytics" className="flex flex-col gap-3">
             <CollapsibleWidget title="אנליטיקס" storageKey="te_analytics">
@@ -1537,12 +1720,13 @@ const TextEditor = () => {
           <TabsContent value="history" className="flex flex-col gap-3">
             <CollapsibleWidget title="היסטוריית עריכה" storageKey="te_history">
               <LazyErrorBoundary label="היסטוריית עריכה"><TextEditHistory 
-                versions={versions}
+                versions={compareVersions}
                 onSelectVersion={handleVersionSelect}
                 selectedVersionId={selectedVersionId}
                 cloudVersions={cloudVersions}
                 cloudLoading={cloudVersionsLoading}
                 onRestoreVersion={handleRestoreVersion}
+                onCompareVersion={sendVersionToCompare}
               /></LazyErrorBoundary>
             </CollapsibleWidget>
           </TabsContent>

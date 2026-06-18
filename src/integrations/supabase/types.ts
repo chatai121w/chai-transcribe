@@ -14,6 +14,57 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_usage_events: {
+        Row: {
+          completion_tokens: number
+          cost_usd_snapshot: number | null
+          created_at: string
+          duration_ms: number | null
+          feature: string
+          id: string
+          model: string
+          params: Json | null
+          prompt_preview: string | null
+          prompt_tokens: number
+          response_preview: string | null
+          system_prompt: string | null
+          total_tokens: number
+          user_id: string
+        }
+        Insert: {
+          completion_tokens?: number
+          cost_usd_snapshot?: number | null
+          created_at?: string
+          duration_ms?: number | null
+          feature: string
+          id?: string
+          model: string
+          params?: Json | null
+          prompt_preview?: string | null
+          prompt_tokens?: number
+          response_preview?: string | null
+          system_prompt?: string | null
+          total_tokens?: number
+          user_id: string
+        }
+        Update: {
+          completion_tokens?: number
+          cost_usd_snapshot?: number | null
+          created_at?: string
+          duration_ms?: number | null
+          feature?: string
+          id?: string
+          model?: string
+          params?: Json | null
+          prompt_preview?: string | null
+          prompt_tokens?: number
+          response_preview?: string | null
+          system_prompt?: string | null
+          total_tokens?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       api_key_usage_events: {
         Row: {
           created_at: string
@@ -455,8 +506,11 @@ export type Database = {
       transcript_versions: {
         Row: {
           action_label: string | null
+          ai_usage_event_id: string | null
+          audio_file_path: string | null
           created_at: string
           engine_label: string | null
+          folder_id: string | null
           id: string
           source: string
           text: string
@@ -467,8 +521,11 @@ export type Database = {
         }
         Insert: {
           action_label?: string | null
+          ai_usage_event_id?: string | null
+          audio_file_path?: string | null
           created_at?: string
           engine_label?: string | null
+          folder_id?: string | null
           id?: string
           source?: string
           text: string
@@ -479,8 +536,11 @@ export type Database = {
         }
         Update: {
           action_label?: string | null
+          ai_usage_event_id?: string | null
+          audio_file_path?: string | null
           created_at?: string
           engine_label?: string | null
+          folder_id?: string | null
           id?: string
           source?: string
           text?: string
@@ -490,6 +550,20 @@ export type Database = {
           word_count?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "transcript_versions_ai_usage_event_id_fkey"
+            columns: ["ai_usage_event_id"]
+            isOneToOne: false
+            referencedRelation: "ai_usage_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transcript_versions_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "transcript_versions_transcript_id_fkey"
             columns: ["transcript_id"]
@@ -702,6 +776,7 @@ export type Database = {
           custom_themes: Json | null
           dashboard_view_mode: string | null
           default_ai_model: string | null
+          design_overrides: Json | null
           diarize_enabled: boolean
           draft_text: string | null
           editor_columns: number | null
@@ -744,6 +819,7 @@ export type Database = {
           custom_themes?: Json | null
           dashboard_view_mode?: string | null
           default_ai_model?: string | null
+          design_overrides?: Json | null
           diarize_enabled?: boolean
           draft_text?: string | null
           editor_columns?: number | null
@@ -786,6 +862,7 @@ export type Database = {
           custom_themes?: Json | null
           dashboard_view_mode?: string | null
           default_ai_model?: string | null
+          design_overrides?: Json | null
           diarize_enabled?: boolean
           draft_text?: string | null
           editor_columns?: number | null
@@ -808,6 +885,36 @@ export type Database = {
           tab_settings_json?: Json | null
           text_color?: string | null
           theme?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_prompts: {
+        Row: {
+          category: string
+          created_at: string
+          id: string
+          label: string
+          prompt: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category?: string
+          created_at?: string
+          id?: string
+          label: string
+          prompt: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          id?: string
+          label?: string
+          prompt?: string
           updated_at?: string
           user_id?: string
         }
