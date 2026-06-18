@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare } from "lucide-react";
+import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, Lock, Unlock, CircleDot, Circle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -151,6 +151,41 @@ export const SyncMirrorLayout = ({
   const [localLetterSpacing, setLocalLetterSpacing] = useState(0); // px extra
   const [localFontWeight, setLocalFontWeight] = useState<number>(400);
   const [localTextColor, setLocalTextColor] = useState<string>("");
+
+  // ── Pane control: which side is the "active" one (drives icon tint) and lock state ──
+  const [activePane, setActivePaneState] = useState<'right' | 'left'>(() => {
+    try { return (localStorage.getItem('sync_mirror_active_pane') as 'right' | 'left') || 'left'; } catch { return 'left'; }
+  });
+  const [lockedPane, setLockedPaneState] = useState<'right' | 'left' | null>(() => {
+    try {
+      const v = localStorage.getItem('sync_mirror_locked_pane');
+      return v === 'right' || v === 'left' ? v : null;
+    } catch { return null; }
+  });
+  const setActivePane = useCallback((p: 'right' | 'left') => {
+    setActivePaneState(p);
+    try { localStorage.setItem('sync_mirror_active_pane', p); } catch {}
+  }, []);
+  const toggleLock = useCallback((p: 'right' | 'left') => {
+    setLockedPaneState(prev => {
+      const next = prev === p ? null : p;
+      try {
+        if (next) localStorage.setItem('sync_mirror_locked_pane', next);
+        else localStorage.removeItem('sync_mirror_locked_pane');
+      } catch {}
+      toast({ title: next ? `צד ${p === 'right' ? 'ימין' : 'שמאל'} ננעל` : 'הנעילה בוטלה' });
+      return next;
+    });
+  }, []);
+  // Guarded onTextChange — blocks edits originating from a locked pane.
+  const handleTextChangeFromPane = useCallback((side: 'right' | 'left', next: string) => {
+    if (lockedPane === side) {
+      toast({ title: 'הצד הזה נעול', description: 'שחרר את הנעילה כדי לערוך' });
+      return;
+    }
+    onTextChange(next);
+  }, [lockedPane, onTextChange]);
+  const navyClass = 'text-[#0a1d3f] dark:text-blue-300';
 
   // Measure the left column's real first-text surface so the right column starts
   // on the same pixel line even when the left side has marking/edit toolbars.
@@ -824,8 +859,8 @@ export const SyncMirrorLayout = ({
 
       {/* ── Regular word-view (hidden in full-edit mode) ── */}
       {!fullEditMode && <>
-      <div className="flex items-center border-b bg-muted/10 sticky top-0 z-10 shrink-0" dir="rtl">
-        {/* Right column label */}
+      <div className={cn("flex items-center border-b bg-muted/10 sticky top-0 z-10 shrink-0 [&_svg]:text-[#0a1d3f] dark:[&_svg]:text-blue-300")} dir="rtl">
+        {/* Visual mid-divider between right-half and left-half intent */}
         <div className="flex-1 flex items-center gap-1.5 px-3 py-2 border-s border-border/40">
           <AlignRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <span className={cn("text-xs font-semibold", compareMode ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
@@ -1358,33 +1393,89 @@ export const SyncMirrorLayout = ({
         ref={scrollRef}
         className="flex flex-1 min-h-0 overflow-y-auto"
       >
-        {/* ── RIGHT column: תמלול מסונכרן (read-only) ── */}
-        <div className="flex-1 min-w-0 flex flex-col border-s border-border/40">
+        {/* ── RIGHT column — full mirror, fully editable (unless locked) ── */}
+        <div className={cn(
+          "flex-1 min-w-0 flex flex-col border-s border-border/40 relative transition-opacity",
+          lockedPane === 'right' && "opacity-90 bg-muted/30",
+        )}>
+          {/* Per-column control strip: active selector + lock */}
+          <div className="flex items-center gap-1 px-2 py-1 border-b border-border/30 bg-background/60" dir="rtl">
+            <button
+              type="button"
+              onClick={() => setActivePane('right')}
+              className={cn("h-6 px-1.5 rounded text-[10px] flex items-center gap-1 transition-colors",
+                activePane === 'right' ? `${navyClass} bg-blue-50 dark:bg-blue-950/40 font-semibold` : "text-muted-foreground hover:bg-muted")}
+              title="הפוך את הצד הימני לפעיל (משפיע על צבע האייקונים בסרגל)"
+            >
+              {activePane === 'right' ? <CircleDot className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
+              ימין פעיל
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleLock('right')}
+              className={cn("h-6 px-1.5 rounded text-[10px] flex items-center gap-1 transition-colors",
+                lockedPane === 'right' ? "text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 font-semibold" : "text-muted-foreground hover:bg-muted")}
+              title={lockedPane === 'right' ? "שחרר נעילה — הצד הימני יחזור להיות עריך" : "נעל את הצד הימני — לא יקבל שינויים"}
+            >
+              {lockedPane === 'right' ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+              {lockedPane === 'right' ? 'נעול' : 'פתוח'}
+            </button>
+          </div>
           {/* word rows — when rich-edit is on, pad-top dynamically to align with editor's first line */}
           <div
             className="px-4 pb-4"
             style={{
               ...textStyle,
               paddingTop: enableRichEdit ? `${rightTopOffset || 16}px` : 16,
+              pointerEvents: lockedPane === 'right' ? 'none' : undefined,
             }}
           >
             {(compareMode ? frozenLines : lines).map((line, li) => {
               const sourceLines = compareMode ? frozenLines : lines;
               const offset = sourceLines.slice(0, li).reduce((a, l) => a + l.length, 0);
-              return renderLine(line, offset, li, "right");
+              // Render right column with FULL "left"-side rendering so it mirrors 1:1
+              // (word context menu, marking, suggestions). Edits are still gated by the lock above.
+              return renderLine(line, offset, li, "left");
             })}
           </div>
         </div>
 
 
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
-        <div className="flex-1 min-w-0 flex flex-col">
+        <div className={cn(
+          "flex-1 min-w-0 flex flex-col relative transition-opacity",
+          lockedPane === 'left' && "opacity-90 bg-muted/30",
+        )}>
+          {/* Per-column control strip: active selector + lock */}
+          <div className="flex items-center gap-1 px-2 py-1 border-b border-border/30 bg-background/60" dir="rtl">
+            <button
+              type="button"
+              onClick={() => setActivePane('left')}
+              className={cn("h-6 px-1.5 rounded text-[10px] flex items-center gap-1 transition-colors",
+                activePane === 'left' ? `${navyClass} bg-blue-50 dark:bg-blue-950/40 font-semibold` : "text-muted-foreground hover:bg-muted")}
+              title="הפוך את הצד השמאלי לפעיל (משפיע על צבע האייקונים בסרגל)"
+            >
+              {activePane === 'left' ? <CircleDot className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
+              שמאל פעיל
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleLock('left')}
+              className={cn("h-6 px-1.5 rounded text-[10px] flex items-center gap-1 transition-colors",
+                lockedPane === 'left' ? "text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 font-semibold" : "text-muted-foreground hover:bg-muted")}
+              title={lockedPane === 'left' ? "שחרר נעילה — הצד השמאלי יחזור להיות עריך" : "נעל את הצד השמאלי — לא יקבל שינויים"}
+            >
+              {lockedPane === 'left' ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+              {lockedPane === 'left' ? 'נעול' : 'פתוח'}
+            </button>
+          </div>
+          <div style={{ pointerEvents: lockedPane === 'left' ? 'none' : undefined }} className="flex-1 min-h-0 flex flex-col">
           {effectiveRichEdit ? (
             <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
               {/* Marking toolbar (always visible) + analysis panel (when active) */}
               <TextMarkingOverlay
                 text={text}
-                onTextChange={onTextChange}
+                onTextChange={(v) => handleTextChangeFromPane('left', v)}
                 fontSize={localFontSize}
                 fontFamily={localFontFamily}
                 lineHeight={localLineHeight}
@@ -1402,7 +1493,7 @@ export const SyncMirrorLayout = ({
                 >
                   <RichTextEditor
                     text={text}
-                    onChange={onTextChange}
+                    onChange={(v) => handleTextChangeFromPane('left', v)}
                     columnStyle={richColumnStyle}
                     onSaveReplaceOriginal={onSaveReplace}
                     onDuplicateSave={onDuplicateSave ? () => onDuplicateSave('') : undefined}
@@ -1420,7 +1511,7 @@ export const SyncMirrorLayout = ({
                 <div className="px-3 pt-2" dir="rtl">
                   <TextMarkingOverlay
                     text={text}
-                    onTextChange={onTextChange}
+                    onTextChange={(v) => handleTextChangeFromPane('left', v)}
                     fontSize={localFontSize}
                     fontFamily={localFontFamily}
                     lineHeight={localLineHeight}
@@ -1439,6 +1530,7 @@ export const SyncMirrorLayout = ({
               )}
             </div>
           )}
+          </div>
         </div>
       </div>
       </>}
