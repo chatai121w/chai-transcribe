@@ -1,83 +1,79 @@
-# איחוד טאב נגן + עריכה → טאב יחיד "עורך טקסט"
 
-## מטרה
-טאב אחד מאוחד שמשלב נגן אודיו מסונכרן עם **כל** יכולות העריכה הקיימות היום בטאב "עריכה" (סרגל סימון, RichTextEditor, קליק ימני, פופ עריכה, שמירה/שכפול/למידה), תוך שמירה על הסנכרון בין הנגן לטקסט.
+## מה נבנה
 
-## שינויים עיקריים
+מתחת לפאנל "עריכה עם AI" בעורך הטקסט תתווסף **תצוגת רשת של כל גרסאות ה-AI** שנעשו על התמלול הנוכחי. כל כרטיס יציג את התוצאה, הפרומפט שנשלח, המודל, הטוקנים והעלות, ויאפשר שמירה/מחיקה ושיוך לתיקיה — כולל יצירת תיקיה חדשה והעתקת האודיו המקורי לאותה תיקיה.
 
-### 1. הסרת הטאב הישן "עריכה"
-- מסירים את `TabsTrigger value="edit"` ואת כל תוכן `TabsContent value="edit"` מ-`src/pages/TextEditor.tsx`.
-- מסירים מהמערך `TABS` של `TabSettingsManager` (אם רלוונטי) את הערך `edit` כברירת מחדל גלויה.
+## מבנה הנתונים
 
-### 2. שינוי שם הטאב "נגן" → "עורך טקסט"
-- בכל הגדרת הטאבים: label `"נגן"` → `"עורך טקסט"`. הערך הפנימי נשאר `player` (לתאימות אחורה עם העדפות שמורות), אבל התווית מתחלפת.
+### חיבור versions ↔ ai_usage_events
+- מוסיפים עמודה `ai_usage_event_id uuid` ל-`transcript_versions` (FK ל-`ai_usage_events.id`).
+- כל פעולת AI (`edit-transcript`, `loshon-kodesh-ai`, `summarize-transcript`, וה-RPC `edit_transcript_proxy`) שיוצרת גרסה חדשה — תשמור את `id` של ה-usage event ותכניס אותו ל-version.
+- כך כל גרסה יודעת בדיוק איזה פרומפט / מודל / טוקנים / עלות הביאו לה.
 
-### 3. שדרוג העמודה השמאלית ב-`SyncMirrorLayout`
-היום העמודה השמאלית היא תצוגת מילים פשוטה עם קליק-ימני (`WordContextMenu`). מחליפים אותה ב-**מצב עריכה מלא** שכולל:
+### שיוך לתיקיה כקבוצה
+- מוסיפים ל-`transcript_versions` עמודות אופציונליות:
+  - `folder_id uuid` — תיקיה שאליה שויכה הגרסה
+  - `audio_file_path text` — העתקה (shared reference) של האודיו של התמלול המקור
+- כשמשייכים קבוצת גרסאות לתיקיה — מעדכנים את כולן ב-`folder_id` זהה, וה-`audio_file_path` מועתק מהתמלול המרכזי (אותו path ב-bucket `permanent-audio`, ללא שכפול בייטים).
 
-**א. סרגל סימון עליון (תמיד גלוי בראש העמודה השמאלית):**
-- `TextMarkingOverlay` במצב `toolbarOnly` (סרגל בלבד) — אותו רכיב שכבר משמש בטאב הישן.
-- כפתור "הפעל סימון" → מפעיל overlay שקוף מעל ה-`RichTextEditor` (לא מסתיר את הטקסט הניתן לעריכה — שכבת ויזואליזציה בלבד).
+## UI חדש
 
-**ב. גוף העמודה — RichTextEditor במקום התצוגה הפשוטה:**
-- `RichTextEditor` (אותו רכיב שבטאב הישן) מקבל את `text` ו-`onChange`.
-- שומר את כל הכלים הקיימים: שמירה/שכפול/תיקון איות AI.
-- עם **שכבת סנכרון** מעל: כאשר `syncEnabled=true`, מילה בזמן הנוכחי של הנגן מוארת (overlay לפי `data-word-index`, או שכבת ויזואל ע"י `useTextMarking` + `alignEditedToWhisper`).
-- **קליק על מילה** = קפיצה לזמן בנגן (כמו היום).
-- **קליק ימני על מילה** → תפריט מאוחד שמכיל גם את אפשרויות `WordContextMenu` הקיימות (החלפה, מחיקה, הוספה למילון, דילוג, התעלמות, קפיצה לזמן) וגם את **הפופ-אפ של עריכת מילה** הקיים ב-RichTextEditor (התיקון החכם / Gemini). מימוש: מאחדים את שני התפריטים ל-`WordContextMenu` מורחב עם קטע "תיקון חכם".
+### `AIVersionsGrid.tsx` (חדש)
+מתחת ל-`AIEditPanel` ב-`TextEditor.tsx`. רשת רספונסיבית של כרטיסים, אחד לכל גרסת AI של התמלול הפעיל:
 
-**ג. שכבת סימון overlay:**
-- כשמפעילים סימון, ה-overlay מצויר מעל הטקסט עם `pointer-events: none` על השכבה הויזואלית, כך שהקליקים והעריכה ב-`RichTextEditor` ממשיכים לעבוד.
+```text
+┌─ AIVersionCard ──────────────────────┐
+│ [Gemini 2.5 Flash] [improve] 14:32   │
+│ ─────────────────────────────────────│
+│ tabs: [תוצאה] [פרומפט] [נתונים]      │
+│  • תוצאה: preview של הטקסט (scroll) │
+│  • פרומפט: system + user prompt     │
+│  • נתונים: tokens · עלות · משך      │
+│ ─────────────────────────────────────│
+│ [💾 שמור בענן] [📥 שמור לוקלי]      │
+│ [📁 שייך לתיקיה ▾] [👁 פתח] [🗑]    │
+└──────────────────────────────────────┘
+```
 
-### 4. שמירה על פריסת ה-presets הקיימת
-- ה-`presets` הקיימים (`split` / `stacked` / `wide` / `full` / `eq-wide`) נשארים בדיוק כמו היום.
-- `split` (ברירת מחדל): נגן מימין, עמודת תמלול מסונכרן מימין-למטה, עמודת עריכה מלאה משמאל.
-- `stacked`: נגן למעלה ברוחב מלא, מתחתיו 2 העמודות.
-- `wide`: נגן + EQ ברוחב מלא ואז העמודות.
-- `full`: נגן בלבד.
+- **שמור בענן** — מסמן `_dirty=false` ודוחף ל-`transcript_versions` (אם זמני).
+- **שמור לוקלי** — שומר ב-Dexie (`db.versions`) דרך `useCloudVersions`.
+- **שייך לתיקיה** — תפריט שמשתמש ב-`useFolderTree` עם:
+  - בחירה מתיקיה קיימת
+  - "➕ צור תיקיה חדשה…" שמוסיף folder ומשייך אליו
+  - checkbox "שייך גם את האודיו המקורי" (ברירת מחדל מסומן)
+- **פתח** — מעלה את הגרסה לעורך הראשי (כפי שכבר עובד היום ב-version history).
 
-### 5. שמירה על פיצ'רים קיימים
-- חיפוש בתמלול (`transcriptSearchOpen`) — ממשיך לעבוד מעל העמודה השמאלית החדשה.
-- נגן צף / EQ צף — ללא שינוי.
-- שמירה מהירה / שכפול / שמירת למידה לפרופיל — חוטים מועברים ל-RichTextEditor במקום ל-overlay הישן.
+### `AIVersionFolderDialog.tsx` (חדש)
+מודאל לבחירה/יצירת תיקיה. תומך בבחירת **קבוצת גרסאות** (checkboxes על הכרטיסים) ושיוך מרובה בלחיצה אחת.
 
-## פירוט טכני
+### בורר תצוגה
+בראש הרשת: כפתורי סינון לפי מודל, פיצ'ר (improve/grammar/translate…), וחיפוש בפרומפט. ברירת מחדל: כל הגרסאות של ה-transcript הנוכחי, מהחדש לישן.
 
-### קבצים שמשתנים
-- **`src/pages/TextEditor.tsx`**
-  - מחיקת `TabsContent value="edit"` (שורות ~1504-1539).
-  - שינוי label של הטאב `player`.
-  - הסרת `edit` מתוויות `tabSettings`.
-  - העברת תלויות ה-edit (`fontSize`, `lineHeight`, `columnStyle`, `handleEditorChange`, callbacks של שמירה/שכפול) ל-props של `SyncMirrorLayout`.
-- **`src/components/SyncMirrorLayout.tsx`**
-  - בעמודה השמאלית: החלפת הרינדור הנוכחי של מילים+כפתור "עריכה מלאה" ב:
-    1. `<TextMarkingOverlay toolbarOnly={!markingActive} onActiveChange={setMarkingActive} ... />` בראש.
-    2. wrapper יחסי (`relative`) שמכיל:
-       - `<RichTextEditor>` במלוא הרוחב/גובה.
-       - שכבת overlay של סימון (כש-`markingActive`): `absolute inset-0 pointer-events-none`.
-       - שכבת overlay של הדגשת מילה לפי זמן (קיימת היום בעמודה הימנית — מועתקת ומסונכרנת לפי word index).
-  - הוספת `onWordClick` ו-`onWordContextMenu` כ-handlers שעוטפים את ה-RichTextEditor (event delegation על `data-word-index`).
-  - הסרת ה-Dialog של "עריכה מלאה" (כבר לא נחוץ — העריכה תמיד פעילה).
-- **`src/components/WordContextMenu.tsx`**
-  - הוספת סקציה "תיקון חכם / AI" שתפעיל את אותו flow שכיום RichTextEditor מפעיל בקליק.
-  - (אם המבנה הקיים לא תומך — נחשוף callback `onSmartCorrect(word)` מ-RichTextEditor ונחבר ל-WordContextMenu).
+## שינויי קוד
 
-### שמירת תאימות נתונים
-- ערך הטאב הפנימי נשאר `'player'` כך שכל ההעדפות השמורות (`activeTab` ב-localStorage / cloud sync) ממשיכות לעבוד.
-- אין שינוי סכמת DB / API.
-- מי שהטאב הפעיל שלו היה `'edit'` — fallback אוטומטי ל-`'player'` (קוד הגנה ב-init).
+| קובץ | שינוי |
+|------|-------|
+| `supabase/migrations/<new>.sql` | הוספת `ai_usage_event_id`, `folder_id`, `audio_file_path` ל-`transcript_versions` + index על `(transcript_id, created_at)` |
+| `src/integrations/supabase/types.ts` | רענון טיפוסים |
+| `src/lib/localDb.ts` | הוספת השדות החדשים ל-`LocalVersion` + version bump של Dexie |
+| `supabase/functions/_shared/aiUsage.ts` | `logAIUsage` יחזיר את ה-`id` שנוצר |
+| `supabase/functions/{edit-transcript,loshon-kodesh-ai,summarize-transcript}/index.ts` | להעביר את ה-`ai_usage_event_id` ל-version שנשמרת |
+| `edit_transcript_proxy` (DB function) | אותו דבר ברמת ה-SQL |
+| `src/hooks/useCloudVersions.ts` | תמיכה ב-`ai_usage_event_id`, `folder_id`, `audio_file_path` + פונקציות `assignVersionsToFolder`, `saveVersionToCloud`, `saveVersionToLocal` |
+| `src/components/AIVersionsGrid.tsx` | **חדש** — הרשת עם הכרטיסים, טאבים וכפתורי פעולה |
+| `src/components/AIVersionCard.tsx` | **חדש** — כרטיס יחיד |
+| `src/components/AIVersionFolderDialog.tsx` | **חדש** — בחירת/יצירת תיקיה לקבוצה |
+| `src/pages/TextEditor.tsx` | שילוב `<AIVersionsGrid transcriptId={…}/>` מתחת לפאנל ה-AI |
 
-### בדיקות מומלצות אחרי המימוש
-1. עורך טקסט ב-RichTextEditor בזמן שהנגן מנגן — סנכרון מילים ממשיך.
-2. הפעלת סימון בזמן עריכה — overlay מופיע, הטקסט עדיין נערך.
-3. קליק ימני על מילה — תפריט מאוחד עם כל האפשרויות (החלפה + תיקון חכם).
-4. קליק שמאלי על מילה — קפיצה לזמן בנגן.
-5. שמירה/שכפול מהסרגל החדש פועלת.
-6. החלפה בין presets (split/stacked/wide/full) שומרת על העמודה השמאלית עם כל היכולות.
-7. משתמש שהיה לו טאב `edit` שמור — נטען ל-`player`.
+## נקודות חשובות
 
-## מה לא משתנה
-- כל שאר הטאבים (loshon, speakers, templates, ai, compare, pipeline, prompts, ollama, learning, vocab, summary, analytics, history).
-- הנגן עצמו (`SyncAudioPlayer`) ללא שינוי.
-- העמודה הימנית "תמלול מסונכרן" (read-only) ללא שינוי.
-- מערכת ה-presets והנגן/EQ הצף.
+- **שמירת הקשר** — כל גרסת AI נטענת תמיד דרך `transcript_id` של התמלול המרכזי; אין דאטה מנותק.
+- **תיקיה כקבוצה** — folder_id זהה לכל הגרסאות שנבחרו יחד, כך שב-`Folders.tsx` הן יוצגו תחת אותה תיקיה (אפשר להוסיף בעתיד תצוגת "קבוצה" גם שם, מחוץ לתחום הזה).
+- **אודיו** — לא משכפלים בייטים, רק שומרים את אותו `audio_file_path` של ה-bucket `permanent-audio`. RLS הקיימת על הbucket מספיקה.
+- **RTL** — כל הקומפוננטות עם `dir="rtl"` ו-utility classes קיימות.
+- **עלות** — מציגים את `cost_usd_snapshot` הקיים מה-event, ואם null מחשבים דינמית מ-`aiPricing.ts`.
+
+## מחוץ לתחום
+- שינוי תצוגת התיקיות עצמה (`Folders.tsx`) — בעתיד.
+- שיתוף קבוצת גרסאות עם משתמש אחר.
+- ייצוא של קבוצה כקובץ אחד.

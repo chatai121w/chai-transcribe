@@ -30,7 +30,6 @@ export const useCloudVersions = (transcriptId: string | null) => {
     if (!transcriptId || !user) return;
     setIsLoading(true);
     try {
-      let localVersions: CloudVersion[] = [];
       // 1) Local first
       if (await isDbAvailable()) {
         const local = await db.versions
@@ -38,7 +37,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
           .equals(transcriptId)
           .sortBy('version_number');
         if (local.length > 0) {
-          localVersions = local.map(l => ({
+          setVersions(local.map(l => ({
             id: l.id,
             transcript_id: l.transcript_id,
             user_id: l.user_id,
@@ -52,8 +51,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
             ai_usage_event_id: l.ai_usage_event_id ?? null,
             folder_id: l.folder_id ?? null,
             audio_file_path: l.audio_file_path ?? null,
-          }));
-          setVersions(localVersions);
+          })));
         }
       }
 
@@ -66,10 +64,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
 
       if (error) throw error;
       const cloud = (data || []) as CloudVersion[];
-      const merged = new Map<string, CloudVersion>();
-      for (const v of localVersions) merged.set(v.id, v);
-      for (const v of cloud) merged.set(v.id, v);
-      setVersions(Array.from(merged.values()).sort((a, b) => a.version_number - b.version_number));
+      setVersions(cloud);
 
       // Sync to local
       if (await isDbAvailable() && cloud.length > 0) {
@@ -101,15 +96,6 @@ export const useCloudVersions = (transcriptId: string | null) => {
   useEffect(() => {
     fetchVersions();
   }, [fetchVersions]);
-
-  useEffect(() => {
-    const onSaved = (event: Event) => {
-      const detail = (event as CustomEvent<{ transcriptId?: string }>).detail;
-      if (!detail?.transcriptId || detail.transcriptId === transcriptId) fetchVersions();
-    };
-    window.addEventListener('ai-version-saved', onSaved as EventListener);
-    return () => window.removeEventListener('ai-version-saved', onSaved as EventListener);
-  }, [fetchVersions, transcriptId]);
 
   // Try to find the most recent matching ai_usage_event for linking
   const findMatchingUsageEventId = useCallback(async (
@@ -145,10 +131,9 @@ export const useCloudVersions = (transcriptId: string | null) => {
     source: string,
     engineLabel?: string | null,
     actionLabel?: string | null,
-    options?: { audioFilePath?: string | null; folderId?: string | null; transcriptId?: string | null },
+    options?: { audioFilePath?: string | null; folderId?: string | null },
   ): Promise<CloudVersion | null> => {
-    const targetTranscriptId = options?.transcriptId || transcriptId;
-    if (!targetTranscriptId || !user) return null;
+    if (!transcriptId || !user) return null;
 
     const nextNumber = versions.length > 0
       ? Math.max(...versions.map(v => v.version_number)) + 1
@@ -158,7 +143,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
     const now = new Date().toISOString();
     const localVersion: LocalVersion = {
       id: localId,
-      transcript_id: targetTranscriptId,
+      transcript_id: transcriptId,
       user_id: user.id,
       text,
       source,
@@ -174,7 +159,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
     // Optimistic local update
     const optimistic: CloudVersion = {
       id: localId,
-      transcript_id: targetTranscriptId,
+      transcript_id: transcriptId,
       user_id: user.id,
       text,
       source,
@@ -198,7 +183,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
       const usageEventId = await findMatchingUsageEventId(actionLabel || null, engineLabel || null);
 
       const insertPayload: Record<string, unknown> = {
-        transcript_id: targetTranscriptId,
+        transcript_id: transcriptId,
         user_id: user.id,
         text,
         source,
@@ -233,7 +218,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
 
       debugLog.info('Versions', `Saved version #${nextNumber} (${source})`);
       try {
-        window.dispatchEvent(new CustomEvent('ai-version-saved', { detail: { transcriptId: targetTranscriptId } }));
+        window.dispatchEvent(new CustomEvent('ai-version-saved', { detail: { transcriptId } }));
       } catch { /* noop */ }
       return cloudVersion;
     } catch (err) {

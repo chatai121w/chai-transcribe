@@ -20,8 +20,6 @@ interface AdvancedDiffViewProps {
   onApplyVersion?: (text: string) => void;
   preselectedLeftId?: string;
   preselectedRightId?: string;
-  /** Optional: send the selected version into the AI editor as input */
-  onSendToAiEditor?: (versionId: string) => void;
 }
 
 type VersionFilter = "all" | "ai" | "manual" | "original" | "cloud" | "local";
@@ -100,25 +98,6 @@ function buildAlignedRows(lineDiffs: [number, string][]): AlignedRow[] {
   return rows;
 }
 
-function buildFallbackRows(left: string, right: string): AlignedRow[] {
-  const leftLines = splitLines(left);
-  const rightLines = splitLines(right);
-  const maxLen = Math.max(leftLines.length, rightLines.length, 1);
-  const rows: AlignedRow[] = [];
-
-  for (let i = 0; i < maxLen; i++) {
-    const leftLine = i < leftLines.length ? leftLines[i] : null;
-    const rightLine = i < rightLines.length ? rightLines[i] : null;
-    rows.push({
-      leftLine,
-      rightLine,
-      rowType: leftLine === rightLine ? 'equal' : leftLine === null ? 'insert' : rightLine === null ? 'delete' : 'change',
-    });
-  }
-
-  return rows;
-}
-
 export const AdvancedDiffView = ({
   versions,
   fontSize = 16,
@@ -128,15 +107,9 @@ export const AdvancedDiffView = ({
   onApplyVersion,
   preselectedLeftId,
   preselectedRightId,
-  onSendToAiEditor,
 }: AdvancedDiffViewProps) => {
-  const defaultLeftId = useMemo(() => versions.find(v => v.source === 'original')?.id || versions[0]?.id || '', [versions]);
-  const defaultRightId = useMemo(() => {
-    const nonOriginal = [...versions].reverse().find(v => v.source !== 'original');
-    return nonOriginal?.id || versions[versions.length - 1]?.id || defaultLeftId;
-  }, [versions, defaultLeftId]);
-  const [leftId, setLeftId] = useState(preselectedLeftId || defaultLeftId);
-  const [rightId, setRightId] = useState(preselectedRightId || defaultRightId);
+  const [leftId, setLeftId] = useState(preselectedLeftId || versions[0]?.id || '');
+  const [rightId, setRightId] = useState(preselectedRightId || versions[versions.length - 1]?.id || '');
 
   // Re-apply preselect when caller pushes a new pair
   useEffect(() => {
@@ -175,12 +148,12 @@ export const AdvancedDiffView = ({
     }
 
     if (!leftId || !versions.some((v) => v.id === leftId)) {
-      setLeftId(defaultLeftId);
+      setLeftId(versions[0].id);
     }
     if (!rightId || !versions.some((v) => v.id === rightId)) {
-      setRightId(defaultRightId);
+      setRightId(versions[versions.length - 1].id);
     }
-  }, [versions, leftId, rightId, defaultLeftId, defaultRightId]);
+  }, [versions, leftId, rightId]);
 
   useEffect(() => {
     if (!selectableVersions.length) return;
@@ -207,8 +180,6 @@ export const AdvancedDiffView = ({
 
     const left = leftVersion.text;
     const right = rightVersion.text;
-    setDiffs([]);
-    setAlignedRows(buildFallbackRows(left, right));
 
     Promise.all([
       runDiff('char', left, right),
@@ -220,21 +191,15 @@ export const AdvancedDiffView = ({
       setDiffPending(false);
     }).catch(() => {
       if (diffReqRef.current !== reqId) return;
-      setAlignedRows(buildFallbackRows(left, right));
       setDiffPending(false);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftVersion?.id, rightVersion?.id, leftVersion?.text, rightVersion?.text]);
+  }, [leftVersion?.id, rightVersion?.id]);
 
   const stats = useMemo(() => {
     let added = 0, removed = 0, unchanged = 0;
     let addedWords = 0, removedWords = 0;
-    const effectiveDiffs = diffs.length > 0
-      ? diffs
-      : leftVersion?.text === rightVersion?.text
-        ? ([[0, leftVersion?.text || '']] as DiffOp[])
-        : ([[-1, leftVersion?.text || ''], [1, rightVersion?.text || '']] as DiffOp[]);
-    for (const [op, text] of effectiveDiffs) {
+    for (const [op, text] of diffs) {
       const words = text.split(/\s+/).filter(w => w).length;
       if (op === 1) { added += text.length; addedWords += words; }
       else if (op === -1) { removed += text.length; removedWords += words; }
@@ -323,17 +288,6 @@ export const AdvancedDiffView = ({
                 ))}
               </SelectContent>
             </Select>
-            {onSendToAiEditor && leftId && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 text-[11px] px-2 shrink-0 text-yellow-700 hover:text-yellow-800 hover:bg-yellow-500/10"
-                onClick={() => onSendToAiEditor(leftId)}
-                title="שלח גרסה זו לעריכת AI"
-              >
-                שלח ל-AI
-              </Button>
-            )}
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="default" className="shrink-0 text-xs">חדש</Badge>
@@ -345,17 +299,6 @@ export const AdvancedDiffView = ({
                 ))}
               </SelectContent>
             </Select>
-            {onSendToAiEditor && rightId && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 text-[11px] px-2 shrink-0 text-yellow-700 hover:text-yellow-800 hover:bg-yellow-500/10"
-                onClick={() => onSendToAiEditor(rightId)}
-                title="שלח גרסה זו לעריכת AI"
-              >
-                שלח ל-AI
-              </Button>
-            )}
           </div>
         </div>
 

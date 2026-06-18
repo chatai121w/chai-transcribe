@@ -776,7 +776,6 @@ export type Database = {
           custom_themes: Json | null
           dashboard_view_mode: string | null
           default_ai_model: string | null
-          design_overrides: Json | null
           diarize_enabled: boolean
           draft_text: string | null
           editor_columns: number | null
@@ -819,7 +818,6 @@ export type Database = {
           custom_themes?: Json | null
           dashboard_view_mode?: string | null
           default_ai_model?: string | null
-          design_overrides?: Json | null
           diarize_enabled?: boolean
           draft_text?: string | null
           editor_columns?: number | null
@@ -862,7 +860,6 @@ export type Database = {
           custom_themes?: Json | null
           dashboard_view_mode?: string | null
           default_ai_model?: string | null
-          design_overrides?: Json | null
           diarize_enabled?: boolean
           draft_text?: string | null
           editor_columns?: number | null
