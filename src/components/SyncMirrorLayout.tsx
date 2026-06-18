@@ -859,8 +859,8 @@ export const SyncMirrorLayout = ({
 
       {/* ── Regular word-view (hidden in full-edit mode) ── */}
       {!fullEditMode && <>
-      <div className="flex items-center border-b bg-muted/10 sticky top-0 z-10 shrink-0" dir="rtl">
-        {/* Right column label */}
+      <div className={cn("flex items-center border-b bg-muted/10 sticky top-0 z-10 shrink-0 [&_svg]:text-[#0a1d3f] dark:[&_svg]:text-blue-300")} dir="rtl">
+        {/* Visual mid-divider between right-half and left-half intent */}
         <div className="flex-1 flex items-center gap-1.5 px-3 py-2 border-s border-border/40">
           <AlignRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <span className={cn("text-xs font-semibold", compareMode ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
