@@ -1632,20 +1632,14 @@ export const SyncMirrorLayout = ({
       >
         {/* ── RIGHT column — full mirror, fully editable (unless locked) ── */}
         <div
+          ref={rightColRef}
           className={cn(
             "min-w-0 flex flex-col border-s border-border/40 relative transition-opacity",
             lockedPane === 'right' && "opacity-90 bg-muted/30",
           )}
-          style={{
-            // In mirrored-padded mode, the editable side gets extra width so
-            // newly-typed words fill the trailing whitespace of a line instead
-            // of pushing rows downward. The locked side stays at its natural
-            // (narrower) width.
-            flex: alignmentMode === 'mirrored-padded'
-              ? (lockedPane === 'right' ? '1 1 0' : `${editableRatio} 1 0`)
-              : '1 1 0',
-          }}
+          style={{ flex: `0 0 ${rightPct}%` }}
         >
+
           {/* Per-column control strip: active selector + lock */}
           <div className="flex items-center gap-1 px-2 py-1 border-b border-border/30 bg-background/60" dir="rtl">
             <button
