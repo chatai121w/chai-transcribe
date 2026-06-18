@@ -1682,6 +1682,8 @@ export const SyncMirrorLayout = ({
                     onSaveReplaceOriginal={onSaveReplace}
                     onDuplicateSave={onDuplicateSave ? () => onDuplicateSave('') : undefined}
                     onWordCorrected={onWordCorrected}
+                    textAlign={sharedTextAlign}
+                    onTextAlignChange={setSharedTextAlign}
                   />
                 </div>
               )}
