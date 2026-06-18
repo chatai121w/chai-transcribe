@@ -1388,6 +1388,21 @@ export const SyncMirrorLayout = ({
         </div>
       </div>
 
+      {/* Shared marking toolbar — lifted ABOVE both columns so each side starts at the same height */}
+      {enableRichEdit && (
+        <div className="px-3 pt-2 pb-1 border-b border-border/30 bg-background/40" dir="rtl">
+          <TextMarkingOverlay
+            text={text}
+            onTextChange={onTextChange}
+            fontSize={localFontSize}
+            fontFamily={localFontFamily}
+            lineHeight={localLineHeight}
+            toolbarOnly={!isMarkingActive}
+            onActiveChange={setIsMarkingActive}
+          />
+        </div>
+      )}
+
       {/* Shared scroll container — two equal flex columns (no individual headers) */}
       <div
         ref={scrollRef}
@@ -1426,7 +1441,7 @@ export const SyncMirrorLayout = ({
             className="px-4 pb-4"
             style={{
               ...textStyle,
-              paddingTop: enableRichEdit ? `${rightTopOffset || 16}px` : 16,
+              paddingTop: 16,
               pointerEvents: lockedPane === 'right' ? 'none' : undefined,
             }}
           >
@@ -1472,16 +1487,7 @@ export const SyncMirrorLayout = ({
           <div style={{ pointerEvents: lockedPane === 'left' ? 'none' : undefined }} className="flex-1 min-h-0 flex flex-col">
           {effectiveRichEdit ? (
             <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
-              {/* Marking toolbar (always visible) + analysis panel (when active) */}
-              <TextMarkingOverlay
-                text={text}
-                onTextChange={(v) => handleTextChangeFromPane('left', v)}
-                fontSize={localFontSize}
-                fontFamily={localFontFamily}
-                lineHeight={localLineHeight}
-                toolbarOnly={!isMarkingActive}
-                onActiveChange={setIsMarkingActive}
-              />
+              {/* Marking toolbar has been lifted above both columns (see top of layout). */}
               {/* RichTextEditor — full editing surface */}
               {!isMarkingActive && (
                 <div
@@ -1507,19 +1513,8 @@ export const SyncMirrorLayout = ({
                Editing happens through right-click WordContextMenu (and the
                marking toolbar above when enableRichEdit is on). */
             <div className="flex flex-col" ref={leftRichRef}>
-              {enableRichEdit && (
-                <div className="px-3 pt-2" dir="rtl">
-                  <TextMarkingOverlay
-                    text={text}
-                    onTextChange={(v) => handleTextChangeFromPane('left', v)}
-                    fontSize={localFontSize}
-                    fontFamily={localFontFamily}
-                    lineHeight={localLineHeight}
-                    toolbarOnly={!isMarkingActive}
-                    onActiveChange={setIsMarkingActive}
-                  />
-                </div>
-              )}
+              {/* Marking toolbar lifted above both columns. */}
+
               {!isMarkingActive && (
                 <div ref={leftRowsRef} className="p-4" style={textStyle}>
                   {lines.map((line, li) => {
