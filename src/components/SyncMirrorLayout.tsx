@@ -1650,7 +1650,7 @@ export const SyncMirrorLayout = ({
             </button>
           </div>
           <div style={{ pointerEvents: lockedPane === 'left' ? 'none' : undefined }} className="flex-1 min-h-0 flex flex-col">
-          {effectiveRichEdit ? (
+          {effectiveRichEdit && !paddedAlignment ? (
             <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
               {/* Marking toolbar has been lifted above both columns (see top of layout). */}
               {/* RichTextEditor — full editing surface */}
@@ -1682,7 +1682,15 @@ export const SyncMirrorLayout = ({
 
               {!isMarkingActive && (
                 <div ref={leftRowsRef} className="p-4" style={textStyle}>
-                  {lines.map((line, li) => {
+                  {paddedAlignment && !compareMode ? (() => {
+                    const rows = lockedPane === 'left' ? paddedAlignment.snapshot : paddedAlignment.current;
+                    const src = lockedPane === 'left' ? snapshotLines : lines;
+                    let srcIdx = -1;
+                    return rows.map((row, ri) => {
+                      if (row.line) srcIdx++;
+                      return renderPaddedRow(row, ri, 'left', src, row.line ? srcIdx : -1);
+                    });
+                  })() : lines.map((line, li) => {
                     const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
                     return renderLine(line, offset, li, "left");
                   })}
