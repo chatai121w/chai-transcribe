@@ -206,29 +206,39 @@ export const SyncMirrorLayout = ({
     });
   }, []);
 
-  // Auto-adjust the editable column's width ratio based on the available
-  // container width. Wider screens get a larger ratio so newly-typed words
-  // have more trailing room and don't push lines down. Narrower screens get
-  // a smaller ratio so the locked column stays readable.
-  const [editableRatio, setEditableRatio] = useState<number>(1.6);
+  // Column width split between the two columns.
+  // `manualSplit` = percentage of the RIGHT column (15–85). null = auto.
+  // Auto: in mirrored-padded mode with a lock, source side ~40% / editor ~60%;
+  // otherwise 50/50. The user can drag a divider to override and the choice
+  // is persisted in localStorage.
+  const SPLIT_KEY = 'sync_mirror_col_split_v1';
+  const [manualSplit, setManualSplit] = useState<number | null>(() => {
+    try {
+      const v = localStorage.getItem(SPLIT_KEY);
+      const n = v ? parseFloat(v) : NaN;
+      return Number.isFinite(n) && n >= 15 && n <= 85 ? n : null;
+    } catch { return null; }
+  });
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const compute = () => {
-      const w = el.clientWidth || window.innerWidth;
-      // Smooth curve: 1.2 @ ~700px → 1.6 @ ~1100px → 2.0 @ ~1500px → 2.4 cap
-      let r: number;
-      if (w < 700) r = 1.2;
-      else if (w > 1700) r = 2.4;
-      else r = 1.2 + ((w - 700) / 1000) * 1.2;
-      setEditableRatio(Number(r.toFixed(2)));
-    };
-    compute();
-    const ro = new ResizeObserver(compute);
-    ro.observe(el);
-    window.addEventListener('resize', compute);
-    return () => { ro.disconnect(); window.removeEventListener('resize', compute); };
-  }, []);
+    try {
+      if (manualSplit == null) localStorage.removeItem(SPLIT_KEY);
+      else localStorage.setItem(SPLIT_KEY, String(manualSplit));
+    } catch {}
+  }, [manualSplit]);
+  const autoRightPct = useMemo(() => {
+    if (alignmentMode !== 'mirrored-padded' || !lockedPane) return 50;
+    return lockedPane === 'right' ? 40 : 60;
+  }, [alignmentMode, lockedPane]);
+  const rightPct = manualSplit ?? autoRightPct;
+  const leftPct = 100 - rightPct;
+
+  // Refs to each column's content area so we can measure the NARROW column's
+  // real text width and use it as the wrapping basis for `lines`. This way
+  // both columns render the same line breaks aligned to the source's width,
+  // and the wider (editor) column has trailing whitespace per line for inline
+  // word additions without pushing rows down.
+  const rightColRef = useRef<HTMLDivElement>(null);
+  const leftColRef = useRef<HTMLDivElement>(null);
 
   // Snapshot of the locked side's text taken at the moment of locking.
   const [lockedSnapshotText, setLockedSnapshotText] = useState<string>('');
