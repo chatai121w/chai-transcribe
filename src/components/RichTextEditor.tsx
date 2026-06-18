@@ -791,7 +791,7 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
                     letterSpacing: 'inherit',
                     wordSpacing: 'inherit',
                     fontWeight: 'inherit',
-                    textAlign: 'right',
+                    textAlign: textAlign ?? 'right',
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
                     ...columnStyle,
