@@ -352,6 +352,81 @@ export const SyncMirrorLayout = ({
     return result;
   }, [displayTimings, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
 
+  // ── Snapshot lines (the locked side's frozen view) ──────────────────────────
+  const snapshotLines = useMemo((): WordTiming[][] => {
+    if (!lockedSnapshotText.trim()) return [];
+    const words = lockedSnapshotText.trim().split(/\s+/).filter(Boolean);
+    const snapTimings: WordTiming[] = words.map((word, i) => ({ word, start: i, end: i + 1 }));
+    const effectiveWidth = colWidth > 0 ? colWidth : 400;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return [snapTimings];
+    ctx.font = `${localFontWeight} ${localFontSize}px ${localFontFamily}`;
+    const spaceW = ctx.measureText(' ').width + 1 + localWordSpacing;
+    const result: WordTiming[][] = [];
+    let line: WordTiming[] = [];
+    let w = 0;
+    for (const wt of snapTimings) {
+      const ww = ctx.measureText(wt.word).width + spaceW + wt.word.length * localLetterSpacing;
+      if (w + ww > effectiveWidth && line.length > 0) {
+        result.push(line); line = [wt]; w = ww;
+      } else { line.push(wt); w += ww; }
+    }
+    if (line.length) result.push(line);
+    return result;
+  }, [lockedSnapshotText, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
+
+  // ── Padded alignment via line-level LCS ────────────────────────────────────
+  // Returns two arrays of identical length where each slot is either a real
+  // line (WordTiming[]) or null (= phantom/empty row). `edited` marks rows
+  // that differ from the snapshot — those get the blue dot in the gutter.
+  type PaddedRow = { line: WordTiming[] | null; edited: boolean };
+  const paddedAlignment = useMemo((): { current: PaddedRow[]; snapshot: PaddedRow[] } | null => {
+    if (alignmentMode !== 'mirrored-padded' || !lockedPane || !snapshotLines.length || !lines.length) {
+      return null;
+    }
+    const keyOf = (l: WordTiming[]) => l.map(w => w.word).join(' ').trim();
+    const A = snapshotLines.map(keyOf); // snapshot
+    const B = lines.map(keyOf);          // current
+    // LCS DP
+    const n = A.length, m = B.length;
+    const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = 1; i <= n; i++) {
+      for (let j = 1; j <= m; j++) {
+        dp[i][j] = A[i - 1] === B[j - 1]
+          ? dp[i - 1][j - 1] + 1
+          : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+    const ops: Array<{ t: 'eq' | 'del' | 'ins'; a?: number; b?: number }> = [];
+    let i = n, j = m;
+    while (i > 0 && j > 0) {
+      if (A[i - 1] === B[j - 1]) { ops.push({ t: 'eq', a: i - 1, b: j - 1 }); i--; j--; }
+      else if (dp[i - 1][j] >= dp[i][j - 1]) { ops.push({ t: 'del', a: i - 1 }); i--; }
+      else { ops.push({ t: 'ins', b: j - 1 }); j--; }
+    }
+    while (i > 0) { ops.push({ t: 'del', a: i - 1 }); i--; }
+    while (j > 0) { ops.push({ t: 'ins', b: j - 1 }); j--; }
+    ops.reverse();
+    const snapOut: PaddedRow[] = [];
+    const curOut: PaddedRow[] = [];
+    for (const op of ops) {
+      if (op.t === 'eq') {
+        snapOut.push({ line: snapshotLines[op.a!], edited: false });
+        curOut.push({ line: lines[op.b!], edited: false });
+      } else if (op.t === 'del') {
+        // line exists only in snapshot → phantom in current
+        snapOut.push({ line: snapshotLines[op.a!], edited: true });
+        curOut.push({ line: null, edited: true });
+      } else {
+        // line exists only in current (new/edited) → phantom in snapshot
+        snapOut.push({ line: null, edited: true });
+        curOut.push({ line: lines[op.b!], edited: true });
+      }
+    }
+    return { current: curOut, snapshot: snapOut };
+  }, [alignmentMode, lockedPane, snapshotLines, lines]);
+
   // ── Active word index (timing sync) ────────────────────────────────────────
   const activeIdx = useMemo(() => {
     if (!syncEnabled || !displayTimings.length) return -1;
