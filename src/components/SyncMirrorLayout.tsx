@@ -1388,6 +1388,24 @@ export const SyncMirrorLayout = ({
         </div>
       </div>
 
+      {/* Shared marking toolbar — lifted ABOVE both columns so each side starts at the same height */}
+      {enableRichEdit && (
+        <div className="px-3 pt-2 pb-1 border-b border-border/30 bg-background/40" dir="rtl">
+          <TextMarkingOverlay
+            text={text}
+            onTextChange={(v) => {
+              if (lockedPane === 'left' && lockedPane === 'right') return;
+              onTextChange(v);
+            }}
+            fontSize={localFontSize}
+            fontFamily={localFontFamily}
+            lineHeight={localLineHeight}
+            toolbarOnly={!isMarkingActive}
+            onActiveChange={setIsMarkingActive}
+          />
+        </div>
+      )}
+
       {/* Shared scroll container — two equal flex columns (no individual headers) */}
       <div
         ref={scrollRef}
