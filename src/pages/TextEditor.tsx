@@ -432,19 +432,10 @@ const TextEditor = () => {
       }
     }
 
-    // Track transcript ID for cloud saves — persist it so re-entering the editor restores compare/AI versions.
+    // Track transcript ID for cloud saves
     if (location.state?.transcriptId) {
       transcriptIdRef.current = location.state.transcriptId;
       setTranscriptId(location.state.transcriptId);
-      try { localStorage.setItem('current_transcript_id', location.state.transcriptId); } catch { /* noop */ }
-    } else {
-      try {
-        const saved = localStorage.getItem('current_transcript_id');
-        if (saved) {
-          transcriptIdRef.current = saved;
-          setTranscriptId(saved);
-        }
-      } catch { /* noop */ }
     }
 
     // Load audio URL from navigation state or resolve from Supabase Storage
@@ -544,20 +535,10 @@ const TextEditor = () => {
     setVersions(prev => [...prev, newVersion]);
     setSelectedVersionId(newVersion.id);
     setText(newText);
-    // Persist immediately to local + cloud so re-renders never lose AI output.
-    // If no cloud transcript yet, create one first then save the version.
-    (async () => {
-      try {
-        let id = transcriptIdRef.current || transcriptId;
-        if (!id) id = await ensureCloudTranscript();
-        if (id) {
-          await saveCloudVersion(newText, source, customPrompt || null, sourceLabels[source] || source);
-        }
-      } catch (e) {
-        console.error('[addVersion] persist failed', e);
-        toast({ title: 'שמירת גרסה נכשלה', description: 'נשמר מקומית בלבד', variant: 'destructive' });
-      }
-    })();
+    // Also save to cloud versions
+    if (transcriptId) {
+      saveCloudVersion(newText, source, customPrompt || null, sourceLabels[source] || source);
+    }
   };
 
   const ensureCloudTranscript = useCallback(async (): Promise<string | null> => {
@@ -575,7 +556,6 @@ const TextEditor = () => {
       if (created?.id) {
         transcriptIdRef.current = created.id;
         setTranscriptId(created.id);
-        try { localStorage.setItem('current_transcript_id', created.id); } catch { /* noop */ }
         toast({ title: 'התמלול נשמר בענן ☁️' });
         return created.id;
       }
