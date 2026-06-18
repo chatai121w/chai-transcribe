@@ -342,17 +342,34 @@ export const SyncMirrorLayout = ({
     return alignEditedToWhisper(words, wordTimings, anchorsArr.length ? anchorsArr : undefined);
   }, [text, wordTimings, alignMode, userAnchors]);
 
-  // ── ResizeObserver: watch container width → column width ───────────────────
+  // ── ResizeObserver: track the NARROWER column's actual content width and
+  // use it as the wrapping basis for `lines`. This keeps both columns visually
+  // aligned at the source-column width; the wider editor column simply has
+  // trailing whitespace per line for inline edits without pushing rows down.
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      // Two equal flex columns, each with 16px horizontal padding
-      setColWidth(Math.floor(entry.contentRect.width / 2) - 32);
-    });
-    ro.observe(el);
+    const rEl = rightColRef.current;
+    const lEl = leftColRef.current;
+    if (!rEl && !lEl) return;
+    const compute = () => {
+      const rW = rEl?.clientWidth ?? 0;
+      const lW = lEl?.clientWidth ?? 0;
+      // Prefer the locked side as the source-of-truth wrapping width.
+      // Without a lock, use the smaller of the two so neither side overflows.
+      let basis = 0;
+      if (lockedPane === 'right' && rW) basis = rW;
+      else if (lockedPane === 'left' && lW) basis = lW;
+      else if (rW && lW) basis = Math.min(rW, lW);
+      else basis = rW || lW;
+      // Subtract ~32px for the column's px-4 horizontal padding.
+      setColWidth(Math.max(120, Math.floor(basis) - 32));
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    if (rEl) ro.observe(rEl);
+    if (lEl) ro.observe(lEl);
     return () => ro.disconnect();
-  }, []);
+  }, [lockedPane, rightPct]);
+
 
   // ── Canvas-measured line breaks ─────────────────────────────────────────────
   const lines = useMemo((): WordTiming[][] => {
