@@ -31,6 +31,7 @@ import { WordContextMenu } from "@/components/WordContextMenu";
 import { alignEditedToWhisper } from "@/lib/whisperAlignment";
 import { getWordHighlightStyle, isWordApproved } from "@/lib/personalPronunciationModel";
 import { RichTextEditor } from "@/components/RichTextEditor";
+import { RichTextEditorMirror } from "@/components/RichTextEditorMirror";
 import { TextMarkingOverlay } from "@/components/TextMarkingOverlay";
 
 interface SyncMirrorLayoutProps {
