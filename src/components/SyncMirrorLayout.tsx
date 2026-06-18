@@ -1513,19 +1513,8 @@ export const SyncMirrorLayout = ({
                Editing happens through right-click WordContextMenu (and the
                marking toolbar above when enableRichEdit is on). */
             <div className="flex flex-col" ref={leftRichRef}>
-              {enableRichEdit && (
-                <div className="px-3 pt-2" dir="rtl">
-                  <TextMarkingOverlay
-                    text={text}
-                    onTextChange={(v) => handleTextChangeFromPane('left', v)}
-                    fontSize={localFontSize}
-                    fontFamily={localFontFamily}
-                    lineHeight={localLineHeight}
-                    toolbarOnly={!isMarkingActive}
-                    onActiveChange={setIsMarkingActive}
-                  />
-                </div>
-              )}
+              {/* Marking toolbar lifted above both columns. */}
+
               {!isMarkingActive && (
                 <div ref={leftRowsRef} className="p-4" style={textStyle}>
                   {lines.map((line, li) => {
