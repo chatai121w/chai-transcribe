@@ -1487,16 +1487,7 @@ export const SyncMirrorLayout = ({
           <div style={{ pointerEvents: lockedPane === 'left' ? 'none' : undefined }} className="flex-1 min-h-0 flex flex-col">
           {effectiveRichEdit ? (
             <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
-              {/* Marking toolbar (always visible) + analysis panel (when active) */}
-              <TextMarkingOverlay
-                text={text}
-                onTextChange={(v) => handleTextChangeFromPane('left', v)}
-                fontSize={localFontSize}
-                fontFamily={localFontFamily}
-                lineHeight={localLineHeight}
-                toolbarOnly={!isMarkingActive}
-                onActiveChange={setIsMarkingActive}
-              />
+              {/* Marking toolbar has been lifted above both columns (see top of layout). */}
               {/* RichTextEditor — full editing surface */}
               {!isMarkingActive && (
                 <div
