@@ -628,10 +628,20 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
           <Separator orientation="vertical" className="h-6 mx-1" />
 
           {/* === יישור === */}
-          <ToolBtn icon={AlignRight} label="יישור לימין" onClick={() => execCommand('justifyRight')} />
-          <ToolBtn icon={AlignCenter} label="מרכוז" onClick={() => execCommand('justifyCenter')} />
-          <ToolBtn icon={AlignLeft} label="יישור לשמאל" onClick={() => execCommand('justifyLeft')} />
-          <ToolBtn icon={AlignJustify} label="יישור לשני הצדדים" onClick={() => execCommand('justifyFull')} />
+          {(() => {
+            const handleAlign = (a: 'right' | 'left' | 'center' | 'justify') => {
+              if (onTextAlignChange) onTextAlignChange(a);
+              else execCommand(a === 'right' ? 'justifyRight' : a === 'left' ? 'justifyLeft' : a === 'center' ? 'justifyCenter' : 'justifyFull');
+            };
+            return (
+              <>
+                <ToolBtn icon={AlignRight} label="יישור לימין" active={textAlign === 'right'} onClick={() => handleAlign('right')} />
+                <ToolBtn icon={AlignCenter} label="מרכוז" active={textAlign === 'center'} onClick={() => handleAlign('center')} />
+                <ToolBtn icon={AlignLeft} label="יישור לשמאל" active={textAlign === 'left'} onClick={() => handleAlign('left')} />
+                <ToolBtn icon={AlignJustify} label="יישור לשני הצדדים (שני הצדדים)" active={textAlign === 'justify'} onClick={() => handleAlign('justify')} />
+              </>
+            );
+          })()}
 
           <Separator orientation="vertical" className="h-6 mx-1" />
 
