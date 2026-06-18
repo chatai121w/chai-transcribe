@@ -38,6 +38,12 @@ interface RichTextEditorProps {
   onWordCorrected?: (original: string, corrected: string) => void;
   onSaveReplaceOriginal?: () => Promise<void> | void;
   onDuplicateSave?: () => Promise<void> | void;
+  /** Controlled horizontal text alignment. When provided together with
+   *  `onTextAlignChange`, the alignment buttons broadcast the change to the
+   *  parent (so a mirror layout can apply the same alignment to BOTH
+   *  columns) instead of running execCommand on the local selection. */
+  textAlign?: 'right' | 'left' | 'center' | 'justify';
+  onTextAlignChange?: (align: 'right' | 'left' | 'center' | 'justify') => void;
 }
 
 const sanitize = (html: string): string => DOMPurify.sanitize(html, {
