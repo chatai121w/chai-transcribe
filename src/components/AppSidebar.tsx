@@ -76,7 +76,6 @@ const navItems: NavItem[] = [
   { label: "התקנת שרת", icon: Server, path: "/setup" },
   { label: "לוח בקרה", icon: Bot, path: "/system-dashboard" },
   { label: "לשון הקודש", icon: ScrollText, path: "/lashon-kodesh" },
-  { label: "כללי לשון הקודש", icon: ScrollText, path: "/loshon-kodesh-rules" },
   { label: "השוואת תמלולים", icon: GitCompareArrows, path: "/compare-report" },
   { label: "הגדרות", icon: Settings, path: "/settings" },
 ];

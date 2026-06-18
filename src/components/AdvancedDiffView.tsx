@@ -18,8 +18,6 @@ interface AdvancedDiffViewProps {
   textColor?: string;
   lineHeight?: number;
   onApplyVersion?: (text: string) => void;
-  preselectedLeftId?: string;
-  preselectedRightId?: string;
 }
 
 type VersionFilter = "all" | "ai" | "manual" | "original" | "cloud" | "local";
@@ -105,21 +103,9 @@ export const AdvancedDiffView = ({
   textColor = 'hsl(var(--foreground))',
   lineHeight = 1.6,
   onApplyVersion,
-  preselectedLeftId,
-  preselectedRightId,
 }: AdvancedDiffViewProps) => {
-  const [leftId, setLeftId] = useState(preselectedLeftId || versions[0]?.id || '');
-  const [rightId, setRightId] = useState(preselectedRightId || versions[versions.length - 1]?.id || '');
-
-  // Re-apply preselect when caller pushes a new pair
-  useEffect(() => {
-    if (preselectedLeftId && versions.some(v => v.id === preselectedLeftId)) {
-      setLeftId(preselectedLeftId);
-    }
-    if (preselectedRightId && versions.some(v => v.id === preselectedRightId)) {
-      setRightId(preselectedRightId);
-    }
-  }, [preselectedLeftId, preselectedRightId, versions]);
+  const [leftId, setLeftId] = useState(versions[0]?.id || '');
+  const [rightId, setRightId] = useState(versions[versions.length - 1]?.id || '');
   const [viewMode, setViewMode] = useState<'side-by-side' | 'unified' | 'stats'>('side-by-side');
   const [versionFilter, setVersionFilter] = useState<VersionFilter>("all");
 

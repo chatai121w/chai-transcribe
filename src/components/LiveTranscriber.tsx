@@ -11,10 +11,8 @@ import {
 import {
   Mic, Square, Copy, Trash2, Radio, Cpu, Globe, Volume2, Clock, Zap,
   AlertTriangle, Pause, Play, Save, FolderOpen, FolderPlus, Download,
-  X, FileText, Trophy, Target, RefreshCw
+  X, FileText, Trophy, Target
 } from "lucide-react";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import { getServerUrl } from "@/lib/serverConfig";
 import { supabase } from "@/integrations/supabase/client";
@@ -74,17 +72,6 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const setChunkSec = useCallback((v: number) => updatePreference('live_chunk_sec', v), [updatePreference]);
   const chunkSecRef = useRef<number>(DEFAULT_CHUNK_SEC);
   useEffect(() => { chunkSecRef.current = chunkSec; }, [chunkSec]);
-
-  // Full re-transcribe on save: chunks are preview-only; on stop, the whole
-  // recording is sent as one unit and replaces the chunked text.
-  const [fullRetranscribe, setFullRetranscribe] = useState<boolean>(() => {
-    try { return localStorage.getItem('live_full_retranscribe') === '1'; } catch { return false; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('live_full_retranscribe', fullRetranscribe ? '1' : '0'); } catch { /* */ }
-  }, [fullRetranscribe]);
-  const fullRetranscribeRef = useRef(fullRetranscribe);
-  useEffect(() => { fullRetranscribeRef.current = fullRetranscribe; }, [fullRetranscribe]);
   const recognitionRef = useRef<any>(null);
   const [isRefining, setIsRefining] = useState(false);
 
@@ -486,52 +473,6 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     }
   }, [getLiveBiasOptions]);
 
-  // Re-transcribe the entire recording via Groq edge function as one unit.
-  // Used when fullRetranscribe is ON and mode=groq.
-  const runGroqFullRetranscribe = useCallback(async (): Promise<string | null> => {
-    if (allChunksRef.current.length === 0) return null;
-    const pool = apiKeys.groq_keys_pool?.filter(Boolean) || [];
-    const groqKey = pool.length > 0
-      ? pool[Math.floor(Math.random() * pool.length)]
-      : apiKeys.groq_key;
-    if (!groqKey) {
-      toast({ title: "חסר מפתח Groq", description: "לא ניתן לתמלל מחדש את ההקלטה המלאה", variant: "destructive" });
-      return null;
-    }
-    setIsRefining(true);
-    setInterimText("מתמלל מחדש את ההקלטה המלאה...");
-    try {
-      const mimeType = mimeTypeRef.current;
-      const fullBlob = new Blob(allChunksRef.current, { type: mimeType });
-      const fd = new FormData();
-      fd.append("file", fullBlob, "live-full.webm");
-      fd.append("apiKey", groqKey);
-      fd.append("language", "he");
-      fd.append("model", "whisper-large-v3");
-      const bias = getLiveBiasOptions();
-      if (bias.hotwords) fd.append("hotwords", bias.hotwords);
-      if (bias.initialPrompt) fd.append("initial_prompt", bias.initialPrompt);
-
-      const { data, error } = await supabase.functions.invoke('transcribe-groq', { body: fd });
-      if (error) throw new Error(String(error.message || error));
-      const text = (data?.text || '').trim();
-      if (!text) return null;
-      if (Array.isArray(data?.wordTimings) && data.wordTimings.length > 0) {
-        wordTimingsRef.current = data.wordTimings.map((w: any) => ({
-          word: String(w.word), start: Number(w.start) || 0, end: Number(w.end) || 0,
-        }));
-      }
-      toast({ title: "✅ תמלול מלא הושלם", description: `${text.split(/\s+/).length} מילים` });
-      return text;
-    } catch (e: any) {
-      toast({ title: "תמלול מחדש נכשל", description: "משתמש בטקסט המקטעי כגיבוי", variant: "destructive" });
-      return null;
-    } finally {
-      setIsRefining(false);
-      setInterimText("");
-    }
-  }, [apiKeys.groq_key, apiKeys.groq_keys_pool, getLiveBiasOptions]);
-
   const startCuda = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -894,32 +835,23 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         : undefined;
       const duration = Math.floor((Date.now() - startTimeRef.current - totalPausedMsRef.current) / 1000);
 
-      // Full re-transcribe path (toggle ON): the whole recording is sent as one
-      // unit and REPLACES the chunked text. Falls back to chunked text on failure.
-      // For CUDA, this also enables the existing refine pass.
+      // Refine pass only available for CUDA (local server). Groq uses accumulated text as-is.
       let merged = finalTextRef.current;
-      const doFullRetranscribe = fullRetranscribeRef.current && (mode === "cuda" || mode === "groq");
-      if (doFullRetranscribe || mode === "cuda") {
+      if (mode === "cuda") {
         const prevTimings = [...wordTimingsRef.current];
         wordTimingsRef.current = [];
-        const refinedText = mode === "groq"
-          ? await runGroqFullRetranscribe()
-          : await runFinalRefinePass();
+        const refinedText = await runFinalRefinePass();
         if (!refinedText && wordTimingsRef.current.length === 0) {
           wordTimingsRef.current = prevTimings;
         }
         const currentFinalText = finalTextRef.current;
-        if (refinedText) {
-          // When the user explicitly asked for full re-transcribe, replace.
-          // Otherwise (legacy CUDA refine), keep the prior heuristic.
-          merged = fullRetranscribeRef.current
+        merged = refinedText
+          ? (refinedText.length >= Math.max(20, Math.floor(currentFinalText.length * 0.8))
             ? refinedText
-            : (refinedText.length >= Math.max(20, Math.floor(currentFinalText.length * 0.8))
-              ? refinedText
-              : appendDedupText(currentFinalText, refinedText));
+            : appendDedupText(currentFinalText, refinedText))
+          : currentFinalText;
+        if (refinedText) {
           setFinalText(merged);
-        } else {
-          merged = currentFinalText;
         }
       }
       stopCudaCleanup();
@@ -947,7 +879,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         });
       }
     }
-  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, runGroqFullRetranscribe, stopCudaCleanup, stopBrowser, flushGroqTail]);
+  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, stopCudaCleanup, stopBrowser, flushGroqTail]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(finalText);
@@ -1207,31 +1139,6 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
               </span>
             </div>
           )}
-
-          {/* Full re-transcribe toggle — applies to CUDA & Groq */}
-          {(mode === "cuda" || mode === "groq") && (
-            <div className="flex items-center justify-center gap-3 px-2">
-              <div className="flex items-center gap-2 rounded-lg border border-yellow-500/40 bg-yellow-500/5 px-3 py-1.5">
-                <RefreshCw className={`w-4 h-4 ${fullRetranscribe ? 'text-yellow-600' : 'text-muted-foreground'}`} />
-                <Label htmlFor="full-retranscribe" className="text-xs cursor-pointer select-none">
-                  תמלול מחדש מלא בשמירה
-                </Label>
-                <Switch
-                  id="full-retranscribe"
-                  checked={fullRetranscribe}
-                  onCheckedChange={setFullRetranscribe}
-                  className="data-[state=checked]:bg-yellow-500"
-                />
-              </div>
-              <span className="text-[10px] text-muted-foreground max-w-[220px] leading-tight">
-                {fullRetranscribe
-                  ? 'הצ׳אנקים הם רק תצוגה מקדימה. בלחיצה על שמור — כל ההקלטה תתמלל מחדש כיחידה אחת.'
-                  : 'הטקסט שנצבר בצ׳אנקים יישמר כמו שהוא.'}
-              </span>
-            </div>
-          )}
-
-
 
           {/* File name + format selector */}
           <div className="flex items-center gap-2 justify-center flex-wrap">

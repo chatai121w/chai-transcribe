@@ -1,7 +1,6 @@
 import "../edge-runtime.d.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
-import { logAIUsage } from "../_shared/aiUsage.ts";
 
 const ALLOWED_ORIGINS = [
   'http://localhost:8080',
@@ -134,7 +133,6 @@ serve(async (req) => {
 
     if (LOVABLE_API_KEY) {
       try {
-        const t0 = Date.now();
         const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -149,29 +147,10 @@ serve(async (req) => {
             ],
           }),
         });
-        const durationMs = Date.now() - t0;
 
         if (response.ok) {
           const data = await response.json();
           editedText = data.choices?.[0]?.message?.content;
-          await logAIUsage({
-            supabaseUserClient: userClient,
-            userId: user.id,
-            feature: `edit:${action}`,
-            model: aiModel,
-            usage: data.usage,
-            promptText: text,
-            systemPrompt,
-            responseText: editedText,
-            params: {
-              action,
-              tone_style: toneStyle ?? null,
-              target_language: targetLanguage ?? null,
-              custom_prompt: action === 'custom' ? Boolean(customPrompt) : false,
-              text_length: text.length,
-            },
-            durationMs,
-          });
         } else if (response.status === 402 || response.status === 429) {
           console.warn(`Lovable AI returned ${response.status}, falling back to user key`);
           editedText = await callDbProxy();
@@ -187,7 +166,6 @@ serve(async (req) => {
     } else {
       editedText = await callDbProxy();
     }
-
 
     if (!editedText) {
       throw new Error('No response from AI');

@@ -1,7 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
-import { logAIUsage } from "../_shared/aiUsage.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -49,12 +48,6 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY not configured');
     }
 
-    const systemPrompt = 'אתה עוזר שמסכם תמלולי אודיו בעברית. צור סיכום תמציתי של 3-5 משפטים, תוך שמירה על נקודות המפתח החשובות ביותר. הסיכום חייב להיות בעברית בלבד.';
-    const userPrompt = `סכם את הטקסט הבא:\n\n${text}`;
-    const aiModel = 'google/gemini-2.5-flash';
-    const temperature = 0.7;
-
-    const t0 = Date.now();
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -62,15 +55,20 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: aiModel,
+        model: 'google/gemini-2.5-flash',
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
+          {
+            role: 'system',
+            content: 'אתה עוזר שמסכם תמלולי אודיו בעברית. צור סיכום תמציתי של 3-5 משפטים, תוך שמירה על נקודות המפתח החשובות ביותר. הסיכום חייב להיות בעברית בלבד.'
+          },
+          {
+            role: 'user',
+            content: `סכם את הטקסט הבא:\n\n${text}`
+          }
         ],
-        temperature,
+        temperature: 0.7,
       }),
     });
-    const durationMs = Date.now() - t0;
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -82,20 +80,6 @@ serve(async (req) => {
     const summary = data.choices[0].message.content;
 
     console.log('[Summarize] Summary generated successfully');
-
-    await logAIUsage({
-      supabaseUserClient: userClient,
-      userId: user.id,
-      feature: 'summary',
-      model: aiModel,
-      usage: data.usage,
-      promptText: text,
-      systemPrompt,
-      responseText: summary,
-      params: { temperature, text_length: text.length },
-      durationMs,
-    });
-
 
     return new Response(
       JSON.stringify({ summary }),

@@ -1,79 +1,70 @@
+## המטרה
 
-## מה נבנה
+לפתור את שני הקשיים הקיימים בעורך ערכות הנושא:
+1. ה-iframe חוסם אינטראקציה — אי אפשר ללחוץ על אלמנטים אמיתיים ולשנות אותם.
+2. כיום אפשר רק לערוך ערכת נושא שלמה (כל הטוקנים), לא אלמנט בודד או רכיב ספציפי.
 
-מתחת לפאנל "עריכה עם AI" בעורך הטקסט תתווסף **תצוגת רשת של כל גרסאות ה-AI** שנעשו על התמלול הנוכחי. כל כרטיס יציג את התוצאה, הפרומפט שנשלח, המודל, הטוקנים והעלות, ויאפשר שמירה/מחיקה ושיוך לתיקיה — כולל יצירת תיקיה חדשה והעתקת האודיו המקורי לאותה תיקיה.
+הפתרון: להוסיף **"מצב עיצוב חי"** — שכבת עריכה שרצה ישירות מעל האפליקציה האמיתית (לא iframe), ובכל שינוי לשאול היקף.
 
-## מבנה הנתונים
+---
 
-### חיבור versions ↔ ai_usage_events
-- מוסיפים עמודה `ai_usage_event_id uuid` ל-`transcript_versions` (FK ל-`ai_usage_events.id`).
-- כל פעולת AI (`edit-transcript`, `loshon-kodesh-ai`, `summarize-transcript`, וה-RPC `edit_transcript_proxy`) שיוצרת גרסה חדשה — תשמור את `id` של ה-usage event ותכניס אותו ל-version.
-- כך כל גרסה יודעת בדיוק איזה פרומפט / מודל / טוקנים / עלות הביאו לה.
+## איך זה ירגיש למשתמש
 
-### שיוך לתיקיה כקבוצה
-- מוסיפים ל-`transcript_versions` עמודות אופציונליות:
-  - `folder_id uuid` — תיקיה שאליה שויכה הגרסה
-  - `audio_file_path text` — העתקה (shared reference) של האודיו של התמלול המקור
-- כשמשייכים קבוצת גרסאות לתיקיה — מעדכנים את כולן ב-`folder_id` זהה, וה-`audio_file_path` מועתק מהתמלול המרכזי (אותו path ב-bucket `permanent-audio`, ללא שכפול בייטים).
+1. בעורך ערכות נושא יתווסף כפתור גדול: **"הפעל מצב עיצוב חי"**. הדיאלוג ייסגר.
+2. סרגל קטן ומרחף יופיע (RTL, פינה שמאלית-עליונה, ניתן לגרירה): מעבר עמודים, מצב פעיל/כבוי, יציאה, ביטול אחרון, שמירה.
+3. במצב פעיל: מעבר עכבר מסמן אלמנטים במסגרת זהובה דקה + תווית קטנה (`button.primary`, `Card`, וכו').
+4. לחיצה על אלמנט → פאנל צף קטן עם:
+   - צבע טקסט / רקע / מסגרת (color picker)
+   - גודל טקסט, משקל, רדיוס, padding
+5. אחרי שינוי ערך → דיאלוג קצר: **"להחיל על:"**
+   - **רק האלמנט הזה** (override נקודתי)
+   - **כל האלמנטים מהסוג הזה בעמוד** (לפי class signature)
+   - **כל המופעים בכל האתר** (משנה את הטוקן ב-CSS variable של הערכה)
+6. שמירה ל-cloud (user_preferences) → מסתנכרן בין מכשירים.
+7. גם המצב המקורי (iframe side-by-side + פלטות מוכנות) נשאר זמין כטאב נפרד.
 
-## UI חדש
+---
 
-### `AIVersionsGrid.tsx` (חדש)
-מתחת ל-`AIEditPanel` ב-`TextEditor.tsx`. רשת רספונסיבית של כרטיסים, אחד לכל גרסת AI של התמלול הפעיל:
+## ארכיטקטורה טכנית
 
-```text
-┌─ AIVersionCard ──────────────────────┐
-│ [Gemini 2.5 Flash] [improve] 14:32   │
-│ ─────────────────────────────────────│
-│ tabs: [תוצאה] [פרומפט] [נתונים]      │
-│  • תוצאה: preview של הטקסט (scroll) │
-│  • פרומפט: system + user prompt     │
-│  • נתונים: tokens · עלות · משך      │
-│ ─────────────────────────────────────│
-│ [💾 שמור בענן] [📥 שמור לוקלי]      │
-│ [📁 שייך לתיקיה ▾] [👁 פתח] [🗑]    │
-└──────────────────────────────────────┘
-```
+### קבצים חדשים
+- `src/components/design-mode/DesignModeProvider.tsx` — context גלובלי. מחזיק `enabled`, `overrides[]`, `history[]`. מזריק `<style>` עם ה-overrides.
+- `src/components/design-mode/DesignModeOverlay.tsx` — מנוי mouseover/click על `document`, מצייר highlight ב-`position:fixed` div, פותח את פאנל העריכה.
+- `src/components/design-mode/ElementEditorPopover.tsx` — שדות צבע/טייפו/spacing.
+- `src/components/design-mode/ScopeDialog.tsx` — דיאלוג "להחיל על". 3 אפשרויות.
+- `src/lib/designOverrides.ts` — חישוב selector ייחודי (id → data-testid → class signature → nth-child path), serialize/deserialize, apply via stylesheet.
 
-- **שמור בענן** — מסמן `_dirty=false` ודוחף ל-`transcript_versions` (אם זמני).
-- **שמור לוקלי** — שומר ב-Dexie (`db.versions`) דרך `useCloudVersions`.
-- **שייך לתיקיה** — תפריט שמשתמש ב-`useFolderTree` עם:
-  - בחירה מתיקיה קיימת
-  - "➕ צור תיקיה חדשה…" שמוסיף folder ומשייך אליו
-  - checkbox "שייך גם את האודיו המקורי" (ברירת מחדל מסומן)
-- **פתח** — מעלה את הגרסה לעורך הראשי (כפי שכבר עובד היום ב-version history).
+### עדכונים
+- `src/App.tsx` — לעטוף ב-`<DesignModeProvider>` ולרנדר `<DesignModeOverlay>` ברמת root.
+- `src/components/ThemeManager.tsx` — להוסיף כפתור "הפעל מצב עיצוב חי" שמדליק את ה-context וסוגר את הדיאלוג. להשאיר את ה-iframe preview כטאב משני.
+- `src/hooks/useCloudPreferences.ts` — הוספת שדה `element_overrides: string` (JSON).
+- מיגרציה: עמודה `element_overrides text` ב-`user_preferences`.
 
-### `AIVersionFolderDialog.tsx` (חדש)
-מודאל לבחירה/יצירת תיקיה. תומך בבחירת **קבוצת גרסאות** (checkboxes על הכרטיסים) ושיוך מרובה בלחיצה אחת.
+### לוגיקת היקף
+- **רק האלמנט הזה**: שומר `{ selector: "main > div:nth-child(2) > button:nth-child(1)", css: {...} }`. מוזרק כ-`<style>` גלובלי.
+- **כל הסוג בעמוד**: לוקח את ה-class signature (`button.bg-primary.text-sm`), שומר ל-`.classsig { ... }`.
+- **כל האתר (טוקן)**: ממפה את ה-CSS property (e.g. `background-color` של אלמנט שמשתמש ב-`hsl(var(--primary))`) → משנה את ה-token בערכת הנושא הפעילה (משתמש ב-`saveCustomTheme` הקיים).
 
-### בורר תצוגה
-בראש הרשת: כפתורי סינון לפי מודל, פיצ'ר (improve/grammar/translate…), וחיפוש בפרומפט. ברירת מחדל: כל הגרסאות של ה-transcript הנוכחי, מהחדש לישן.
+### בטיחות
+- מצב עיצוב חי מבטל clicks רגילים (preventDefault + stopPropagation) רק כשפעיל.
+- מקש Esc יוצא מהמצב.
+- "ביטול" (Ctrl+Z) מסיר את ה-override האחרון.
+- ב-mobile: מקבל tap עם long-press לבחירה (ולא click רגיל).
 
-## שינויי קוד
+---
 
-| קובץ | שינוי |
-|------|-------|
-| `supabase/migrations/<new>.sql` | הוספת `ai_usage_event_id`, `folder_id`, `audio_file_path` ל-`transcript_versions` + index על `(transcript_id, created_at)` |
-| `src/integrations/supabase/types.ts` | רענון טיפוסים |
-| `src/lib/localDb.ts` | הוספת השדות החדשים ל-`LocalVersion` + version bump של Dexie |
-| `supabase/functions/_shared/aiUsage.ts` | `logAIUsage` יחזיר את ה-`id` שנוצר |
-| `supabase/functions/{edit-transcript,loshon-kodesh-ai,summarize-transcript}/index.ts` | להעביר את ה-`ai_usage_event_id` ל-version שנשמרת |
-| `edit_transcript_proxy` (DB function) | אותו דבר ברמת ה-SQL |
-| `src/hooks/useCloudVersions.ts` | תמיכה ב-`ai_usage_event_id`, `folder_id`, `audio_file_path` + פונקציות `assignVersionsToFolder`, `saveVersionToCloud`, `saveVersionToLocal` |
-| `src/components/AIVersionsGrid.tsx` | **חדש** — הרשת עם הכרטיסים, טאבים וכפתורי פעולה |
-| `src/components/AIVersionCard.tsx` | **חדש** — כרטיס יחיד |
-| `src/components/AIVersionFolderDialog.tsx` | **חדש** — בחירת/יצירת תיקיה לקבוצה |
-| `src/pages/TextEditor.tsx` | שילוב `<AIVersionsGrid transcriptId={…}/>` מתחת לפאנל ה-AI |
+## טכני נוסף
 
-## נקודות חשובות
+- ה-`<style>` המוזרק יושב ב-`<head>` עם `id="design-overrides"`, מתעדכן בכל שינוי overrides.
+- selector ייחודי: עוקב אחר parent path עד שמוצאים `[data-testid]` או `id`, אחרת nth-child path מקסימום 5 רמות.
+- ה-overlay highlight: `pointer-events:none`, `position:fixed`, `outline: 2px solid hsl(var(--primary))`.
+- תאימות RTL: כל הפאנלים `dir="rtl"`, מיקום שמאלי בברירת מחדל אבל ניתן לגרירה.
+- ב-mobile (`useIsMobile`): סרגל למטה, פאנל עורך מלא-מסך מלמטה (sheet).
 
-- **שמירת הקשר** — כל גרסת AI נטענת תמיד דרך `transcript_id` של התמלול המרכזי; אין דאטה מנותק.
-- **תיקיה כקבוצה** — folder_id זהה לכל הגרסאות שנבחרו יחד, כך שב-`Folders.tsx` הן יוצגו תחת אותה תיקיה (אפשר להוסיף בעתיד תצוגת "קבוצה" גם שם, מחוץ לתחום הזה).
-- **אודיו** — לא משכפלים בייטים, רק שומרים את אותו `audio_file_path` של ה-bucket `permanent-audio`. RLS הקיימת על הbucket מספיקה.
-- **RTL** — כל הקומפוננטות עם `dir="rtl"` ו-utility classes קיימות.
-- **עלות** — מציגים את `cost_usd_snapshot` הקיים מה-event, ואם null מחשבים דינמית מ-`aiPricing.ts`.
+---
 
-## מחוץ לתחום
-- שינוי תצוגת התיקיות עצמה (`Folders.tsx`) — בעתיד.
-- שיתוף קבוצת גרסאות עם משתמש אחר.
-- ייצוא של קבוצה כקובץ אחד.
+## מה לא נכלל
+
+- אין AI שמייצר עיצוב לאלמנט בודד (אפשר להוסיף בהמשך).
+- אין export של overrides לקוד React (רק שמירה ב-preferences).
+- אין undo מעבר ל-5 פעולות אחרונות (מספיק לתיקון טע
