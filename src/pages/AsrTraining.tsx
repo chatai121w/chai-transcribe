@@ -457,6 +457,33 @@ export default function AsrTraining() {
 
     // ── Cloud save ──
     if (saveCloud && user) {
+      // Upload the original audio to permanent-audio bucket so we can replay
+      // and re-transcribe it later, even if the user deletes the local file.
+      let uploadedAudioPath: string | null = null;
+      let uploadedAudioSize: number | null = null;
+      if (audioFile) {
+        try {
+          const ext = (audioFile.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const safeName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext || 'bin'}`;
+          const path = `asr-training/${user.id}/${safeName}`;
+          const { error: upErr } = await supabase.storage
+            .from('permanent-audio')
+            .upload(path, audioFile, {
+              cacheControl: '3600',
+              upsert: false,
+              contentType: audioFile.type || 'application/octet-stream',
+            });
+          if (upErr) {
+            toast({ title: 'העלאת אודיו לענן נכשלה', description: upErr.message, variant: 'destructive' });
+          } else {
+            uploadedAudioPath = path;
+            uploadedAudioSize = audioFile.size;
+          }
+        } catch (err: any) {
+          toast({ title: 'העלאת אודיו לענן נכשלה', description: err?.message || String(err), variant: 'destructive' });
+        }
+      }
+
       const { data: insertedRun, error: runErr } = await supabase
         .from('asr_training_runs')
         .insert({
@@ -477,9 +504,11 @@ export default function AsrTraining() {
           term_recall_b: b?.metrics.termRecall ?? null,
           audio_duration_ms: 0,
           audio_filename: audioFile?.name ?? null,
+          audio_path: uploadedAudioPath,
+          audio_size: uploadedAudioSize,
           learning_mode: learningMode,
           corrections_applied: autoApplied.length,
-        })
+        } as any)
         .select()
         .single();
 
