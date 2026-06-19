@@ -21,6 +21,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Upload, Sparkles, BookOpen, Trash2, Check, X, RefreshCw } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
@@ -175,6 +176,7 @@ export default function AsrTraining() {
   const [results, setResults] = useState<EngineResult[]>([]);
   const [history, setHistory] = useState<SavedRun[]>([]);
   const [pending, setPending] = useState<PendingCorrection[]>([]);
+  const [selectedPending, setSelectedPending] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { localStorage.setItem('asr_training_mode', learningMode); }, [learningMode]);
@@ -350,15 +352,37 @@ export default function AsrTraining() {
     void refreshLists();
   };
 
-  const approvePending = async (p: PendingCorrection) => {
-    learnFromCorrections([buildCorrection(p.wrong_text, p.correct_text, p.occurrences, p.engine || 'manual')]);
-    await supabase.from('asr_pending_corrections').update({ status: 'approved', resolved_at: new Date().toISOString() }).eq('id', p.id);
-    toast({ title: 'תיקון אושר', description: `${p.wrong_text} → ${p.correct_text}` });
+  const approvePending = async (items: PendingCorrection[]) => {
+    if (items.length === 0) return;
+    const entries = items.map((p) => buildCorrection(p.wrong_text, p.correct_text, p.occurrences, p.engine || 'manual'));
+    learnFromCorrections(entries);
+    const ids = items.map((p) => p.id);
+    await supabase.from('asr_pending_corrections').update({ status: 'approved', resolved_at: new Date().toISOString() }).in('id', ids);
+    if (items.length === 1) {
+      toast({ title: 'תיקון אושר', description: `${items[0].wrong_text} → ${items[0].correct_text}` });
+    } else {
+      toast({ title: `${items.length} תיקונים אושרו`, description: 'נשמרו למערכת הלמידה' });
+    }
+    setSelectedPending(new Set());
     void refreshLists();
   };
   const rejectPending = async (p: PendingCorrection) => {
     await supabase.from('asr_pending_corrections').update({ status: 'rejected', resolved_at: new Date().toISOString() }).eq('id', p.id);
     void refreshLists();
+  };
+  const togglePendingSelection = (id: string) => {
+    setSelectedPending((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const selectAllPending = () => {
+    setSelectedPending(new Set(pending.map((p) => p.id)));
+  };
+  const clearPendingSelection = () => {
+    setSelectedPending(new Set());
   };
 
   // ─── Render ─────────────────────────────────────────────────────────────
@@ -549,18 +573,39 @@ export default function AsrTraining() {
       {/* ── Pending corrections ── */}
       {pending.length > 0 && (
         <Card>
-          <CardHeader><CardTitle>תיקונים ממתינים לאישור ({pending.length})</CardTitle></CardHeader>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>תיקונים ממתינים לאישור ({pending.length})</CardTitle>
+              <div className="flex items-center gap-2">
+                {selectedPending.size > 0 ? (
+                  <>
+                    <span className="text-xs text-muted-foreground">{selectedPending.size} נבחרו</span>
+                    <Button size="sm" variant="default" onClick={() => approvePending(pending.filter((p) => selectedPending.has(p.id)))}>
+                      <Check className="h-4 w-4 ml-1" /> אשר נבחרים
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={clearPendingSelection}>בטל בחירה</Button>
+                  </>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={selectAllPending}>בחר הכל</Button>
+                )}
+              </div>
+            </div>
+          </CardHeader>
           <CardContent>
             <ScrollArea className="h-64">
               <div className="space-y-1">
                 {pending.map((p) => (
                   <div key={p.id} className="flex items-center gap-2 p-2 rounded border">
+                    <Checkbox
+                      checked={selectedPending.has(p.id)}
+                      onCheckedChange={() => togglePendingSelection(p.id)}
+                    />
                     <span className="text-rose-600 line-through">{p.wrong_text}</span>
                     <span>→</span>
                     <span className="text-emerald-600 font-medium">{p.correct_text}</span>
                     <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
                     <div className="flex-1" />
-                    <Button size="sm" variant="ghost" onClick={() => approvePending(p)}><Check className="h-4 w-4" /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => approvePending([p])}><Check className="h-4 w-4" /></Button>
                     <Button size="sm" variant="ghost" onClick={() => rejectPending(p)}><X className="h-4 w-4" /></Button>
                   </div>
                 ))}
