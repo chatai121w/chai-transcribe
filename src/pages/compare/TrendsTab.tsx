@@ -73,6 +73,17 @@ export default function TrendsTab() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [kindFilter, setKindFilter] = useState<string>('all');
   const [compareIds, setCompareIds] = useState<[string?, string?]>([undefined, undefined]);
+  const location = useLocation();
+
+  // Deep-link: /compare?tab=trends&fp=<fingerprint>&a=<runId>&b=<runId>
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const fp = params.get('fp');
+    const a = params.get('a') ?? undefined;
+    const b = params.get('b') ?? undefined;
+    if (fp) setExpanded(fp);
+    if (a || b) setCompareIds([a, b]);
+  }, [location.search]);
 
   const filteredGroups = useMemo(() => {
     if (kindFilter === 'all') return groups;
