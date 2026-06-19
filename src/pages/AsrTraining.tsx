@@ -711,6 +711,54 @@ export default function AsrTraining() {
         </Card>
       )}
 
+      {/* ── Local sessions ── */}
+      {localSessions.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <HardDrive className="h-4 w-4" /> סשנים מקומיים ({localSessions.length})
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={handleExportLocal}>
+                  <Download className="h-4 w-4 ml-1" /> ייצוא JSON
+                </Button>
+                <Button size="sm" variant="ghost" onClick={handleClearLocal}>
+                  <Trash2 className="h-4 w-4 ml-1" /> נקה הכל
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-64">
+              <div className="space-y-1">
+                {localSessions.map((s) => {
+                  const a = s.results[0];
+                  const b = s.results[1];
+                  return (
+                    <div key={s.id} className="flex items-center gap-2 p-2 rounded border text-sm">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{s.label}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(s.createdAt).toLocaleString('he-IL')}
+                          {a && ` · A: ${a.model.split('/').pop()} WER ${pct(a.metrics.wer)}`}
+                          {b && ` · B: ${b.model.split('/').pop()} WER ${pct(b.metrics.wer)}`}
+                          {` · ${s.autoApplied.length + s.pending.length} תיקונים`}
+                        </div>
+                      </div>
+                      <Button size="sm" variant="outline" onClick={() => loadLocalIntoUI(s)}>טען</Button>
+                      <Button size="sm" variant="ghost" onClick={() => handleDeleteLocal(s.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ── Learning curve / history ── */}
       {history.length > 0 && (
         <Card>
