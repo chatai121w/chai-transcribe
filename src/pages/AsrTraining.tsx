@@ -23,7 +23,7 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Upload, Sparkles, BookOpen, Trash2, Check, X, RefreshCw, Download, HardDrive, Cloud } from 'lucide-react';
+import { Upload, Sparkles, BookOpen, Trash2, Check, X, RefreshCw, Download, HardDrive, Cloud, Pencil } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { normalizeHebrew } from '@/lib/hebrewNormalize';
 import {
@@ -560,6 +560,9 @@ export default function AsrTraining() {
   // ─── Manual add ───
   const [manualWrong, setManualWrong] = useState('');
   const [manualCorrect, setManualCorrect] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editWrong, setEditWrong] = useState('');
+  const [editCorrect, setEditCorrect] = useState('');
   const addManualCorrection = async (opts: { approveNow: boolean }) => {
     const wrong = manualWrong.trim();
     const correct = manualCorrect.trim();
@@ -624,6 +627,47 @@ export default function AsrTraining() {
   };
   const clearPendingSelection = () => {
     setSelectedPending(new Set());
+  };
+
+  const startEdit = (p: PendingCorrection) => {
+    setEditingId(p.id);
+    setEditWrong(p.wrong_text);
+    setEditCorrect(p.correct_text);
+  };
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditWrong('');
+    setEditCorrect('');
+  };
+  const saveEdit = async (original: PendingCorrection) => {
+    const wrong = editWrong.trim();
+    const correct = editCorrect.trim();
+    if (!wrong || !correct) {
+      toast({ title: 'חסר טקסט', description: 'מלא גם שגוי וגם נכון', variant: 'destructive' });
+      return;
+    }
+    if (wrong === correct) {
+      toast({ title: 'אין הבדל', description: 'השגוי והנכון זהים', variant: 'destructive' });
+      return;
+    }
+    commitPending((prev) =>
+      prev.map((item) =>
+        item.id === original.id ? { ...item, wrong_text: wrong, correct_text: correct } : item
+      )
+    );
+    if (!original.id.startsWith('local_') && user) {
+      const { error } = await supabase
+        .from('asr_pending_corrections')
+        .update({ wrong_text: wrong, correct_text: correct })
+        .eq('id', original.id);
+      if (error) {
+        toast({ title: 'עדכון בענן נכשל', description: error.message, variant: 'destructive' });
+      }
+    }
+    setEditingId(null);
+    setEditWrong('');
+    setEditCorrect('');
+    toast({ title: 'תיקון עודכן', description: `${wrong} → ${correct}` });
   };
 
   // ─── Local sessions ───
