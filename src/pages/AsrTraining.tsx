@@ -444,16 +444,18 @@ export default function AsrTraining() {
 
     // Optimistically show pending items in UI immediately (works even without cloud save)
     if (queuedPending.length > 0) {
+      const createdAt = new Date().toISOString();
       const synthetic: PendingCorrection[] = queuedPending.map((q, i) => ({
         id: `local_${Date.now()}_${i}`,
         wrong_text: q.wrong,
         correct_text: q.correct,
         occurrences: 1,
         engine: q.engine,
-      } as PendingCorrection));
-      setPending((prev) => {
-        const existing = new Set(prev.map((p) => `${p.wrong_text}→${p.correct_text}`));
-        const fresh = synthetic.filter((s) => !existing.has(`${s.wrong_text}→${s.correct_text}`));
+        created_at: createdAt,
+      }));
+      commitPending((prev) => {
+        const existing = new Set(prev.map(pendingKey));
+        const fresh = synthetic.filter((s) => !existing.has(pendingKey(s)));
         return [...fresh, ...prev];
       });
       // Scroll the pending list into view so the user sees the new items
@@ -477,10 +479,14 @@ export default function AsrTraining() {
     learnFromCorrections(entries);
     const dbIds = items.map((p) => p.id).filter((id) => !id.startsWith('local_'));
     if (dbIds.length > 0) {
-      await supabase.from('asr_pending_corrections').update({ status: 'approved', resolved_at: new Date().toISOString() }).in('id', dbIds);
+      const { error } = await supabase.from('asr_pending_corrections').update({ status: 'approved', resolved_at: new Date().toISOString() }).in('id', dbIds);
+      if (error) {
+        toast({ title: 'אישור נכשל', description: error.message, variant: 'destructive' });
+        return;
+      }
     }
-    const approvedIds = new Set(items.map((p) => p.id));
-    setPending((prev) => prev.filter((p) => !approvedIds.has(p.id)));
+    const approvedKeys = new Set(items.map(pendingKey));
+    commitPending((prev) => prev.filter((p) => !approvedKeys.has(pendingKey(p))));
     if (items.length === 1) {
       toast({ title: 'תיקון אושר', description: `${items[0].wrong_text} → ${items[0].correct_text}` });
     } else {
@@ -491,9 +497,14 @@ export default function AsrTraining() {
   };
   const rejectPending = async (p: PendingCorrection) => {
     if (!p.id.startsWith('local_')) {
-      await supabase.from('asr_pending_corrections').update({ status: 'rejected', resolved_at: new Date().toISOString() }).eq('id', p.id);
+      const { error } = await supabase.from('asr_pending_corrections').update({ status: 'rejected', resolved_at: new Date().toISOString() }).eq('id', p.id);
+      if (error) {
+        toast({ title: 'דחייה נכשלה', description: error.message, variant: 'destructive' });
+        return;
+      }
     }
-    setPending((prev) => prev.filter((x) => x.id !== p.id));
+    const rejectedKey = pendingKey(p);
+    commitPending((prev) => prev.filter((x) => pendingKey(x) !== rejectedKey));
     void refreshLists();
   };
 
