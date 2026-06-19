@@ -556,6 +556,46 @@ export default function AsrTraining() {
       }, 100);
     }
 
+    // ── Unified trends store: one row per engine, with fingerprint + counts ──
+    try {
+      const { recordRun } = await import('@/lib/comparisonRuns');
+      const { fingerprintFile, fingerprintFromString } = await import('@/lib/recordingFingerprint');
+      const { getCorrectionStats } = await import('@/utils/correctionLearning');
+      const { getVocabularyStats } = await import('@/utils/customVocabulary');
+      const fp = audioFile
+        ? await fingerprintFile(audioFile)
+        : await fingerprintFromString(`${sourceKind}|${sourceRef}|${refLabel}`);
+      const hotwords_count = getVocabularyStats().totalTerms;
+      const corrections_count = getCorrectionStats().totalCorrections;
+      for (const r of results) {
+        await recordRun({
+          kind: 'asr_ground_truth',
+          recording_fingerprint: fp,
+          recording_label: refLabel || audioFile?.name || sourceRef || 'ללא כותרת',
+          audio_duration_ms: null,
+          engine: r.engine,
+          model: r.model,
+          hotwords_count,
+          corrections_count,
+          reference_text: effectiveRef,
+          hypothesis_text: r.hyp,
+          wer: r.metrics.wer ?? null,
+          cer: r.metrics.cer ?? null,
+          term_recall: r.metrics.termRecall ?? null,
+          len_ratio: r.metrics.lenRatio ?? null,
+          elapsed_ms: r.metrics.elapsedMs ?? null,
+          config_snapshot: {
+            learningMode,
+            sourceKind, sourceRef,
+            corrections_applied: autoApplied.length,
+            pending_queued: queuedPending.length,
+          },
+        });
+      }
+    } catch (err) {
+      console.warn('[AsrTraining] comparison_runs record failed', err);
+    }
+
     const destinations = [saveLocally && 'מקומי', saveCloud && user && 'ענן'].filter(Boolean).join(' + ') || 'לא נשמר';
     toast({
       title: `הריצה נשמרה (${destinations})`,

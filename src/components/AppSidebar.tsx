@@ -69,7 +69,6 @@ const navItems: NavItem[] = [
   { label: "ניקוי קול", icon: Wand2, path: "/audio-clean" },
   { label: "תיקיות", icon: FolderOpen, path: "/folders" },
   { label: "עורך טקסט", icon: FileText, path: "/text-editor" },
-  { label: "בנצ'מארק", icon: BarChart3, path: "/benchmark" },
   { label: "זיהוי דוברים", icon: Users, path: "/diarization" },
   { label: "השוואות", icon: GitCompareArrows, path: "/compare" },
   { label: "ממיר ל-MP3", icon: Music, path: "/video-to-mp3" },
@@ -78,7 +77,6 @@ const navItems: NavItem[] = [
   { label: "לוח בקרה", icon: Bot, path: "/system-dashboard" },
   { label: "לשון הקודש", icon: ScrollText, path: "/lashon-kodesh" },
   { label: "כללי לשון הקודש", icon: ScrollText, path: "/loshon-kodesh-rules" },
-  { label: "אימון תמלול", icon: GraduationCap, path: "/asr-training" },
   { label: "הגדרות", icon: Settings, path: "/settings" },
 ];
 

@@ -425,6 +425,44 @@ function TabRun() {
             } else if (evt.type === "done") {
               setState((s) => ({ ...s, status: "done", progress: 100, results: evt.results }));
               toast({ title: "✓ השוואה הושלמה", description: `${evt.results.filter((r: CmpResult) => !r.error).length} מערכות רצו בהצלחה` });
+
+              // ── Unified trends: one row per configuration ──
+              try {
+                const { recordRun } = await import('@/lib/comparisonRuns');
+                const { fingerprintFile } = await import('@/lib/recordingFingerprint');
+                const { getCorrectionStats } = await import('@/utils/correctionLearning');
+                const { getVocabularyStats } = await import('@/utils/customVocabulary');
+                const fp = await fingerprintFile(f);
+                const hotwords_count = getVocabularyStats().totalTerms;
+                const corrections_count = getCorrectionStats().totalCorrections;
+                const allResults: CmpResult[] = evt.results;
+                for (const r of allResults) {
+                  if (r.error) continue;
+                  await recordRun({
+                    kind: 'transcribe_settings',
+                    recording_fingerprint: fp,
+                    recording_label: f.name,
+                    audio_duration_ms: null,
+                    engine: 'local-server',
+                    model: r.label,
+                    hotwords_count,
+                    corrections_count,
+                    hypothesis_text: r.text,
+                    elapsed_ms: Math.round((r.elapsed_s || 0) * 1000),
+                    config_snapshot: {
+                      id: r.id,
+                      beam: r.beam,
+                      normalize: r.normalize,
+                      denoise: r.denoise,
+                      avg_prob: r.avg_prob,
+                      word_count: r.word_count,
+                      server_session_id: evt.session_id ?? null,
+                    },
+                  });
+                }
+              } catch (err) {
+                console.warn('[CompareReport] comparison_runs record failed', err);
+              }
             } else if (evt.type === "error") {
               setState((s) => ({ ...s, status: "error", error: evt.error }));
               toast({ title: "שגיאה", description: evt.error, variant: "destructive" });
