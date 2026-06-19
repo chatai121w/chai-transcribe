@@ -991,30 +991,72 @@ export default function AsrTraining() {
           ) : (
             <ScrollArea className="h-64">
               <div className="space-y-1">
-                {pending.map((p) => (
-                  <div
-                    key={p.id}
-                    className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors ${selectedPending.has(p.id) ? 'bg-yellow-500/10 border-yellow-500/40' : 'hover:bg-muted/50'}`}
-                    onClick={() => togglePendingSelection(p.id)}
-                  >
-                    <Checkbox
-                      checked={selectedPending.has(p.id)}
-                      onCheckedChange={() => togglePendingSelection(p.id)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                    <span className="text-rose-600 line-through">{p.wrong_text}</span>
-                    <span>→</span>
-                    <span className="text-emerald-600 font-medium">{p.correct_text}</span>
-                    <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
-                    <div className="flex-1" />
-                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); approvePending([p]); }}>
-                      <Check className="h-4 w-4" />
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); rejectPending(p); }}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
+                {pending.map((p) => {
+                  const isEditing = editingId === p.id;
+                  return (
+                    <div
+                      key={p.id}
+                      className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors ${selectedPending.has(p.id) ? 'bg-yellow-500/10 border-yellow-500/40' : 'hover:bg-muted/50'}`}
+                      onClick={() => !isEditing && togglePendingSelection(p.id)}
+                    >
+                      <Checkbox
+                        checked={selectedPending.has(p.id)}
+                        onCheckedChange={() => !isEditing && togglePendingSelection(p.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        disabled={isEditing}
+                      />
+                      {isEditing ? (
+                        <>
+                          <Input
+                            value={editWrong}
+                            onChange={(e) => setEditWrong(e.target.value)}
+                            className="h-7 text-xs w-28"
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }}
+                          />
+                          <span className="text-xs">→</span>
+                          <Input
+                            value={editCorrect}
+                            onChange={(e) => setEditCorrect(e.target.value)}
+                            className="h-7 text-xs w-28"
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-rose-600 line-through">{p.wrong_text}</span>
+                          <span>→</span>
+                          <span className="text-emerald-600 font-medium">{p.correct_text}</span>
+                        </>
+                      )}
+                      <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
+                      <div className="flex-1" />
+                      {isEditing ? (
+                        <>
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); void saveEdit(p); }}>
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); cancelEdit(); }}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); startEdit(p); }}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); approvePending([p]); }}>
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); rejectPending(p); }}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </ScrollArea>
           )}
