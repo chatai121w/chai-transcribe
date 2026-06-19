@@ -227,7 +227,7 @@ export default function AsrTraining() {
   );
   const [localSessions, setLocalSessions] = useState<LocalSession[]>(() => loadLocalSessions());
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pendingRef = useRef<PendingCorrection[]>(loadLocalPendingCorrections());
+  const pendingRef = useRef<PendingCorrection[]>(pending);
 
   useEffect(() => { localStorage.setItem('asr_training_mode', learningMode); }, [learningMode]);
   useEffect(() => { localStorage.setItem('asr_training_local_url', localServerUrl); }, [localServerUrl]);
