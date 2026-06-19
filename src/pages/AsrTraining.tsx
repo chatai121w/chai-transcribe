@@ -489,7 +489,7 @@ export default function AsrTraining() {
               </RadioGroup>
             </div>
 
-            <Button onClick={runComparison} disabled={running || !audioFile || !refText} className="w-full">
+            <Button onClick={runComparison} disabled={running || !audioFile || !(refText || (sourceKind === 'text' && freeText.trim()))} className="w-full">
               {running ? 'מתמלל…' : 'התחל השוואה ולמידה'}
             </Button>
           </CardContent>
