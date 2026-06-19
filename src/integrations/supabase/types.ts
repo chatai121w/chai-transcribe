@@ -307,6 +307,84 @@ export type Database = {
         }
         Relationships: []
       }
+      comparison_runs: {
+        Row: {
+          audio_duration_ms: number | null
+          cer: number | null
+          config_snapshot: Json
+          corrections_count: number | null
+          created_at: string
+          elapsed_ms: number | null
+          engine: string | null
+          hotwords_count: number | null
+          hypothesis_text: string | null
+          id: string
+          kind: string
+          len_ratio: number | null
+          model: string | null
+          notes: string | null
+          recording_fingerprint: string
+          recording_label: string | null
+          reference_text: string | null
+          source_run_id: string | null
+          term_recall: number | null
+          updated_at: string
+          user_id: string
+          user_verdict: string | null
+          wer: number | null
+        }
+        Insert: {
+          audio_duration_ms?: number | null
+          cer?: number | null
+          config_snapshot?: Json
+          corrections_count?: number | null
+          created_at?: string
+          elapsed_ms?: number | null
+          engine?: string | null
+          hotwords_count?: number | null
+          hypothesis_text?: string | null
+          id?: string
+          kind: string
+          len_ratio?: number | null
+          model?: string | null
+          notes?: string | null
+          recording_fingerprint: string
+          recording_label?: string | null
+          reference_text?: string | null
+          source_run_id?: string | null
+          term_recall?: number | null
+          updated_at?: string
+          user_id: string
+          user_verdict?: string | null
+          wer?: number | null
+        }
+        Update: {
+          audio_duration_ms?: number | null
+          cer?: number | null
+          config_snapshot?: Json
+          corrections_count?: number | null
+          created_at?: string
+          elapsed_ms?: number | null
+          engine?: string | null
+          hotwords_count?: number | null
+          hypothesis_text?: string | null
+          id?: string
+          kind?: string
+          len_ratio?: number | null
+          model?: string | null
+          notes?: string | null
+          recording_fingerprint?: string
+          recording_label?: string | null
+          reference_text?: string | null
+          source_run_id?: string | null
+          term_recall?: number | null
+          updated_at?: string
+          user_id?: string
+          user_verdict?: string | null
+          wer?: number | null
+        }
+        Relationships: []
+      }
       conversion_history: {
         Row: {
           created_at: string
