@@ -412,6 +412,10 @@ export default function AsrTraining() {
         const fresh = synthetic.filter((s) => !existing.has(`${s.wrong_text}→${s.correct_text}`));
         return [...fresh, ...prev];
       });
+      // Scroll the pending list into view so the user sees the new items
+      setTimeout(() => {
+        document.getElementById('pending-corrections')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
     }
 
     const destinations = [saveLocally && 'מקומי', saveCloud && user && 'ענן'].filter(Boolean).join(' + ') || 'לא נשמר';
