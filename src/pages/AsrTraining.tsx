@@ -723,7 +723,147 @@ export default function AsrTraining() {
     setLocalSessions([]);
   };
 
+  // ─── Pending item renderer (shared across view modes) ───
+  const renderPendingItem = (p: PendingCorrection, variant: 'row' | 'card' | 'tableRow') => {
+    const isEditing = editingId === p.id;
+    const isSelected = selectedPending.has(p.id);
+
+    const Texts = isEditing ? (
+      <>
+        <Input
+          value={editWrong}
+          onChange={(e) => setEditWrong(e.target.value)}
+          className="h-7 text-xs w-28"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }}
+        />
+        <span className="text-xs">→</span>
+        <Input
+          value={editCorrect}
+          onChange={(e) => setEditCorrect(e.target.value)}
+          className="h-7 text-xs w-28"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }}
+        />
+      </>
+    ) : (
+      <>
+        <span className="text-rose-600 line-through truncate">{p.wrong_text}</span>
+        <span>→</span>
+        <span className="text-emerald-600 font-medium truncate">{p.correct_text}</span>
+      </>
+    );
+
+    const Actions = isEditing ? (
+      <>
+        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); void saveEdit(p); }}>
+          <Check className="h-4 w-4" />
+        </Button>
+        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); cancelEdit(); }}>
+          <X className="h-4 w-4" />
+        </Button>
+      </>
+    ) : (
+      <>
+        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); startEdit(p); }}>
+          <Pencil className="h-4 w-4" />
+        </Button>
+        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); approvePending([p]); }}>
+          <Check className="h-4 w-4" />
+        </Button>
+        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); rejectPending(p); }}>
+          <X className="h-4 w-4" />
+        </Button>
+      </>
+    );
+
+    if (variant === 'tableRow') {
+      return (
+        <tr
+          key={p.id}
+          className={`border-t cursor-pointer transition-colors ${isSelected ? 'bg-yellow-500/10' : 'hover:bg-muted/40'}`}
+          onClick={() => !isEditing && togglePendingSelection(p.id)}
+        >
+          <td className="p-2 w-8">
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={() => !isEditing && togglePendingSelection(p.id)}
+              onClick={(e) => e.stopPropagation()}
+              disabled={isEditing}
+            />
+          </td>
+          <td className="p-2">
+            {isEditing ? (
+              <Input value={editWrong} onChange={(e) => setEditWrong(e.target.value)} className="h-7 text-xs"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }} />
+            ) : (
+              <span className="text-rose-600 line-through">{p.wrong_text}</span>
+            )}
+          </td>
+          <td className="p-2">
+            {isEditing ? (
+              <Input value={editCorrect} onChange={(e) => setEditCorrect(e.target.value)} className="h-7 text-xs"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }} />
+            ) : (
+              <span className="text-emerald-600 font-medium">{p.correct_text}</span>
+            )}
+          </td>
+          <td className="p-2 text-xs text-muted-foreground">×{p.occurrences}</td>
+          <td className="p-2 text-left whitespace-nowrap">{Actions}</td>
+        </tr>
+      );
+    }
+
+    if (variant === 'card') {
+      return (
+        <div
+          key={p.id}
+          className={`rounded border p-2 flex flex-col gap-2 cursor-pointer transition-colors ${isSelected ? 'bg-yellow-500/10 border-yellow-500/40' : 'hover:bg-muted/50'}`}
+          onClick={() => !isEditing && togglePendingSelection(p.id)}
+        >
+          <div className="flex items-center gap-2">
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={() => !isEditing && togglePendingSelection(p.id)}
+              onClick={(e) => e.stopPropagation()}
+              disabled={isEditing}
+            />
+            <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
+            <div className="flex-1" />
+            {Actions}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap text-sm">
+            {Texts}
+          </div>
+        </div>
+      );
+    }
+
+    // row (list / horizontal)
+    return (
+      <div
+        key={p.id}
+        className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors ${variant === 'row' ? '' : ''} ${isSelected ? 'bg-yellow-500/10 border-yellow-500/40' : 'hover:bg-muted/50'}`}
+        onClick={() => !isEditing && togglePendingSelection(p.id)}
+      >
+        <Checkbox
+          checked={isSelected}
+          onCheckedChange={() => !isEditing && togglePendingSelection(p.id)}
+          onClick={(e) => e.stopPropagation()}
+          disabled={isEditing}
+        />
+        {Texts}
+        <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
+        <div className="flex-1" />
+        {Actions}
+      </div>
+    );
+  };
+
   // ─── Render ─────────────────────────────────────────────────────────────
+
 
   return (
     <div dir="rtl" className="container mx-auto p-4 max-w-7xl space-y-6">
