@@ -402,6 +402,7 @@ const TextEditor = () => {
     if (stateText) {
       setText(stateText);
       originalTextRef.current = stateText;
+      learningBaselineRef.current = stateText;
       const initialVersion: TextVersion = {
         id: crypto.randomUUID(),
         text: stateText,
