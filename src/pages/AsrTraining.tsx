@@ -33,7 +33,7 @@ import {
 import { learnFromCorrections, type CorrectionEntry } from '@/utils/correctionLearning';
 import {
   loadLocalSessions, saveLocalSession, deleteLocalSession,
-  exportLocalSessionsJson, clearLocalSessions, type LocalSession,
+  exportLocalSessionsJson, clearLocalSessions, removePendingCorrectionsFromLocalSessions, type LocalSession,
 } from '@/lib/asrLocalSessions';
 
 // ─── Tanakh book catalog (Sefaria refs) ───────────────────────────────────
@@ -153,6 +153,59 @@ function pct(x: number, digits = 1): string {
   return (x * 100).toFixed(digits) + '%';
 }
 
+const LOCAL_PENDING_KEY = 'asr_training_pending_corrections_v1';
+
+function pendingKey(p: Pick<PendingCorrection, 'wrong_text' | 'correct_text'>): string {
+  return `${p.wrong_text.trim()}→${p.correct_text.trim()}`;
+}
+
+function dedupePending(items: PendingCorrection[]): PendingCorrection[] {
+  const map = new Map<string, PendingCorrection>();
+  for (const item of items) {
+    const key = pendingKey(item);
+    const existing = map.get(key);
+    map.set(key, existing ? { ...existing, ...item, occurrences: Math.max(existing.occurrences || 1, item.occurrences || 1) } : item);
+  }
+  return Array.from(map.values());
+}
+
+function mergePending(localItems: PendingCorrection[], cloudItems: PendingCorrection[]): PendingCorrection[] {
+  return dedupePending([...localItems, ...cloudItems]);
+}
+
+function loadLocalPendingCorrections(): PendingCorrection[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_PENDING_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? dedupePending(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadPendingCorrectionsFromLocalSessions(): PendingCorrection[] {
+  return loadLocalSessions().flatMap((session) => session.pending.map((item, index) => ({
+    id: `local_session_${session.id}_${index}`,
+    wrong_text: item.wrong,
+    correct_text: item.correct,
+    occurrences: 1,
+    engine: item.engine,
+    created_at: new Date(session.createdAt).toISOString(),
+  })));
+}
+
+function loadPersistentPendingCorrections(): PendingCorrection[] {
+  return mergePending(loadLocalPendingCorrections(), loadPendingCorrectionsFromLocalSessions());
+}
+
+function saveLocalPendingCorrections(items: PendingCorrection[]): void {
+  try {
+    localStorage.setItem(LOCAL_PENDING_KEY, JSON.stringify(dedupePending(items)));
+  } catch (err) {
+    console.warn('Local pending corrections save failed:', err);
+  }
+}
+
 // ─── Component ─────────────────────────────────────────────────────────────
 
 export default function AsrTraining() {
@@ -179,7 +232,7 @@ export default function AsrTraining() {
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<EngineResult[]>([]);
   const [history, setHistory] = useState<SavedRun[]>([]);
-  const [pending, setPending] = useState<PendingCorrection[]>([]);
+  const [pending, setPending] = useState<PendingCorrection[]>(() => loadPersistentPendingCorrections());
   const [selectedPending, setSelectedPending] = useState<Set<string>>(new Set());
   const [saveLocally, setSaveLocally] = useState<boolean>(
     () => localStorage.getItem('asr_training_save_local') !== 'false',
@@ -189,31 +242,35 @@ export default function AsrTraining() {
   );
   const [localSessions, setLocalSessions] = useState<LocalSession[]>(() => loadLocalSessions());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingRef = useRef<PendingCorrection[]>(pending);
 
   useEffect(() => { localStorage.setItem('asr_training_mode', learningMode); }, [learningMode]);
   useEffect(() => { localStorage.setItem('asr_training_local_url', localServerUrl); }, [localServerUrl]);
   useEffect(() => { localStorage.setItem('asr_training_save_local', String(saveLocally)); }, [saveLocally]);
   useEffect(() => { localStorage.setItem('asr_training_save_cloud', String(saveCloud)); }, [saveCloud]);
 
-  // Load history + pending corrections
-  // Load history + pending corrections — MERGE with current state, don't replace local items
+  const commitPending = (updater: (prev: PendingCorrection[]) => PendingCorrection[]) => {
+    setPending((prev) => {
+      const next = dedupePending(updater(prev));
+      pendingRef.current = next;
+      saveLocalPendingCorrections(next);
+      return next;
+    });
+  };
+
+  // Load history + pending corrections — MERGE with local items, never replace them
   const refreshLists = async () => {
-    if (!user) return;
+    if (!user) {
+      commitPending((prev) => mergePending(loadPersistentPendingCorrections(), prev));
+      return;
+    }
     const [{ data: runs }, { data: pend }] = await Promise.all([
       supabase.from('asr_training_runs').select('*').order('created_at', { ascending: false }).limit(30),
       supabase.from('asr_pending_corrections').select('*').eq('status', 'pending').order('occurrences', { ascending: false }).limit(500),
     ]);
     if (runs) setHistory(runs as SavedRun[]);
-    if (pend) {
-      setPending((prev) => {
-        const cloud = pend as PendingCorrection[];
-        const cloudKeys = new Set(cloud.map((p) => `${p.wrong_text}→${p.correct_text}`));
-        const localOnly = prev.filter(
-          (p) => p.id.startsWith('local_') && !cloudKeys.has(`${p.wrong_text}→${p.correct_text}`),
-        );
-        return [...localOnly, ...cloud];
-      });
-    }
+    const cloud = (pend ?? []) as PendingCorrection[];
+    commitPending((prev) => mergePending([...loadPersistentPendingCorrections(), ...pendingRef.current, ...prev], cloud));
   };
   useEffect(() => { void refreshLists(); }, [user?.id]);
 
@@ -330,7 +387,7 @@ export default function AsrTraining() {
     // ── Local save ──
     if (saveLocally) {
       const session: LocalSession = {
-        id: (crypto as any).randomUUID?.() ?? `local_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        id: crypto.randomUUID?.() ?? `local_${Date.now()}_${Math.random().toString(36).slice(2)}`,
         createdAt: Date.now(),
         label: refLabel || 'ללא כותרת',
         sourceKind,
@@ -400,16 +457,18 @@ export default function AsrTraining() {
 
     // Optimistically show pending items in UI immediately (works even without cloud save)
     if (queuedPending.length > 0) {
+      const createdAt = new Date().toISOString();
       const synthetic: PendingCorrection[] = queuedPending.map((q, i) => ({
         id: `local_${Date.now()}_${i}`,
         wrong_text: q.wrong,
         correct_text: q.correct,
         occurrences: 1,
         engine: q.engine,
-      } as PendingCorrection));
-      setPending((prev) => {
-        const existing = new Set(prev.map((p) => `${p.wrong_text}→${p.correct_text}`));
-        const fresh = synthetic.filter((s) => !existing.has(`${s.wrong_text}→${s.correct_text}`));
+        created_at: createdAt,
+      }));
+      commitPending((prev) => {
+        const existing = new Set(prev.map(pendingKey));
+        const fresh = synthetic.filter((s) => !existing.has(pendingKey(s)));
         return [...fresh, ...prev];
       });
       // Scroll the pending list into view so the user sees the new items
@@ -433,10 +492,15 @@ export default function AsrTraining() {
     learnFromCorrections(entries);
     const dbIds = items.map((p) => p.id).filter((id) => !id.startsWith('local_'));
     if (dbIds.length > 0) {
-      await supabase.from('asr_pending_corrections').update({ status: 'approved', resolved_at: new Date().toISOString() }).in('id', dbIds);
+      const { error } = await supabase.from('asr_pending_corrections').update({ status: 'approved', resolved_at: new Date().toISOString() }).in('id', dbIds);
+      if (error) {
+        toast({ title: 'אישור נכשל', description: error.message, variant: 'destructive' });
+        return;
+      }
     }
-    const approvedIds = new Set(items.map((p) => p.id));
-    setPending((prev) => prev.filter((p) => !approvedIds.has(p.id)));
+    const approvedKeys = new Set(items.map(pendingKey));
+    removePendingCorrectionsFromLocalSessions(items.map((p) => ({ wrong: p.wrong_text, correct: p.correct_text })));
+    commitPending((prev) => prev.filter((p) => !approvedKeys.has(pendingKey(p))));
     if (items.length === 1) {
       toast({ title: 'תיקון אושר', description: `${items[0].wrong_text} → ${items[0].correct_text}` });
     } else {
@@ -447,9 +511,15 @@ export default function AsrTraining() {
   };
   const rejectPending = async (p: PendingCorrection) => {
     if (!p.id.startsWith('local_')) {
-      await supabase.from('asr_pending_corrections').update({ status: 'rejected', resolved_at: new Date().toISOString() }).eq('id', p.id);
+      const { error } = await supabase.from('asr_pending_corrections').update({ status: 'rejected', resolved_at: new Date().toISOString() }).eq('id', p.id);
+      if (error) {
+        toast({ title: 'דחייה נכשלה', description: error.message, variant: 'destructive' });
+        return;
+      }
     }
-    setPending((prev) => prev.filter((x) => x.id !== p.id));
+    const rejectedKey = pendingKey(p);
+    removePendingCorrectionsFromLocalSessions([{ wrong: p.wrong_text, correct: p.correct_text }]);
+    commitPending((prev) => prev.filter((x) => pendingKey(x) !== rejectedKey));
     void refreshLists();
   };
 
