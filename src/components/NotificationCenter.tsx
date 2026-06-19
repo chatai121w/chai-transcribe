@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { Bell, Check, CheckCheck, Trash2, X, AlertCircle, CheckCircle2, Info, AlertTriangle } from "lucide-react";
+import { Bell, Check, CheckCheck, Trash2, X, AlertCircle, CheckCircle2, Info, AlertTriangle, ExternalLink } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +18,7 @@ const typeConfig = {
 export const NotificationCenter = () => {
   const { notifications, unreadCount, markRead, markAllRead, clearAll } = useNotifications();
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
 
   const formatTime = (date: Date) => {
     const now = new Date();
@@ -83,7 +85,13 @@ export const NotificationCenter = () => {
                         "p-3 hover:bg-muted/50 cursor-pointer transition-colors",
                         !n.read && "bg-primary/5"
                       )}
-                      onClick={() => markRead(n.id)}
+                      onClick={() => {
+                        markRead(n.id);
+                        if (n.link) {
+                          setOpen(false);
+                          navigate(n.link);
+                        }
+                      }}
                     >
                       <div className="flex items-start gap-2 flex-row-reverse">
                         <div className={cn("w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0", config.bg)}>
@@ -97,7 +105,25 @@ export const NotificationCenter = () => {
                           {n.description && (
                             <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.description}</p>
                           )}
-                          <span className="text-[10px] text-muted-foreground mt-1 block">{formatTime(n.timestamp)}</span>
+                          <div className="flex items-center justify-between gap-2 mt-1 flex-row-reverse">
+                            <span className="text-[10px] text-muted-foreground">{formatTime(n.timestamp)}</span>
+                            {n.link && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-[10px] text-yellow-600 hover:text-yellow-700"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  markRead(n.id);
+                                  setOpen(false);
+                                  navigate(n.link!);
+                                }}
+                              >
+                                <ExternalLink className="w-3 h-3 ml-1" />
+                                {n.actionLabel ?? 'פתח'}
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
