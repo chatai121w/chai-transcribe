@@ -751,6 +751,9 @@ export default function AsrTraining() {
     }
     const stripNikud = (s: string) => s.replace(/[\u0591-\u05C7]/g, '');
     const normTargets = targets.map(stripNikud);
+    const maxLineChars = 90;
+    const windowHalf = 50;
+
     // Split into sentences on Hebrew/Latin sentence terminators and line breaks.
     const splitter = /(?<=[.!?؟׃]|[\n])\s+|[\n\r]+/;
     for (const src of contextSources) {
@@ -758,10 +761,26 @@ export default function AsrTraining() {
       const sentences = stripped.split(splitter).map((s) => s.trim()).filter(Boolean);
       const idx = sentences.findIndex((s) => normTargets.some((t) => s.includes(t)));
       if (idx >= 0) {
-        // Always return two lines: the matching sentence plus the next one (or the previous if it's the last).
         const a = sentences[idx];
         const b = sentences[idx + 1] ?? sentences[idx - 1] ?? '';
-        const out = b ? `${a}\n${b}` : a;
+        const limit = (s: string) => {
+          if (!s || s.length <= maxLineChars) return s;
+          const matchIdx = normTargets
+            .map((t) => s.indexOf(t))
+            .filter((i) => i >= 0)
+            .sort((x, y) => x - y)[0];
+          const center = matchIdx >= 0 ? matchIdx + Math.floor(normTargets[0].length / 2) : Math.floor(s.length / 2);
+          const start = Math.max(0, center - windowHalf);
+          const end = Math.min(s.length, center + windowHalf);
+          let out = '';
+          if (start > 0) out += '…';
+          out += s.slice(start, end).trim();
+          if (end < s.length) out += '…';
+          return out;
+        };
+        const la = limit(a);
+        const lb = b ? limit(b) : '';
+        const out = lb ? `${la}\n${lb}` : la;
         cache.set(key, out);
         return out;
       }
