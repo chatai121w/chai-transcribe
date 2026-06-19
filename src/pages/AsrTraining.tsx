@@ -39,6 +39,7 @@ import {
   loadLocalSessions, saveLocalSession, deleteLocalSession,
   exportLocalSessionsJson, clearLocalSessions, removePendingCorrectionsFromLocalSessions, type LocalSession,
 } from '@/lib/asrLocalSessions';
+import LoraFineTuningPanel from '@/components/training/LoraFineTuningPanel';
 
 // ─── Tanakh book catalog (Sefaria refs) ───────────────────────────────────
 const TANAKH_BOOKS: Array<{ value: string; label: string; chapters: number }> = [
