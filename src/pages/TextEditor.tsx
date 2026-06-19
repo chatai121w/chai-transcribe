@@ -1676,6 +1676,9 @@ const TextEditor = () => {
                       onTextChange={(newText, source, customPrompt) => {
                         setText(newText);
                         addVersion(newText, source as TextVersion['source'], customPrompt);
+                        if (typeof source === 'string' && source.startsWith('ai-')) {
+                          learningBaselineRef.current = newText;
+                        }
                       }}
                       onSaveVersion={handleSaveVersion}
                       onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
