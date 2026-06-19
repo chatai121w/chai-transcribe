@@ -280,16 +280,16 @@ export default function AsrTraining() {
   };
 
   const saveRun = async (results: EngineResult[], effectiveRef: string = refText) => {
-    if (!user || results.length === 0) return;
+    if (results.length === 0) return;
     const a = results[0];
     const b = results[1];
 
     // Auto-applied corrections (per learning mode, based on engine A's diff)
     const autoApplied: CorrectionEntry[] = [];
+    const autoSummary: Array<{ wrong: string; correct: string; occurrences: number; engine: string }> = [];
     const queuedPending: Array<{ wrong: string; correct: string; engine: string }> = [];
 
     if (a) {
-      // Aggregate candidates: count duplicates within this run
       const counts = new Map<string, number>();
       for (const c of a.candidates) {
         if (isAmbiguous(c.wrong, c.correct)) continue;
@@ -301,65 +301,93 @@ export default function AsrTraining() {
         const [wrong, correct] = key.split('→');
         if (learningMode === 'auto') {
           autoApplied.push(buildCorrection(wrong, correct, n, a.engine));
+          autoSummary.push({ wrong, correct, occurrences: n, engine: a.engine });
         } else if (learningMode === 'hybrid') {
-          if (n >= 2) autoApplied.push(buildCorrection(wrong, correct, n, a.engine));
-          else queuedPending.push({ wrong, correct, engine: a.engine });
+          if (n >= 2) {
+            autoApplied.push(buildCorrection(wrong, correct, n, a.engine));
+            autoSummary.push({ wrong, correct, occurrences: n, engine: a.engine });
+          } else queuedPending.push({ wrong, correct, engine: a.engine });
         } else {
           queuedPending.push({ wrong, correct, engine: a.engine });
         }
       }
     }
 
-    // Persist corrections to local learning store
     if (autoApplied.length > 0) learnFromCorrections(autoApplied);
 
-    // Persist run
-    const { data: insertedRun, error: runErr } = await supabase
-      .from('asr_training_runs')
-      .insert({
-        user_id: user.id,
-        source_kind: sourceKind,
-        source_ref: sourceKind === 'tanakh' ? `${book}.${chapter}${verses.trim() ? `.${verses.trim()}` : ''}` : null,
-        source_label: refLabel,
-        ref_text: effectiveRef,
-        hyp_a_text: a?.hyp ?? null,
-        model_a: a?.model ?? null,
-        wer_a: a?.metrics.wer ?? null,
-        cer_a: a?.metrics.cer ?? null,
-        term_recall_a: a?.metrics.termRecall ?? null,
-        hyp_b_text: b?.hyp ?? null,
-        model_b: b?.model ?? null,
-        wer_b: b?.metrics.wer ?? null,
-        cer_b: b?.metrics.cer ?? null,
-        term_recall_b: b?.metrics.termRecall ?? null,
-        audio_duration_ms: 0,
-        audio_filename: audioFile?.name ?? null,
-        learning_mode: learningMode,
-        corrections_applied: autoApplied.length,
-      })
-      .select()
-      .single();
+    const sourceRef = sourceKind === 'tanakh' ? `${book}.${chapter}${verses.trim() ? `.${verses.trim()}` : ''}` : null;
 
-    if (runErr) { toast({ title: 'שמירה נכשלה', description: runErr.message, variant: 'destructive' }); return; }
-
-    // Persist pending corrections
-    if (queuedPending.length > 0 && insertedRun) {
-      await supabase.from('asr_pending_corrections').upsert(
-        queuedPending.map((q) => ({
-          user_id: user.id,
-          run_id: insertedRun.id,
-          wrong_text: q.wrong,
-          correct_text: q.correct,
-          occurrences: 1,
-          engine: q.engine,
-          status: 'pending',
+    // ── Local save ──
+    if (saveLocally) {
+      const session: LocalSession = {
+        id: (crypto as any).randomUUID?.() ?? `local_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        createdAt: Date.now(),
+        label: refLabel || 'ללא כותרת',
+        sourceKind,
+        sourceRef,
+        refText: effectiveRef,
+        audioFilename: audioFile?.name ?? null,
+        learningMode,
+        results: results.map((r) => ({
+          engine: r.engine, model: r.model, hyp: r.hyp,
+          metrics: r.metrics, candidates: r.candidates,
         })),
-        { onConflict: 'user_id,wrong_text,correct_text', ignoreDuplicates: false },
-      );
+        autoApplied: autoSummary,
+        pending: queuedPending,
+      };
+      saveLocalSession(session);
+      setLocalSessions(loadLocalSessions());
     }
 
+    // ── Cloud save ──
+    if (saveCloud && user) {
+      const { data: insertedRun, error: runErr } = await supabase
+        .from('asr_training_runs')
+        .insert({
+          user_id: user.id,
+          source_kind: sourceKind,
+          source_ref: sourceRef,
+          source_label: refLabel,
+          ref_text: effectiveRef,
+          hyp_a_text: a?.hyp ?? null,
+          model_a: a?.model ?? null,
+          wer_a: a?.metrics.wer ?? null,
+          cer_a: a?.metrics.cer ?? null,
+          term_recall_a: a?.metrics.termRecall ?? null,
+          hyp_b_text: b?.hyp ?? null,
+          model_b: b?.model ?? null,
+          wer_b: b?.metrics.wer ?? null,
+          cer_b: b?.metrics.cer ?? null,
+          term_recall_b: b?.metrics.termRecall ?? null,
+          audio_duration_ms: 0,
+          audio_filename: audioFile?.name ?? null,
+          learning_mode: learningMode,
+          corrections_applied: autoApplied.length,
+        })
+        .select()
+        .single();
+
+      if (runErr) {
+        toast({ title: 'שמירה לענן נכשלה', description: runErr.message, variant: 'destructive' });
+      } else if (queuedPending.length > 0 && insertedRun) {
+        await supabase.from('asr_pending_corrections').upsert(
+          queuedPending.map((q) => ({
+            user_id: user.id,
+            run_id: insertedRun.id,
+            wrong_text: q.wrong,
+            correct_text: q.correct,
+            occurrences: 1,
+            engine: q.engine,
+            status: 'pending',
+          })),
+          { onConflict: 'user_id,wrong_text,correct_text', ignoreDuplicates: false },
+        );
+      }
+    }
+
+    const destinations = [saveLocally && 'מקומי', saveCloud && user && 'ענן'].filter(Boolean).join(' + ') || 'לא נשמר';
     toast({
-      title: 'הריצה נשמרה',
+      title: `הריצה נשמרה (${destinations})`,
       description: `${autoApplied.length} תיקונים אוטומטיים, ${queuedPending.length} ממתינים לאישור`,
     });
     void refreshLists();
