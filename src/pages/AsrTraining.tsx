@@ -426,6 +426,43 @@ export default function AsrTraining() {
     setSelectedPending(new Set());
   };
 
+  // ─── Local sessions ───
+  const loadLocalIntoUI = (s: LocalSession) => {
+    setRefText(s.refText);
+    setRefLabel(s.label);
+    setSourceKind(s.sourceKind);
+    setResults(s.results.map((r) => {
+      const evalRes = evaluateRun(s.refText, r.hyp, r.metrics.elapsedMs);
+      return {
+        engine: r.engine as Engine,
+        model: r.model,
+        hyp: r.hyp,
+        metrics: r.metrics,
+        diff: evalRes.diff,
+        candidates: r.candidates,
+      };
+    }));
+    toast({ title: 'סשן נטען', description: s.label });
+  };
+  const handleDeleteLocal = (id: string) => {
+    deleteLocalSession(id);
+    setLocalSessions(loadLocalSessions());
+  };
+  const handleExportLocal = () => {
+    const blob = new Blob([exportLocalSessionsJson()], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `asr-sessions-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const handleClearLocal = () => {
+    if (!confirm('למחוק את כל הסשנים המקומיים?')) return;
+    clearLocalSessions();
+    setLocalSessions([]);
+  };
+
   // ─── Render ─────────────────────────────────────────────────────────────
 
   return (
