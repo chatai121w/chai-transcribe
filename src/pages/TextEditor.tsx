@@ -843,9 +843,13 @@ const TextEditor = () => {
     if (manualVersionTimerRef.current) clearTimeout(manualVersionTimerRef.current);
     manualVersionTimerRef.current = setTimeout(() => {
       addVersion(newText, 'manual');
-      // Learn from user corrections
-      if (originalTextRef.current && newText !== originalTextRef.current) {
-        learnCorrections(originalTextRef.current, newText, 'manual');
+      // Learn from user corrections — compare against the learning baseline
+      // (latest AI/loaded text), so AI Polish changes don't pollute the dataset.
+      const baseline = learningBaselineRef.current || originalTextRef.current;
+      if (baseline && newText !== baseline) {
+        learnCorrections(baseline, newText, 'manual');
+        // Advance the baseline so the next manual edit only diffs from here.
+        learningBaselineRef.current = newText;
       }
     }, 2000);
   }, [learnCorrections]);
