@@ -573,6 +573,7 @@ export default function AsrTraining() {
       toast({ title: `${items.length} תיקונים אושרו`, description: 'נשמרו למערכת הלמידה ולענן' });
     }
     setSelectedPending(new Set());
+    if (user) void runLearnedSync({ silent: true });
     void refreshLists();
   };
   const rejectPending = async (p: PendingCorrection) => {
