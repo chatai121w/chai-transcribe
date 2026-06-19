@@ -181,10 +181,19 @@ export default function AsrTraining() {
   const [history, setHistory] = useState<SavedRun[]>([]);
   const [pending, setPending] = useState<PendingCorrection[]>([]);
   const [selectedPending, setSelectedPending] = useState<Set<string>>(new Set());
+  const [saveLocally, setSaveLocally] = useState<boolean>(
+    () => localStorage.getItem('asr_training_save_local') !== 'false',
+  );
+  const [saveCloud, setSaveCloud] = useState<boolean>(
+    () => localStorage.getItem('asr_training_save_cloud') !== 'false',
+  );
+  const [localSessions, setLocalSessions] = useState<LocalSession[]>(() => loadLocalSessions());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { localStorage.setItem('asr_training_mode', learningMode); }, [learningMode]);
   useEffect(() => { localStorage.setItem('asr_training_local_url', localServerUrl); }, [localServerUrl]);
+  useEffect(() => { localStorage.setItem('asr_training_save_local', String(saveLocally)); }, [saveLocally]);
+  useEffect(() => { localStorage.setItem('asr_training_save_cloud', String(saveCloud)); }, [saveCloud]);
 
   // Load history + pending corrections
   const refreshLists = async () => {
