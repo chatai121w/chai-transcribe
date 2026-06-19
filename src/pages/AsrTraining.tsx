@@ -222,7 +222,13 @@ export default function AsrTraining() {
   const runComparison = async () => {
     if (!user) { toast({ title: 'נדרשת התחברות', variant: 'destructive' }); return; }
     if (!audioFile) { toast({ title: 'העלה קובץ אודיו', variant: 'destructive' }); return; }
-    if (!refText) { toast({ title: 'טען טקסט קנוני קודם', variant: 'destructive' }); return; }
+    let effectiveRef = refText;
+    if (!effectiveRef && sourceKind === 'text' && freeText.trim()) {
+      effectiveRef = freeText.trim();
+      setRefText(effectiveRef);
+      setRefLabel('טקסט חופשי');
+    }
+    if (!effectiveRef) { toast({ title: 'טען טקסט קנוני קודם', variant: 'destructive' }); return; }
     if (!useLovable && !useLocal) { toast({ title: 'בחר לפחות מנוע אחד', variant: 'destructive' }); return; }
 
     setRunning(true);
