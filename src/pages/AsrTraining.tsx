@@ -32,7 +32,8 @@ import {
   computeWER, computeCER, computeTermRecall, lenRatio,
   wordDiff, extractCorrectionCandidates, isAmbiguous, type DiffOp,
 } from '@/lib/asrMetrics';
-import { learnFromCorrections, type CorrectionEntry } from '@/utils/correctionLearning';
+import { learnFromCorrections, getCorrectionThreshold, setCorrectionThreshold, type CorrectionEntry } from '@/utils/correctionLearning';
+import { Slider } from '@/components/ui/slider';
 import { syncLearnedCorrections, getLastSyncAt, type SyncState } from '@/lib/syncLearnedCorrections';
 import {
   loadLocalSessions, saveLocalSession, deleteLocalSession,
