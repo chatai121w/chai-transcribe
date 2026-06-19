@@ -443,6 +443,7 @@ const TextEditor = () => {
       if (savedText) {
         setText(savedText);
         if (!originalTextRef.current) originalTextRef.current = savedText;
+        if (!learningBaselineRef.current) learningBaselineRef.current = savedText;
       }
     }
 
