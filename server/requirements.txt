@@ -13,3 +13,13 @@ soundfile>=0.12.0
 scipy>=1.10.0
 # Hebrew nikud / diacritization (optional — DICTA dictabert-large-char-menaked)
 transformers>=4.40.0
+# ── LoRA fine-tuning (optional — only needed when running training jobs) ──
+# Install with:  python -m pip install -r server/requirements.txt
+peft>=0.11.0
+datasets>=2.18.0
+accelerate>=0.30.0
+evaluate>=0.4.1
+jiwer>=3.0.3
+librosa>=0.10.1
+audiomentations>=0.35.0
+

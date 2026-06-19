@@ -39,6 +39,7 @@ import {
   loadLocalSessions, saveLocalSession, deleteLocalSession,
   exportLocalSessionsJson, clearLocalSessions, removePendingCorrectionsFromLocalSessions, type LocalSession,
 } from '@/lib/asrLocalSessions';
+import LoraFineTuningPanel from '@/components/training/LoraFineTuningPanel';
 
 // ─── Tanakh book catalog (Sefaria refs) ───────────────────────────────────
 const TANAKH_BOOKS: Array<{ value: string; label: string; chapters: number }> = [
@@ -1072,6 +1073,11 @@ export default function AsrTraining() {
         העלה קובץ אודיו של פרק תהילים / משנה / כל טקסט מהתנ"ך. המערכת תוריד אוטומטית את הטקסט הקנוני מ-Sefaria,
         תתמלל עם המנוע שבחרת, ותשווה. כל הבדל הופך לתיקון שמזין את מערכת הלמידה האישית שלך.
       </p>
+
+      {/* Real Whisper LoRA fine-tuning on the local GPU */}
+      <LoraFineTuningPanel />
+
+
 
       <div className="grid lg:grid-cols-3 gap-4">
         {/* ── Source ── */}
