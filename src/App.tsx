@@ -259,6 +259,7 @@ const App = () => {
           <DeferredMount delay={800}><JobsCenterLazy /></DeferredMount>
           <DeferredMount delay={1200}><ConversionJobsBridgeLazy /></DeferredMount>
           <DeferredMount delay={1400}><TranscriptionJobsBridgeLazy /></DeferredMount>
+          <DeferredMount delay={1600}><RegressionWatcherLazy /></DeferredMount>
           
           <AppSidebar />
           <DeferredMount delay={200}><QuickCutDialogLazy /></DeferredMount>
