@@ -133,6 +133,10 @@ const TextEditor = () => {
   const ollama = useOllama();
   const { learn: learnCorrections, applyCorrections } = useCorrectionLearning();
   const originalTextRef = useRef<string>("");
+  // Baseline used for correction-learning. Resets to the latest AI/version output
+  // so that learning captures only the user's manual edits *on top of* the AI text,
+  // not the AI's stylistic changes (punctuation, paragraph splits, rewording).
+  const learningBaselineRef = useRef<string>("");
   const ownedAudioUrlRef = useRef<string | null>(null);
 
   // Tab settings (visibility + order)
