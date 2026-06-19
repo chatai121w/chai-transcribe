@@ -1073,6 +1073,11 @@ export default function AsrTraining() {
         תתמלל עם המנוע שבחרת, ותשווה. כל הבדל הופך לתיקון שמזין את מערכת הלמידה האישית שלך.
       </p>
 
+      {/* Real Whisper LoRA fine-tuning on the local GPU */}
+      <LoraFineTuningPanel />
+
+
+
       <div className="grid lg:grid-cols-3 gap-4">
         {/* ── Source ── */}
         <Card>
