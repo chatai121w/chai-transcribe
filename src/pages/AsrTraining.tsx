@@ -1111,6 +1111,30 @@ export default function AsrTraining() {
               תיקונים ממתינים לאישור ({pending.length})
             </CardTitle>
             <div className="flex items-center gap-2 flex-wrap">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" title="תצוגה" aria-label="שנה תצוגה">
+                    {(() => { const Icon = currentViewIcon; return <Icon className="h-4 w-4" />; })()}
+                    <LayoutPanelTop className="h-3 w-3 mr-1 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel className="text-xs">תצוגה</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {PENDING_VIEW_OPTIONS.map((opt) => {
+                    const Icon = opt.icon;
+                    const active = pendingView === opt.value;
+                    return (
+                      <DropdownMenuItem key={opt.value} onClick={() => setPendingView(opt.value)} className={active ? 'bg-yellow-500/10 font-medium' : ''}>
+                        <Icon className="h-4 w-4 ml-2" />
+                        <span className="flex-1">{opt.label}</span>
+                        {opt.hint && <span className="text-[10px] text-muted-foreground mr-2">{opt.hint}</span>}
+                        {active && <Check className="h-3 w-3 mr-2" />}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
               {pending.length > 0 && (
                 <>
                   <Button size="sm" variant="outline" onClick={selectAllPending} disabled={selectedPending.size === pending.length}>
@@ -1144,80 +1168,53 @@ export default function AsrTraining() {
               <br />
               <span className="text-xs">מצב למידה נוכחי: <b>{learningMode}</b></span>
             </div>
-          ) : (
+          ) : pendingView === 'list' ? (
             <ScrollArea className="h-64">
               <div className="space-y-1">
-                {pending.map((p) => {
-                  const isEditing = editingId === p.id;
-                  return (
-                    <div
-                      key={p.id}
-                      className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors ${selectedPending.has(p.id) ? 'bg-yellow-500/10 border-yellow-500/40' : 'hover:bg-muted/50'}`}
-                      onClick={() => !isEditing && togglePendingSelection(p.id)}
-                    >
-                      <Checkbox
-                        checked={selectedPending.has(p.id)}
-                        onCheckedChange={() => !isEditing && togglePendingSelection(p.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        disabled={isEditing}
-                      />
-                      {isEditing ? (
-                        <>
-                          <Input
-                            value={editWrong}
-                            onChange={(e) => setEditWrong(e.target.value)}
-                            className="h-7 text-xs w-28"
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }}
-                          />
-                          <span className="text-xs">→</span>
-                          <Input
-                            value={editCorrect}
-                            onChange={(e) => setEditCorrect(e.target.value)}
-                            className="h-7 text-xs w-28"
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }}
-                          />
-                        </>
-                      ) : (
-                        <>
-                          <span className="text-rose-600 line-through">{p.wrong_text}</span>
-                          <span>→</span>
-                          <span className="text-emerald-600 font-medium">{p.correct_text}</span>
-                        </>
-                      )}
-                      <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
-                      <div className="flex-1" />
-                      {isEditing ? (
-                        <>
-                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); void saveEdit(p); }}>
-                            <Check className="h-4 w-4" />
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); cancelEdit(); }}>
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); startEdit(p); }}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); approvePending([p]); }}>
-                            <Check className="h-4 w-4" />
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); rejectPending(p); }}>
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
+                {pending.map((p) => renderPendingItem(p, 'row'))}
+              </div>
+            </ScrollArea>
+          ) : pendingView === 'horizontal' ? (
+            <ScrollArea className="w-full" dir="rtl">
+              <div className="flex gap-2 pb-3">
+                {pending.map((p) => (
+                  <div key={p.id} className="min-w-[280px] max-w-[320px] flex-shrink-0">
+                    {renderPendingItem(p, 'card')}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          ) : pendingView === 'table' ? (
+            <ScrollArea className="h-72">
+              <table className="w-full text-sm">
+                <thead className="text-xs text-muted-foreground sticky top-0 bg-background">
+                  <tr className="border-b">
+                    <th className="p-2 w-8"></th>
+                    <th className="p-2 text-right">שגוי</th>
+                    <th className="p-2 text-right">נכון</th>
+                    <th className="p-2 text-right w-16">הופעות</th>
+                    <th className="p-2 text-left w-32">פעולות</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pending.map((p) => renderPendingItem(p, 'tableRow'))}
+                </tbody>
+              </table>
+            </ScrollArea>
+          ) : (
+            <ScrollArea className="h-96">
+              <div className={`grid gap-2 ${
+                pendingView === 'grid2' ? 'grid-cols-1 md:grid-cols-2' :
+                pendingView === 'grid3' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' :
+                'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+              }`}>
+                {pending.map((p) => renderPendingItem(p, 'card'))}
               </div>
             </ScrollArea>
           )}
         </CardContent>
       </Card>
+
 
 
       {/* ── Local sessions ── */}
