@@ -245,6 +245,14 @@ const TextEditor = () => {
   const [activeTab, setActiveTab] = useState<string>("player");
   // Migrate stale "edit" tab → "player" (the two tabs were unified)
   useEffect(() => { if (activeTab === "edit") setActiveTab("player"); }, [activeTab]);
+
+  // AI Polish opt-in — saves Lovable credits when off. Persists in localStorage.
+  const [aiPolishEnabled, setAiPolishEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem('ai_polish_enabled') !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('ai_polish_enabled', aiPolishEnabled ? '1' : '0'); } catch {}
+  }, [aiPolishEnabled]);
   const [comparePreselect, setComparePreselect] = useState<{ leftId: string; rightId: string } | null>(null);
   const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
   const sendTextToLoshonKodesh = useCallback((opts?: { jump?: boolean }) => {
@@ -1537,30 +1545,53 @@ const TextEditor = () => {
           </TabsContent>
 
           <TabsContent value="ai" className="flex flex-col gap-3">
-            <div
-              style={{
-                fontSize: `${fontSize}px`,
-                fontFamily: fontFamily,
-                color: textColor,
-                lineHeight: lineHeight,
-                ...columnStyle,
-              }}
-            >
-              <LazyErrorBoundary label="עורך AI"><AIEditorDual 
-                text={text} 
-                onTextChange={(newText, source, customPrompt) => {
-                  setText(newText);
-                  addVersion(newText, source as TextVersion['source'], customPrompt);
-                }}
-                onSaveVersion={handleSaveVersion}
-                onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
-                onDuplicateAndSave={handleDuplicateAndSave}
-                onSyncToPlayer={handleSyncToPlayer}
-                versions={compareVersions}
-                originalText={compareVersions.find(v => v.source === 'original')?.text || originalTextRef.current}
-                initialSourceId={aiPreselectSourceId}
-              /></LazyErrorBoundary>
+            <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-primary"
+                  checked={aiPolishEnabled}
+                  onChange={(e) => setAiPolishEnabled(e.target.checked)}
+                />
+                <span className="text-sm font-medium">הפעל עריכת AI (AI Polish)</span>
+              </label>
+              <span className="text-[11px] text-muted-foreground">
+                {aiPolishEnabled
+                  ? "פעיל — קריאות AI צורכות קרדיטים של Lovable"
+                  : "כבוי — חוסך קרדיטים. אפשר להפעיל בכל עת."}
+              </span>
             </div>
+
+            {aiPolishEnabled ? (
+              <div
+                style={{
+                  fontSize: `${fontSize}px`,
+                  fontFamily: fontFamily,
+                  color: textColor,
+                  lineHeight: lineHeight,
+                  ...columnStyle,
+                }}
+              >
+                <LazyErrorBoundary label="עורך AI"><AIEditorDual 
+                  text={text} 
+                  onTextChange={(newText, source, customPrompt) => {
+                    setText(newText);
+                    addVersion(newText, source as TextVersion['source'], customPrompt);
+                  }}
+                  onSaveVersion={handleSaveVersion}
+                  onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
+                  onDuplicateAndSave={handleDuplicateAndSave}
+                  onSyncToPlayer={handleSyncToPlayer}
+                  versions={compareVersions}
+                  originalText={compareVersions.find(v => v.source === 'original')?.text || originalTextRef.current}
+                  initialSourceId={aiPreselectSourceId}
+                /></LazyErrorBoundary>
+              </div>
+            ) : (
+              <div className="rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">
+                עריכת AI כבויה. סמן את ה-V למעלה כדי להפעיל אותה ולהשתמש בשיפורי הניסוח, פיסוק והפסקאות.
+              </div>
+            )}
 
             <LazyErrorBoundary label="גרסאות AI">
               <AIVersionsGrid
