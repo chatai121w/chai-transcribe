@@ -274,7 +274,7 @@ const App = () => {
                 <Route path="/setup" element={<ProtectedRoute><Setup /></ProtectedRoute>} />
                 <Route path="/text-editor" element={<ProtectedRoute><TextEditor /></ProtectedRoute>} />
                 <Route path="/folders" element={<ProtectedRoute><Folders /></ProtectedRoute>} />
-                <Route path="/benchmark" element={<ProtectedRoute><Benchmark /></ProtectedRoute>} />
+                <Route path="/benchmark" element={<Navigate to="/compare?tab=enhance" replace />} />
                 <Route path="/voice-studio" element={<ProtectedRoute><VoiceStudio /></ProtectedRoute>} />
                 <Route path="/audacity-lab" element={<ProtectedRoute><AudacityLab /></ProtectedRoute>} />
                 <Route path="/diarization" element={<ProtectedRoute><Diarization /></ProtectedRoute>} />
@@ -289,7 +289,7 @@ const App = () => {
                 <Route path="/system-dashboard" element={<ProtectedRoute><SystemDashboard /></ProtectedRoute>} />
                 <Route path="/lashon-kodesh" element={<ProtectedRoute><LashoKodesh /></ProtectedRoute>} />
                 <Route path="/loshon-kodesh-rules" element={<ProtectedRoute><LoshonKodeshRules /></ProtectedRoute>} />
-                <Route path="/asr-training" element={<ProtectedRoute><AsrTraining /></ProtectedRoute>} />
+                <Route path="/asr-training" element={<Navigate to="/compare?tab=ground-truth" replace />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
