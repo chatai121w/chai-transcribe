@@ -370,7 +370,7 @@ export default function AsrTraining() {
       if (runErr) {
         toast({ title: 'שמירה לענן נכשלה', description: runErr.message, variant: 'destructive' });
       } else if (queuedPending.length > 0 && insertedRun) {
-        await supabase.from('asr_pending_corrections').upsert(
+        const { error: pendErr } = await supabase.from('asr_pending_corrections').upsert(
           queuedPending.map((q) => ({
             user_id: user.id,
             run_id: insertedRun.id,
@@ -382,7 +382,26 @@ export default function AsrTraining() {
           })),
           { onConflict: 'user_id,wrong_text,correct_text', ignoreDuplicates: false },
         );
+        if (pendErr) {
+          toast({ title: 'שמירת תיקונים ממתינים נכשלה', description: pendErr.message, variant: 'destructive' });
+        }
       }
+    }
+
+    // Optimistically show pending items in UI immediately (works even without cloud save)
+    if (queuedPending.length > 0) {
+      const synthetic: PendingCorrection[] = queuedPending.map((q, i) => ({
+        id: `local_${Date.now()}_${i}`,
+        wrong_text: q.wrong,
+        correct_text: q.correct,
+        occurrences: 1,
+        engine: q.engine,
+      } as PendingCorrection));
+      setPending((prev) => {
+        const existing = new Set(prev.map((p) => `${p.wrong_text}→${p.correct_text}`));
+        const fresh = synthetic.filter((s) => !existing.has(`${s.wrong_text}→${s.correct_text}`));
+        return [...fresh, ...prev];
+      });
     }
 
     const destinations = [saveLocally && 'מקומי', saveCloud && user && 'ענן'].filter(Boolean).join(' + ') || 'לא נשמר';
@@ -392,6 +411,7 @@ export default function AsrTraining() {
     });
     void refreshLists();
   };
+
 
   const approvePending = async (items: PendingCorrection[]) => {
     if (items.length === 0) return;
