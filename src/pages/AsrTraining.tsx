@@ -217,7 +217,7 @@ export default function AsrTraining() {
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<EngineResult[]>([]);
   const [history, setHistory] = useState<SavedRun[]>([]);
-  const [pending, setPending] = useState<PendingCorrection[]>([]);
+  const [pending, setPending] = useState<PendingCorrection[]>(() => loadLocalPendingCorrections());
   const [selectedPending, setSelectedPending] = useState<Set<string>>(new Set());
   const [saveLocally, setSaveLocally] = useState<boolean>(
     () => localStorage.getItem('asr_training_save_local') !== 'false',
@@ -227,30 +227,36 @@ export default function AsrTraining() {
   );
   const [localSessions, setLocalSessions] = useState<LocalSession[]>(() => loadLocalSessions());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingRef = useRef<PendingCorrection[]>(loadLocalPendingCorrections());
 
   useEffect(() => { localStorage.setItem('asr_training_mode', learningMode); }, [learningMode]);
   useEffect(() => { localStorage.setItem('asr_training_local_url', localServerUrl); }, [localServerUrl]);
   useEffect(() => { localStorage.setItem('asr_training_save_local', String(saveLocally)); }, [saveLocally]);
   useEffect(() => { localStorage.setItem('asr_training_save_cloud', String(saveCloud)); }, [saveCloud]);
 
-  // Load history + pending corrections
-  // Load history + pending corrections — MERGE with current state, don't replace local items
+  const commitPending = (updater: (prev: PendingCorrection[]) => PendingCorrection[]) => {
+    setPending((prev) => {
+      const next = dedupePending(updater(prev));
+      pendingRef.current = next;
+      saveLocalPendingCorrections(next);
+      return next;
+    });
+  };
+
+  // Load history + pending corrections — MERGE with local items, never replace them
   const refreshLists = async () => {
-    if (!user) return;
+    if (!user) {
+      commitPending((prev) => mergePending(loadLocalPendingCorrections(), prev));
+      return;
+    }
     const [{ data: runs }, { data: pend }] = await Promise.all([
       supabase.from('asr_training_runs').select('*').order('created_at', { ascending: false }).limit(30),
       supabase.from('asr_pending_corrections').select('*').eq('status', 'pending').order('occurrences', { ascending: false }).limit(500),
     ]);
     if (runs) setHistory(runs as SavedRun[]);
     if (pend) {
-      setPending((prev) => {
-        const cloud = pend as PendingCorrection[];
-        const cloudKeys = new Set(cloud.map((p) => `${p.wrong_text}→${p.correct_text}`));
-        const localOnly = prev.filter(
-          (p) => p.id.startsWith('local_') && !cloudKeys.has(`${p.wrong_text}→${p.correct_text}`),
-        );
-        return [...localOnly, ...cloud];
-      });
+      const cloud = pend as PendingCorrection[];
+      commitPending((prev) => mergePending([...loadLocalPendingCorrections(), ...pendingRef.current, ...prev], cloud));
     }
   };
   useEffect(() => { void refreshLists(); }, [user?.id]);
