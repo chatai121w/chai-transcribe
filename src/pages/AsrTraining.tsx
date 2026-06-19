@@ -25,6 +25,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Upload, Sparkles, BookOpen, Trash2, Check, X, RefreshCw, Download, HardDrive, Cloud, Pencil, LayoutList, StretchHorizontal, LayoutGrid, Columns2, Columns3, Columns4, Table as TableIcon, LayoutPanelTop } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/hooks/use-toast';
 import { normalizeHebrew } from '@/lib/hebrewNormalize';
 import {
@@ -724,6 +725,75 @@ export default function AsrTraining() {
   };
 
   // ─── Pending item renderer (shared across view modes) ───
+
+  // Build a normalized pool of reference texts (current + recent local sessions)
+  // and provide a memoized lookup for the sentence(s) that contain a pending word.
+  const contextSources = useMemo(() => {
+    const arr: string[] = [];
+    if (refText && refText.trim()) arr.push(refText);
+    for (const s of localSessions) {
+      if (s.refText && s.refText.trim()) arr.push(s.refText);
+    }
+    return arr;
+  }, [refText, localSessions]);
+
+  const contextCacheRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => { contextCacheRef.current = new Map(); }, [contextSources]);
+
+  const findContextSentence = (wrong: string, correct: string): string => {
+    const key = `${wrong}→${correct}`;
+    const cache = contextCacheRef.current;
+    if (cache.has(key)) return cache.get(key)!;
+    const targets = [wrong, correct].map((t) => t.trim()).filter(Boolean);
+    if (targets.length === 0 || contextSources.length === 0) {
+      cache.set(key, '');
+      return '';
+    }
+    const stripNikud = (s: string) => s.replace(/[\u0591-\u05C7]/g, '');
+    const normTargets = targets.map(stripNikud);
+    // Split into sentences on Hebrew/Latin sentence terminators and line breaks.
+    const splitter = /(?<=[.!?؟׃]|[\n])\s+|[\n\r]+/;
+    for (const src of contextSources) {
+      const stripped = stripNikud(src);
+      const sentences = stripped.split(splitter).map((s) => s.trim()).filter(Boolean);
+      const idx = sentences.findIndex((s) => normTargets.some((t) => s.includes(t)));
+      if (idx >= 0) {
+        // Always return two lines: the matching sentence plus the next one (or the previous if it's the last).
+        const a = sentences[idx];
+        const b = sentences[idx + 1] ?? sentences[idx - 1] ?? '';
+        const out = b ? `${a}\n${b}` : a;
+        cache.set(key, out);
+        return out;
+      }
+    }
+    cache.set(key, '');
+    return '';
+  };
+
+  // Render context with the wrong/correct words highlighted.
+  const renderContext = (text: string, wrong: string, correct: string) => {
+    if (!text) return null;
+    const targets = [wrong, correct].filter(Boolean).sort((a, b) => b.length - a.length);
+    if (targets.length === 0) return <span>{text}</span>;
+    const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(${targets.map(escape).join('|')})`, 'g');
+    return (
+      <>
+        {text.split('\n').slice(0, 2).map((line, li) => (
+          <div key={li} className="leading-relaxed">
+            {line.split(re).map((part, i) =>
+              targets.includes(part) ? (
+                <mark key={i} className="bg-rose-500/20 text-rose-700 rounded px-0.5 font-semibold">{part}</mark>
+              ) : (
+                <span key={i}>{part}</span>
+              )
+            )}
+          </div>
+        ))}
+      </>
+    );
+  };
+
   const renderPendingItem = (p: PendingCorrection, variant: 'row' | 'card' | 'tableRow') => {
     const isEditing = editingId === p.id;
     const isSelected = selectedPending.has(p.id);
@@ -777,88 +847,114 @@ export default function AsrTraining() {
       </>
     );
 
+    const ctx = findContextSentence(p.wrong_text, p.correct_text);
+    const tooltipContent = (
+      <TooltipContent side="top" align="center" className="max-w-md text-xs leading-relaxed" dir="rtl">
+        {ctx ? (
+          renderContext(ctx, p.wrong_text, p.correct_text)
+        ) : (
+          <>
+            <div className="text-muted-foreground">אין הקשר זמין מהתמליל הנוכחי</div>
+            <div className="text-muted-foreground/70">העלה/טען מחדש את המקור כדי לראות את הפסוק</div>
+          </>
+        )}
+      </TooltipContent>
+    );
+
     if (variant === 'tableRow') {
       return (
-        <tr
-          key={p.id}
-          className={`border-t cursor-pointer transition-colors ${isSelected ? 'bg-yellow-500/10' : 'hover:bg-muted/40'}`}
-          onClick={() => !isEditing && togglePendingSelection(p.id)}
-        >
-          <td className="p-2 w-8">
-            <Checkbox
-              checked={isSelected}
-              onCheckedChange={() => !isEditing && togglePendingSelection(p.id)}
-              onClick={(e) => e.stopPropagation()}
-              disabled={isEditing}
-            />
-          </td>
-          <td className="p-2">
-            {isEditing ? (
-              <Input value={editWrong} onChange={(e) => setEditWrong(e.target.value)} className="h-7 text-xs"
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }} />
-            ) : (
-              <span className="text-rose-600 line-through">{p.wrong_text}</span>
-            )}
-          </td>
-          <td className="p-2">
-            {isEditing ? (
-              <Input value={editCorrect} onChange={(e) => setEditCorrect(e.target.value)} className="h-7 text-xs"
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }} />
-            ) : (
-              <span className="text-emerald-600 font-medium">{p.correct_text}</span>
-            )}
-          </td>
-          <td className="p-2 text-xs text-muted-foreground">×{p.occurrences}</td>
-          <td className="p-2 text-left whitespace-nowrap">{Actions}</td>
-        </tr>
+        <Tooltip key={p.id} delayDuration={200}>
+          <TooltipTrigger asChild>
+            <tr
+              className={`border-t cursor-pointer transition-colors ${isSelected ? 'bg-yellow-500/10' : 'hover:bg-muted/40'}`}
+              onClick={() => !isEditing && togglePendingSelection(p.id)}
+            >
+              <td className="p-2 w-8">
+                <Checkbox
+                  checked={isSelected}
+                  onCheckedChange={() => !isEditing && togglePendingSelection(p.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  disabled={isEditing}
+                />
+              </td>
+              <td className="p-2">
+                {isEditing ? (
+                  <Input value={editWrong} onChange={(e) => setEditWrong(e.target.value)} className="h-7 text-xs"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }} />
+                ) : (
+                  <span className="text-rose-600 line-through">{p.wrong_text}</span>
+                )}
+              </td>
+              <td className="p-2">
+                {isEditing ? (
+                  <Input value={editCorrect} onChange={(e) => setEditCorrect(e.target.value)} className="h-7 text-xs"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }} />
+                ) : (
+                  <span className="text-emerald-600 font-medium">{p.correct_text}</span>
+                )}
+              </td>
+              <td className="p-2 text-xs text-muted-foreground">×{p.occurrences}</td>
+              <td className="p-2 text-left whitespace-nowrap">{Actions}</td>
+            </tr>
+          </TooltipTrigger>
+          {tooltipContent}
+        </Tooltip>
       );
     }
 
     if (variant === 'card') {
       return (
-        <div
-          key={p.id}
-          className={`rounded border p-2 flex flex-col gap-2 cursor-pointer transition-colors ${isSelected ? 'bg-yellow-500/10 border-yellow-500/40' : 'hover:bg-muted/50'}`}
-          onClick={() => !isEditing && togglePendingSelection(p.id)}
-        >
-          <div className="flex items-center gap-2">
+        <Tooltip key={p.id} delayDuration={200}>
+          <TooltipTrigger asChild>
+            <div
+              className={`rounded border p-2 flex flex-col gap-2 cursor-pointer transition-colors ${isSelected ? 'bg-yellow-500/10 border-yellow-500/40' : 'hover:bg-muted/50'}`}
+              onClick={() => !isEditing && togglePendingSelection(p.id)}
+            >
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={isSelected}
+                  onCheckedChange={() => !isEditing && togglePendingSelection(p.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  disabled={isEditing}
+                />
+                <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
+                <div className="flex-1" />
+                {Actions}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap text-sm">
+                {Texts}
+              </div>
+            </div>
+          </TooltipTrigger>
+          {tooltipContent}
+        </Tooltip>
+      );
+    }
+
+    // row (list / horizontal)
+    return (
+      <Tooltip key={p.id} delayDuration={200}>
+        <TooltipTrigger asChild>
+          <div
+            className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors ${variant === 'row' ? '' : ''} ${isSelected ? 'bg-yellow-500/10 border-yellow-500/40' : 'hover:bg-muted/50'}`}
+            onClick={() => !isEditing && togglePendingSelection(p.id)}
+          >
             <Checkbox
               checked={isSelected}
               onCheckedChange={() => !isEditing && togglePendingSelection(p.id)}
               onClick={(e) => e.stopPropagation()}
               disabled={isEditing}
             />
+            {Texts}
             <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
             <div className="flex-1" />
             {Actions}
           </div>
-          <div className="flex items-center gap-2 flex-wrap text-sm">
-            {Texts}
-          </div>
-        </div>
-      );
-    }
-
-    // row (list / horizontal)
-    return (
-      <div
-        key={p.id}
-        className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors ${variant === 'row' ? '' : ''} ${isSelected ? 'bg-yellow-500/10 border-yellow-500/40' : 'hover:bg-muted/50'}`}
-        onClick={() => !isEditing && togglePendingSelection(p.id)}
-      >
-        <Checkbox
-          checked={isSelected}
-          onCheckedChange={() => !isEditing && togglePendingSelection(p.id)}
-          onClick={(e) => e.stopPropagation()}
-          disabled={isEditing}
-        />
-        {Texts}
-        <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
-        <div className="flex-1" />
-        {Actions}
-      </div>
+        </TooltipTrigger>
+        {tooltipContent}
+      </Tooltip>
     );
   };
 
