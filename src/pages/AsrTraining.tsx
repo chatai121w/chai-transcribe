@@ -490,12 +490,32 @@ export default function AsrTraining() {
     if (items.length === 0) return;
     const entries = items.map((p) => buildCorrection(p.wrong_text, p.correct_text, p.occurrences, p.engine || 'manual'));
     learnFromCorrections(entries);
+    const nowIso = new Date().toISOString();
     const dbIds = items.map((p) => p.id).filter((id) => !id.startsWith('local_'));
     if (dbIds.length > 0) {
-      const { error } = await supabase.from('asr_pending_corrections').update({ status: 'approved', resolved_at: new Date().toISOString() }).in('id', dbIds);
+      const { error } = await supabase.from('asr_pending_corrections').update({ status: 'approved', resolved_at: nowIso }).in('id', dbIds);
       if (error) {
         toast({ title: 'אישור נכשל', description: error.message, variant: 'destructive' });
         return;
+      }
+    }
+    // Push local-only items to cloud as approved (so all corrections live in cloud too)
+    const localItems = items.filter((p) => p.id.startsWith('local_'));
+    if (localItems.length > 0 && user) {
+      const { error } = await supabase.from('asr_pending_corrections').upsert(
+        localItems.map((p) => ({
+          user_id: user.id,
+          wrong_text: p.wrong_text,
+          correct_text: p.correct_text,
+          occurrences: p.occurrences || 1,
+          engine: p.engine || 'manual',
+          status: 'approved',
+          resolved_at: nowIso,
+        })),
+        { onConflict: 'user_id,wrong_text,correct_text', ignoreDuplicates: false },
+      );
+      if (error) {
+        toast({ title: 'שמירת תיקונים בענן נכשלה', description: error.message, variant: 'destructive' });
       }
     }
     const approvedKeys = new Set(items.map(pendingKey));
@@ -504,7 +524,7 @@ export default function AsrTraining() {
     if (items.length === 1) {
       toast({ title: 'תיקון אושר', description: `${items[0].wrong_text} → ${items[0].correct_text}` });
     } else {
-      toast({ title: `${items.length} תיקונים אושרו`, description: 'נשמרו למערכת הלמידה' });
+      toast({ title: `${items.length} תיקונים אושרו`, description: 'נשמרו למערכת הלמידה ולענן' });
     }
     setSelectedPending(new Set());
     void refreshLists();
@@ -516,11 +536,79 @@ export default function AsrTraining() {
         toast({ title: 'דחייה נכשלה', description: error.message, variant: 'destructive' });
         return;
       }
+    } else if (user) {
+      // Mirror rejection to cloud so the same pair won't resurface from another device
+      await supabase.from('asr_pending_corrections').upsert(
+        [{
+          user_id: user.id,
+          wrong_text: p.wrong_text,
+          correct_text: p.correct_text,
+          occurrences: p.occurrences || 1,
+          engine: p.engine || 'manual',
+          status: 'rejected',
+          resolved_at: new Date().toISOString(),
+        }],
+        { onConflict: 'user_id,wrong_text,correct_text', ignoreDuplicates: false },
+      );
     }
     const rejectedKey = pendingKey(p);
     removePendingCorrectionsFromLocalSessions([{ wrong: p.wrong_text, correct: p.correct_text }]);
     commitPending((prev) => prev.filter((x) => pendingKey(x) !== rejectedKey));
     void refreshLists();
+  };
+
+  // ─── Manual add ───
+  const [manualWrong, setManualWrong] = useState('');
+  const [manualCorrect, setManualCorrect] = useState('');
+  const addManualCorrection = async (opts: { approveNow: boolean }) => {
+    const wrong = manualWrong.trim();
+    const correct = manualCorrect.trim();
+    if (!wrong || !correct) {
+      toast({ title: 'חסר טקסט', description: 'מלא גם שגוי וגם נכון', variant: 'destructive' });
+      return;
+    }
+    if (wrong === correct) {
+      toast({ title: 'אין הבדל', description: 'השגוי והנכון זהים', variant: 'destructive' });
+      return;
+    }
+    const item: PendingCorrection = {
+      id: `local_manual_${Date.now()}`,
+      wrong_text: wrong,
+      correct_text: correct,
+      occurrences: 1,
+      engine: 'manual',
+      created_at: new Date().toISOString(),
+    };
+    // Add to UI/local immediately
+    commitPending((prev) => {
+      const k = pendingKey(item);
+      if (prev.some((p) => pendingKey(p) === k)) return prev;
+      return [item, ...prev];
+    });
+    // Save to cloud as pending too (when logged in)
+    if (user && saveCloud) {
+      const { error } = await supabase.from('asr_pending_corrections').upsert(
+        [{
+          user_id: user.id,
+          wrong_text: wrong,
+          correct_text: correct,
+          occurrences: 1,
+          engine: 'manual',
+          status: 'pending',
+        }],
+        { onConflict: 'user_id,wrong_text,correct_text', ignoreDuplicates: false },
+      );
+      if (error) {
+        toast({ title: 'שמירה לענן נכשלה', description: error.message, variant: 'destructive' });
+      }
+    }
+    setManualWrong('');
+    setManualCorrect('');
+    if (opts.approveNow) {
+      await approvePending([item]);
+    } else {
+      toast({ title: 'תיקון נוסף לרשימת המתנה', description: `${wrong} → ${correct}` });
+    }
   };
 
   const togglePendingSelection = (id: string) => {
@@ -738,7 +826,38 @@ export default function AsrTraining() {
       {results.length > 0 && (
         <Card>
           <CardHeader><CardTitle>תוצאות</CardTitle></CardHeader>
-          <CardContent>
+        <CardContent className="space-y-3">
+          {/* Manual add row */}
+          <div className="flex flex-wrap items-end gap-2 p-3 rounded-md border bg-muted/20">
+            <div className="flex-1 min-w-[140px]">
+              <Label className="text-xs">שגוי (כפי שמופיע בתמלול)</Label>
+              <Input
+                value={manualWrong}
+                onChange={(e) => setManualWrong(e.target.value)}
+                placeholder="לדוגמה: רב פפה"
+                dir="rtl"
+                className="h-9"
+              />
+            </div>
+            <div className="flex-1 min-w-[140px]">
+              <Label className="text-xs">נכון</Label>
+              <Input
+                value={manualCorrect}
+                onChange={(e) => setManualCorrect(e.target.value)}
+                placeholder="לדוגמה: רב פפא"
+                dir="rtl"
+                className="h-9"
+                onKeyDown={(e) => { if (e.key === 'Enter') void addManualCorrection({ approveNow: false }); }}
+              />
+            </div>
+            <Button size="sm" variant="outline" onClick={() => void addManualCorrection({ approveNow: false })}>
+              הוסף לרשימה
+            </Button>
+            <Button size="sm" onClick={() => void addManualCorrection({ approveNow: true })}>
+              <Check className="h-4 w-4 ml-1" /> הוסף ואשר מיד
+            </Button>
+          </div>
+
             <div className={`grid gap-4 ${results.length === 2 ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
               {results.map((r, i) => (
                 <div key={i} className="rounded-lg border p-3 space-y-2">
