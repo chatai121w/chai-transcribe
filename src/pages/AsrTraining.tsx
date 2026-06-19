@@ -31,6 +31,10 @@ import {
   wordDiff, extractCorrectionCandidates, isAmbiguous, type DiffOp,
 } from '@/lib/asrMetrics';
 import { learnFromCorrections, type CorrectionEntry } from '@/utils/correctionLearning';
+import {
+  loadLocalSessions, saveLocalSession, deleteLocalSession,
+  exportLocalSessionsJson, clearLocalSessions, type LocalSession,
+} from '@/lib/asrLocalSessions';
 
 // ─── Tanakh book catalog (Sefaria refs) ───────────────────────────────────
 const TANAKH_BOOKS: Array<{ value: string; label: string; chapters: number }> = [
