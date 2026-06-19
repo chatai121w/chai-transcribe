@@ -306,7 +306,7 @@ export default function AsrTraining() {
         source_kind: sourceKind,
         source_ref: sourceKind === 'tanakh' ? `${book}.${chapter}${verses.trim() ? `.${verses.trim()}` : ''}` : null,
         source_label: refLabel,
-        ref_text: refText,
+        ref_text: effectiveRef,
         hyp_a_text: a?.hyp ?? null,
         model_a: a?.model ?? null,
         wer_a: a?.metrics.wer ?? null,
