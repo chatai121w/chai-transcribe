@@ -239,7 +239,7 @@ export default function AsrTraining() {
       if (useLovable) {
         toast({ title: 'מתמלל עם Lovable AI…' });
         const { text, elapsed_ms } = await transcribeWithLovable(audioFile, lovableModel);
-        const { metrics, diff, candidates } = evaluateRun(refText, text, elapsed_ms);
+        const { metrics, diff, candidates } = evaluateRun(effectiveRef, text, elapsed_ms);
         results.push({ engine: 'lovable', model: lovableModel, hyp: text, metrics, diff, candidates });
         setResults([...results]);
       }
