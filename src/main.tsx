@@ -21,6 +21,15 @@ try {
   }
 } catch { /* localStorage not available */ }
 
+// One-time seed of Talmudic/Ashkenazi ASR corrections (גמרה→גמרא, etc.)
+// Runs once per browser; subsequent loads are a no-op.
+try {
+  void import("./utils/talmudicCorrectionsSeed").then(({ seedTalmudicCorrections }) => {
+    const n = seedTalmudicCorrections();
+    if (n > 0) debugLog.info("Boot", `📚 Seeded ${n} Talmudic ASR corrections`);
+  });
+} catch { /* non-fatal */ }
+
 debugLog.info('Boot', `🚀 אתחול אפליקציה — ${new Date().toLocaleTimeString('he-IL')}`, {
   url: location.href,
   userAgent: navigator.userAgent,
