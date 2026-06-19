@@ -389,6 +389,28 @@ export function getAllCorrections(): CorrectionEntry[] {
 }
 
 /**
+ * Get top learned corrections as a hotwords string,
+ * to bias ASR engines toward known correct forms before transcription.
+ * Returns the corrected (target) terms, ranked by confidence * frequency.
+ */
+export function getLearnedHotwords(limit = 100, minConfidence = 0.6): string {
+  const corrections = loadCorrections();
+  const seen = new Set<string>();
+  const ranked = corrections
+    .filter(c => (c.category === 'word' || c.category === 'phrase') && c.confidence >= minConfidence)
+    .sort((a, b) => (b.confidence * b.frequency) - (a.confidence * a.frequency));
+  const out: string[] = [];
+  for (const c of ranked) {
+    const term = (c.corrected || '').trim();
+    if (!term || seen.has(term)) continue;
+    seen.add(term);
+    out.push(term);
+    if (out.length >= limit) break;
+  }
+  return out.join(', ');
+}
+
+/**
  * Delete a specific correction
  */
 export function deleteCorrection(original: string, corrected: string): void {

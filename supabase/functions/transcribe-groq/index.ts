@@ -44,6 +44,7 @@ serve(async (req) => {
     let fileName = 'audio.webm';
     let language = 'he';
     let modelOverride: string | undefined;
+    let hotwords = '';
 
     if (contentType.includes('multipart/form-data')) {
       const form = await req.formData();
@@ -53,6 +54,8 @@ serve(async (req) => {
       if (typeof lang === 'string' && lang !== 'auto') language = lang;
       const mdl = form.get('model');
       if (typeof mdl === 'string' && mdl.trim()) modelOverride = mdl.trim();
+      const hw = form.get('hotwords');
+      if (typeof hw === 'string') hotwords = hw.trim();
       const file = form.get('file');
       if (file instanceof Blob) {
         fileBlob = file;
@@ -62,11 +65,12 @@ serve(async (req) => {
       }
       if (!fileBlob) throw new Error('file is required in multipart form');
     } else {
-      const { audio, fileName: jsonName, apiKey, language: jsonLang, model: jsonModel } = await req.json();
+      const { audio, fileName: jsonName, apiKey, language: jsonLang, model: jsonModel, hotwords: jsonHotwords } = await req.json();
       if (!audio) throw new Error('No audio data provided');
       GROQ_API_KEY = apiKey || Deno.env.get('GROQ_API_KEY');
       if (jsonLang && jsonLang !== 'auto') language = jsonLang;
       if (typeof jsonModel === 'string' && jsonModel.trim()) modelOverride = jsonModel.trim();
+      if (typeof jsonHotwords === 'string') hotwords = jsonHotwords.trim();
       const binaryAudio = Uint8Array.from(atob(audio), c => c.charCodeAt(0));
       fileBlob = new Blob([binaryAudio], { type: 'application/octet-stream' });
       fileName = jsonName || fileName;
@@ -114,7 +118,18 @@ serve(async (req) => {
           fd.append('timestamp_granularities[]', 'word');
           fd.append('temperature', '0');
           if (language === 'he') {
-            fd.append('prompt', 'תמלול שיחה בעברית. דיבור ברור ומדויק.');
+            // Whisper "prompt" is capped around 224 tokens — keep it short.
+            // We append the user's hotwords (vocabulary + learned corrections + LK terms)
+            // so Groq Whisper biases toward known correct forms.
+            let prompt = 'תמלול שיחה בעברית. דיבור ברור ומדויק.';
+            if (hotwords) {
+              const trimmed = hotwords.length > 800 ? hotwords.slice(0, 800) : hotwords;
+              prompt += ' מונחים: ' + trimmed;
+            }
+            fd.append('prompt', prompt);
+          } else if (hotwords) {
+            const trimmed = hotwords.length > 800 ? hotwords.slice(0, 800) : hotwords;
+            fd.append('prompt', 'Terms: ' + trimmed);
           }
 
           console.log(`Trying model: ${model}, mime: ${mimeType}, size: ${typedBlob.size}`);

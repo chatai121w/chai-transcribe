@@ -13,7 +13,7 @@ import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
 import { useLocalTranscriptionQueue } from "@/hooks/useLocalTranscriptionQueue";
 import { useKeyRotation } from "@/hooks/useKeyRotation";
 import type { CloudProvider } from "@/hooks/useKeyRotation";
-import { applyLearnedCorrections } from "@/utils/correctionLearning";
+import { applyLearnedCorrections, getLearnedHotwords } from "@/utils/correctionLearning";
 import { isPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
 import {
   applyProfileCorrections,
@@ -28,7 +28,7 @@ import { addNotification } from "@/hooks/useNotifications";
 import { isVideoFile, extractAudioFromVideo, VIDEO_NEEDS_EXTRACTION, MAX_VIDEO_SIZE_MB, MAX_AUDIO_SIZE_MB } from "@/lib/videoUtils";
 import { compressAudio, needsCompression, formatFileSize, CLOUD_API_LIMIT } from "@/lib/audioCompression";
 import { db } from "@/lib/localDb";
-import { isLoshonKodeshEnabled } from "@/lib/loshonKodesh";
+import { isLoshonKodeshEnabled, buildLoshonKodeshHotwords } from "@/lib/loshonKodesh";
 
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
@@ -281,6 +281,15 @@ export function useTranscriptionEngines(
         form.append('language', sourceLanguage);
         form.append('targetLanguage', 'he');
 
+        // Bias Groq Whisper toward known vocabulary + learned corrections + Loshon Kodesh terms
+        if (provider === 'groq') {
+          const vocab = getHotwordsString();
+          const learned = getLearnedHotwords(60);
+          const base = [vocab, learned].filter(Boolean).join(', ');
+          const hotwords = buildLoshonKodeshHotwords(base);
+          if (hotwords) form.append('hotwords', hotwords);
+        }
+
         debugLog.info(engineLabel, `Uploading via XHR with key #${idx + 1}/${keyPool.length}`);
         const result = await xhrInvoke(functionName, form, (p) => state.setUploadProgress(p));
         debugLog.info(engineLabel, 'Response received', { hasData: !!result.data, hasError: !!result.error, keyIndex: idx + 1 });
@@ -505,8 +514,11 @@ export function useTranscriptionEngines(
       const vocabHotwords = getHotwordsString();
       const userHotwords = preferences.cuda_hotwords || '';
       const profileHotwords = buildProfileHotwords();
-      const mergedHotwords =
-        [userHotwords, vocabHotwords, profileHotwords].filter(Boolean).join(', ') || undefined;
+      const learnedHotwords = getLearnedHotwords(100);
+      const baseMerged = [userHotwords, vocabHotwords, profileHotwords, learnedHotwords]
+        .filter(Boolean).join(', ');
+      // Always pipe through LK builder so enabled dictionaries + LK base list are included
+      const mergedHotwords = buildLoshonKodeshHotwords(baseMerged) || undefined;
       const profilePrompt = getProfileInitialPrompt();
       const cudaOptions: CudaOptions = {
         preset: preferences.cuda_preset || 'balanced',
