@@ -256,7 +256,7 @@ export default function AsrTraining() {
       }
 
       // Save run + handle corrections per learning mode
-      await saveRun(results);
+      await saveRun(results, effectiveRef);
     } catch (err) {
       toast({ title: 'תמלול נכשל', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
     } finally {
