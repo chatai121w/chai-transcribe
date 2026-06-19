@@ -1588,6 +1588,11 @@ const TextEditor = () => {
                   onTextChange={(newText, source, customPrompt) => {
                     setText(newText);
                     addVersion(newText, source as TextVersion['source'], customPrompt);
+                    // AI rewrote the text — advance baseline so we only learn from
+                    // future manual edits, not the AI's stylistic changes.
+                    if (typeof source === 'string' && source.startsWith('ai-')) {
+                      learningBaselineRef.current = newText;
+                    }
                   }}
                   onSaveVersion={handleSaveVersion}
                   onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
@@ -1608,7 +1613,7 @@ const TextEditor = () => {
               <AIVersionsGrid
                 transcriptId={transcriptId}
                 audioFilePath={(location.state as any)?.audioFilePath || null}
-                onOpenInEditor={(t) => setText(t)}
+                onOpenInEditor={(t) => { setText(t); learningBaselineRef.current = t; }}
                 onCreateCloudTranscript={ensureCloudTranscript}
                 onSendToCompare={sendVersionToCompare}
               />
