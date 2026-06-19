@@ -222,7 +222,13 @@ export default function AsrTraining() {
   const runComparison = async () => {
     if (!user) { toast({ title: 'נדרשת התחברות', variant: 'destructive' }); return; }
     if (!audioFile) { toast({ title: 'העלה קובץ אודיו', variant: 'destructive' }); return; }
-    if (!refText) { toast({ title: 'טען טקסט קנוני קודם', variant: 'destructive' }); return; }
+    let effectiveRef = refText;
+    if (!effectiveRef && sourceKind === 'text' && freeText.trim()) {
+      effectiveRef = freeText.trim();
+      setRefText(effectiveRef);
+      setRefLabel('טקסט חופשי');
+    }
+    if (!effectiveRef) { toast({ title: 'טען טקסט קנוני קודם', variant: 'destructive' }); return; }
     if (!useLovable && !useLocal) { toast({ title: 'בחר לפחות מנוע אחד', variant: 'destructive' }); return; }
 
     setRunning(true);
@@ -233,7 +239,7 @@ export default function AsrTraining() {
       if (useLovable) {
         toast({ title: 'מתמלל עם Lovable AI…' });
         const { text, elapsed_ms } = await transcribeWithLovable(audioFile, lovableModel);
-        const { metrics, diff, candidates } = evaluateRun(refText, text, elapsed_ms);
+        const { metrics, diff, candidates } = evaluateRun(effectiveRef, text, elapsed_ms);
         results.push({ engine: 'lovable', model: lovableModel, hyp: text, metrics, diff, candidates });
         setResults([...results]);
       }
@@ -241,7 +247,7 @@ export default function AsrTraining() {
         toast({ title: 'מתמלל עם השרת המקומי…' });
         try {
           const { text, elapsed_ms } = await transcribeWithLocal(audioFile, localServerUrl);
-          const { metrics, diff, candidates } = evaluateRun(refText, text, elapsed_ms);
+          const { metrics, diff, candidates } = evaluateRun(effectiveRef, text, elapsed_ms);
           results.push({ engine: 'local', model: 'ivrit-ai/local-cuda', hyp: text, metrics, diff, candidates });
           setResults([...results]);
         } catch (err) {
@@ -250,7 +256,7 @@ export default function AsrTraining() {
       }
 
       // Save run + handle corrections per learning mode
-      await saveRun(results);
+      await saveRun(results, effectiveRef);
     } catch (err) {
       toast({ title: 'תמלול נכשל', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
     } finally {
@@ -258,7 +264,7 @@ export default function AsrTraining() {
     }
   };
 
-  const saveRun = async (results: EngineResult[]) => {
+  const saveRun = async (results: EngineResult[], effectiveRef: string = refText) => {
     if (!user || results.length === 0) return;
     const a = results[0];
     const b = results[1];
@@ -300,7 +306,7 @@ export default function AsrTraining() {
         source_kind: sourceKind,
         source_ref: sourceKind === 'tanakh' ? `${book}.${chapter}${verses.trim() ? `.${verses.trim()}` : ''}` : null,
         source_label: refLabel,
-        ref_text: refText,
+        ref_text: effectiveRef,
         hyp_a_text: a?.hyp ?? null,
         model_a: a?.model ?? null,
         wer_a: a?.metrics.wer ?? null,
@@ -489,7 +495,7 @@ export default function AsrTraining() {
               </RadioGroup>
             </div>
 
-            <Button onClick={runComparison} disabled={running || !audioFile || !refText} className="w-full">
+            <Button onClick={runComparison} disabled={running || !audioFile || !(refText || (sourceKind === 'text' && freeText.trim()))} className="w-full">
               {running ? 'מתמלל…' : 'התחל השוואה ולמידה'}
             </Button>
           </CardContent>
