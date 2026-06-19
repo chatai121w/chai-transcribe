@@ -36,6 +36,7 @@ import {
   ScrollText,
   Scissors,
   Palette,
+  GraduationCap,
 } from "lucide-react";
 import { openQuickCut } from "@/lib/quickCutBus";
 import { cn } from "@/lib/utils";
@@ -77,6 +78,7 @@ const navItems: NavItem[] = [
   { label: "לוח בקרה", icon: Bot, path: "/system-dashboard" },
   { label: "לשון הקודש", icon: ScrollText, path: "/lashon-kodesh" },
   { label: "כללי לשון הקודש", icon: ScrollText, path: "/loshon-kodesh-rules" },
+  { label: "אימון תמלול", icon: GraduationCap, path: "/asr-training" },
   { label: "הגדרות", icon: Settings, path: "/settings" },
 ];
 
