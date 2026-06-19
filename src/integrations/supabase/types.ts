@@ -521,6 +521,108 @@ export type Database = {
           },
         ]
       }
+      lora_training_jobs: {
+        Row: {
+          adapter_path: string | null
+          base_model: string
+          batch_size: number
+          cer_after: number | null
+          cer_before: number | null
+          created_at: string
+          ct2_model_path: string | null
+          current_epoch: number | null
+          current_step: number | null
+          dataset_size: number
+          epochs: number
+          error_message: string | null
+          eval_loss: number | null
+          finished_at: string | null
+          hardware_info: Json | null
+          id: string
+          job_name: string
+          learning_rate: number
+          log_tail: string | null
+          lora_alpha: number
+          lora_dropout: number
+          lora_r: number
+          progress: number
+          started_at: string | null
+          status: string
+          total_steps: number | null
+          train_loss: number | null
+          updated_at: string
+          user_id: string
+          wer_after: number | null
+          wer_before: number | null
+        }
+        Insert: {
+          adapter_path?: string | null
+          base_model: string
+          batch_size?: number
+          cer_after?: number | null
+          cer_before?: number | null
+          created_at?: string
+          ct2_model_path?: string | null
+          current_epoch?: number | null
+          current_step?: number | null
+          dataset_size?: number
+          epochs?: number
+          error_message?: string | null
+          eval_loss?: number | null
+          finished_at?: string | null
+          hardware_info?: Json | null
+          id?: string
+          job_name: string
+          learning_rate?: number
+          log_tail?: string | null
+          lora_alpha?: number
+          lora_dropout?: number
+          lora_r?: number
+          progress?: number
+          started_at?: string | null
+          status?: string
+          total_steps?: number | null
+          train_loss?: number | null
+          updated_at?: string
+          user_id: string
+          wer_after?: number | null
+          wer_before?: number | null
+        }
+        Update: {
+          adapter_path?: string | null
+          base_model?: string
+          batch_size?: number
+          cer_after?: number | null
+          cer_before?: number | null
+          created_at?: string
+          ct2_model_path?: string | null
+          current_epoch?: number | null
+          current_step?: number | null
+          dataset_size?: number
+          epochs?: number
+          error_message?: string | null
+          eval_loss?: number | null
+          finished_at?: string | null
+          hardware_info?: Json | null
+          id?: string
+          job_name?: string
+          learning_rate?: number
+          log_tail?: string | null
+          lora_alpha?: number
+          lora_dropout?: number
+          lora_r?: number
+          progress?: number
+          started_at?: string | null
+          status?: string
+          total_steps?: number | null
+          train_loss?: number | null
+          updated_at?: string
+          user_id?: string
+          wer_after?: number | null
+          wer_before?: number | null
+        }
+        Relationships: []
+      }
       migration_logs: {
         Row: {
           created_at: string
