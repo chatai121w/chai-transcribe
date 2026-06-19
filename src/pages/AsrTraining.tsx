@@ -725,6 +725,75 @@ export default function AsrTraining() {
   };
 
   // ─── Pending item renderer (shared across view modes) ───
+
+  // Build a normalized pool of reference texts (current + recent local sessions)
+  // and provide a memoized lookup for the sentence(s) that contain a pending word.
+  const contextSources = useMemo(() => {
+    const arr: string[] = [];
+    if (refText && refText.trim()) arr.push(refText);
+    for (const s of localSessions) {
+      if (s.refText && s.refText.trim()) arr.push(s.refText);
+    }
+    return arr;
+  }, [refText, localSessions]);
+
+  const contextCacheRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => { contextCacheRef.current = new Map(); }, [contextSources]);
+
+  const findContextSentence = (wrong: string, correct: string): string => {
+    const key = `${wrong}→${correct}`;
+    const cache = contextCacheRef.current;
+    if (cache.has(key)) return cache.get(key)!;
+    const targets = [wrong, correct].map((t) => t.trim()).filter(Boolean);
+    if (targets.length === 0 || contextSources.length === 0) {
+      cache.set(key, '');
+      return '';
+    }
+    const stripNikud = (s: string) => s.replace(/[\u0591-\u05C7]/g, '');
+    const normTargets = targets.map(stripNikud);
+    // Split into sentences on Hebrew/Latin sentence terminators and line breaks.
+    const splitter = /(?<=[.!?؟׃]|[\n])\s+|[\n\r]+/;
+    for (const src of contextSources) {
+      const stripped = stripNikud(src);
+      const sentences = stripped.split(splitter).map((s) => s.trim()).filter(Boolean);
+      const idx = sentences.findIndex((s) => normTargets.some((t) => s.includes(t)));
+      if (idx >= 0) {
+        // Always return two lines: the matching sentence plus the next one (or the previous if it's the last).
+        const a = sentences[idx];
+        const b = sentences[idx + 1] ?? sentences[idx - 1] ?? '';
+        const out = b ? `${a}\n${b}` : a;
+        cache.set(key, out);
+        return out;
+      }
+    }
+    cache.set(key, '');
+    return '';
+  };
+
+  // Render context with the wrong/correct words highlighted.
+  const renderContext = (text: string, wrong: string, correct: string) => {
+    if (!text) return null;
+    const targets = [wrong, correct].filter(Boolean).sort((a, b) => b.length - a.length);
+    if (targets.length === 0) return <span>{text}</span>;
+    const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(${targets.map(escape).join('|')})`, 'g');
+    return (
+      <>
+        {text.split('\n').slice(0, 2).map((line, li) => (
+          <div key={li} className="leading-relaxed">
+            {line.split(re).map((part, i) =>
+              targets.includes(part) ? (
+                <mark key={i} className="bg-rose-500/20 text-rose-700 rounded px-0.5 font-semibold">{part}</mark>
+              ) : (
+                <span key={i}>{part}</span>
+              )
+            )}
+          </div>
+        ))}
+      </>
+    );
+  };
+
   const renderPendingItem = (p: PendingCorrection, variant: 'row' | 'card' | 'tableRow') => {
     const isEditing = editingId === p.id;
     const isSelected = selectedPending.has(p.id);
