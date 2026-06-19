@@ -232,7 +232,7 @@ export default function AsrTraining() {
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<EngineResult[]>([]);
   const [history, setHistory] = useState<SavedRun[]>([]);
-  const [pending, setPending] = useState<PendingCorrection[]>(() => loadLocalPendingCorrections());
+  const [pending, setPending] = useState<PendingCorrection[]>(() => loadPersistentPendingCorrections());
   const [selectedPending, setSelectedPending] = useState<Set<string>>(new Set());
   const [saveLocally, setSaveLocally] = useState<boolean>(
     () => localStorage.getItem('asr_training_save_local') !== 'false',
@@ -261,7 +261,7 @@ export default function AsrTraining() {
   // Load history + pending corrections — MERGE with local items, never replace them
   const refreshLists = async () => {
     if (!user) {
-      commitPending((prev) => mergePending(loadLocalPendingCorrections(), prev));
+      commitPending((prev) => mergePending(loadPersistentPendingCorrections(), prev));
       return;
     }
     const [{ data: runs }, { data: pend }] = await Promise.all([
@@ -270,7 +270,7 @@ export default function AsrTraining() {
     ]);
     if (runs) setHistory(runs as SavedRun[]);
     const cloud = (pend ?? []) as PendingCorrection[];
-    commitPending((prev) => mergePending([...loadLocalPendingCorrections(), ...pendingRef.current, ...prev], cloud));
+    commitPending((prev) => mergePending([...loadPersistentPendingCorrections(), ...pendingRef.current, ...prev], cloud));
   };
   useEffect(() => { void refreshLists(); }, [user?.id]);
 
