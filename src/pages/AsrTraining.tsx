@@ -423,7 +423,10 @@ export default function AsrTraining() {
       }
     }
 
-    if (autoApplied.length > 0) learnFromCorrections(autoApplied);
+    if (autoApplied.length > 0) {
+      learnFromCorrections(autoApplied);
+      if (user) void runLearnedSync({ silent: true });
+    }
 
     const sourceRef = sourceKind === 'tanakh' ? `${book}.${chapter}${verses.trim() ? `.${verses.trim()}` : ''}` : null;
 
