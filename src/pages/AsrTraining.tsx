@@ -264,7 +264,7 @@ export default function AsrTraining() {
     }
   };
 
-  const saveRun = async (results: EngineResult[]) => {
+  const saveRun = async (results: EngineResult[], effectiveRef: string = refText) => {
     if (!user || results.length === 0) return;
     const a = results[0];
     const b = results[1];
