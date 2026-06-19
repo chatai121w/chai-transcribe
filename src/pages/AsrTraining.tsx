@@ -597,6 +597,24 @@ export default function AsrTraining() {
               </RadioGroup>
             </div>
 
+            <Separator />
+
+            <div className="space-y-2">
+              <Label className="text-xs">שמירת סשן</Label>
+              <div className="flex items-center gap-2">
+                <Checkbox id="save-local" checked={saveLocally} onCheckedChange={(v) => setSaveLocally(!!v)} />
+                <label htmlFor="save-local" className="text-sm flex items-center gap-1 flex-1">
+                  <HardDrive className="h-3 w-3" /> מקומי (דפדפן)
+                </label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="save-cloud" checked={saveCloud} onCheckedChange={(v) => setSaveCloud(!!v)} disabled={!user} />
+                <label htmlFor="save-cloud" className="text-sm flex items-center gap-1 flex-1">
+                  <Cloud className="h-3 w-3" /> בענן {!user && <span className="text-xs text-muted-foreground">(דרושה התחברות)</span>}
+                </label>
+              </div>
+            </div>
+
             <Button onClick={runComparison} disabled={running || !audioFile || !(refText || (sourceKind === 'text' && freeText.trim()))} className="w-full">
               {running ? 'מתמלל…' : 'התחל השוואה ולמידה'}
             </Button>
