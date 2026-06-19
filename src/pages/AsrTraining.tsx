@@ -23,7 +23,7 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Upload, Sparkles, BookOpen, Trash2, Check, X, RefreshCw, Download, HardDrive, Cloud, Pencil, LayoutList, StretchHorizontal, LayoutGrid, Columns2, Columns3, Columns4, Table as TableIcon, LayoutPanelTop } from 'lucide-react';
+import { Upload, Sparkles, BookOpen, Trash2, Check, X, RefreshCw, Download, HardDrive, Cloud, CloudOff, Pencil, LayoutList, StretchHorizontal, LayoutGrid, Columns2, Columns3, Columns4, Table as TableIcon, LayoutPanelTop, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/hooks/use-toast';
@@ -33,6 +33,7 @@ import {
   wordDiff, extractCorrectionCandidates, isAmbiguous, type DiffOp,
 } from '@/lib/asrMetrics';
 import { learnFromCorrections, type CorrectionEntry } from '@/utils/correctionLearning';
+import { syncLearnedCorrections, getLastSyncAt, type SyncState } from '@/lib/syncLearnedCorrections';
 import {
   loadLocalSessions, saveLocalSession, deleteLocalSession,
   exportLocalSessionsJson, clearLocalSessions, removePendingCorrectionsFromLocalSessions, type LocalSession,
