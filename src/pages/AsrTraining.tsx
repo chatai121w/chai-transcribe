@@ -572,12 +572,33 @@ export default function AsrTraining() {
       {/* ── Pending corrections ── */}
       {pending.length > 0 && (
         <Card>
-          <CardHeader><CardTitle>תיקונים ממתינים לאישור ({pending.length})</CardTitle></CardHeader>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>תיקונים ממתינים לאישור ({pending.length})</CardTitle>
+              <div className="flex items-center gap-2">
+                {selectedPending.size > 0 ? (
+                  <>
+                    <span className="text-xs text-muted-foreground">{selectedPending.size} נבחרו</span>
+                    <Button size="sm" variant="default" onClick={() => approvePending(pending.filter((p) => selectedPending.has(p.id)))}>
+                      <Check className="h-4 w-4 ml-1" /> אשר נבחרים
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={clearPendingSelection}>בטל בחירה</Button>
+                  </>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={selectAllPending}>בחר הכל</Button>
+                )}
+              </div>
+            </div>
+          </CardHeader>
           <CardContent>
             <ScrollArea className="h-64">
               <div className="space-y-1">
                 {pending.map((p) => (
                   <div key={p.id} className="flex items-center gap-2 p-2 rounded border">
+                    <Checkbox
+                      checked={selectedPending.has(p.id)}
+                      onCheckedChange={() => togglePendingSelection(p.id)}
+                    />
                     <span className="text-rose-600 line-through">{p.wrong_text}</span>
                     <span>→</span>
                     <span className="text-emerald-600 font-medium">{p.correct_text}</span>
