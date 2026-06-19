@@ -175,6 +175,7 @@ export default function AsrTraining() {
   const [results, setResults] = useState<EngineResult[]>([]);
   const [history, setHistory] = useState<SavedRun[]>([]);
   const [pending, setPending] = useState<PendingCorrection[]>([]);
+  const [selectedPending, setSelectedPending] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { localStorage.setItem('asr_training_mode', learningMode); }, [learningMode]);
