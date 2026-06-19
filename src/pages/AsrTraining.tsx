@@ -153,6 +153,44 @@ function pct(x: number, digits = 1): string {
   return (x * 100).toFixed(digits) + '%';
 }
 
+const LOCAL_PENDING_KEY = 'asr_training_pending_corrections_v1';
+
+function pendingKey(p: Pick<PendingCorrection, 'wrong_text' | 'correct_text'>): string {
+  return `${p.wrong_text.trim()}→${p.correct_text.trim()}`;
+}
+
+function dedupePending(items: PendingCorrection[]): PendingCorrection[] {
+  const map = new Map<string, PendingCorrection>();
+  for (const item of items) {
+    const key = pendingKey(item);
+    const existing = map.get(key);
+    map.set(key, existing ? { ...existing, ...item, occurrences: Math.max(existing.occurrences || 1, item.occurrences || 1) } : item);
+  }
+  return Array.from(map.values());
+}
+
+function mergePending(localItems: PendingCorrection[], cloudItems: PendingCorrection[]): PendingCorrection[] {
+  return dedupePending([...localItems, ...cloudItems]);
+}
+
+function loadLocalPendingCorrections(): PendingCorrection[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_PENDING_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? dedupePending(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalPendingCorrections(items: PendingCorrection[]): void {
+  try {
+    localStorage.setItem(LOCAL_PENDING_KEY, JSON.stringify(dedupePending(items)));
+  } catch (err) {
+    console.warn('Local pending corrections save failed:', err);
+  }
+}
+
 // ─── Component ─────────────────────────────────────────────────────────────
 
 export default function AsrTraining() {
