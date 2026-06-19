@@ -351,15 +351,37 @@ export default function AsrTraining() {
     void refreshLists();
   };
 
-  const approvePending = async (p: PendingCorrection) => {
-    learnFromCorrections([buildCorrection(p.wrong_text, p.correct_text, p.occurrences, p.engine || 'manual')]);
-    await supabase.from('asr_pending_corrections').update({ status: 'approved', resolved_at: new Date().toISOString() }).eq('id', p.id);
-    toast({ title: 'תיקון אושר', description: `${p.wrong_text} → ${p.correct_text}` });
+  const approvePending = async (items: PendingCorrection[]) => {
+    if (items.length === 0) return;
+    const entries = items.map((p) => buildCorrection(p.wrong_text, p.correct_text, p.occurrences, p.engine || 'manual'));
+    learnFromCorrections(entries);
+    const ids = items.map((p) => p.id);
+    await supabase.from('asr_pending_corrections').update({ status: 'approved', resolved_at: new Date().toISOString() }).in('id', ids);
+    if (items.length === 1) {
+      toast({ title: 'תיקון אושר', description: `${items[0].wrong_text} → ${items[0].correct_text}` });
+    } else {
+      toast({ title: `${items.length} תיקונים אושרו`, description: 'נשמרו למערכת הלמידה' });
+    }
+    setSelectedPending(new Set());
     void refreshLists();
   };
   const rejectPending = async (p: PendingCorrection) => {
     await supabase.from('asr_pending_corrections').update({ status: 'rejected', resolved_at: new Date().toISOString() }).eq('id', p.id);
     void refreshLists();
+  };
+  const togglePendingSelection = (id: string) => {
+    setSelectedPending((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const selectAllPending = () => {
+    setSelectedPending(new Set(pending.map((p) => p.id)));
+  };
+  const clearPendingSelection = () => {
+    setSelectedPending(new Set());
   };
 
   // ─── Render ─────────────────────────────────────────────────────────────
