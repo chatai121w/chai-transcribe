@@ -33,7 +33,7 @@ import {
 import { learnFromCorrections, type CorrectionEntry } from '@/utils/correctionLearning';
 import {
   loadLocalSessions, saveLocalSession, deleteLocalSession,
-  exportLocalSessionsJson, clearLocalSessions, type LocalSession,
+  exportLocalSessionsJson, clearLocalSessions, removePendingCorrectionsFromLocalSessions, type LocalSession,
 } from '@/lib/asrLocalSessions';
 
 // ─── Tanakh book catalog (Sefaria refs) ───────────────────────────────────
@@ -181,6 +181,21 @@ function loadLocalPendingCorrections(): PendingCorrection[] {
   } catch {
     return [];
   }
+}
+
+function loadPendingCorrectionsFromLocalSessions(): PendingCorrection[] {
+  return loadLocalSessions().flatMap((session) => session.pending.map((item, index) => ({
+    id: `local_session_${session.id}_${index}`,
+    wrong_text: item.wrong,
+    correct_text: item.correct,
+    occurrences: 1,
+    engine: item.engine,
+    created_at: new Date(session.createdAt).toISOString(),
+  })));
+}
+
+function loadPersistentPendingCorrections(): PendingCorrection[] {
+  return mergePending(loadLocalPendingCorrections(), loadPendingCorrectionsFromLocalSessions());
 }
 
 function saveLocalPendingCorrections(items: PendingCorrection[]): void {
