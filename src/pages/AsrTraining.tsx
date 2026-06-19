@@ -499,6 +499,7 @@ export default function AsrTraining() {
       }
     }
     const approvedKeys = new Set(items.map(pendingKey));
+    removePendingCorrectionsFromLocalSessions(items.map((p) => ({ wrong: p.wrong_text, correct: p.correct_text })));
     commitPending((prev) => prev.filter((p) => !approvedKeys.has(pendingKey(p))));
     if (items.length === 1) {
       toast({ title: 'תיקון אושר', description: `${items[0].wrong_text} → ${items[0].correct_text}` });
@@ -517,6 +518,7 @@ export default function AsrTraining() {
       }
     }
     const rejectedKey = pendingKey(p);
+    removePendingCorrectionsFromLocalSessions([{ wrong: p.wrong_text, correct: p.correct_text }]);
     commitPending((prev) => prev.filter((x) => pendingKey(x) !== rejectedKey));
     void refreshLists();
   };
