@@ -826,7 +826,38 @@ export default function AsrTraining() {
       {results.length > 0 && (
         <Card>
           <CardHeader><CardTitle>תוצאות</CardTitle></CardHeader>
-          <CardContent>
+        <CardContent className="space-y-3">
+          {/* Manual add row */}
+          <div className="flex flex-wrap items-end gap-2 p-3 rounded-md border bg-muted/20">
+            <div className="flex-1 min-w-[140px]">
+              <Label className="text-xs">שגוי (כפי שמופיע בתמלול)</Label>
+              <Input
+                value={manualWrong}
+                onChange={(e) => setManualWrong(e.target.value)}
+                placeholder="לדוגמה: רב פפה"
+                dir="rtl"
+                className="h-9"
+              />
+            </div>
+            <div className="flex-1 min-w-[140px]">
+              <Label className="text-xs">נכון</Label>
+              <Input
+                value={manualCorrect}
+                onChange={(e) => setManualCorrect(e.target.value)}
+                placeholder="לדוגמה: רב פפא"
+                dir="rtl"
+                className="h-9"
+                onKeyDown={(e) => { if (e.key === 'Enter') void addManualCorrection({ approveNow: false }); }}
+              />
+            </div>
+            <Button size="sm" variant="outline" onClick={() => void addManualCorrection({ approveNow: false })}>
+              הוסף לרשימה
+            </Button>
+            <Button size="sm" onClick={() => void addManualCorrection({ approveNow: true })}>
+              <Check className="h-4 w-4 ml-1" /> הוסף ואשר מיד
+            </Button>
+          </div>
+
             <div className={`grid gap-4 ${results.length === 2 ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
               {results.map((r, i) => (
                 <div key={i} className="rounded-lg border p-3 space-y-2">
