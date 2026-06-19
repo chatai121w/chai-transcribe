@@ -1207,6 +1207,37 @@ export default function AsrTraining() {
               </div>
             </div>
 
+            <Separator />
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs">סף ביטחון להחלת תיקונים אוטומטית</Label>
+                <span className="text-xs font-mono font-medium text-yellow-600">{confidenceThreshold.toFixed(2)}</span>
+              </div>
+              <Slider
+                value={[confidenceThreshold]}
+                min={0.3}
+                max={1}
+                step={0.05}
+                onValueChange={(v) => setConfidenceThresholdState(v[0] ?? 0.6)}
+                className="py-1"
+              />
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                <span>אגרסיבי (0.30)</span>
+                <span>מאוזן (0.60)</span>
+                <span>שמרני (1.00)</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                {confidenceThreshold <= 0.45
+                  ? '⚠️ תיקון בודד כבר יוחל אוטומטית. מומלץ רק אם אתה בודק את התוצאות.'
+                  : confidenceThreshold <= 0.65
+                  ? '✅ ברירת המחדל — תיקון יוחל אחרי 1-2 אישורים.'
+                  : confidenceThreshold <= 0.85
+                  ? '🛡️ נדרשים 3-4 אישורים לפני שתיקון יוחל אוטומטית.'
+                  : '🔒 רק תיקונים שאושרו פעמים רבות יוחלו אוטומטית.'}
+              </p>
+            </div>
+
             <Button onClick={runComparison} disabled={running || !audioFile || !(refText || (sourceKind === 'text' && freeText.trim()))} className="w-full">
               {running ? 'מתמלל…' : 'התחל השוואה ולמידה'}
             </Button>
