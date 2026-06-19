@@ -69,3 +69,14 @@ export function clearLocalSessions(): void {
 export function exportLocalSessionsJson(): string {
   return JSON.stringify(loadLocalSessions(), null, 2);
 }
+
+export function removePendingCorrectionsFromLocalSessions(items: Array<{ wrong: string; correct: string }>): void {
+  const keys = new Set(items.map((item) => `${item.wrong.trim()}→${item.correct.trim()}`));
+  if (keys.size === 0) return;
+
+  const updated = loadLocalSessions().map((session) => ({
+    ...session,
+    pending: session.pending.filter((item) => !keys.has(`${item.wrong.trim()}→${item.correct.trim()}`)),
+  }));
+  localStorage.setItem(KEY, JSON.stringify(updated));
+}
