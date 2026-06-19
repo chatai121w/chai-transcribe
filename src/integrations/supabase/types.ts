@@ -191,6 +191,8 @@ export type Database = {
         Row: {
           audio_duration_ms: number | null
           audio_filename: string | null
+          audio_path: string | null
+          audio_size: number | null
           cer_a: number | null
           cer_b: number | null
           corrections_applied: number
@@ -215,6 +217,8 @@ export type Database = {
         Insert: {
           audio_duration_ms?: number | null
           audio_filename?: string | null
+          audio_path?: string | null
+          audio_size?: number | null
           cer_a?: number | null
           cer_b?: number | null
           corrections_applied?: number
@@ -239,6 +243,8 @@ export type Database = {
         Update: {
           audio_duration_ms?: number | null
           audio_filename?: string | null
+          audio_path?: string | null
+          audio_size?: number | null
           cer_a?: number | null
           cer_b?: number | null
           corrections_applied?: number

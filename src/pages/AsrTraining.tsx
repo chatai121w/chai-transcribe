@@ -32,7 +32,8 @@ import {
   computeWER, computeCER, computeTermRecall, lenRatio,
   wordDiff, extractCorrectionCandidates, isAmbiguous, type DiffOp,
 } from '@/lib/asrMetrics';
-import { learnFromCorrections, type CorrectionEntry } from '@/utils/correctionLearning';
+import { learnFromCorrections, getCorrectionThreshold, setCorrectionThreshold, type CorrectionEntry } from '@/utils/correctionLearning';
+import { Slider } from '@/components/ui/slider';
 import { syncLearnedCorrections, getLastSyncAt, type SyncState } from '@/lib/syncLearnedCorrections';
 import {
   loadLocalSessions, saveLocalSession, deleteLocalSession,
@@ -244,6 +245,7 @@ export default function AsrTraining() {
     () => localStorage.getItem('asr_training_save_cloud') !== 'false',
   );
   const [localSessions, setLocalSessions] = useState<LocalSession[]>(() => loadLocalSessions());
+  const [confidenceThreshold, setConfidenceThresholdState] = useState<number>(() => getCorrectionThreshold());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingRef = useRef<PendingCorrection[]>(pending);
 
@@ -251,6 +253,7 @@ export default function AsrTraining() {
   useEffect(() => { localStorage.setItem('asr_training_local_url', localServerUrl); }, [localServerUrl]);
   useEffect(() => { localStorage.setItem('asr_training_save_local', String(saveLocally)); }, [saveLocally]);
   useEffect(() => { localStorage.setItem('asr_training_save_cloud', String(saveCloud)); }, [saveCloud]);
+  useEffect(() => { setCorrectionThreshold(confidenceThreshold); }, [confidenceThreshold]);
 
   const commitPending = (updater: (prev: PendingCorrection[]) => PendingCorrection[]) => {
     setPending((prev) => {
@@ -454,6 +457,33 @@ export default function AsrTraining() {
 
     // ── Cloud save ──
     if (saveCloud && user) {
+      // Upload the original audio to permanent-audio bucket so we can replay
+      // and re-transcribe it later, even if the user deletes the local file.
+      let uploadedAudioPath: string | null = null;
+      let uploadedAudioSize: number | null = null;
+      if (audioFile) {
+        try {
+          const ext = (audioFile.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const safeName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext || 'bin'}`;
+          const path = `asr-training/${user.id}/${safeName}`;
+          const { error: upErr } = await supabase.storage
+            .from('permanent-audio')
+            .upload(path, audioFile, {
+              cacheControl: '3600',
+              upsert: false,
+              contentType: audioFile.type || 'application/octet-stream',
+            });
+          if (upErr) {
+            toast({ title: 'העלאת אודיו לענן נכשלה', description: upErr.message, variant: 'destructive' });
+          } else {
+            uploadedAudioPath = path;
+            uploadedAudioSize = audioFile.size;
+          }
+        } catch (err: any) {
+          toast({ title: 'העלאת אודיו לענן נכשלה', description: err?.message || String(err), variant: 'destructive' });
+        }
+      }
+
       const { data: insertedRun, error: runErr } = await supabase
         .from('asr_training_runs')
         .insert({
@@ -474,9 +504,11 @@ export default function AsrTraining() {
           term_recall_b: b?.metrics.termRecall ?? null,
           audio_duration_ms: 0,
           audio_filename: audioFile?.name ?? null,
+          audio_path: uploadedAudioPath,
+          audio_size: uploadedAudioSize,
           learning_mode: learningMode,
           corrections_applied: autoApplied.length,
-        })
+        } as any)
         .select()
         .single();
 
@@ -1173,6 +1205,37 @@ export default function AsrTraining() {
                   <Cloud className="h-3 w-3" /> בענן {!user && <span className="text-xs text-muted-foreground">(דרושה התחברות)</span>}
                 </label>
               </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs">סף ביטחון להחלת תיקונים אוטומטית</Label>
+                <span className="text-xs font-mono font-medium text-yellow-600">{confidenceThreshold.toFixed(2)}</span>
+              </div>
+              <Slider
+                value={[confidenceThreshold]}
+                min={0.3}
+                max={1}
+                step={0.05}
+                onValueChange={(v) => setConfidenceThresholdState(v[0] ?? 0.6)}
+                className="py-1"
+              />
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                <span>אגרסיבי (0.30)</span>
+                <span>מאוזן (0.60)</span>
+                <span>שמרני (1.00)</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                {confidenceThreshold <= 0.45
+                  ? '⚠️ תיקון בודד כבר יוחל אוטומטית. מומלץ רק אם אתה בודק את התוצאות.'
+                  : confidenceThreshold <= 0.65
+                  ? '✅ ברירת המחדל — תיקון יוחל אחרי 1-2 אישורים.'
+                  : confidenceThreshold <= 0.85
+                  ? '🛡️ נדרשים 3-4 אישורים לפני שתיקון יוחל אוטומטית.'
+                  : '🔒 רק תיקונים שאושרו פעמים רבות יוחלו אוטומטית.'}
+              </p>
             </div>
 
             <Button onClick={runComparison} disabled={running || !audioFile || !(refText || (sourceKind === 'text' && freeText.trim()))} className="w-full">
