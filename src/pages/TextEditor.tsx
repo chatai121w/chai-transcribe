@@ -245,6 +245,14 @@ const TextEditor = () => {
   const [activeTab, setActiveTab] = useState<string>("player");
   // Migrate stale "edit" tab → "player" (the two tabs were unified)
   useEffect(() => { if (activeTab === "edit") setActiveTab("player"); }, [activeTab]);
+
+  // AI Polish opt-in — saves Lovable credits when off. Persists in localStorage.
+  const [aiPolishEnabled, setAiPolishEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem('ai_polish_enabled') !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('ai_polish_enabled', aiPolishEnabled ? '1' : '0'); } catch {}
+  }, [aiPolishEnabled]);
   const [comparePreselect, setComparePreselect] = useState<{ leftId: string; rightId: string } | null>(null);
   const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
   const sendTextToLoshonKodesh = useCallback((opts?: { jump?: boolean }) => {
