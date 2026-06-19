@@ -23,7 +23,7 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Upload, Sparkles, BookOpen, Trash2, Check, X, RefreshCw, Download, HardDrive, Cloud } from 'lucide-react';
+import { Upload, Sparkles, BookOpen, Trash2, Check, X, RefreshCw, Download, HardDrive, Cloud, Pencil } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { normalizeHebrew } from '@/lib/hebrewNormalize';
 import {
@@ -560,6 +560,9 @@ export default function AsrTraining() {
   // ─── Manual add ───
   const [manualWrong, setManualWrong] = useState('');
   const [manualCorrect, setManualCorrect] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editWrong, setEditWrong] = useState('');
+  const [editCorrect, setEditCorrect] = useState('');
   const addManualCorrection = async (opts: { approveNow: boolean }) => {
     const wrong = manualWrong.trim();
     const correct = manualCorrect.trim();
@@ -624,6 +627,47 @@ export default function AsrTraining() {
   };
   const clearPendingSelection = () => {
     setSelectedPending(new Set());
+  };
+
+  const startEdit = (p: PendingCorrection) => {
+    setEditingId(p.id);
+    setEditWrong(p.wrong_text);
+    setEditCorrect(p.correct_text);
+  };
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditWrong('');
+    setEditCorrect('');
+  };
+  const saveEdit = async (original: PendingCorrection) => {
+    const wrong = editWrong.trim();
+    const correct = editCorrect.trim();
+    if (!wrong || !correct) {
+      toast({ title: 'חסר טקסט', description: 'מלא גם שגוי וגם נכון', variant: 'destructive' });
+      return;
+    }
+    if (wrong === correct) {
+      toast({ title: 'אין הבדל', description: 'השגוי והנכון זהים', variant: 'destructive' });
+      return;
+    }
+    commitPending((prev) =>
+      prev.map((item) =>
+        item.id === original.id ? { ...item, wrong_text: wrong, correct_text: correct } : item
+      )
+    );
+    if (!original.id.startsWith('local_') && user) {
+      const { error } = await supabase
+        .from('asr_pending_corrections')
+        .update({ wrong_text: wrong, correct_text: correct })
+        .eq('id', original.id);
+      if (error) {
+        toast({ title: 'עדכון בענן נכשל', description: error.message, variant: 'destructive' });
+      }
+    }
+    setEditingId(null);
+    setEditWrong('');
+    setEditCorrect('');
+    toast({ title: 'תיקון עודכן', description: `${wrong} → ${correct}` });
   };
 
   // ─── Local sessions ───
@@ -947,30 +991,72 @@ export default function AsrTraining() {
           ) : (
             <ScrollArea className="h-64">
               <div className="space-y-1">
-                {pending.map((p) => (
-                  <div
-                    key={p.id}
-                    className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors ${selectedPending.has(p.id) ? 'bg-yellow-500/10 border-yellow-500/40' : 'hover:bg-muted/50'}`}
-                    onClick={() => togglePendingSelection(p.id)}
-                  >
-                    <Checkbox
-                      checked={selectedPending.has(p.id)}
-                      onCheckedChange={() => togglePendingSelection(p.id)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                    <span className="text-rose-600 line-through">{p.wrong_text}</span>
-                    <span>→</span>
-                    <span className="text-emerald-600 font-medium">{p.correct_text}</span>
-                    <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
-                    <div className="flex-1" />
-                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); approvePending([p]); }}>
-                      <Check className="h-4 w-4" />
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); rejectPending(p); }}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
+                {pending.map((p) => {
+                  const isEditing = editingId === p.id;
+                  return (
+                    <div
+                      key={p.id}
+                      className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors ${selectedPending.has(p.id) ? 'bg-yellow-500/10 border-yellow-500/40' : 'hover:bg-muted/50'}`}
+                      onClick={() => !isEditing && togglePendingSelection(p.id)}
+                    >
+                      <Checkbox
+                        checked={selectedPending.has(p.id)}
+                        onCheckedChange={() => !isEditing && togglePendingSelection(p.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        disabled={isEditing}
+                      />
+                      {isEditing ? (
+                        <>
+                          <Input
+                            value={editWrong}
+                            onChange={(e) => setEditWrong(e.target.value)}
+                            className="h-7 text-xs w-28"
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }}
+                          />
+                          <span className="text-xs">→</span>
+                          <Input
+                            value={editCorrect}
+                            onChange={(e) => setEditCorrect(e.target.value)}
+                            className="h-7 text-xs w-28"
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => { if (e.key === 'Enter') void saveEdit(p); }}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-rose-600 line-through">{p.wrong_text}</span>
+                          <span>→</span>
+                          <span className="text-emerald-600 font-medium">{p.correct_text}</span>
+                        </>
+                      )}
+                      <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
+                      <div className="flex-1" />
+                      {isEditing ? (
+                        <>
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); void saveEdit(p); }}>
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); cancelEdit(); }}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); startEdit(p); }}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); approvePending([p]); }}>
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); rejectPending(p); }}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </ScrollArea>
           )}
