@@ -95,6 +95,128 @@ export type Database = {
         }
         Relationships: []
       }
+      asr_pending_corrections: {
+        Row: {
+          correct_text: string
+          created_at: string
+          engine: string | null
+          id: string
+          occurrences: number
+          resolved_at: string | null
+          run_id: string | null
+          status: string
+          user_id: string
+          wrong_text: string
+        }
+        Insert: {
+          correct_text: string
+          created_at?: string
+          engine?: string | null
+          id?: string
+          occurrences?: number
+          resolved_at?: string | null
+          run_id?: string | null
+          status?: string
+          user_id: string
+          wrong_text: string
+        }
+        Update: {
+          correct_text?: string
+          created_at?: string
+          engine?: string | null
+          id?: string
+          occurrences?: number
+          resolved_at?: string | null
+          run_id?: string | null
+          status?: string
+          user_id?: string
+          wrong_text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asr_pending_corrections_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "asr_training_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      asr_training_runs: {
+        Row: {
+          audio_duration_ms: number | null
+          audio_filename: string | null
+          cer_a: number | null
+          cer_b: number | null
+          corrections_applied: number
+          created_at: string
+          hyp_a_text: string | null
+          hyp_b_text: string | null
+          id: string
+          learning_mode: string
+          model_a: string | null
+          model_b: string | null
+          notes: string | null
+          ref_text: string
+          source_kind: string
+          source_label: string | null
+          source_ref: string | null
+          term_recall_a: number | null
+          term_recall_b: number | null
+          user_id: string
+          wer_a: number | null
+          wer_b: number | null
+        }
+        Insert: {
+          audio_duration_ms?: number | null
+          audio_filename?: string | null
+          cer_a?: number | null
+          cer_b?: number | null
+          corrections_applied?: number
+          created_at?: string
+          hyp_a_text?: string | null
+          hyp_b_text?: string | null
+          id?: string
+          learning_mode?: string
+          model_a?: string | null
+          model_b?: string | null
+          notes?: string | null
+          ref_text: string
+          source_kind: string
+          source_label?: string | null
+          source_ref?: string | null
+          term_recall_a?: number | null
+          term_recall_b?: number | null
+          user_id: string
+          wer_a?: number | null
+          wer_b?: number | null
+        }
+        Update: {
+          audio_duration_ms?: number | null
+          audio_filename?: string | null
+          cer_a?: number | null
+          cer_b?: number | null
+          corrections_applied?: number
+          created_at?: string
+          hyp_a_text?: string | null
+          hyp_b_text?: string | null
+          id?: string
+          learning_mode?: string
+          model_a?: string | null
+          model_b?: string | null
+          notes?: string | null
+          ref_text?: string
+          source_kind?: string
+          source_label?: string | null
+          source_ref?: string | null
+          term_recall_a?: number | null
+          term_recall_b?: number | null
+          user_id?: string
+          wer_a?: number | null
+          wer_b?: number | null
+        }
+        Relationships: []
+      }
       community_themes: {
         Row: {
           colors: Json
