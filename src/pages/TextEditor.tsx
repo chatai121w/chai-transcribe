@@ -533,6 +533,7 @@ const TextEditor = () => {
     transcriptIdRef.current = latest.id;
     setTranscriptId(latest.id);
     originalTextRef.current = latest.text;
+    learningBaselineRef.current = editorText;
     setText(editorText);
 
     const initialVersion: TextVersion = {
