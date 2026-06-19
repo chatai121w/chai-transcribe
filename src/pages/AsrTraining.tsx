@@ -247,7 +247,7 @@ export default function AsrTraining() {
         toast({ title: 'מתמלל עם השרת המקומי…' });
         try {
           const { text, elapsed_ms } = await transcribeWithLocal(audioFile, localServerUrl);
-          const { metrics, diff, candidates } = evaluateRun(refText, text, elapsed_ms);
+          const { metrics, diff, candidates } = evaluateRun(effectiveRef, text, elapsed_ms);
           results.push({ engine: 'local', model: 'ivrit-ai/local-cuda', hyp: text, metrics, diff, candidates });
           setResults([...results]);
         } catch (err) {
