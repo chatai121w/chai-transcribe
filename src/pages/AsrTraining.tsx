@@ -196,14 +196,24 @@ export default function AsrTraining() {
   useEffect(() => { localStorage.setItem('asr_training_save_cloud', String(saveCloud)); }, [saveCloud]);
 
   // Load history + pending corrections
+  // Load history + pending corrections — MERGE with current state, don't replace local items
   const refreshLists = async () => {
     if (!user) return;
     const [{ data: runs }, { data: pend }] = await Promise.all([
       supabase.from('asr_training_runs').select('*').order('created_at', { ascending: false }).limit(30),
-      supabase.from('asr_pending_corrections').select('*').eq('status', 'pending').order('occurrences', { ascending: false }).limit(100),
+      supabase.from('asr_pending_corrections').select('*').eq('status', 'pending').order('occurrences', { ascending: false }).limit(500),
     ]);
     if (runs) setHistory(runs as SavedRun[]);
-    if (pend) setPending(pend as PendingCorrection[]);
+    if (pend) {
+      setPending((prev) => {
+        const cloud = pend as PendingCorrection[];
+        const cloudKeys = new Set(cloud.map((p) => `${p.wrong_text}→${p.correct_text}`));
+        const localOnly = prev.filter(
+          (p) => p.id.startsWith('local_') && !cloudKeys.has(`${p.wrong_text}→${p.correct_text}`),
+        );
+        return [...localOnly, ...cloud];
+      });
+    }
   };
   useEffect(() => { void refreshLists(); }, [user?.id]);
 
@@ -402,6 +412,10 @@ export default function AsrTraining() {
         const fresh = synthetic.filter((s) => !existing.has(`${s.wrong_text}→${s.correct_text}`));
         return [...fresh, ...prev];
       });
+      // Scroll the pending list into view so the user sees the new items
+      setTimeout(() => {
+        document.getElementById('pending-corrections')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
     }
 
     const destinations = [saveLocally && 'מקומי', saveCloud && user && 'ענן'].filter(Boolean).join(' + ') || 'לא נשמר';
