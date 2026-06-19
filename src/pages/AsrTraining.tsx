@@ -387,7 +387,7 @@ export default function AsrTraining() {
     // ── Local save ──
     if (saveLocally) {
       const session: LocalSession = {
-        id: (crypto as any).randomUUID?.() ?? `local_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        id: crypto.randomUUID?.() ?? `local_${Date.now()}_${Math.random().toString(36).slice(2)}`,
         createdAt: Date.now(),
         label: refLabel || 'ללא כותרת',
         sourceKind,
