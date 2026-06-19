@@ -103,6 +103,7 @@ const DiarizationFloatingStatusLazy = lazy(() => import("./components/Diarizatio
 const JobsCenterLazy = lazy(() => import("./components/jobs/JobsCenter").then(m => ({ default: m.JobsCenter })));
 const ConversionJobsBridgeLazy = lazy(() => import("./components/jobs/ConversionJobsBridge").then(m => ({ default: m.ConversionJobsBridge })));
 const TranscriptionJobsBridgeLazy = lazy(() => import("./components/jobs/TranscriptionJobsBridge").then(m => ({ default: m.TranscriptionJobsBridge })));
+const RegressionWatcherLazy = lazy(() => import("./components/RegressionWatcher"));
 
 
 /** Mounts children only after the browser is idle / a delay — keeps them off the critical path. */
