@@ -133,6 +133,10 @@ const TextEditor = () => {
   const ollama = useOllama();
   const { learn: learnCorrections, applyCorrections } = useCorrectionLearning();
   const originalTextRef = useRef<string>("");
+  // Baseline used for correction-learning. Resets to the latest AI/version output
+  // so that learning captures only the user's manual edits *on top of* the AI text,
+  // not the AI's stylistic changes (punctuation, paragraph splits, rewording).
+  const learningBaselineRef = useRef<string>("");
   const ownedAudioUrlRef = useRef<string | null>(null);
 
   // Tab settings (visibility + order)
@@ -398,6 +402,7 @@ const TextEditor = () => {
     if (stateText) {
       setText(stateText);
       originalTextRef.current = stateText;
+      learningBaselineRef.current = stateText;
       const initialVersion: TextVersion = {
         id: crypto.randomUUID(),
         text: stateText,
@@ -438,6 +443,7 @@ const TextEditor = () => {
       if (savedText) {
         setText(savedText);
         if (!originalTextRef.current) originalTextRef.current = savedText;
+        if (!learningBaselineRef.current) learningBaselineRef.current = savedText;
       }
     }
 
@@ -527,6 +533,7 @@ const TextEditor = () => {
     transcriptIdRef.current = latest.id;
     setTranscriptId(latest.id);
     originalTextRef.current = latest.text;
+    learningBaselineRef.current = editorText;
     setText(editorText);
 
     const initialVersion: TextVersion = {
@@ -836,9 +843,13 @@ const TextEditor = () => {
     if (manualVersionTimerRef.current) clearTimeout(manualVersionTimerRef.current);
     manualVersionTimerRef.current = setTimeout(() => {
       addVersion(newText, 'manual');
-      // Learn from user corrections
-      if (originalTextRef.current && newText !== originalTextRef.current) {
-        learnCorrections(originalTextRef.current, newText, 'manual');
+      // Learn from user corrections — compare against the learning baseline
+      // (latest AI/loaded text), so AI Polish changes don't pollute the dataset.
+      const baseline = learningBaselineRef.current || originalTextRef.current;
+      if (baseline && newText !== baseline) {
+        learnCorrections(baseline, newText, 'manual');
+        // Advance the baseline so the next manual edit only diffs from here.
+        learningBaselineRef.current = newText;
       }
     }, 2000);
   }, [learnCorrections]);
@@ -1577,6 +1588,11 @@ const TextEditor = () => {
                   onTextChange={(newText, source, customPrompt) => {
                     setText(newText);
                     addVersion(newText, source as TextVersion['source'], customPrompt);
+                    // AI rewrote the text — advance baseline so we only learn from
+                    // future manual edits, not the AI's stylistic changes.
+                    if (typeof source === 'string' && source.startsWith('ai-')) {
+                      learningBaselineRef.current = newText;
+                    }
                   }}
                   onSaveVersion={handleSaveVersion}
                   onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
@@ -1597,7 +1613,7 @@ const TextEditor = () => {
               <AIVersionsGrid
                 transcriptId={transcriptId}
                 audioFilePath={(location.state as any)?.audioFilePath || null}
-                onOpenInEditor={(t) => setText(t)}
+                onOpenInEditor={(t) => { setText(t); learningBaselineRef.current = t; }}
                 onCreateCloudTranscript={ensureCloudTranscript}
                 onSendToCompare={sendVersionToCompare}
               />
@@ -1646,7 +1662,7 @@ const TextEditor = () => {
                   </div>
                 )}
 
-                {showCompareAi && (
+                {showCompareAi && aiPolishEnabled && (
                   <div
                     style={{
                       fontSize: `${fontSize}px`,
@@ -1660,6 +1676,9 @@ const TextEditor = () => {
                       onTextChange={(newText, source, customPrompt) => {
                         setText(newText);
                         addVersion(newText, source as TextVersion['source'], customPrompt);
+                        if (typeof source === 'string' && source.startsWith('ai-')) {
+                          learningBaselineRef.current = newText;
+                        }
                       }}
                       onSaveVersion={handleSaveVersion}
                       onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
