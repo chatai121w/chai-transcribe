@@ -1269,6 +1269,40 @@ export default function AsrTraining() {
                 aria-label="בחר הכל"
               />
               תיקונים ממתינים לאישור ({pending.length})
+              {(() => {
+                const SyncIcon =
+                  syncState === 'syncing' ? Loader2 :
+                  syncState === 'synced'  ? CheckCircle2 :
+                  syncState === 'error'   ? AlertCircle :
+                  syncState === 'offline' ? CloudOff : Cloud;
+                const color =
+                  syncState === 'syncing' ? 'text-blue-500' :
+                  syncState === 'synced'  ? 'text-emerald-600' :
+                  syncState === 'error'   ? 'text-rose-600' :
+                  syncState === 'offline' ? 'text-muted-foreground' : 'text-muted-foreground';
+                const label =
+                  syncState === 'syncing' ? 'מסנכרן מילון תיקונים לענן…' :
+                  syncState === 'synced'  ? `מילון תיקונים סונכרן${syncStats ? ` · סה"כ ${syncStats.total} · ↑${syncStats.pushed} ↓${syncStats.pulled}` : ''}${lastSyncAt ? ` · עודכן ${new Date(lastSyncAt).toLocaleTimeString('he-IL')}` : ''}` :
+                  syncState === 'error'   ? 'סנכרון נכשל — לחץ כדי לנסות שוב' :
+                  syncState === 'offline' ? 'לא מחובר — תיקונים נשמרים מקומית בלבד' :
+                  'לחץ לסנכרון מילון התיקונים עם הענן';
+                return (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => void runLearnedSync()}
+                        disabled={!user || syncState === 'syncing'}
+                        className={`inline-flex items-center justify-center h-7 w-7 rounded-md border border-border hover:bg-accent transition-colors ${color} disabled:opacity-60 disabled:cursor-not-allowed`}
+                        aria-label={label}
+                      >
+                        <SyncIcon className={`h-4 w-4 ${syncState === 'syncing' ? 'animate-spin' : ''}`} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs text-xs">{label}</TooltipContent>
+                  </Tooltip>
+                );
+              })()}
             </CardTitle>
             <div className="flex items-center gap-2 flex-wrap">
               <DropdownMenu>
