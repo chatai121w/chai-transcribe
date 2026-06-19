@@ -245,6 +245,7 @@ export default function AsrTraining() {
     () => localStorage.getItem('asr_training_save_cloud') !== 'false',
   );
   const [localSessions, setLocalSessions] = useState<LocalSession[]>(() => loadLocalSessions());
+  const [confidenceThreshold, setConfidenceThresholdState] = useState<number>(() => getCorrectionThreshold());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingRef = useRef<PendingCorrection[]>(pending);
 
@@ -252,6 +253,7 @@ export default function AsrTraining() {
   useEffect(() => { localStorage.setItem('asr_training_local_url', localServerUrl); }, [localServerUrl]);
   useEffect(() => { localStorage.setItem('asr_training_save_local', String(saveLocally)); }, [saveLocally]);
   useEffect(() => { localStorage.setItem('asr_training_save_cloud', String(saveCloud)); }, [saveCloud]);
+  useEffect(() => { setCorrectionThreshold(confidenceThreshold); }, [confidenceThreshold]);
 
   const commitPending = (updater: (prev: PendingCorrection[]) => PendingCorrection[]) => {
     setPending((prev) => {
