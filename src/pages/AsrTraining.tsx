@@ -254,10 +254,8 @@ export default function AsrTraining() {
       supabase.from('asr_pending_corrections').select('*').eq('status', 'pending').order('occurrences', { ascending: false }).limit(500),
     ]);
     if (runs) setHistory(runs as SavedRun[]);
-    if (pend) {
-      const cloud = pend as PendingCorrection[];
-      commitPending((prev) => mergePending([...loadLocalPendingCorrections(), ...pendingRef.current, ...prev], cloud));
-    }
+    const cloud = (pend ?? []) as PendingCorrection[];
+    commitPending((prev) => mergePending([...loadLocalPendingCorrections(), ...pendingRef.current, ...prev], cloud));
   };
   useEffect(() => { void refreshLists(); }, [user?.id]);
 
