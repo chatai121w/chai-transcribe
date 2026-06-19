@@ -417,8 +417,12 @@ export default function AsrTraining() {
     if (items.length === 0) return;
     const entries = items.map((p) => buildCorrection(p.wrong_text, p.correct_text, p.occurrences, p.engine || 'manual'));
     learnFromCorrections(entries);
-    const ids = items.map((p) => p.id);
-    await supabase.from('asr_pending_corrections').update({ status: 'approved', resolved_at: new Date().toISOString() }).in('id', ids);
+    const dbIds = items.map((p) => p.id).filter((id) => !id.startsWith('local_'));
+    if (dbIds.length > 0) {
+      await supabase.from('asr_pending_corrections').update({ status: 'approved', resolved_at: new Date().toISOString() }).in('id', dbIds);
+    }
+    const approvedIds = new Set(items.map((p) => p.id));
+    setPending((prev) => prev.filter((p) => !approvedIds.has(p.id)));
     if (items.length === 1) {
       toast({ title: 'תיקון אושר', description: `${items[0].wrong_text} → ${items[0].correct_text}` });
     } else {
@@ -428,9 +432,13 @@ export default function AsrTraining() {
     void refreshLists();
   };
   const rejectPending = async (p: PendingCorrection) => {
-    await supabase.from('asr_pending_corrections').update({ status: 'rejected', resolved_at: new Date().toISOString() }).eq('id', p.id);
+    if (!p.id.startsWith('local_')) {
+      await supabase.from('asr_pending_corrections').update({ status: 'rejected', resolved_at: new Date().toISOString() }).eq('id', p.id);
+    }
+    setPending((prev) => prev.filter((x) => x.id !== p.id));
     void refreshLists();
   };
+
   const togglePendingSelection = (id: string) => {
     setSelectedPending((prev) => {
       const next = new Set(prev);
