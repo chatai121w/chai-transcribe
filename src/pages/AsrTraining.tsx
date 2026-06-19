@@ -564,6 +564,21 @@ export default function AsrTraining() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editWrong, setEditWrong] = useState('');
   const [editCorrect, setEditCorrect] = useState('');
+  type PendingViewMode = 'list' | 'horizontal' | 'grid2' | 'grid3' | 'grid4' | 'table';
+  const [pendingView, setPendingView] = useState<PendingViewMode>(() => {
+    const v = localStorage.getItem('asr_pending_view') as PendingViewMode | null;
+    return v && ['list','horizontal','grid2','grid3','grid4','table'].includes(v) ? v : 'list';
+  });
+  useEffect(() => { localStorage.setItem('asr_pending_view', pendingView); }, [pendingView]);
+  const PENDING_VIEW_OPTIONS: Array<{ value: PendingViewMode; label: string; icon: typeof LayoutList; hint?: string }> = [
+    { value: 'list',       label: 'רשימה אנכית',     icon: LayoutList, hint: 'מומלץ' },
+    { value: 'horizontal', label: 'גלילה אופקית',    icon: StretchHorizontal },
+    { value: 'grid2',      label: '2 עמודות',         icon: Columns2 },
+    { value: 'grid3',      label: '3 עמודות',         icon: Columns3 },
+    { value: 'grid4',      label: '4 עמודות',         icon: Columns4 },
+    { value: 'table',      label: 'טבלה',             icon: TableIcon },
+  ];
+  const currentViewIcon = (PENDING_VIEW_OPTIONS.find((o) => o.value === pendingView)?.icon) ?? LayoutList;
   const addManualCorrection = async (opts: { approveNow: boolean }) => {
     const wrong = manualWrong.trim();
     const correct = manualCorrect.trim();
