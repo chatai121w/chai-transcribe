@@ -23,7 +23,7 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Upload, Sparkles, BookOpen, Trash2, Check, X, RefreshCw } from 'lucide-react';
+import { Upload, Sparkles, BookOpen, Trash2, Check, X, RefreshCw, Download, HardDrive, Cloud } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { normalizeHebrew } from '@/lib/hebrewNormalize';
 import {
@@ -31,6 +31,10 @@ import {
   wordDiff, extractCorrectionCandidates, isAmbiguous, type DiffOp,
 } from '@/lib/asrMetrics';
 import { learnFromCorrections, type CorrectionEntry } from '@/utils/correctionLearning';
+import {
+  loadLocalSessions, saveLocalSession, deleteLocalSession,
+  exportLocalSessionsJson, clearLocalSessions, type LocalSession,
+} from '@/lib/asrLocalSessions';
 
 // ─── Tanakh book catalog (Sefaria refs) ───────────────────────────────────
 const TANAKH_BOOKS: Array<{ value: string; label: string; chapters: number }> = [
@@ -177,10 +181,19 @@ export default function AsrTraining() {
   const [history, setHistory] = useState<SavedRun[]>([]);
   const [pending, setPending] = useState<PendingCorrection[]>([]);
   const [selectedPending, setSelectedPending] = useState<Set<string>>(new Set());
+  const [saveLocally, setSaveLocally] = useState<boolean>(
+    () => localStorage.getItem('asr_training_save_local') !== 'false',
+  );
+  const [saveCloud, setSaveCloud] = useState<boolean>(
+    () => localStorage.getItem('asr_training_save_cloud') !== 'false',
+  );
+  const [localSessions, setLocalSessions] = useState<LocalSession[]>(() => loadLocalSessions());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { localStorage.setItem('asr_training_mode', learningMode); }, [learningMode]);
   useEffect(() => { localStorage.setItem('asr_training_local_url', localServerUrl); }, [localServerUrl]);
+  useEffect(() => { localStorage.setItem('asr_training_save_local', String(saveLocally)); }, [saveLocally]);
+  useEffect(() => { localStorage.setItem('asr_training_save_cloud', String(saveCloud)); }, [saveCloud]);
 
   // Load history + pending corrections
   const refreshLists = async () => {
@@ -267,16 +280,16 @@ export default function AsrTraining() {
   };
 
   const saveRun = async (results: EngineResult[], effectiveRef: string = refText) => {
-    if (!user || results.length === 0) return;
+    if (results.length === 0) return;
     const a = results[0];
     const b = results[1];
 
     // Auto-applied corrections (per learning mode, based on engine A's diff)
     const autoApplied: CorrectionEntry[] = [];
+    const autoSummary: Array<{ wrong: string; correct: string; occurrences: number; engine: string }> = [];
     const queuedPending: Array<{ wrong: string; correct: string; engine: string }> = [];
 
     if (a) {
-      // Aggregate candidates: count duplicates within this run
       const counts = new Map<string, number>();
       for (const c of a.candidates) {
         if (isAmbiguous(c.wrong, c.correct)) continue;
@@ -288,65 +301,93 @@ export default function AsrTraining() {
         const [wrong, correct] = key.split('→');
         if (learningMode === 'auto') {
           autoApplied.push(buildCorrection(wrong, correct, n, a.engine));
+          autoSummary.push({ wrong, correct, occurrences: n, engine: a.engine });
         } else if (learningMode === 'hybrid') {
-          if (n >= 2) autoApplied.push(buildCorrection(wrong, correct, n, a.engine));
-          else queuedPending.push({ wrong, correct, engine: a.engine });
+          if (n >= 2) {
+            autoApplied.push(buildCorrection(wrong, correct, n, a.engine));
+            autoSummary.push({ wrong, correct, occurrences: n, engine: a.engine });
+          } else queuedPending.push({ wrong, correct, engine: a.engine });
         } else {
           queuedPending.push({ wrong, correct, engine: a.engine });
         }
       }
     }
 
-    // Persist corrections to local learning store
     if (autoApplied.length > 0) learnFromCorrections(autoApplied);
 
-    // Persist run
-    const { data: insertedRun, error: runErr } = await supabase
-      .from('asr_training_runs')
-      .insert({
-        user_id: user.id,
-        source_kind: sourceKind,
-        source_ref: sourceKind === 'tanakh' ? `${book}.${chapter}${verses.trim() ? `.${verses.trim()}` : ''}` : null,
-        source_label: refLabel,
-        ref_text: effectiveRef,
-        hyp_a_text: a?.hyp ?? null,
-        model_a: a?.model ?? null,
-        wer_a: a?.metrics.wer ?? null,
-        cer_a: a?.metrics.cer ?? null,
-        term_recall_a: a?.metrics.termRecall ?? null,
-        hyp_b_text: b?.hyp ?? null,
-        model_b: b?.model ?? null,
-        wer_b: b?.metrics.wer ?? null,
-        cer_b: b?.metrics.cer ?? null,
-        term_recall_b: b?.metrics.termRecall ?? null,
-        audio_duration_ms: 0,
-        audio_filename: audioFile?.name ?? null,
-        learning_mode: learningMode,
-        corrections_applied: autoApplied.length,
-      })
-      .select()
-      .single();
+    const sourceRef = sourceKind === 'tanakh' ? `${book}.${chapter}${verses.trim() ? `.${verses.trim()}` : ''}` : null;
 
-    if (runErr) { toast({ title: 'שמירה נכשלה', description: runErr.message, variant: 'destructive' }); return; }
-
-    // Persist pending corrections
-    if (queuedPending.length > 0 && insertedRun) {
-      await supabase.from('asr_pending_corrections').upsert(
-        queuedPending.map((q) => ({
-          user_id: user.id,
-          run_id: insertedRun.id,
-          wrong_text: q.wrong,
-          correct_text: q.correct,
-          occurrences: 1,
-          engine: q.engine,
-          status: 'pending',
+    // ── Local save ──
+    if (saveLocally) {
+      const session: LocalSession = {
+        id: (crypto as any).randomUUID?.() ?? `local_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        createdAt: Date.now(),
+        label: refLabel || 'ללא כותרת',
+        sourceKind,
+        sourceRef,
+        refText: effectiveRef,
+        audioFilename: audioFile?.name ?? null,
+        learningMode,
+        results: results.map((r) => ({
+          engine: r.engine, model: r.model, hyp: r.hyp,
+          metrics: r.metrics, candidates: r.candidates,
         })),
-        { onConflict: 'user_id,wrong_text,correct_text', ignoreDuplicates: false },
-      );
+        autoApplied: autoSummary,
+        pending: queuedPending,
+      };
+      saveLocalSession(session);
+      setLocalSessions(loadLocalSessions());
     }
 
+    // ── Cloud save ──
+    if (saveCloud && user) {
+      const { data: insertedRun, error: runErr } = await supabase
+        .from('asr_training_runs')
+        .insert({
+          user_id: user.id,
+          source_kind: sourceKind,
+          source_ref: sourceRef,
+          source_label: refLabel,
+          ref_text: effectiveRef,
+          hyp_a_text: a?.hyp ?? null,
+          model_a: a?.model ?? null,
+          wer_a: a?.metrics.wer ?? null,
+          cer_a: a?.metrics.cer ?? null,
+          term_recall_a: a?.metrics.termRecall ?? null,
+          hyp_b_text: b?.hyp ?? null,
+          model_b: b?.model ?? null,
+          wer_b: b?.metrics.wer ?? null,
+          cer_b: b?.metrics.cer ?? null,
+          term_recall_b: b?.metrics.termRecall ?? null,
+          audio_duration_ms: 0,
+          audio_filename: audioFile?.name ?? null,
+          learning_mode: learningMode,
+          corrections_applied: autoApplied.length,
+        })
+        .select()
+        .single();
+
+      if (runErr) {
+        toast({ title: 'שמירה לענן נכשלה', description: runErr.message, variant: 'destructive' });
+      } else if (queuedPending.length > 0 && insertedRun) {
+        await supabase.from('asr_pending_corrections').upsert(
+          queuedPending.map((q) => ({
+            user_id: user.id,
+            run_id: insertedRun.id,
+            wrong_text: q.wrong,
+            correct_text: q.correct,
+            occurrences: 1,
+            engine: q.engine,
+            status: 'pending',
+          })),
+          { onConflict: 'user_id,wrong_text,correct_text', ignoreDuplicates: false },
+        );
+      }
+    }
+
+    const destinations = [saveLocally && 'מקומי', saveCloud && user && 'ענן'].filter(Boolean).join(' + ') || 'לא נשמר';
     toast({
-      title: 'הריצה נשמרה',
+      title: `הריצה נשמרה (${destinations})`,
       description: `${autoApplied.length} תיקונים אוטומטיים, ${queuedPending.length} ממתינים לאישור`,
     });
     void refreshLists();
@@ -383,6 +424,43 @@ export default function AsrTraining() {
   };
   const clearPendingSelection = () => {
     setSelectedPending(new Set());
+  };
+
+  // ─── Local sessions ───
+  const loadLocalIntoUI = (s: LocalSession) => {
+    setRefText(s.refText);
+    setRefLabel(s.label);
+    setSourceKind(s.sourceKind);
+    setResults(s.results.map((r) => {
+      const evalRes = evaluateRun(s.refText, r.hyp, r.metrics.elapsedMs);
+      return {
+        engine: r.engine as Engine,
+        model: r.model,
+        hyp: r.hyp,
+        metrics: r.metrics,
+        diff: evalRes.diff,
+        candidates: r.candidates,
+      };
+    }));
+    toast({ title: 'סשן נטען', description: s.label });
+  };
+  const handleDeleteLocal = (id: string) => {
+    deleteLocalSession(id);
+    setLocalSessions(loadLocalSessions());
+  };
+  const handleExportLocal = () => {
+    const blob = new Blob([exportLocalSessionsJson()], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `asr-sessions-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const handleClearLocal = () => {
+    if (!confirm('למחוק את כל הסשנים המקומיים?')) return;
+    clearLocalSessions();
+    setLocalSessions([]);
   };
 
   // ─── Render ─────────────────────────────────────────────────────────────
@@ -519,6 +597,24 @@ export default function AsrTraining() {
               </RadioGroup>
             </div>
 
+            <Separator />
+
+            <div className="space-y-2">
+              <Label className="text-xs">שמירת סשן</Label>
+              <div className="flex items-center gap-2">
+                <Checkbox id="save-local" checked={saveLocally} onCheckedChange={(v) => setSaveLocally(!!v)} />
+                <label htmlFor="save-local" className="text-sm flex items-center gap-1 flex-1">
+                  <HardDrive className="h-3 w-3" /> מקומי (דפדפן)
+                </label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="save-cloud" checked={saveCloud} onCheckedChange={(v) => setSaveCloud(!!v)} disabled={!user} />
+                <label htmlFor="save-cloud" className="text-sm flex items-center gap-1 flex-1">
+                  <Cloud className="h-3 w-3" /> בענן {!user && <span className="text-xs text-muted-foreground">(דרושה התחברות)</span>}
+                </label>
+              </div>
+            </div>
+
             <Button onClick={runComparison} disabled={running || !audioFile || !(refText || (sourceKind === 'text' && freeText.trim()))} className="w-full">
               {running ? 'מתמלל…' : 'התחל השוואה ולמידה'}
             </Button>
@@ -609,6 +705,54 @@ export default function AsrTraining() {
                     <Button size="sm" variant="ghost" onClick={() => rejectPending(p)}><X className="h-4 w-4" /></Button>
                   </div>
                 ))}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Local sessions ── */}
+      {localSessions.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <HardDrive className="h-4 w-4" /> סשנים מקומיים ({localSessions.length})
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={handleExportLocal}>
+                  <Download className="h-4 w-4 ml-1" /> ייצוא JSON
+                </Button>
+                <Button size="sm" variant="ghost" onClick={handleClearLocal}>
+                  <Trash2 className="h-4 w-4 ml-1" /> נקה הכל
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-64">
+              <div className="space-y-1">
+                {localSessions.map((s) => {
+                  const a = s.results[0];
+                  const b = s.results[1];
+                  return (
+                    <div key={s.id} className="flex items-center gap-2 p-2 rounded border text-sm">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{s.label}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(s.createdAt).toLocaleString('he-IL')}
+                          {a && ` · A: ${a.model.split('/').pop()} WER ${pct(a.metrics.wer)}`}
+                          {b && ` · B: ${b.model.split('/').pop()} WER ${pct(b.metrics.wer)}`}
+                          {` · ${s.autoApplied.length + s.pending.length} תיקונים`}
+                        </div>
+                      </div>
+                      <Button size="sm" variant="outline" onClick={() => loadLocalIntoUI(s)}>טען</Button>
+                      <Button size="sm" variant="ghost" onClick={() => handleDeleteLocal(s.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  );
+                })}
               </div>
             </ScrollArea>
           </CardContent>
