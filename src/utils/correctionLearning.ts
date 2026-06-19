@@ -277,6 +277,28 @@ export function learnFromCorrections(newCorrections: CorrectionEntry[]): void {
 }
 
 /**
+ * User-configurable global confidence threshold for auto-applying learned
+ * corrections. Persisted in localStorage so it follows the user across pages.
+ */
+const CORRECTION_THRESHOLD_KEY = 'correction_confidence_threshold';
+export const DEFAULT_CORRECTION_THRESHOLD = 0.6;
+
+export function getCorrectionThreshold(): number {
+  try {
+    const raw = localStorage.getItem(CORRECTION_THRESHOLD_KEY);
+    if (raw == null) return DEFAULT_CORRECTION_THRESHOLD;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return DEFAULT_CORRECTION_THRESHOLD;
+    return Math.min(1, Math.max(0, n));
+  } catch { return DEFAULT_CORRECTION_THRESHOLD; }
+}
+
+export function setCorrectionThreshold(value: number): void {
+  const clamped = Math.min(1, Math.max(0, value));
+  try { localStorage.setItem(CORRECTION_THRESHOLD_KEY, String(clamped)); } catch { /* ignore */ }
+}
+
+/**
  * Apply learned corrections to new transcription text.
  * Only applies corrections with confidence >= threshold.
  */
@@ -290,9 +312,10 @@ export function applyLearnedCorrections(
 ): { text: string; appliedCount: number; applied: Array<{ original: string; corrected: string }> } {
   const {
     engine,
-    confidenceThreshold = 0.6,
+    confidenceThreshold = getCorrectionThreshold(),
     maxCorrections = 50,
   } = options || {};
+
 
   const corrections = loadCorrections();
 
