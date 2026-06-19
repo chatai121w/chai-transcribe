@@ -23,7 +23,7 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Upload, Sparkles, BookOpen, Trash2, Check, X, RefreshCw, Download, HardDrive, Cloud, Pencil, LayoutList, StretchHorizontal, LayoutGrid, Columns2, Columns3, Columns4, Table as TableIcon, LayoutPanelTop } from 'lucide-react';
+import { Upload, Sparkles, BookOpen, Trash2, Check, X, RefreshCw, Download, HardDrive, Cloud, CloudOff, Pencil, LayoutList, StretchHorizontal, LayoutGrid, Columns2, Columns3, Columns4, Table as TableIcon, LayoutPanelTop, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/hooks/use-toast';
@@ -33,6 +33,7 @@ import {
   wordDiff, extractCorrectionCandidates, isAmbiguous, type DiffOp,
 } from '@/lib/asrMetrics';
 import { learnFromCorrections, type CorrectionEntry } from '@/utils/correctionLearning';
+import { syncLearnedCorrections, getLastSyncAt, type SyncState } from '@/lib/syncLearnedCorrections';
 import {
   loadLocalSessions, saveLocalSession, deleteLocalSession,
   exportLocalSessionsJson, clearLocalSessions, removePendingCorrectionsFromLocalSessions, type LocalSession,
@@ -276,6 +277,46 @@ export default function AsrTraining() {
   };
   useEffect(() => { void refreshLists(); }, [user?.id]);
 
+  // ─── Learned-corrections cloud sync (asr_learned_corrections) ───
+  const [syncState, setSyncState] = useState<SyncState>('idle');
+  const [syncStats, setSyncStats] = useState<{ pushed: number; pulled: number; total: number } | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(() => getLastSyncAt());
+  const syncInFlight = useRef(false);
+
+  const runLearnedSync = async (opts?: { silent?: boolean }) => {
+    if (!user) { setSyncState('offline'); return; }
+    if (syncInFlight.current) return;
+    syncInFlight.current = true;
+    setSyncState('syncing');
+    try {
+      const res = await syncLearnedCorrections(user.id);
+      setSyncStats({ pushed: res.pushed, pulled: res.pulled, total: res.total });
+      setLastSyncAt(res.at);
+      setSyncState('synced');
+      if (!opts?.silent && (res.pushed > 0 || res.pulled > 0)) {
+        toast({
+          title: 'מילון התיקונים סונכרן לענן',
+          description: `↑ ${res.pushed} נשלחו · ↓ ${res.pulled} התקבלו · סה"כ ${res.total}`,
+        });
+      }
+    } catch (err: any) {
+      console.error('[learned-sync] failed', err);
+      setSyncState('error');
+      if (!opts?.silent) {
+        toast({ title: 'סנכרון נכשל', description: err?.message || String(err), variant: 'destructive' });
+      }
+    } finally {
+      syncInFlight.current = false;
+    }
+  };
+
+  // initial pull when user becomes available
+  useEffect(() => {
+    if (!user) { setSyncState('offline'); return; }
+    void runLearnedSync({ silent: true });
+  }, [user?.id]);
+
+
   // ─── Fetch reference text ───
   const fetchReference = async () => {
     if (sourceKind === 'text') {
@@ -382,7 +423,10 @@ export default function AsrTraining() {
       }
     }
 
-    if (autoApplied.length > 0) learnFromCorrections(autoApplied);
+    if (autoApplied.length > 0) {
+      learnFromCorrections(autoApplied);
+      if (user) void runLearnedSync({ silent: true });
+    }
 
     const sourceRef = sourceKind === 'tanakh' ? `${book}.${chapter}${verses.trim() ? `.${verses.trim()}` : ''}` : null;
 
@@ -529,6 +573,7 @@ export default function AsrTraining() {
       toast({ title: `${items.length} תיקונים אושרו`, description: 'נשמרו למערכת הלמידה ולענן' });
     }
     setSelectedPending(new Set());
+    if (user) void runLearnedSync({ silent: true });
     void refreshLists();
   };
   const rejectPending = async (p: PendingCorrection) => {
@@ -1224,6 +1269,40 @@ export default function AsrTraining() {
                 aria-label="בחר הכל"
               />
               תיקונים ממתינים לאישור ({pending.length})
+              {(() => {
+                const SyncIcon =
+                  syncState === 'syncing' ? Loader2 :
+                  syncState === 'synced'  ? CheckCircle2 :
+                  syncState === 'error'   ? AlertCircle :
+                  syncState === 'offline' ? CloudOff : Cloud;
+                const color =
+                  syncState === 'syncing' ? 'text-blue-500' :
+                  syncState === 'synced'  ? 'text-emerald-600' :
+                  syncState === 'error'   ? 'text-rose-600' :
+                  syncState === 'offline' ? 'text-muted-foreground' : 'text-muted-foreground';
+                const label =
+                  syncState === 'syncing' ? 'מסנכרן מילון תיקונים לענן…' :
+                  syncState === 'synced'  ? `מילון תיקונים סונכרן${syncStats ? ` · סה"כ ${syncStats.total} · ↑${syncStats.pushed} ↓${syncStats.pulled}` : ''}${lastSyncAt ? ` · עודכן ${new Date(lastSyncAt).toLocaleTimeString('he-IL')}` : ''}` :
+                  syncState === 'error'   ? 'סנכרון נכשל — לחץ כדי לנסות שוב' :
+                  syncState === 'offline' ? 'לא מחובר — תיקונים נשמרים מקומית בלבד' :
+                  'לחץ לסנכרון מילון התיקונים עם הענן';
+                return (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => void runLearnedSync()}
+                        disabled={!user || syncState === 'syncing'}
+                        className={`inline-flex items-center justify-center h-7 w-7 rounded-md border border-border hover:bg-accent transition-colors ${color} disabled:opacity-60 disabled:cursor-not-allowed`}
+                        aria-label={label}
+                      >
+                        <SyncIcon className={`h-4 w-4 ${syncState === 'syncing' ? 'animate-spin' : ''}`} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs text-xs">{label}</TooltipContent>
+                  </Tooltip>
+                );
+              })()}
             </CardTitle>
             <div className="flex items-center gap-2 flex-wrap">
               <DropdownMenu>

@@ -95,6 +95,51 @@ export type Database = {
         }
         Relationships: []
       }
+      asr_learned_corrections: {
+        Row: {
+          category: string
+          confidence: number
+          corrected: string
+          created_at: string
+          engine: string
+          frequency: number
+          id: string
+          last_used: string
+          note: string | null
+          original: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category?: string
+          confidence?: number
+          corrected: string
+          created_at?: string
+          engine?: string
+          frequency?: number
+          id?: string
+          last_used?: string
+          note?: string | null
+          original: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string
+          confidence?: number
+          corrected?: string
+          created_at?: string
+          engine?: string
+          frequency?: number
+          id?: string
+          last_used?: string
+          note?: string | null
+          original?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       asr_pending_corrections: {
         Row: {
           correct_text: string
