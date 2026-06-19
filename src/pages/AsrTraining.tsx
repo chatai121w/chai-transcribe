@@ -583,7 +583,7 @@ export default function AsrTraining() {
                     <span className="text-emerald-600 font-medium">{p.correct_text}</span>
                     <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
                     <div className="flex-1" />
-                    <Button size="sm" variant="ghost" onClick={() => approvePending(p)}><Check className="h-4 w-4" /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => approvePending([p])}><Check className="h-4 w-4" /></Button>
                     <Button size="sm" variant="ghost" onClick={() => rejectPending(p)}><X className="h-4 w-4" /></Button>
                   </div>
                 ))}
