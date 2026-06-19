@@ -277,6 +277,46 @@ export default function AsrTraining() {
   };
   useEffect(() => { void refreshLists(); }, [user?.id]);
 
+  // ─── Learned-corrections cloud sync (asr_learned_corrections) ───
+  const [syncState, setSyncState] = useState<SyncState>('idle');
+  const [syncStats, setSyncStats] = useState<{ pushed: number; pulled: number; total: number } | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(() => getLastSyncAt());
+  const syncInFlight = useRef(false);
+
+  const runLearnedSync = async (opts?: { silent?: boolean }) => {
+    if (!user) { setSyncState('offline'); return; }
+    if (syncInFlight.current) return;
+    syncInFlight.current = true;
+    setSyncState('syncing');
+    try {
+      const res = await syncLearnedCorrections(user.id);
+      setSyncStats({ pushed: res.pushed, pulled: res.pulled, total: res.total });
+      setLastSyncAt(res.at);
+      setSyncState('synced');
+      if (!opts?.silent && (res.pushed > 0 || res.pulled > 0)) {
+        toast({
+          title: 'מילון התיקונים סונכרן לענן',
+          description: `↑ ${res.pushed} נשלחו · ↓ ${res.pulled} התקבלו · סה"כ ${res.total}`,
+        });
+      }
+    } catch (err: any) {
+      console.error('[learned-sync] failed', err);
+      setSyncState('error');
+      if (!opts?.silent) {
+        toast({ title: 'סנכרון נכשל', description: err?.message || String(err), variant: 'destructive' });
+      }
+    } finally {
+      syncInFlight.current = false;
+    }
+  };
+
+  // initial pull when user becomes available
+  useEffect(() => {
+    if (!user) { setSyncState('offline'); return; }
+    void runLearnedSync({ silent: true });
+  }, [user?.id]);
+
+
   // ─── Fetch reference text ───
   const fetchReference = async () => {
     if (sourceKind === 'text') {
