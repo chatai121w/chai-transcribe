@@ -862,6 +862,17 @@ def load_model(model_id: str, compute_type_override: str | None = None) -> faste
     if model_id in MODELS_NEEDING_CONVERSION:
         actual_path = convert_hf_to_ct2(model_id)
 
+    # Honor an active fine-tuned CT2 model (set via /training/set-active-model).
+    # If present, override the requested model with the user's LoRA-trained build.
+    try:
+        from training_routes import get_active_ct2_path  # type: ignore
+        _ft = get_active_ct2_path()
+        if _ft:
+            print(f"  🎯 Using fine-tuned model override: {_ft}")
+            actual_path = _ft
+    except Exception:
+        pass
+
     print(f"\n  Loading model: {model_id} ({device}/{compute_type})...")
     start = time.time()
 
