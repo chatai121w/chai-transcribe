@@ -18,6 +18,7 @@ const typeConfig = {
 export const NotificationCenter = () => {
   const { notifications, unreadCount, markRead, markAllRead, clearAll } = useNotifications();
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
 
   const formatTime = (date: Date) => {
     const now = new Date();
