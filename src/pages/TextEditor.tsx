@@ -1662,7 +1662,7 @@ const TextEditor = () => {
                   </div>
                 )}
 
-                {showCompareAi && (
+                {showCompareAi && aiPolishEnabled && (
                   <div
                     style={{
                       fontSize: `${fontSize}px`,
