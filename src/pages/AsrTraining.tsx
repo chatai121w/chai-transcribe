@@ -570,6 +570,8 @@ export default function AsrTraining() {
             occurrences: 1,
             engine: q.engine,
             status: 'pending',
+            confidence: q.confidence,
+            rule_ids: q.rule_ids,
           })),
           { onConflict: 'user_id,wrong_text,correct_text', ignoreDuplicates: false },
         );
