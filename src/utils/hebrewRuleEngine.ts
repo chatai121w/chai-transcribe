@@ -37,7 +37,27 @@ const NORMAL_MAP: Record<string, string> = {
 
 // סטריפ ניקוד/טעמים לבדיקת אותיות בלבד
 const stripNikud = (s: string): string => s.replace(/[\u0591-\u05C7]/g, '');
+const normalizeSpaces = (s: string): string => stripNikud(s).trim().replace(/\s+/g, ' ');
 const isHebrewLetter = (ch: string): boolean => /^[\u05D0-\u05EA]$/.test(ch);
+
+const toRegularFinalSkeleton = (s: string): string =>
+  normalizeSpaces(s).replace(/[ךםןףץ]/g, (ch) => NORMAL_MAP[ch] ?? ch);
+
+const countFinalOnlyDifferences = (wrong: string, correct: string): number => {
+  const a = normalizeSpaces(wrong);
+  const b = normalizeSpaces(correct);
+  if (a.length !== b.length) return 0;
+  let diffs = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] === b[i]) continue;
+    if (FINAL_MAP[a[i]] === b[i] || NORMAL_MAP[a[i]] === b[i]) {
+      diffs += 1;
+      continue;
+    }
+    return 0;
+  }
+  return diffs;
+};
 
 /**
  * חוק #1: אות סופית חייבת בסוף מילה.
@@ -207,7 +227,33 @@ export function applyRulesToText(text: string): { fixedText: string; hits: RuleH
  * משמש לחישוב ביטחון של תיקון שכבר נמצא ב-diff.
  */
 export function matchesHebrewRule(wrong: string, correct: string): RuleHit | null {
-  const hit = applyRulesToWord(wrong);
-  if (hit && stripNikud(hit.to) === stripNikud(correct)) return hit;
+  const wrongNorm = normalizeSpaces(wrong);
+  const correctNorm = normalizeSpaces(correct);
+
+  const hit = applyRulesToWord(wrongNorm);
+  if (hit && normalizeSpaces(hit.to) === correctNorm) return hit;
+
+  // זוגות שמגיעים מה-diff לפעמים כוללים רווח/פיסוק או כמה מילים.
+  // אם השלד זהה אחרי המרת ך/ם/ן/ף/ץ לאות רגילה — זו בדיוק טעות אות סופית.
+  const finalDiffs = countFinalOnlyDifferences(wrongNorm, correctNorm);
+  if (finalDiffs > 0 && toRegularFinalSkeleton(wrongNorm) === toRegularFinalSkeleton(correctNorm)) {
+    return {
+      from: wrong,
+      to: correct,
+      ruleId: 'final-letter-pair-match',
+      confidence: 98,
+      reason: 'ההבדל היחיד הוא אות סופית בעברית',
+    };
+  }
+
+  const fixed = applyRulesToText(wrongNorm);
+  if (fixed.hits.length > 0 && normalizeSpaces(fixed.fixedText) === correctNorm) {
+    return {
+      ...fixed.hits[0],
+      from: wrong,
+      to: correct,
+      confidence: Math.max(95, fixed.hits[0].confidence),
+    };
+  }
   return null;
 }
