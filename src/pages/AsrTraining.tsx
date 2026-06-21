@@ -805,22 +805,22 @@ export default function AsrTraining() {
 
   // ─── AI Alignment Review ───
   const runAiReview = async () => {
-    if (results.length === 0) {
-      toast({ title: 'אין תוצאות לניתוח', description: 'הרץ תמלול קודם', variant: 'destructive' });
-      return;
-    }
     const a = results[0];
-    if (!a || !refText) {
-      toast({ title: 'חסר טקסט קנוני או היפותזה', variant: 'destructive' });
+    const hasResults = !!(a && refText);
+    if (!hasResults && pending.length === 0) {
+      toast({ title: 'אין נתונים לניתוח', description: 'הרץ תמלול או טען תיקונים ממתינים', variant: 'destructive' });
       return;
     }
     setAiReviewing(true);
     setAiReviewSummary(null);
     try {
+      const candidates = hasResults
+        ? a!.candidates
+        : filteredSortedPending.slice(0, 80).map((p) => ({ wrong: p.wrong_text, correct: p.correct_text }));
       const review = await runAiAlignmentReview({
-        refText,
-        hypText: a.hyp,
-        candidates: a.candidates,
+        refText: hasResults ? refText : '',
+        hypText: hasResults ? a!.hyp : '',
+        candidates,
       });
       setAiReviewSummary(review.summary ?? null);
 
@@ -1721,7 +1721,7 @@ export default function AsrTraining() {
                   <ShieldCheck className="h-3.5 w-3.5 ml-1" />
                   אשר את כל מה שמעל הסף
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => void runAiReview()} disabled={aiReviewing || results.length === 0}>
+                <Button size="sm" variant="outline" onClick={() => void runAiReview()} disabled={aiReviewing || (results.length === 0 && pending.length === 0)}>
                   {aiReviewing ? <Loader2 className="h-3.5 w-3.5 ml-1 animate-spin" /> : <Sparkle className="h-3.5 w-3.5 ml-1" />}
                   נתח עם AI
                 </Button>

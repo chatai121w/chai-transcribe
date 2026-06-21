@@ -50,24 +50,28 @@ Deno.serve(async (req: Request) => {
     }
 
     const body = (await req.json()) as RequestBody;
-    if (!body?.refText || !body?.hypText) {
-      return new Response(JSON.stringify({ error: 'refText and hypText required' }), {
+    const hasTexts = !!(body?.refText && body?.hypText);
+    const hasCandidates = Array.isArray(body?.candidates) && body.candidates.length > 0;
+    if (!hasTexts && !hasCandidates) {
+      return new Response(JSON.stringify({ error: 'יש לספק refText+hypText או candidates' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     const userPrompt = [
-      `## טקסט קנוני (אמת):\n${body.refText.slice(0, 8000)}`,
-      `\n## טקסט שהתקבל מהמנוע:\n${body.hypText.slice(0, 8000)}`,
-      body.candidates?.length
-        ? `\n## מועמדי תיקון שזיהיתי (wrong → correct):\n${body.candidates
+      hasTexts ? `## טקסט קנוני (אמת):\n${body.refText.slice(0, 8000)}` : '',
+      hasTexts ? `\n## טקסט שהתקבל מהמנוע:\n${body.hypText.slice(0, 8000)}` : '',
+      hasCandidates
+        ? `\n## מועמדי תיקון לבדיקה (wrong → correct):\n${body.candidates
             .slice(0, 80)
             .map((c) => `- ${c.wrong} → ${c.correct}`)
             .join('\n')}`
         : '',
-      '\n## משימה:\nנתח את התיקונים והחזר JSON כפי שתואר במערכת.',
-    ].join('\n');
+      hasTexts
+        ? '\n## משימה:\nנתח את התיקונים והחזר JSON כפי שתואר במערכת.'
+        : '\n## משימה:\nאין טקסט הקשר — הערך כל זוג wrong→correct באופן עצמאי לפי כללי עברית (פונטיקה, הומופונים, אותיות סופיות ך/ם/ן/ף/ץ, מורפולוגיה, כתיב). החזר JSON כפי שתואר.',
+    ].filter(Boolean).join('\n');
 
     const aiResp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
