@@ -805,22 +805,22 @@ export default function AsrTraining() {
 
   // ─── AI Alignment Review ───
   const runAiReview = async () => {
-    if (results.length === 0) {
-      toast({ title: 'אין תוצאות לניתוח', description: 'הרץ תמלול קודם', variant: 'destructive' });
-      return;
-    }
     const a = results[0];
-    if (!a || !refText) {
-      toast({ title: 'חסר טקסט קנוני או היפותזה', variant: 'destructive' });
+    const hasResults = !!(a && refText);
+    if (!hasResults && pending.length === 0) {
+      toast({ title: 'אין נתונים לניתוח', description: 'הרץ תמלול או טען תיקונים ממתינים', variant: 'destructive' });
       return;
     }
     setAiReviewing(true);
     setAiReviewSummary(null);
     try {
+      const candidates = hasResults
+        ? a!.candidates
+        : filteredSortedPending.slice(0, 80).map((p) => ({ wrong: p.wrong_text, correct: p.correct_text }));
       const review = await runAiAlignmentReview({
-        refText,
-        hypText: a.hyp,
-        candidates: a.candidates,
+        refText: hasResults ? refText : '',
+        hypText: hasResults ? a!.hyp : '',
+        candidates,
       });
       setAiReviewSummary(review.summary ?? null);
 
