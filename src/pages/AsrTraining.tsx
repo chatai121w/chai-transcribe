@@ -1199,6 +1199,7 @@ export default function AsrTraining() {
                 )}
               </td>
               <td className="p-2 text-xs text-muted-foreground">×{p.occurrences}</td>
+              <td className="p-2">{ConfBadge}</td>
               <td className="p-2 text-left whitespace-nowrap">{Actions}</td>
             </tr>
           </TooltipTrigger>
