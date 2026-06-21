@@ -1630,6 +1630,29 @@ export default function AsrTraining() {
             <div className="flex items-center gap-2 flex-wrap">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" title="מיון" aria-label="מיון">
+                    {(() => { const Icon = (SORT_OPTIONS.find(o => o.value === pendingSort)?.icon) ?? ArrowDown10; return <Icon className="h-4 w-4" />; })()}
+                    <span className="text-[10px] mr-1 opacity-70">מיון</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel className="text-xs">מיון תיקונים</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {SORT_OPTIONS.map((opt) => {
+                    const Icon = opt.icon;
+                    const active = pendingSort === opt.value;
+                    return (
+                      <DropdownMenuItem key={opt.value} onClick={() => setPendingSort(opt.value)} className={active ? 'bg-yellow-500/10 font-medium' : ''}>
+                        <Icon className="h-4 w-4 ml-2" />
+                        <span className="flex-1">{opt.label}</span>
+                        {active && <Check className="h-3 w-3 mr-2" />}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <Button size="sm" variant="outline" title="תצוגה" aria-label="שנה תצוגה">
                     {(() => { const Icon = currentViewIcon; return <Icon className="h-4 w-4" />; })()}
                     <LayoutPanelTop className="h-3 w-3 mr-1 opacity-50" />
