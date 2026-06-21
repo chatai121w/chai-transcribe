@@ -591,6 +591,8 @@ export default function AsrTraining() {
         occurrences: 1,
         engine: q.engine,
         created_at: createdAt,
+        confidence: q.confidence,
+        rule_ids: q.rule_ids,
       }));
       commitPending((prev) => {
         const existing = new Set(prev.map(pendingKey));
