@@ -1632,6 +1632,53 @@ export default function AsrTraining() {
           </div>
         </CardHeader>
         <CardContent>
+          {/* ── Auto-approve threshold slider + AI review ── */}
+          <div className="mb-3 p-3 rounded-md border bg-muted/20 space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <Label className="text-xs font-medium flex items-center gap-1">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                סף אישור אוטומטי לפי ביטחון
+                <span className="font-mono text-yellow-600">{autoApproveThreshold}%</span>
+              </Label>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const above = pending.filter((p) => (p.confidence ?? 0) >= autoApproveThreshold).length;
+                  return (
+                    <span className="text-xs text-muted-foreground">
+                      {above} תיקונים מעל הסף
+                    </span>
+                  );
+                })()}
+                <Button size="sm" variant="default" onClick={approveAllAboveThreshold} disabled={pending.length === 0}>
+                  <ShieldCheck className="h-3.5 w-3.5 ml-1" />
+                  אשר את כל מה שמעל הסף
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void runAiReview()} disabled={aiReviewing || results.length === 0}>
+                  {aiReviewing ? <Loader2 className="h-3.5 w-3.5 ml-1 animate-spin" /> : <Sparkle className="h-3.5 w-3.5 ml-1" />}
+                  נתח עם AI
+                </Button>
+              </div>
+            </div>
+            <Slider
+              value={[autoApproveThreshold]}
+              min={0}
+              max={100}
+              step={5}
+              onValueChange={(v) => setAutoApproveThreshold(v[0] ?? 80)}
+              className="py-1"
+            />
+            <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+              <span>אגרסיבי (0%)</span>
+              <span>מאוזן (50%)</span>
+              <span>שמרני (100%)</span>
+            </div>
+            {aiReviewSummary && (
+              <div className="text-xs text-muted-foreground bg-background/60 rounded p-2 border">
+                <span className="font-medium text-foreground">סיכום AI:</span> {aiReviewSummary}
+              </div>
+            )}
+          </div>
+
           {pending.length === 0 ? (
             <div className="text-sm text-muted-foreground p-4 text-center border border-dashed rounded">
               אין כרגע תיקונים ממתינים לאישור.
