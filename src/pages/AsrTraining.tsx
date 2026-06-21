@@ -41,7 +41,7 @@ import {
 } from '@/lib/asrLocalSessions';
 import LoraFineTuningPanel from '@/components/training/LoraFineTuningPanel';
 import { scoreCorrection, confidenceColor } from '@/utils/correctionConfidence';
-import { applyRulesToText } from '@/utils/hebrewRuleEngine';
+import { applyRulesToText, matchesHebrewRule } from '@/utils/hebrewRuleEngine';
 import { runAiAlignmentReview, type AiAlignment } from '@/utils/aiAlignmentReview';
 import { getAllTerms } from '@/utils/customVocabulary';
 import { getAllCorrections } from '@/utils/correctionLearning';
