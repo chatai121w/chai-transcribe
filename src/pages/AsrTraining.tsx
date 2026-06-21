@@ -45,7 +45,7 @@ import { applyRulesToText } from '@/utils/hebrewRuleEngine';
 import { runAiAlignmentReview, type AiAlignment } from '@/utils/aiAlignmentReview';
 import { getAllTerms } from '@/utils/customVocabulary';
 import { getAllCorrections } from '@/utils/correctionLearning';
-import { Sparkle, ShieldCheck } from 'lucide-react';
+import { Sparkle, ShieldCheck, ArrowDownAZ, ArrowUpAZ, ArrowDown10, ArrowUp10, Filter } from 'lucide-react';
 
 // ─── Tanakh book catalog (Sefaria refs) ───────────────────────────────────
 const TANAKH_BOOKS: Array<{ value: string; label: string; chapters: number }> = [
@@ -757,6 +757,51 @@ export default function AsrTraining() {
     { value: 'table',      label: 'טבלה',             icon: TableIcon },
   ];
   const currentViewIcon = (PENDING_VIEW_OPTIONS.find((o) => o.value === pendingView)?.icon) ?? LayoutList;
+
+  // ─── Sort / Filter for pending ───
+  type PendingSortMode = 'conf_desc' | 'conf_asc' | 'name_asc' | 'name_desc' | 'occ_desc' | 'default';
+  const [pendingSort, setPendingSort] = useState<PendingSortMode>(() => {
+    const v = localStorage.getItem('asr_pending_sort') as PendingSortMode | null;
+    return v && ['conf_desc','conf_asc','name_asc','name_desc','occ_desc','default'].includes(v) ? v : 'default';
+  });
+  useEffect(() => { localStorage.setItem('asr_pending_sort', pendingSort); }, [pendingSort]);
+  const [pendingMinConf, setPendingMinConf] = useState<number>(() => {
+    const v = Number(localStorage.getItem('asr_pending_min_conf'));
+    return Number.isFinite(v) ? v : 0;
+  });
+  useEffect(() => { localStorage.setItem('asr_pending_min_conf', String(pendingMinConf)); }, [pendingMinConf]);
+  const [pendingNameFilter, setPendingNameFilter] = useState('');
+
+  const SORT_OPTIONS: Array<{ value: PendingSortMode; label: string; icon: typeof ArrowDown10 }> = [
+    { value: 'default',   label: 'ברירת מחדל (הופעות)', icon: ArrowDown10 },
+    { value: 'conf_desc', label: 'ביטחון: גבוה → נמוך', icon: ArrowDown10 },
+    { value: 'conf_asc',  label: 'ביטחון: נמוך → גבוה', icon: ArrowUp10 },
+    { value: 'name_asc',  label: 'שם (א → ת)',          icon: ArrowDownAZ },
+    { value: 'name_desc', label: 'שם (ת → א)',          icon: ArrowUpAZ },
+    { value: 'occ_desc',  label: 'הופעות (הרבה → מעט)', icon: ArrowDown10 },
+  ];
+
+  const filteredSortedPending = useMemo(() => {
+    const q = pendingNameFilter.trim().toLowerCase();
+    let arr = pending.filter((p) => (p.confidence ?? 0) >= pendingMinConf);
+    if (q) {
+      arr = arr.filter((p) =>
+        (p.wrong_text || '').toLowerCase().includes(q) ||
+        (p.correct_text || '').toLowerCase().includes(q)
+      );
+    }
+    const cmp = (a: PendingCorrection, b: PendingCorrection) => {
+      switch (pendingSort) {
+        case 'conf_desc': return (b.confidence ?? 0) - (a.confidence ?? 0);
+        case 'conf_asc':  return (a.confidence ?? 0) - (b.confidence ?? 0);
+        case 'name_asc':  return (a.wrong_text || '').localeCompare(b.wrong_text || '', 'he');
+        case 'name_desc': return (b.wrong_text || '').localeCompare(a.wrong_text || '', 'he');
+        case 'occ_desc':  return (b.occurrences ?? 0) - (a.occurrences ?? 0);
+        default: return 0;
+      }
+    };
+    return pendingSort === 'default' ? arr : [...arr].sort(cmp);
+  }, [pending, pendingSort, pendingMinConf, pendingNameFilter]);
 
   // ─── AI Alignment Review ───
   const runAiReview = async () => {
@@ -1585,6 +1630,29 @@ export default function AsrTraining() {
             <div className="flex items-center gap-2 flex-wrap">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" title="מיון" aria-label="מיון">
+                    {(() => { const Icon = (SORT_OPTIONS.find(o => o.value === pendingSort)?.icon) ?? ArrowDown10; return <Icon className="h-4 w-4" />; })()}
+                    <span className="text-[10px] mr-1 opacity-70">מיון</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel className="text-xs">מיון תיקונים</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {SORT_OPTIONS.map((opt) => {
+                    const Icon = opt.icon;
+                    const active = pendingSort === opt.value;
+                    return (
+                      <DropdownMenuItem key={opt.value} onClick={() => setPendingSort(opt.value)} className={active ? 'bg-yellow-500/10 font-medium' : ''}>
+                        <Icon className="h-4 w-4 ml-2" />
+                        <span className="flex-1">{opt.label}</span>
+                        {active && <Check className="h-3 w-3 mr-2" />}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <Button size="sm" variant="outline" title="תצוגה" aria-label="שנה תצוגה">
                     {(() => { const Icon = currentViewIcon; return <Icon className="h-4 w-4" />; })()}
                     <LayoutPanelTop className="h-3 w-3 mr-1 opacity-50" />
@@ -1679,6 +1747,42 @@ export default function AsrTraining() {
             )}
           </div>
 
+          {/* ── Filter row: name search + min confidence ── */}
+          {pending.length > 0 && (
+            <div className="mb-3 p-2 rounded-md border bg-background/40 flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-1 min-w-[180px]">
+                <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={pendingNameFilter}
+                  onChange={(e) => setPendingNameFilter(e.target.value)}
+                  placeholder="חיפוש לפי שם מילה (שגוי/נכון)..."
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div className="flex items-center gap-2 min-w-[220px]">
+                <Label className="text-xs whitespace-nowrap">
+                  ביטחון מינ׳ <span className="font-mono text-yellow-600">{pendingMinConf}%</span>
+                </Label>
+                <Slider
+                  value={[pendingMinConf]}
+                  min={0}
+                  max={100}
+                  step={5}
+                  onValueChange={(v) => setPendingMinConf(v[0] ?? 0)}
+                  className="w-32"
+                />
+              </div>
+              <span className="text-xs text-muted-foreground">
+                מציג {filteredSortedPending.length} מתוך {pending.length}
+              </span>
+              {(pendingMinConf > 0 || pendingNameFilter || pendingSort !== 'default') && (
+                <Button size="sm" variant="ghost" className="h-7" onClick={() => { setPendingMinConf(0); setPendingNameFilter(''); setPendingSort('default'); }}>
+                  <X className="h-3 w-3 ml-1" /> אפס סינון
+                </Button>
+              )}
+            </div>
+          )}
+
           {pending.length === 0 ? (
             <div className="text-sm text-muted-foreground p-4 text-center border border-dashed rounded">
               אין כרגע תיקונים ממתינים לאישור.
@@ -1690,13 +1794,13 @@ export default function AsrTraining() {
           ) : pendingView === 'list' ? (
             <ScrollArea className="h-64">
               <div className="space-y-1">
-                {pending.map((p) => renderPendingItem(p, 'row'))}
+                {filteredSortedPending.map((p) => renderPendingItem(p, "row"))}
               </div>
             </ScrollArea>
           ) : pendingView === 'horizontal' ? (
             <ScrollArea className="w-full" dir="rtl">
               <div className="flex gap-2 pb-3">
-                {pending.map((p) => (
+                {filteredSortedPending.map((p) => (
                   <div key={p.id} className="min-w-[280px] max-w-[320px] flex-shrink-0">
                     {renderPendingItem(p, 'card')}
                   </div>
@@ -1717,7 +1821,7 @@ export default function AsrTraining() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pending.map((p) => renderPendingItem(p, 'tableRow'))}
+                  {filteredSortedPending.map((p) => renderPendingItem(p, "tableRow"))}
                 </tbody>
               </table>
             </ScrollArea>
@@ -1728,7 +1832,7 @@ export default function AsrTraining() {
                 pendingView === 'grid3' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' :
                 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
               }`}>
-                {pending.map((p) => renderPendingItem(p, 'card'))}
+                {filteredSortedPending.map((p) => renderPendingItem(p, "card"))}
               </div>
             </ScrollArea>
           )}
