@@ -1747,6 +1747,42 @@ export default function AsrTraining() {
             )}
           </div>
 
+          {/* ── Filter row: name search + min confidence ── */}
+          {pending.length > 0 && (
+            <div className="mb-3 p-2 rounded-md border bg-background/40 flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-1 min-w-[180px]">
+                <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={pendingNameFilter}
+                  onChange={(e) => setPendingNameFilter(e.target.value)}
+                  placeholder="חיפוש לפי שם מילה (שגוי/נכון)..."
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div className="flex items-center gap-2 min-w-[220px]">
+                <Label className="text-xs whitespace-nowrap">
+                  ביטחון מינ׳ <span className="font-mono text-yellow-600">{pendingMinConf}%</span>
+                </Label>
+                <Slider
+                  value={[pendingMinConf]}
+                  min={0}
+                  max={100}
+                  step={5}
+                  onValueChange={(v) => setPendingMinConf(v[0] ?? 0)}
+                  className="w-32"
+                />
+              </div>
+              <span className="text-xs text-muted-foreground">
+                מציג {filteredSortedPending.length} מתוך {pending.length}
+              </span>
+              {(pendingMinConf > 0 || pendingNameFilter || pendingSort !== 'default') && (
+                <Button size="sm" variant="ghost" className="h-7" onClick={() => { setPendingMinConf(0); setPendingNameFilter(''); setPendingSort('default'); }}>
+                  <X className="h-3 w-3 ml-1" /> אפס סינון
+                </Button>
+              )}
+            </div>
+          )}
+
           {pending.length === 0 ? (
             <div className="text-sm text-muted-foreground p-4 text-center border border-dashed rounded">
               אין כרגע תיקונים ממתינים לאישור.
