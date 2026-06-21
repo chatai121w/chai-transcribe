@@ -882,6 +882,36 @@ export default function AsrTraining() {
     void approvePending(high);
   };
 
+  /**
+   * החל חוקי עברית דטרמיניסטיים (ללא AI) על כל הממתינים.
+   * מאתר אותיות סופיות (כ→ך, מ→ם, נ→ן, פ→ף, צ→ץ), ראשי תיבות, וו כפולה,
+   * מעדכן ביטחון ל-95 ומאשר אוטומטית.
+   */
+  const applyHebrewRulesToPending = async () => {
+    if (pending.length === 0) {
+      toast({ title: 'אין תיקונים ממתינים', variant: 'destructive' });
+      return;
+    }
+    const matched: PendingCorrection[] = [];
+    const reasons: string[] = [];
+    for (const p of pending) {
+      const hit = matchesHebrewRule(p.wrong_text, p.correct_text);
+      if (hit) {
+        matched.push({ ...p, confidence: Math.max(p.confidence ?? 0, hit.confidence) });
+        reasons.push(`${p.wrong_text} → ${p.correct_text} (${hit.reason})`);
+      }
+    }
+    if (matched.length === 0) {
+      toast({ title: 'לא נמצאו תיקונים שמתאימים לחוקי עברית', description: 'בדוק תיקונים אחרים' });
+      return;
+    }
+    toast({
+      title: `נמצאו ${matched.length} תיקונים לפי חוקי עברית`,
+      description: reasons.slice(0, 3).join(' · ') + (reasons.length > 3 ? '…' : ''),
+    });
+    await approvePending(matched);
+  };
+
 
   const addManualCorrection = async (opts: { approveNow: boolean }) => {
     const wrong = manualWrong.trim();
