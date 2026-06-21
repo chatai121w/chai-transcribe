@@ -142,36 +142,45 @@ export type Database = {
       }
       asr_pending_corrections: {
         Row: {
+          ai_reason: string | null
+          confidence: number
           correct_text: string
           created_at: string
           engine: string | null
           id: string
           occurrences: number
           resolved_at: string | null
+          rule_ids: string[]
           run_id: string | null
           status: string
           user_id: string
           wrong_text: string
         }
         Insert: {
+          ai_reason?: string | null
+          confidence?: number
           correct_text: string
           created_at?: string
           engine?: string | null
           id?: string
           occurrences?: number
           resolved_at?: string | null
+          rule_ids?: string[]
           run_id?: string | null
           status?: string
           user_id: string
           wrong_text: string
         }
         Update: {
+          ai_reason?: string | null
+          confidence?: number
           correct_text?: string
           created_at?: string
           engine?: string | null
           id?: string
           occurrences?: number
           resolved_at?: string | null
+          rule_ids?: string[]
           run_id?: string | null
           status?: string
           user_id?: string

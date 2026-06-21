@@ -40,6 +40,12 @@ import {
   exportLocalSessionsJson, clearLocalSessions, removePendingCorrectionsFromLocalSessions, type LocalSession,
 } from '@/lib/asrLocalSessions';
 import LoraFineTuningPanel from '@/components/training/LoraFineTuningPanel';
+import { scoreCorrection, confidenceColor } from '@/utils/correctionConfidence';
+import { applyRulesToText } from '@/utils/hebrewRuleEngine';
+import { runAiAlignmentReview, type AiAlignment } from '@/utils/aiAlignmentReview';
+import { getAllTerms } from '@/utils/customVocabulary';
+import { getAllCorrections } from '@/utils/correctionLearning';
+import { Sparkle, ShieldCheck } from 'lucide-react';
 
 // ─── Tanakh book catalog (Sefaria refs) ───────────────────────────────────
 const TANAKH_BOOKS: Array<{ value: string; label: string; chapters: number }> = [
@@ -110,6 +116,9 @@ interface PendingCorrection {
   occurrences: number;
   engine: string | null;
   created_at: string;
+  confidence?: number;       // 0-100
+  rule_ids?: string[];
+  ai_reason?: string | null;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -247,6 +256,11 @@ export default function AsrTraining() {
   );
   const [localSessions, setLocalSessions] = useState<LocalSession[]>(() => loadLocalSessions());
   const [confidenceThreshold, setConfidenceThresholdState] = useState<number>(() => getCorrectionThreshold());
+  const [autoApproveThreshold, setAutoApproveThreshold] = useState<number>(
+    () => Number(localStorage.getItem('asr_training_auto_approve_threshold') ?? 80),
+  );
+  const [aiReviewing, setAiReviewing] = useState(false);
+  const [aiReviewSummary, setAiReviewSummary] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingRef = useRef<PendingCorrection[]>(pending);
 
@@ -255,6 +269,26 @@ export default function AsrTraining() {
   useEffect(() => { localStorage.setItem('asr_training_save_local', String(saveLocally)); }, [saveLocally]);
   useEffect(() => { localStorage.setItem('asr_training_save_cloud', String(saveCloud)); }, [saveCloud]);
   useEffect(() => { setCorrectionThreshold(confidenceThreshold); }, [confidenceThreshold]);
+  useEffect(() => { localStorage.setItem('asr_training_auto_approve_threshold', String(autoApproveThreshold)); }, [autoApproveThreshold]);
+
+  // Vocabulary + learned lookup set for confidence boost
+  const knownCorrectWords = useMemo(() => {
+    const set = new Set<string>();
+    try {
+      for (const t of getAllTerms()) set.add(t.term.trim());
+      for (const c of getAllCorrections()) set.add(c.corrected.trim());
+    } catch { /* ignore */ }
+    return set;
+  }, [pending.length]);
+
+  const computeConfidence = (wrong: string, correct: string, occurrences: number, aiConf?: number | null): number => {
+    return scoreCorrection({
+      wrong, correct, occurrences,
+      inVocabulary: knownCorrectWords.has(correct.trim()),
+      aiConfidence: aiConf,
+    }).total;
+  };
+
 
   const commitPending = (updater: (prev: PendingCorrection[]) => PendingCorrection[]) => {
     setPending((prev) => {
@@ -368,21 +402,31 @@ export default function AsrTraining() {
       if (useLovable) {
         toast({ title: 'מתמלל עם Lovable AI…' });
         const { text, elapsed_ms } = await transcribeWithLovable(audioFile, lovableModel);
-        const { metrics, diff, candidates } = evaluateRun(effectiveRef, text, elapsed_ms);
-        results.push({ engine: 'lovable', model: lovableModel, hyp: text, metrics, diff, candidates });
+        // ── Pre-pass: Hebrew rule engine (deterministic, non-AI) ──
+        const { fixedText, hits } = applyRulesToText(text);
+        if (hits.length > 0) {
+          toast({ title: `${hits.length} תיקוני חוקים עבריים הופעלו`, description: 'סופיות, רווחים וכו׳' });
+        }
+        const { metrics, diff, candidates } = evaluateRun(effectiveRef, fixedText, elapsed_ms);
+        results.push({ engine: 'lovable', model: lovableModel, hyp: fixedText, metrics, diff, candidates });
         setResults([...results]);
       }
       if (useLocal) {
         toast({ title: 'מתמלל עם השרת המקומי…' });
         try {
           const { text, elapsed_ms } = await transcribeWithLocal(audioFile, localServerUrl);
-          const { metrics, diff, candidates } = evaluateRun(effectiveRef, text, elapsed_ms);
-          results.push({ engine: 'local', model: 'ivrit-ai/local-cuda', hyp: text, metrics, diff, candidates });
+          const { fixedText, hits } = applyRulesToText(text);
+          if (hits.length > 0) {
+            toast({ title: `${hits.length} תיקוני חוקים עבריים הופעלו (מקומי)` });
+          }
+          const { metrics, diff, candidates } = evaluateRun(effectiveRef, fixedText, elapsed_ms);
+          results.push({ engine: 'local', model: 'ivrit-ai/local-cuda', hyp: fixedText, metrics, diff, candidates });
           setResults([...results]);
         } catch (err) {
           toast({ title: 'שרת מקומי לא זמין', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
         }
       }
+
 
       // Save run + handle corrections per learning mode
       await saveRun(results, effectiveRef);
@@ -401,7 +445,7 @@ export default function AsrTraining() {
     // Auto-applied corrections (per learning mode, based on engine A's diff)
     const autoApplied: CorrectionEntry[] = [];
     const autoSummary: Array<{ wrong: string; correct: string; occurrences: number; engine: string }> = [];
-    const queuedPending: Array<{ wrong: string; correct: string; engine: string }> = [];
+    const queuedPending: Array<{ wrong: string; correct: string; engine: string; confidence: number; rule_ids: string[] }> = [];
 
     if (a) {
       const counts = new Map<string, number>();
@@ -413,19 +457,30 @@ export default function AsrTraining() {
 
       for (const [key, n] of counts) {
         const [wrong, correct] = key.split('→');
-        if (learningMode === 'auto') {
+        const breakdown = scoreCorrection({
+          wrong, correct, occurrences: n,
+          inVocabulary: knownCorrectWords.has(correct.trim()),
+        });
+        const conf = breakdown.total;
+        const ruleIds = breakdown.ruleHit ? [breakdown.ruleHit.ruleId] : [];
+
+        // Auto-approve if confidence passes threshold OR mode allows it
+        const passesAutoThreshold = conf >= autoApproveThreshold;
+
+        if (learningMode === 'auto' || passesAutoThreshold) {
           autoApplied.push(buildCorrection(wrong, correct, n, a.engine));
           autoSummary.push({ wrong, correct, occurrences: n, engine: a.engine });
         } else if (learningMode === 'hybrid') {
           if (n >= 2) {
             autoApplied.push(buildCorrection(wrong, correct, n, a.engine));
             autoSummary.push({ wrong, correct, occurrences: n, engine: a.engine });
-          } else queuedPending.push({ wrong, correct, engine: a.engine });
+          } else queuedPending.push({ wrong, correct, engine: a.engine, confidence: conf, rule_ids: ruleIds });
         } else {
-          queuedPending.push({ wrong, correct, engine: a.engine });
+          queuedPending.push({ wrong, correct, engine: a.engine, confidence: conf, rule_ids: ruleIds });
         }
       }
     }
+
 
     if (autoApplied.length > 0) {
       learnFromCorrections(autoApplied);
@@ -525,6 +580,8 @@ export default function AsrTraining() {
             occurrences: 1,
             engine: q.engine,
             status: 'pending',
+            confidence: q.confidence,
+            rule_ids: q.rule_ids,
           })),
           { onConflict: 'user_id,wrong_text,correct_text', ignoreDuplicates: false },
         );
@@ -544,6 +601,8 @@ export default function AsrTraining() {
         occurrences: 1,
         engine: q.engine,
         created_at: createdAt,
+        confidence: q.confidence,
+        rule_ids: q.rule_ids,
       }));
       commitPending((prev) => {
         const existing = new Set(prev.map(pendingKey));
@@ -698,6 +757,87 @@ export default function AsrTraining() {
     { value: 'table',      label: 'טבלה',             icon: TableIcon },
   ];
   const currentViewIcon = (PENDING_VIEW_OPTIONS.find((o) => o.value === pendingView)?.icon) ?? LayoutList;
+
+  // ─── AI Alignment Review ───
+  const runAiReview = async () => {
+    if (results.length === 0) {
+      toast({ title: 'אין תוצאות לניתוח', description: 'הרץ תמלול קודם', variant: 'destructive' });
+      return;
+    }
+    const a = results[0];
+    if (!a || !refText) {
+      toast({ title: 'חסר טקסט קנוני או היפותזה', variant: 'destructive' });
+      return;
+    }
+    setAiReviewing(true);
+    setAiReviewSummary(null);
+    try {
+      const review = await runAiAlignmentReview({
+        refText,
+        hypText: a.hyp,
+        candidates: a.candidates,
+      });
+      setAiReviewSummary(review.summary ?? null);
+
+      // Add new high-confidence alignments to pending (or boost existing)
+      const newPending: PendingCorrection[] = [];
+      const createdAt = new Date().toISOString();
+      for (let i = 0; i < review.alignments.length; i += 1) {
+        const al: AiAlignment = review.alignments[i];
+        if (al.confidence < 0.5) continue;
+        if (al.hyp.trim() === al.ref.trim()) continue;
+        const conf = computeConfidence(al.hyp, al.ref, 1, al.confidence);
+        newPending.push({
+          id: `local_ai_${Date.now()}_${i}`,
+          wrong_text: al.hyp,
+          correct_text: al.ref,
+          occurrences: 1,
+          engine: 'ai-review',
+          created_at: createdAt,
+          confidence: conf,
+          rule_ids: [],
+          ai_reason: `[${al.ruleType}] ${al.reason}`,
+        });
+      }
+      commitPending((prev) => {
+        const existing = new Map(prev.map((p) => [pendingKey(p), p] as const));
+        for (const np of newPending) {
+          const k = pendingKey(np);
+          const old = existing.get(k);
+          if (old) {
+            // Boost confidence + attach AI reason
+            existing.set(k, {
+              ...old,
+              confidence: Math.max(old.confidence ?? 0, np.confidence ?? 0),
+              ai_reason: np.ai_reason ?? old.ai_reason ?? null,
+            });
+          } else {
+            existing.set(k, np);
+          }
+        }
+        return Array.from(existing.values());
+      });
+      toast({
+        title: 'ניתוח AI הושלם',
+        description: `${review.alignments.length} alignments · ${newPending.length} נוספו/עודכנו`,
+      });
+    } catch (err) {
+      toast({ title: 'ניתוח AI נכשל', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
+    } finally {
+      setAiReviewing(false);
+    }
+  };
+
+  const approveAllAboveThreshold = () => {
+    const high = pending.filter((p) => (p.confidence ?? 0) >= autoApproveThreshold);
+    if (high.length === 0) {
+      toast({ title: 'אין תיקונים מעל הסף', description: `סף נוכחי: ${autoApproveThreshold}` });
+      return;
+    }
+    void approvePending(high);
+  };
+
+
   const addManualCorrection = async (opts: { approveNow: boolean }) => {
     const wrong = manualWrong.trim();
     const correct = manualCorrect.trim();
@@ -961,6 +1101,32 @@ export default function AsrTraining() {
       </>
     );
 
+    const conf = p.confidence ?? 50;
+    const confStyle = confidenceColor(conf);
+    const ConfBadge = (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className={`text-xs ${confStyle.bg} ${confStyle.text} border-current/30`}>
+            <ShieldCheck className="h-3 w-3 ml-1 inline" />
+            {conf}%
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs max-w-xs" dir="rtl">
+          <div>ביטחון {confStyle.label} ({conf}%)</div>
+          {p.rule_ids && p.rule_ids.length > 0 && (
+            <div className="text-muted-foreground">חוקים: {p.rule_ids.join(', ')}</div>
+          )}
+          {p.ai_reason && (
+            <div className="text-muted-foreground">AI: {p.ai_reason}</div>
+          )}
+          {conf >= autoApproveThreshold && (
+            <div className="text-emerald-500">✓ מעל סף האישור האוטומטי ({autoApproveThreshold}%)</div>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    );
+
+
     const Actions = isEditing ? (
       <>
         <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); void saveEdit(p); }}>
@@ -1033,6 +1199,7 @@ export default function AsrTraining() {
                 )}
               </td>
               <td className="p-2 text-xs text-muted-foreground">×{p.occurrences}</td>
+              <td className="p-2">{ConfBadge}</td>
               <td className="p-2 text-left whitespace-nowrap">{Actions}</td>
             </tr>
           </TooltipTrigger>
@@ -1057,6 +1224,7 @@ export default function AsrTraining() {
                   disabled={isEditing}
                 />
                 <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
+                {ConfBadge}
                 <div className="flex-1" />
                 {Actions}
               </div>
@@ -1086,6 +1254,7 @@ export default function AsrTraining() {
             />
             {Texts}
             <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
+            {ConfBadge}
             <div className="flex-1" />
             {Actions}
           </div>
@@ -1463,6 +1632,53 @@ export default function AsrTraining() {
           </div>
         </CardHeader>
         <CardContent>
+          {/* ── Auto-approve threshold slider + AI review ── */}
+          <div className="mb-3 p-3 rounded-md border bg-muted/20 space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <Label className="text-xs font-medium flex items-center gap-1">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                סף אישור אוטומטי לפי ביטחון
+                <span className="font-mono text-yellow-600">{autoApproveThreshold}%</span>
+              </Label>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const above = pending.filter((p) => (p.confidence ?? 0) >= autoApproveThreshold).length;
+                  return (
+                    <span className="text-xs text-muted-foreground">
+                      {above} תיקונים מעל הסף
+                    </span>
+                  );
+                })()}
+                <Button size="sm" variant="default" onClick={approveAllAboveThreshold} disabled={pending.length === 0}>
+                  <ShieldCheck className="h-3.5 w-3.5 ml-1" />
+                  אשר את כל מה שמעל הסף
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void runAiReview()} disabled={aiReviewing || results.length === 0}>
+                  {aiReviewing ? <Loader2 className="h-3.5 w-3.5 ml-1 animate-spin" /> : <Sparkle className="h-3.5 w-3.5 ml-1" />}
+                  נתח עם AI
+                </Button>
+              </div>
+            </div>
+            <Slider
+              value={[autoApproveThreshold]}
+              min={0}
+              max={100}
+              step={5}
+              onValueChange={(v) => setAutoApproveThreshold(v[0] ?? 80)}
+              className="py-1"
+            />
+            <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+              <span>אגרסיבי (0%)</span>
+              <span>מאוזן (50%)</span>
+              <span>שמרני (100%)</span>
+            </div>
+            {aiReviewSummary && (
+              <div className="text-xs text-muted-foreground bg-background/60 rounded p-2 border">
+                <span className="font-medium text-foreground">סיכום AI:</span> {aiReviewSummary}
+              </div>
+            )}
+          </div>
+
           {pending.length === 0 ? (
             <div className="text-sm text-muted-foreground p-4 text-center border border-dashed rounded">
               אין כרגע תיקונים ממתינים לאישור.
@@ -1496,6 +1712,7 @@ export default function AsrTraining() {
                     <th className="p-2 text-right">שגוי</th>
                     <th className="p-2 text-right">נכון</th>
                     <th className="p-2 text-right w-16">הופעות</th>
+                    <th className="p-2 text-right w-20">ביטחון</th>
                     <th className="p-2 text-left w-32">פעולות</th>
                   </tr>
                 </thead>

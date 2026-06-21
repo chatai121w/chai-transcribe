@@ -1,0 +1,4 @@
+ALTER TABLE public.asr_pending_corrections
+  ADD COLUMN IF NOT EXISTS confidence INTEGER NOT NULL DEFAULT 50,
+  ADD COLUMN IF NOT EXISTS rule_ids TEXT[] NOT NULL DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS ai_reason TEXT;
