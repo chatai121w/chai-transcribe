@@ -1800,7 +1800,7 @@ export default function AsrTraining() {
           ) : pendingView === 'horizontal' ? (
             <ScrollArea className="w-full" dir="rtl">
               <div className="flex gap-2 pb-3">
-                {pending.map((p) => (
+                {filteredSortedPending.map((p) => (
                   <div key={p.id} className="min-w-[280px] max-w-[320px] flex-shrink-0">
                     {renderPendingItem(p, 'card')}
                   </div>
