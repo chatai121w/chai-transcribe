@@ -41,7 +41,7 @@ import {
 } from '@/lib/asrLocalSessions';
 import LoraFineTuningPanel from '@/components/training/LoraFineTuningPanel';
 import { scoreCorrection, confidenceColor } from '@/utils/correctionConfidence';
-import { applyRulesToText } from '@/utils/hebrewRuleEngine';
+import { applyRulesToText, matchesHebrewRule } from '@/utils/hebrewRuleEngine';
 import { runAiAlignmentReview, type AiAlignment } from '@/utils/aiAlignmentReview';
 import { getAllTerms } from '@/utils/customVocabulary';
 import { getAllCorrections } from '@/utils/correctionLearning';
@@ -882,6 +882,36 @@ export default function AsrTraining() {
     void approvePending(high);
   };
 
+  /**
+   * החל חוקי עברית דטרמיניסטיים (ללא AI) על כל הממתינים.
+   * מאתר אותיות סופיות (כ→ך, מ→ם, נ→ן, פ→ף, צ→ץ), ראשי תיבות, וו כפולה,
+   * מעדכן ביטחון ל-95 ומאשר אוטומטית.
+   */
+  const applyHebrewRulesToPending = async () => {
+    if (pending.length === 0) {
+      toast({ title: 'אין תיקונים ממתינים', variant: 'destructive' });
+      return;
+    }
+    const matched: PendingCorrection[] = [];
+    const reasons: string[] = [];
+    for (const p of pending) {
+      const hit = matchesHebrewRule(p.wrong_text, p.correct_text);
+      if (hit) {
+        matched.push({ ...p, confidence: Math.max(p.confidence ?? 0, hit.confidence) });
+        reasons.push(`${p.wrong_text} → ${p.correct_text} (${hit.reason})`);
+      }
+    }
+    if (matched.length === 0) {
+      toast({ title: 'לא נמצאו תיקונים שמתאימים לחוקי עברית', description: 'בדוק תיקונים אחרים' });
+      return;
+    }
+    toast({
+      title: `נמצאו ${matched.length} תיקונים לפי חוקי עברית`,
+      description: reasons.slice(0, 3).join(' · ') + (reasons.length > 3 ? '…' : ''),
+    });
+    await approvePending(matched);
+  };
+
 
   const addManualCorrection = async (opts: { approveNow: boolean }) => {
     const wrong = manualWrong.trim();
@@ -1720,6 +1750,10 @@ export default function AsrTraining() {
                 <Button size="sm" variant="default" onClick={approveAllAboveThreshold} disabled={pending.length === 0}>
                   <ShieldCheck className="h-3.5 w-3.5 ml-1" />
                   אשר את כל מה שמעל הסף
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => void applyHebrewRulesToPending()} disabled={pending.length === 0} title="אותיות סופיות, ראשי תיבות וכו'">
+                  <ShieldCheck className="h-3.5 w-3.5 ml-1" />
+                  החל חוקי עברית
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => void runAiReview()} disabled={aiReviewing || (results.length === 0 && pending.length === 0)}>
                   {aiReviewing ? <Loader2 className="h-3.5 w-3.5 ml-1 animate-spin" /> : <Sparkle className="h-3.5 w-3.5 ml-1" />}
