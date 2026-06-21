@@ -94,6 +94,7 @@ export function useLoraTraining() {
           lora_r: opts?.lora_r ?? 32,
           lora_alpha: opts?.lora_alpha ?? 64,
           lora_dropout: opts?.lora_dropout ?? 0.05,
+          dataset_size: (opts as any)?.dataset_size ?? 0,
           finished_at: (j.status === 'done' || j.status === 'failed' || j.status === 'cancelled')
             ? new Date().toISOString() : null,
         }, { onConflict: 'user_id,job_name' as any });
