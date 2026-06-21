@@ -256,6 +256,11 @@ export default function AsrTraining() {
   );
   const [localSessions, setLocalSessions] = useState<LocalSession[]>(() => loadLocalSessions());
   const [confidenceThreshold, setConfidenceThresholdState] = useState<number>(() => getCorrectionThreshold());
+  const [autoApproveThreshold, setAutoApproveThreshold] = useState<number>(
+    () => Number(localStorage.getItem('asr_training_auto_approve_threshold') ?? 80),
+  );
+  const [aiReviewing, setAiReviewing] = useState(false);
+  const [aiReviewSummary, setAiReviewSummary] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingRef = useRef<PendingCorrection[]>(pending);
 
@@ -264,6 +269,26 @@ export default function AsrTraining() {
   useEffect(() => { localStorage.setItem('asr_training_save_local', String(saveLocally)); }, [saveLocally]);
   useEffect(() => { localStorage.setItem('asr_training_save_cloud', String(saveCloud)); }, [saveCloud]);
   useEffect(() => { setCorrectionThreshold(confidenceThreshold); }, [confidenceThreshold]);
+  useEffect(() => { localStorage.setItem('asr_training_auto_approve_threshold', String(autoApproveThreshold)); }, [autoApproveThreshold]);
+
+  // Vocabulary + learned lookup set for confidence boost
+  const knownCorrectWords = useMemo(() => {
+    const set = new Set<string>();
+    try {
+      for (const t of getAllTerms()) set.add(t.term.trim());
+      for (const c of getAllCorrections()) set.add(c.corrected.trim());
+    } catch { /* ignore */ }
+    return set;
+  }, [pending.length]);
+
+  const computeConfidence = (wrong: string, correct: string, occurrences: number, aiConf?: number | null): number => {
+    return scoreCorrection({
+      wrong, correct, occurrences,
+      inVocabulary: knownCorrectWords.has(correct.trim()),
+      aiConfidence: aiConf,
+    }).total;
+  };
+
 
   const commitPending = (updater: (prev: PendingCorrection[]) => PendingCorrection[]) => {
     setPending((prev) => {
