@@ -1665,6 +1665,7 @@ export default function AsrTraining() {
                     <th className="p-2 text-right">שגוי</th>
                     <th className="p-2 text-right">נכון</th>
                     <th className="p-2 text-right w-16">הופעות</th>
+                    <th className="p-2 text-right w-20">ביטחון</th>
                     <th className="p-2 text-left w-32">פעולות</th>
                   </tr>
                 </thead>
