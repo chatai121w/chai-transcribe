@@ -402,21 +402,31 @@ export default function AsrTraining() {
       if (useLovable) {
         toast({ title: 'מתמלל עם Lovable AI…' });
         const { text, elapsed_ms } = await transcribeWithLovable(audioFile, lovableModel);
-        const { metrics, diff, candidates } = evaluateRun(effectiveRef, text, elapsed_ms);
-        results.push({ engine: 'lovable', model: lovableModel, hyp: text, metrics, diff, candidates });
+        // ── Pre-pass: Hebrew rule engine (deterministic, non-AI) ──
+        const { fixedText, hits } = applyRulesToText(text);
+        if (hits.length > 0) {
+          toast({ title: `${hits.length} תיקוני חוקים עבריים הופעלו`, description: 'סופיות, רווחים וכו׳' });
+        }
+        const { metrics, diff, candidates } = evaluateRun(effectiveRef, fixedText, elapsed_ms);
+        results.push({ engine: 'lovable', model: lovableModel, hyp: fixedText, metrics, diff, candidates });
         setResults([...results]);
       }
       if (useLocal) {
         toast({ title: 'מתמלל עם השרת המקומי…' });
         try {
           const { text, elapsed_ms } = await transcribeWithLocal(audioFile, localServerUrl);
-          const { metrics, diff, candidates } = evaluateRun(effectiveRef, text, elapsed_ms);
-          results.push({ engine: 'local', model: 'ivrit-ai/local-cuda', hyp: text, metrics, diff, candidates });
+          const { fixedText, hits } = applyRulesToText(text);
+          if (hits.length > 0) {
+            toast({ title: `${hits.length} תיקוני חוקים עבריים הופעלו (מקומי)` });
+          }
+          const { metrics, diff, candidates } = evaluateRun(effectiveRef, fixedText, elapsed_ms);
+          results.push({ engine: 'local', model: 'ivrit-ai/local-cuda', hyp: fixedText, metrics, diff, candidates });
           setResults([...results]);
         } catch (err) {
           toast({ title: 'שרת מקומי לא זמין', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
         }
       }
+
 
       // Save run + handle corrections per learning mode
       await saveRun(results, effectiveRef);
