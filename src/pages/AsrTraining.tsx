@@ -110,6 +110,9 @@ interface PendingCorrection {
   occurrences: number;
   engine: string | null;
   created_at: string;
+  confidence?: number;       // 0-100
+  rule_ids?: string[];
+  ai_reason?: string | null;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
