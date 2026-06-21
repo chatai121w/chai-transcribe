@@ -758,6 +758,51 @@ export default function AsrTraining() {
   ];
   const currentViewIcon = (PENDING_VIEW_OPTIONS.find((o) => o.value === pendingView)?.icon) ?? LayoutList;
 
+  // ─── Sort / Filter for pending ───
+  type PendingSortMode = 'conf_desc' | 'conf_asc' | 'name_asc' | 'name_desc' | 'occ_desc' | 'default';
+  const [pendingSort, setPendingSort] = useState<PendingSortMode>(() => {
+    const v = localStorage.getItem('asr_pending_sort') as PendingSortMode | null;
+    return v && ['conf_desc','conf_asc','name_asc','name_desc','occ_desc','default'].includes(v) ? v : 'default';
+  });
+  useEffect(() => { localStorage.setItem('asr_pending_sort', pendingSort); }, [pendingSort]);
+  const [pendingMinConf, setPendingMinConf] = useState<number>(() => {
+    const v = Number(localStorage.getItem('asr_pending_min_conf'));
+    return Number.isFinite(v) ? v : 0;
+  });
+  useEffect(() => { localStorage.setItem('asr_pending_min_conf', String(pendingMinConf)); }, [pendingMinConf]);
+  const [pendingNameFilter, setPendingNameFilter] = useState('');
+
+  const SORT_OPTIONS: Array<{ value: PendingSortMode; label: string; icon: typeof ArrowDown10 }> = [
+    { value: 'default',   label: 'ברירת מחדל (הופעות)', icon: ArrowDown10 },
+    { value: 'conf_desc', label: 'ביטחון: גבוה → נמוך', icon: ArrowDown10 },
+    { value: 'conf_asc',  label: 'ביטחון: נמוך → גבוה', icon: ArrowUp10 },
+    { value: 'name_asc',  label: 'שם (א → ת)',          icon: ArrowDownAZ },
+    { value: 'name_desc', label: 'שם (ת → א)',          icon: ArrowUpAZ },
+    { value: 'occ_desc',  label: 'הופעות (הרבה → מעט)', icon: ArrowDown10 },
+  ];
+
+  const filteredSortedPending = useMemo(() => {
+    const q = pendingNameFilter.trim().toLowerCase();
+    let arr = pending.filter((p) => (p.confidence ?? 0) >= pendingMinConf);
+    if (q) {
+      arr = arr.filter((p) =>
+        (p.wrong_text || '').toLowerCase().includes(q) ||
+        (p.correct_text || '').toLowerCase().includes(q)
+      );
+    }
+    const cmp = (a: PendingCorrection, b: PendingCorrection) => {
+      switch (pendingSort) {
+        case 'conf_desc': return (b.confidence ?? 0) - (a.confidence ?? 0);
+        case 'conf_asc':  return (a.confidence ?? 0) - (b.confidence ?? 0);
+        case 'name_asc':  return (a.wrong_text || '').localeCompare(b.wrong_text || '', 'he');
+        case 'name_desc': return (b.wrong_text || '').localeCompare(a.wrong_text || '', 'he');
+        case 'occ_desc':  return (b.occurrences ?? 0) - (a.occurrences ?? 0);
+        default: return 0;
+      }
+    };
+    return pendingSort === 'default' ? arr : [...arr].sort(cmp);
+  }, [pending, pendingSort, pendingMinConf, pendingNameFilter]);
+
   // ─── AI Alignment Review ───
   const runAiReview = async () => {
     if (results.length === 0) {
