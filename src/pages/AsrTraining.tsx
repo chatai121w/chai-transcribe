@@ -1224,6 +1224,7 @@ export default function AsrTraining() {
                   disabled={isEditing}
                 />
                 <Badge variant="outline" className="text-xs">×{p.occurrences}</Badge>
+                {ConfBadge}
                 <div className="flex-1" />
                 {Actions}
               </div>
