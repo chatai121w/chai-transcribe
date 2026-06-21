@@ -1101,6 +1101,32 @@ export default function AsrTraining() {
       </>
     );
 
+    const conf = p.confidence ?? 50;
+    const confStyle = confidenceColor(conf);
+    const ConfBadge = (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className={`text-xs ${confStyle.bg} ${confStyle.text} border-current/30`}>
+            <ShieldCheck className="h-3 w-3 ml-1 inline" />
+            {conf}%
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs max-w-xs" dir="rtl">
+          <div>ביטחון {confStyle.label} ({conf}%)</div>
+          {p.rule_ids && p.rule_ids.length > 0 && (
+            <div className="text-muted-foreground">חוקים: {p.rule_ids.join(', ')}</div>
+          )}
+          {p.ai_reason && (
+            <div className="text-muted-foreground">AI: {p.ai_reason}</div>
+          )}
+          {conf >= autoApproveThreshold && (
+            <div className="text-emerald-500">✓ מעל סף האישור האוטומטי ({autoApproveThreshold}%)</div>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    );
+
+
     const Actions = isEditing ? (
       <>
         <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); void saveEdit(p); }}>
