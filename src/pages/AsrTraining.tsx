@@ -40,6 +40,12 @@ import {
   exportLocalSessionsJson, clearLocalSessions, removePendingCorrectionsFromLocalSessions, type LocalSession,
 } from '@/lib/asrLocalSessions';
 import LoraFineTuningPanel from '@/components/training/LoraFineTuningPanel';
+import { scoreCorrection, confidenceColor } from '@/utils/correctionConfidence';
+import { applyRulesToText } from '@/utils/hebrewRuleEngine';
+import { runAiAlignmentReview, type AiAlignment } from '@/utils/aiAlignmentReview';
+import { getCustomVocabulary } from '@/utils/customVocabulary';
+import { getAllLearnedCorrections } from '@/utils/correctionLearning';
+import { Sparkle, ShieldCheck } from 'lucide-react';
 
 // ─── Tanakh book catalog (Sefaria refs) ───────────────────────────────────
 const TANAKH_BOOKS: Array<{ value: string; label: string; chapters: number }> = [
