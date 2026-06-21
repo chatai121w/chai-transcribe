@@ -895,7 +895,7 @@ export default function AsrTraining() {
     const matched: PendingCorrection[] = [];
     const reasons: string[] = [];
     for (const p of pending) {
-      const hit = matchesHebrewRule(p.wrong_text, p.correct_text);
+      const hit = matchesHebrewRule(p.wrong_text, p.correct_text) ?? matchesHebrewRule(p.correct_text, p.wrong_text);
       if (hit) {
         matched.push({ ...p, confidence: Math.max(p.confidence ?? 0, hit.confidence) });
         reasons.push(`${p.wrong_text} → ${p.correct_text} (${hit.reason})`);
