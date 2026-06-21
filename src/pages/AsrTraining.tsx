@@ -757,6 +757,87 @@ export default function AsrTraining() {
     { value: 'table',      label: 'טבלה',             icon: TableIcon },
   ];
   const currentViewIcon = (PENDING_VIEW_OPTIONS.find((o) => o.value === pendingView)?.icon) ?? LayoutList;
+
+  // ─── AI Alignment Review ───
+  const runAiReview = async () => {
+    if (results.length === 0) {
+      toast({ title: 'אין תוצאות לניתוח', description: 'הרץ תמלול קודם', variant: 'destructive' });
+      return;
+    }
+    const a = results[0];
+    if (!a || !refText) {
+      toast({ title: 'חסר טקסט קנוני או היפותזה', variant: 'destructive' });
+      return;
+    }
+    setAiReviewing(true);
+    setAiReviewSummary(null);
+    try {
+      const review = await runAiAlignmentReview({
+        refText,
+        hypText: a.hyp,
+        candidates: a.candidates,
+      });
+      setAiReviewSummary(review.summary ?? null);
+
+      // Add new high-confidence alignments to pending (or boost existing)
+      const newPending: PendingCorrection[] = [];
+      const createdAt = new Date().toISOString();
+      for (let i = 0; i < review.alignments.length; i += 1) {
+        const al: AiAlignment = review.alignments[i];
+        if (al.confidence < 0.5) continue;
+        if (al.hyp.trim() === al.ref.trim()) continue;
+        const conf = computeConfidence(al.hyp, al.ref, 1, al.confidence);
+        newPending.push({
+          id: `local_ai_${Date.now()}_${i}`,
+          wrong_text: al.hyp,
+          correct_text: al.ref,
+          occurrences: 1,
+          engine: 'ai-review',
+          created_at: createdAt,
+          confidence: conf,
+          rule_ids: [],
+          ai_reason: `[${al.ruleType}] ${al.reason}`,
+        });
+      }
+      commitPending((prev) => {
+        const existing = new Map(prev.map((p) => [pendingKey(p), p] as const));
+        for (const np of newPending) {
+          const k = pendingKey(np);
+          const old = existing.get(k);
+          if (old) {
+            // Boost confidence + attach AI reason
+            existing.set(k, {
+              ...old,
+              confidence: Math.max(old.confidence ?? 0, np.confidence ?? 0),
+              ai_reason: np.ai_reason ?? old.ai_reason ?? null,
+            });
+          } else {
+            existing.set(k, np);
+          }
+        }
+        return Array.from(existing.values());
+      });
+      toast({
+        title: 'ניתוח AI הושלם',
+        description: `${review.alignments.length} alignments · ${newPending.length} נוספו/עודכנו`,
+      });
+    } catch (err) {
+      toast({ title: 'ניתוח AI נכשל', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
+    } finally {
+      setAiReviewing(false);
+    }
+  };
+
+  const approveAllAboveThreshold = () => {
+    const high = pending.filter((p) => (p.confidence ?? 0) >= autoApproveThreshold);
+    if (high.length === 0) {
+      toast({ title: 'אין תיקונים מעל הסף', description: `סף נוכחי: ${autoApproveThreshold}` });
+      return;
+    }
+    void approvePending(high);
+  };
+
+
   const addManualCorrection = async (opts: { approveNow: boolean }) => {
     const wrong = manualWrong.trim();
     const correct = manualCorrect.trim();
