@@ -435,7 +435,7 @@ export default function AsrTraining() {
     // Auto-applied corrections (per learning mode, based on engine A's diff)
     const autoApplied: CorrectionEntry[] = [];
     const autoSummary: Array<{ wrong: string; correct: string; occurrences: number; engine: string }> = [];
-    const queuedPending: Array<{ wrong: string; correct: string; engine: string }> = [];
+    const queuedPending: Array<{ wrong: string; correct: string; engine: string; confidence: number; rule_ids: string[] }> = [];
 
     if (a) {
       const counts = new Map<string, number>();
@@ -447,19 +447,30 @@ export default function AsrTraining() {
 
       for (const [key, n] of counts) {
         const [wrong, correct] = key.split('→');
-        if (learningMode === 'auto') {
+        const breakdown = scoreCorrection({
+          wrong, correct, occurrences: n,
+          inVocabulary: knownCorrectWords.has(correct.trim()),
+        });
+        const conf = breakdown.total;
+        const ruleIds = breakdown.ruleHit ? [breakdown.ruleHit.ruleId] : [];
+
+        // Auto-approve if confidence passes threshold OR mode allows it
+        const passesAutoThreshold = conf >= autoApproveThreshold;
+
+        if (learningMode === 'auto' || passesAutoThreshold) {
           autoApplied.push(buildCorrection(wrong, correct, n, a.engine));
           autoSummary.push({ wrong, correct, occurrences: n, engine: a.engine });
         } else if (learningMode === 'hybrid') {
           if (n >= 2) {
             autoApplied.push(buildCorrection(wrong, correct, n, a.engine));
             autoSummary.push({ wrong, correct, occurrences: n, engine: a.engine });
-          } else queuedPending.push({ wrong, correct, engine: a.engine });
+          } else queuedPending.push({ wrong, correct, engine: a.engine, confidence: conf, rule_ids: ruleIds });
         } else {
-          queuedPending.push({ wrong, correct, engine: a.engine });
+          queuedPending.push({ wrong, correct, engine: a.engine, confidence: conf, rule_ids: ruleIds });
         }
       }
     }
+
 
     if (autoApplied.length > 0) {
       learnFromCorrections(autoApplied);
