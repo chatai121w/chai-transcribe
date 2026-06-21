@@ -1751,6 +1751,10 @@ export default function AsrTraining() {
                   <ShieldCheck className="h-3.5 w-3.5 ml-1" />
                   אשר את כל מה שמעל הסף
                 </Button>
+                <Button size="sm" variant="secondary" onClick={() => void applyHebrewRulesToPending()} disabled={pending.length === 0} title="אותיות סופיות, ראשי תיבות וכו'">
+                  <ShieldCheck className="h-3.5 w-3.5 ml-1" />
+                  החל חוקי עברית
+                </Button>
                 <Button size="sm" variant="outline" onClick={() => void runAiReview()} disabled={aiReviewing || (results.length === 0 && pending.length === 0)}>
                   {aiReviewing ? <Loader2 className="h-3.5 w-3.5 ml-1 animate-spin" /> : <Sparkle className="h-3.5 w-3.5 ml-1" />}
                   נתח עם AI
