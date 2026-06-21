@@ -45,7 +45,7 @@ import { applyRulesToText } from '@/utils/hebrewRuleEngine';
 import { runAiAlignmentReview, type AiAlignment } from '@/utils/aiAlignmentReview';
 import { getAllTerms } from '@/utils/customVocabulary';
 import { getAllCorrections } from '@/utils/correctionLearning';
-import { Sparkle, ShieldCheck } from 'lucide-react';
+import { Sparkle, ShieldCheck, ArrowDownAZ, ArrowUpAZ, ArrowDown10, ArrowUp10, Filter } from 'lucide-react';
 
 // ─── Tanakh book catalog (Sefaria refs) ───────────────────────────────────
 const TANAKH_BOOKS: Array<{ value: string; label: string; chapters: number }> = [
