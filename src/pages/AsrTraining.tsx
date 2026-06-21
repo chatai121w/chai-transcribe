@@ -1794,7 +1794,7 @@ export default function AsrTraining() {
           ) : pendingView === 'list' ? (
             <ScrollArea className="h-64">
               <div className="space-y-1">
-                {pending.map((p) => renderPendingItem(p, 'row'))}
+                {filteredSortedPending.map((p) => renderPendingItem(p, "row"))}
               </div>
             </ScrollArea>
           ) : pendingView === 'horizontal' ? (
@@ -1821,7 +1821,7 @@ export default function AsrTraining() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pending.map((p) => renderPendingItem(p, 'tableRow'))}
+                  {filteredSortedPending.map((p) => renderPendingItem(p, "tableRow"))}
                 </tbody>
               </table>
             </ScrollArea>
@@ -1832,7 +1832,7 @@ export default function AsrTraining() {
                 pendingView === 'grid3' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' :
                 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
               }`}>
-                {pending.map((p) => renderPendingItem(p, 'card'))}
+                {filteredSortedPending.map((p) => renderPendingItem(p, "card"))}
               </div>
             </ScrollArea>
           )}
