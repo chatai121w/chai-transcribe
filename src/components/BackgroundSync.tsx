@@ -11,14 +11,17 @@ import { debugLog } from '@/lib/debugLogger';
 export const BackgroundSync = () => {
   const { user } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval>>();
+  // Depend on user.id only — prevents effect restarts on token refresh where
+  // the user object gets a new reference but the ID stays the same.
+  const userId = user?.id ?? null;
 
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
 
     const runSync = async () => {
       if (!(await isDbAvailable())) return;
       try {
-        await syncAll(user.id);
+        await syncAll(userId);
       } catch (err) {
         debugLog.error('BackgroundSync', 'Sync error', err instanceof Error ? err.message : String(err));
       }
@@ -41,7 +44,7 @@ export const BackgroundSync = () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [user]);
+  }, [userId]);
 
   return null;
 };

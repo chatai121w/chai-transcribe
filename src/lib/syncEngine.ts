@@ -8,30 +8,41 @@ import { debugLog } from './debugLogger';
 
 const SYNC_COOLDOWN_MS = 30_000; // minimum 30s between full syncs
 let lastSyncTime = 0;
+let syncInFlight: Promise<void> | null = null;
 
 /** Full sync: pull cloud → local, push dirty local → cloud */
 export async function syncAll(userId: string): Promise<void> {
-  if (!(await isDbAvailable())) return;
+  // Cooldown and inflight checks are synchronous (no await before them) to
+  // prevent the race where multiple concurrent callers all pass before any
+  // one of them sets lastSyncTime.
   const now = Date.now();
   if (now - lastSyncTime < SYNC_COOLDOWN_MS) return;
+  if (syncInFlight) return;
   lastSyncTime = now;
 
+  if (!(await isDbAvailable())) return;
+
   debugLog.info('Sync', 'Starting full sync...');
-  try {
-    await Promise.all([
-      syncTranscriptsDown(userId),
-      syncPreferencesDown(userId),
-      syncApiKeysDown(userId),
-    ]);
-    await Promise.all([
-      pushDirtyTranscripts(userId),
-      pushDirtyPreferences(userId),
-      pushDirtyApiKeys(userId),
-    ]);
-    debugLog.info('Sync', 'Full sync complete');
-  } catch (err) {
-    debugLog.error('Sync', 'Sync failed', err instanceof Error ? err.message : String(err));
-  }
+  syncInFlight = (async () => {
+    try {
+      await Promise.all([
+        syncTranscriptsDown(userId),
+        syncPreferencesDown(userId),
+        syncApiKeysDown(userId),
+      ]);
+      await Promise.all([
+        pushDirtyTranscripts(userId),
+        pushDirtyPreferences(userId),
+        pushDirtyApiKeys(userId),
+      ]);
+      debugLog.info('Sync', 'Full sync complete');
+    } catch (err) {
+      debugLog.error('Sync', 'Sync failed', err instanceof Error ? err.message : String(err));
+    } finally {
+      syncInFlight = null;
+    }
+  })();
+  return syncInFlight;
 }
 
 // ─── Transcripts ─────────────────────────────────────────────────

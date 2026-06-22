@@ -60,6 +60,7 @@ export function useLoraTraining() {
   const [activeCt2, setActiveCt2] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
   const pollRef = useRef<number | null>(null);
+  const serverMissRef = useRef(0);
 
   const base = () => getServerUrl().replace(/\/$/, '');
 
@@ -107,10 +108,24 @@ export function useLoraTraining() {
   const refreshJobs = useCallback(async () => {
     try {
       const res = await fetch(`${base()}/training/jobs`);
-      if (!res.ok) return;
+      if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
+      serverMissRef.current = 0;
       setJobs(data.jobs || []);
-    } catch { /* server offline — silent */ }
+    } catch {
+      // After 5 consecutive missed polls (~15s), mark active jobs as unknown
+      // so the UI doesn't show stale "preparing"/"training" forever.
+      serverMissRef.current += 1;
+      if (serverMissRef.current >= 5) {
+        setJobs(prev =>
+          prev.map(j =>
+            ['preparing', 'training', 'merging', 'converting'].includes(j.status)
+              ? { ...j, status: 'unknown' as LoraJob['status'] }
+              : j
+          )
+        );
+      }
+    }
   }, []);
 
   const refreshDatasets = useCallback(async () => {
