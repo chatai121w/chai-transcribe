@@ -7,7 +7,11 @@ import { debugLog } from './debugLogger';
 // Strategy: local-first reads, write-through to cloud, periodic pull.
 
 const SYNC_COOLDOWN_MS = 30_000; // minimum 30s between full syncs
-let lastSyncTime = 0;
+// Persist lastSyncTime in sessionStorage so HMR module re-evaluations in dev
+// don't reset it to 0 and trigger an immediate sync on every file save.
+const SYNC_TS_KEY = '__sync_last_at__';
+function getLastSyncTime(): number { return Number(sessionStorage.getItem(SYNC_TS_KEY) || 0); }
+function setLastSyncTime(t: number): void { sessionStorage.setItem(SYNC_TS_KEY, String(t)); }
 let syncInFlight: Promise<void> | null = null;
 
 /** Full sync: pull cloud → local, push dirty local → cloud */
@@ -16,9 +20,9 @@ export async function syncAll(userId: string): Promise<void> {
   // prevent the race where multiple concurrent callers all pass before any
   // one of them sets lastSyncTime.
   const now = Date.now();
-  if (now - lastSyncTime < SYNC_COOLDOWN_MS) return;
+  if (now - getLastSyncTime() < SYNC_COOLDOWN_MS) return;
   if (syncInFlight) return;
-  lastSyncTime = now;
+  setLastSyncTime(now);
 
   if (!(await isDbAvailable())) return;
 

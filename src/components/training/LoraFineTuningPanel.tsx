@@ -66,6 +66,7 @@ export default function LoraFineTuningPanel() {
   const [loraR, setLoraR] = useState(32);
   const [mergeAndConvert, setMergeAndConvert] = useState(true);
   const [starting, setStarting] = useState(false);
+  const activeJob = jobs.find(j => ['preparing', 'training', 'merging', 'converting'].includes(j.status));
 
   // ── Handlers ─────────────────────────────────────────────────
   const handleCreateDataset = async () => {
@@ -132,7 +133,13 @@ export default function LoraFineTuningPanel() {
         merge_and_convert: mergeAndConvert,
       });
     } catch (e) {
-      toast({ title: 'שגיאה בהפעלה', description: String(e), variant: 'destructive' });
+      const msg = String(e);
+      const is409 = msg.includes('409') || msg.toLowerCase().includes('conflict');
+      toast({
+        title: is409 ? 'אימון כבר פועל' : 'שגיאה בהפעלה',
+        description: is409 ? 'המתן לסיום האימון הנוכחי לפני שמתחילים חדש' : msg,
+        variant: 'destructive',
+      });
     } finally {
       setStarting(false);
     }
@@ -266,12 +273,12 @@ export default function LoraFineTuningPanel() {
 
             <Button
               onClick={handleStart}
-              disabled={starting || !selectedDs}
+              disabled={starting || !selectedDs || !!activeJob}
               className="mt-4 gap-2"
               size="lg"
             >
-              {starting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-              התחל אימון LoRA
+              {(starting || activeJob) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              {activeJob ? `רץ: ${activeJob.status}…` : 'התחל אימון LoRA'}
             </Button>
           </section>
 
