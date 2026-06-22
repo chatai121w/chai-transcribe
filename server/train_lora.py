@@ -157,8 +157,8 @@ def main():
         rows = load_manifest(args.dataset)
         if args.max_samples > 0:
             rows = rows[: args.max_samples]
-        if len(rows) < 4:
-            raise RuntimeError(f"Dataset too small: {len(rows)} valid rows. Need at least 4.")
+        if len(rows) < 1:
+            raise RuntimeError(f"Dataset too small: {len(rows)} valid rows. Need at least 1.")
         progress.log(f"Loaded {len(rows)} valid (audio,text) pairs")
         progress.update(dataset_size=len(rows))
 
