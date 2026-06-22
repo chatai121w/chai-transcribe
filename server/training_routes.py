@@ -166,7 +166,25 @@ def register_training_routes(app):
         manifest = body.get("manifest")
         dataset_id = body.get("dataset_id")
         if not manifest and dataset_id:
-            manifest = str(DATASETS_DIR / _safe_id(dataset_id) / "manifest.jsonl")
+            ds_dir = DATASETS_DIR / _safe_id(dataset_id)
+            manifest_path = ds_dir / "manifest.jsonl"
+            # Auto-finalize if dataset dir exists but manifest hasn't been written yet
+            if not manifest_path.is_file() and (ds_dir / "audio").is_dir():
+                rows = 0
+                with open(manifest_path, "w", encoding="utf-8") as mf:
+                    for audio_path in sorted((ds_dir / "audio").glob("*")):
+                        stem = audio_path.stem
+                        text_path = ds_dir / "texts" / f"{stem}.txt"
+                        if not text_path.is_file():
+                            continue
+                        text = text_path.read_text(encoding="utf-8").strip()
+                        if not text:
+                            continue
+                        mf.write(json.dumps({"audio": str(audio_path.resolve()), "text": text}, ensure_ascii=False) + "\n")
+                        rows += 1
+                if rows == 0:
+                    return jsonify({"error": "dataset is empty — upload audio+text pairs first"}), 400
+            manifest = str(manifest_path)
         if not manifest or not Path(manifest).is_file():
             return jsonify({"error": "manifest not found (provide 'manifest' or 'dataset_id' first)"}), 400
 
@@ -175,7 +193,18 @@ def register_training_routes(app):
         if job_dir.exists() and (job_dir / "progress.json").is_file():
             cur = _read_progress(job_id)
             if cur.get("status") in ("training", "preparing", "merging", "converting"):
-                return jsonify({"error": f"job '{job_id}' is already running"}), 409
+                # Only block if the process is actually alive
+                with _jobs_lock:
+                    entry = _running_jobs.get(job_id)
+                proc_alive = entry is not None and entry["proc"].poll() is None
+                if proc_alive:
+                    return jsonify({"error": f"job '{job_id}' is already running"}), 409
+                # Process died but progress.json wasn't updated — mark as failed and allow restart
+                cur["status"] = "failed"
+                cur["error"] = cur.get("error") or "trainer process exited unexpectedly"
+                (job_dir / "progress.json").write_text(
+                    json.dumps(cur, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
         job_dir.mkdir(parents=True, exist_ok=True)
 
         cmd = [
@@ -200,6 +229,7 @@ def register_training_routes(app):
         log_f = open(log_path, "ab")
         env = os.environ.copy()
         env.setdefault("PYTHONUNBUFFERED", "1")
+        env["PYTHONIOENCODING"] = "utf-8"
         try:
             proc = subprocess.Popen(cmd, stdout=log_f, stderr=subprocess.STDOUT, env=env)
         except Exception as e:

@@ -191,8 +191,9 @@ export const useLocalServer = () => {
         applyConnectedStatus(data as ServerStatus);
         return true;
       }
-    } catch {
-      // Server not running — silent
+    } catch (err) {
+      // Only log real failures (not the per-poll noise) so issues stay visible.
+      debugLog.error('ServerCheck', `health check failed for ${url}`, err instanceof Error ? err.message : String(err));
     }
 
     // Hosted app fallback: ask the local launcher (8764) about whisper status.

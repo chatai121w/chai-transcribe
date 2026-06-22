@@ -115,6 +115,14 @@ export default function LoraFineTuningPanel() {
     }
     setStarting(true);
     try {
+      if (!selectedDsInfo?.has_manifest) {
+        const res = await finalizeDataset(selectedDs);
+        if (res.rows === 0) {
+          toast({ title: 'Dataset ריק', description: 'יש להוסיף זוגות אודיו+טקסט לפני האימון', variant: 'destructive' });
+          return;
+        }
+        toast({ title: 'Manifest נוצר', description: `${res.rows} זוגות` });
+      }
       await startJob({
         job_name: jobName,
         dataset_id: selectedDs,
