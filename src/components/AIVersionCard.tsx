@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Trash2, Eye, FolderInput, Cloud, HardDrive, Sparkles, GitCompareArrows } from "lucide-react";
+import { Trash2, Eye, FolderInput, Cloud, HardDrive, Sparkles, GitCompareArrows, Pencil, Check, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { calcCostUSD, fmtUSD } from "@/lib/aiPricing";
 import type { CloudVersion } from "@/hooks/useCloudVersions";
@@ -20,10 +21,13 @@ interface Props {
   onSaveLocal: (v: CloudVersion) => void;
   onAssignFolder: (id: string) => void;
   onSendToCompare?: (id: string) => void;
+  onRename?: (id: string, newLabel: string) => void | Promise<void>;
 }
 
-export function AIVersionCard({ version, selected, onSelectChange, onOpen, onDelete, onSaveLocal, onAssignFolder, onSendToCompare }: Props) {
+export function AIVersionCard({ version, selected, onSelectChange, onOpen, onDelete, onSaveLocal, onAssignFolder, onSendToCompare, onRename }: Props) {
   const [usage, setUsage] = useState<AIUsageRow | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(version.action_label || "");
 
   useEffect(() => {
     let cancelled = false;
