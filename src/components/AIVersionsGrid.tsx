@@ -17,7 +17,7 @@ interface Props {
 }
 
 export function AIVersionsGrid({ transcriptId, audioFilePath, onOpenInEditor, onCreateCloudTranscript, onSendToCompare }: Props) {
-  const { versions, isLoading, assignVersionsToFolder, deleteVersion, saveVersionToLocalOnly } = useCloudVersions(transcriptId);
+  const { versions, isLoading, assignVersionsToFolder, deleteVersion, saveVersionToLocalOnly, renameVersion } = useCloudVersions(transcriptId);
   const [search, setSearch] = useState("");
   const [modelFilter, setModelFilter] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
