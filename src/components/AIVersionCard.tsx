@@ -60,8 +60,43 @@ export function AIVersionCard({ version, selected, onSelectChange, onOpen, onDel
             <Sparkles className="w-3 h-3" />
             {version.engine_label || usage?.model || "AI"}
           </Badge>
-          {version.action_label && (
-            <Badge variant="outline" className="text-xs">{version.action_label}</Badge>
+          {editingName && onRename ? (
+            <div className="flex items-center gap-1">
+              <Input
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { onRename(version.id, nameDraft); setEditingName(false); }
+                  if (e.key === 'Escape') { setNameDraft(version.action_label || ''); setEditingName(false); }
+                }}
+                autoFocus
+                placeholder="שם הגרסה"
+                className="h-6 text-xs w-40"
+              />
+              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { onRename(version.id, nameDraft); setEditingName(false); }}>
+                <Check className="w-3 h-3 text-green-600" />
+              </Button>
+              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { setNameDraft(version.action_label || ''); setEditingName(false); }}>
+                <X className="w-3 h-3" />
+              </Button>
+            </div>
+          ) : (
+            <>
+              {version.action_label && (
+                <Badge variant="outline" className="text-xs">{version.action_label}</Badge>
+              )}
+              {onRename && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 w-6 p-0"
+                  title="ערוך שם גרסה"
+                  onClick={() => { setNameDraft(version.action_label || ''); setEditingName(true); }}
+                >
+                  <Pencil className="w-3 h-3" />
+                </Button>
+              )}
+            </>
           )}
           <span className="text-xs text-muted-foreground">{time}</span>
         </div>
