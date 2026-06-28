@@ -1402,6 +1402,15 @@ const TextEditor = () => {
           </div>
         )}
 
+        {/* Title editor — always visible above tabs */}
+        <div className="mb-3">
+          <TranscriptTitleEditor
+            transcriptId={transcriptId}
+            transcripts={transcripts}
+            updateTranscript={updateTranscript}
+          />
+        </div>
+
         {/* Main Content */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" dir="rtl">
           {/* Primary tabs — core workflow */}
