@@ -1402,6 +1402,15 @@ const TextEditor = () => {
           </div>
         )}
 
+        {/* Title editor — always visible above tabs */}
+        <div className="mb-3">
+          <TranscriptTitleEditor
+            transcriptId={transcriptId}
+            transcripts={transcripts}
+            updateTranscript={updateTranscript}
+          />
+        </div>
+
         {/* Main Content */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" dir="rtl">
           {/* Primary tabs — core workflow */}
@@ -1648,11 +1657,6 @@ const TextEditor = () => {
           </TabsContent>
 
           <TabsContent value="ai" className="flex flex-col gap-3">
-            <TranscriptTitleEditor
-              transcriptId={transcriptId}
-              transcripts={transcripts}
-              updateTranscript={updateTranscript}
-            />
             <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <input
