@@ -1403,13 +1403,46 @@ const TextEditor = () => {
         )}
 
         {/* Title editor — always visible above tabs */}
-        <div className="mb-3">
-          <TranscriptTitleEditor
-            transcriptId={transcriptId}
-            transcripts={transcripts}
-            updateTranscript={updateTranscript}
-          />
+        <div className="mb-3 flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <TranscriptTitleEditor
+              transcriptId={transcriptId}
+              transcripts={transcripts}
+              updateTranscript={updateTranscript}
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30 shrink-0"
+            title="נקה הכל — טקסט, אודיו ותזמונים"
+            onClick={async () => {
+              const ok = window.confirm("לנקות את כל התוכן בעורך? פעולה זו תמחק את הטקסט, קובץ האודיו והתזמונים מהזיכרון המקומי. רשומות שכבר נשמרו בענן יישארו.");
+              if (!ok) return;
+              try {
+                setText("");
+                setWordTimings([]);
+                if (audioUrl) { try { URL.revokeObjectURL(audioUrl); } catch { /* noop */ } }
+                setAudioUrl(null);
+                setAudioBlob(null);
+                setAudioFileName("");
+                transcriptIdRef.current = null;
+                setTranscriptId(null);
+                try { await db.audioBlobs.delete('last_audio'); } catch { /* noop */ }
+                try { localStorage.removeItem('current_transcript_id'); } catch { /* noop */ }
+                try { localStorage.removeItem('editor_text'); } catch { /* noop */ }
+                try { localStorage.removeItem('editor_word_timings'); } catch { /* noop */ }
+                toast({ title: "נוקה בהצלחה", description: "הטקסט והאודיו הוסרו מהעורך." });
+              } catch (e) {
+                toast({ title: "שגיאה בניקוי", description: (e as Error).message, variant: "destructive" });
+              }
+            }}
+          >
+            <Eraser className="w-4 h-4" />
+            נקה
+          </Button>
         </div>
+
 
         {/* Main Content */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" dir="rtl">
