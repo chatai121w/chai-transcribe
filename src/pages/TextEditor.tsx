@@ -10,7 +10,7 @@ import type { TextVersion } from "@/components/TextEditHistory";
 import type { WordTiming, SyncAudioPlayerRef } from "@/components/SyncAudioPlayer";
 import { TextStyleControl } from "@/components/TextStyleControl";
 import { Input } from "@/components/ui/input";
-import { Pencil, Check as CheckIcon } from "lucide-react";
+import { Pencil, Check as CheckIcon, Eraser } from "lucide-react";
 
 // Lazy-loaded heavy components
 const SyncAudioPlayer = lazy(() => import("@/components/SyncAudioPlayer").then(m => ({ default: m.SyncAudioPlayer })));
