@@ -1,13 +1,12 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { Fragment, useState, useMemo, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowRightLeft, Copy, ArrowUp, ArrowDown, Layers, Loader2 } from "lucide-react";
+import { ArrowRightLeft, Copy, ArrowUp, ArrowDown, Layers } from "lucide-react";
 import { TextVersion } from "@/components/TextEditHistory";
-import { useDiffWorker, type DiffOp } from "@/hooks/useDiffWorker";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -47,76 +46,139 @@ const sourceLabels: Record<TextVersion['source'], string> = {
   'ai-tone': 'AI - טון',
 };
 
-// ── Aligned-row helpers (pure, run in component after worker responds) ─────────
-
-type AlignedRow = {
-  leftLine: string | null;
-  rightLine: string | null;
-  rowType: 'equal' | 'change' | 'delete' | 'insert';
+type WordToken = {
+  text: string;
+  norm: string;
 };
 
-function splitLines(t: string): string[] {
-  const parts = t.split('\n');
-  if (parts.length && parts[parts.length - 1] === '') parts.pop();
-  return parts;
+type WordDiffChunk = {
+  op: -1 | 0 | 1;
+  text: string;
+};
+
+type WordDiffResult = {
+  leftChunks: WordDiffChunk[];
+  rightChunks: WordDiffChunk[];
+  unifiedChunks: WordDiffChunk[];
+  addedWords: number;
+  removedWords: number;
+  unchangedWords: number;
+  leftWords: number;
+  rightWords: number;
+};
+
+const HEBREW_NIKUD_RE = /[\u0591-\u05C7]/g;
+const HEBREW_QUOTE_RE = /[\u05F3\u05F4'"״׳`´]/g;
+const OUTER_PUNCT_RE = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
+
+function normalizeDiffToken(value: string): string {
+  return value
+    .trim()
+    .normalize("NFKC")
+    .replace(HEBREW_NIKUD_RE, "")
+    .replace(HEBREW_QUOTE_RE, "")
+    .replace(OUTER_PUNCT_RE, "")
+    .toLocaleLowerCase("he");
 }
 
-function buildAlignedRows(lineDiffs: [number, string][]): AlignedRow[] {
-  const rows: AlignedRow[] = [];
-  let i = 0;
-  while (i < lineDiffs.length) {
-    const [op, text] = lineDiffs[i];
-    const lines = splitLines(text);
+function tokenizeWords(text: string): WordToken[] {
+  const matches = text.match(/\S+\s*/g) || [];
+  return matches
+    .map((part) => ({ text: part, norm: normalizeDiffToken(part) }))
+    .filter((token) => token.norm.length > 0);
+}
 
-    if (op === 0) {
-      for (const line of lines)
-        rows.push({ leftLine: line, rightLine: line, rowType: 'equal' });
-      i++;
-    } else if (op === -1) {
-      const delLines = lines;
-      let addLines: string[] = [];
-      if (i + 1 < lineDiffs.length && lineDiffs[i + 1][0] === 1) {
-        addLines = splitLines(lineDiffs[i + 1][1]);
-        i += 2;
-      } else {
-        i++;
-      }
-      const maxLen = Math.max(delLines.length, addLines.length);
-      for (let j = 0; j < maxLen; j++) {
-        const hasL = j < delLines.length;
-        const hasR = j < addLines.length;
-        rows.push({
-          leftLine: hasL ? delLines[j] : null,
-          rightLine: hasR ? addLines[j] : null,
-          rowType: hasL && hasR ? 'change' : hasL ? 'delete' : 'insert',
-        });
-      }
-    } else {
-      for (const line of lines)
-        rows.push({ leftLine: null, rightLine: line, rowType: 'insert' });
-      i++;
+function pushChunk(chunks: WordDiffChunk[], op: WordDiffChunk["op"], text: string) {
+  if (!text) return;
+  const last = chunks[chunks.length - 1];
+  if (last?.op === op) last.text += text;
+  else chunks.push({ op, text });
+}
+
+function appendGap(
+  leftGap: WordToken[],
+  rightGap: WordToken[],
+  leftChunks: WordDiffChunk[],
+  rightChunks: WordDiffChunk[],
+  unifiedChunks: WordDiffChunk[],
+) {
+  const leftText = leftGap.map((token) => token.text).join("");
+  const rightText = rightGap.map((token) => token.text).join("");
+
+  if (leftText) {
+    pushChunk(leftChunks, -1, leftText);
+    pushChunk(unifiedChunks, -1, leftText);
+  }
+  if (rightText) {
+    pushChunk(rightChunks, 1, rightText);
+    pushChunk(unifiedChunks, 1, rightText);
+  }
+}
+
+function countChunkWords(chunks: WordDiffChunk[], op: WordDiffChunk["op"]): number {
+  return chunks
+    .filter((chunk) => chunk.op === op)
+    .reduce((sum, chunk) => sum + tokenizeWords(chunk.text).length, 0);
+}
+
+function buildWordDiff(left: string, right: string): WordDiffResult {
+  const leftTokens = tokenizeWords(left);
+  const rightTokens = tokenizeWords(right);
+  const dp = Array.from({ length: leftTokens.length + 1 }, () => new Uint16Array(rightTokens.length + 1));
+
+  for (let i = leftTokens.length - 1; i >= 0; i--) {
+    for (let j = rightTokens.length - 1; j >= 0; j--) {
+      dp[i][j] = leftTokens[i].norm === rightTokens[j].norm
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
-  return rows;
-}
 
-function buildFallbackRows(left: string, right: string): AlignedRow[] {
-  const leftLines = splitLines(left);
-  const rightLines = splitLines(right);
-  const maxLen = Math.max(leftLines.length, rightLines.length, 1);
-  const rows: AlignedRow[] = [];
+  const leftChunks: WordDiffChunk[] = [];
+  const rightChunks: WordDiffChunk[] = [];
+  const unifiedChunks: WordDiffChunk[] = [];
+  let i = 0;
+  let j = 0;
+  let unchangedWords = 0;
 
-  for (let i = 0; i < maxLen; i++) {
-    const leftLine = i < leftLines.length ? leftLines[i] : null;
-    const rightLine = i < rightLines.length ? rightLines[i] : null;
-    rows.push({
-      leftLine,
-      rightLine,
-      rowType: leftLine === rightLine ? 'equal' : leftLine === null ? 'insert' : rightLine === null ? 'delete' : 'change',
-    });
+  while (i < leftTokens.length || j < rightTokens.length) {
+    if (i < leftTokens.length && j < rightTokens.length && leftTokens[i].norm === rightTokens[j].norm) {
+      pushChunk(leftChunks, 0, leftTokens[i].text);
+      pushChunk(rightChunks, 0, rightTokens[j].text);
+      pushChunk(unifiedChunks, 0, rightTokens[j].text);
+      unchangedWords++;
+      i++;
+      j++;
+      continue;
+    }
+
+    const leftStart = i;
+    const rightStart = j;
+    while (i < leftTokens.length || j < rightTokens.length) {
+      if (i < leftTokens.length && j < rightTokens.length && leftTokens[i].norm === rightTokens[j].norm) break;
+      if (j >= rightTokens.length || (i < leftTokens.length && dp[i + 1][j] >= dp[i][j + 1])) i++;
+      else j++;
+    }
+
+    appendGap(
+      leftTokens.slice(leftStart, i),
+      rightTokens.slice(rightStart, j),
+      leftChunks,
+      rightChunks,
+      unifiedChunks,
+    );
   }
 
-  return rows;
+  return {
+    leftChunks,
+    rightChunks,
+    unifiedChunks,
+    addedWords: countChunkWords(rightChunks, 1),
+    removedWords: countChunkWords(leftChunks, -1),
+    unchangedWords,
+    leftWords: leftTokens.length,
+    rightWords: rightTokens.length,
+  };
 }
 
 export const AdvancedDiffView = ({
@@ -149,13 +211,6 @@ export const AdvancedDiffView = ({
   }, [preselectedLeftId, preselectedRightId, versions]);
   const [viewMode, setViewMode] = useState<'side-by-side' | 'unified' | 'stats'>('side-by-side');
   const [versionFilter, setVersionFilter] = useState<VersionFilter>("all");
-
-  // Worker-computed diffs (async, off main thread)
-  const { runDiff } = useDiffWorker();
-  const [diffs, setDiffs] = useState<DiffOp[]>([]);
-  const [alignedRows, setAlignedRows] = useState<AlignedRow[]>([]);
-  const [diffPending, setDiffPending] = useState(false);
-  const diffReqRef = useRef(0); // cancel stale responses
 
   const selectableVersions = useMemo(() => {
     const isCloudVersion = (v: TextVersion) => v.id.includes("-") && v.id.length >= 30;
@@ -195,71 +250,59 @@ export const AdvancedDiffView = ({
   const leftVersion = versions.find(v => v.id === leftId);
   const rightVersion = versions.find(v => v.id === rightId);
 
-  // Kick off both char-diff and line-diff in the worker whenever versions change
-  useEffect(() => {
-    if (!leftVersion || !rightVersion) {
-      setDiffs([]);
-      setAlignedRows([]);
-      return;
-    }
-    const reqId = ++diffReqRef.current;
-    setDiffPending(true);
-
-    const left = leftVersion.text;
-    const right = rightVersion.text;
-    setDiffs([]);
-    setAlignedRows(buildFallbackRows(left, right));
-
-    Promise.all([
-      runDiff('char', left, right),
-      runDiff('line', left, right),
-    ]).then(([charDiffs, lineDiffs]) => {
-      if (diffReqRef.current !== reqId) return; // stale — newer request in flight
-      setDiffs(charDiffs);
-      setAlignedRows(buildAlignedRows(lineDiffs));
-      setDiffPending(false);
-    }).catch(() => {
-      if (diffReqRef.current !== reqId) return;
-      setAlignedRows(buildFallbackRows(left, right));
-      setDiffPending(false);
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftVersion?.id, rightVersion?.id, leftVersion?.text, rightVersion?.text]);
+  const wordDiff = useMemo(() => {
+    return buildWordDiff(leftVersion?.text || "", rightVersion?.text || "");
+  }, [leftVersion?.text, rightVersion?.text]);
 
   const stats = useMemo(() => {
-    let added = 0, removed = 0, unchanged = 0;
-    let addedWords = 0, removedWords = 0;
-    const effectiveDiffs = diffs.length > 0
-      ? diffs
-      : leftVersion?.text === rightVersion?.text
-        ? ([[0, leftVersion?.text || '']] as DiffOp[])
-        : ([[-1, leftVersion?.text || ''], [1, rightVersion?.text || '']] as DiffOp[]);
-    for (const [op, text] of effectiveDiffs) {
-      const words = text.split(/\s+/).filter(w => w).length;
-      if (op === 1) { added += text.length; addedWords += words; }
-      else if (op === -1) { removed += text.length; removedWords += words; }
-      else { unchanged += text.length; }
-    }
-    const total = added + removed + unchanged;
-    const similarity = total > 0 ? Math.round((unchanged / total) * 100) : 100;
+    const maxWords = Math.max(wordDiff.leftWords, wordDiff.rightWords);
+    const similarity = maxWords > 0 ? Math.round((wordDiff.unchangedWords / maxWords) * 100) : 100;
     
     const lWords = leftVersion?.text.split(/\s+/).filter(w => w).length || 0;
     const rWords = rightVersion?.text.split(/\s+/).filter(w => w).length || 0;
     const lChars = leftVersion?.text.length || 0;
     const rChars = rightVersion?.text.length || 0;
 
-    return { added, removed, unchanged, addedWords, removedWords, similarity, lWords, rWords, lChars, rChars };
-  }, [diffs, leftVersion, rightVersion]);
-
-  // Build line-level aligned rows so both sides have the same number of visual lines.
-  // (now computed in the worker — handled by the useEffect above)
+    return {
+      added: wordDiff.rightChunks.filter((chunk) => chunk.op === 1).reduce((sum, chunk) => sum + chunk.text.length, 0),
+      removed: wordDiff.leftChunks.filter((chunk) => chunk.op === -1).reduce((sum, chunk) => sum + chunk.text.length, 0),
+      unchanged: wordDiff.unifiedChunks.filter((chunk) => chunk.op === 0).reduce((sum, chunk) => sum + chunk.text.length, 0),
+      addedWords: wordDiff.addedWords,
+      removedWords: wordDiff.removedWords,
+      similarity,
+      lWords,
+      rWords,
+      lChars,
+      rChars,
+    };
+  }, [leftVersion, rightVersion, wordDiff]);
 
   const renderUnified = () => {
-    return diffs.map((diff, i) => {
-      const [op, text] = diff;
-      if (op === -1) return <span key={i} className="bg-destructive/20 line-through decoration-destructive/60">{text}</span>;
-      if (op === 1) return <span key={i} className="bg-green-500/20 font-medium underline decoration-green-500/60">{text}</span>;
-      return <span key={i}>{text}</span>;
+    return wordDiff.unifiedChunks.map((chunk, i) => {
+      if (chunk.op === -1) return <span key={i} className="rounded bg-rose-500/20 px-0.5 text-rose-900 dark:text-rose-100">{chunk.text}</span>;
+      if (chunk.op === 1) return <span key={i} className="rounded bg-emerald-500/20 px-0.5 font-medium text-emerald-900 dark:text-emerald-100">{chunk.text}</span>;
+      return <span key={i}>{chunk.text}</span>;
+    });
+  };
+
+  const renderSideChunks = (chunks: WordDiffChunk[], side: "left" | "right") => {
+    return chunks.map((chunk, i) => {
+      if (chunk.op === 0) return <Fragment key={i}>{chunk.text}</Fragment>;
+      const isRemoved = side === "left" && chunk.op === -1;
+      const isAdded = side === "right" && chunk.op === 1;
+      if (!isRemoved && !isAdded) return <Fragment key={i}>{chunk.text}</Fragment>;
+      return (
+        <span
+          key={i}
+          className={cn(
+            "rounded px-0.5 font-medium",
+            isRemoved && "bg-rose-500/20 text-rose-900 dark:text-rose-100",
+            isAdded && "bg-emerald-500/20 text-emerald-900 dark:text-emerald-100",
+          )}
+        >
+          {chunk.text}
+        </span>
+      );
     });
   };
 
@@ -361,11 +404,6 @@ export const AdvancedDiffView = ({
 
         {/* Quick stats bar */}
         <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t text-xs">
-          {diffPending && (
-            <span className="flex items-center gap-1 text-muted-foreground">
-              <Loader2 className="w-3 h-3 animate-spin" /> מחשב...
-            </span>
-          )}
           <span className="text-muted-foreground">דמיון:</span>
           <div className="flex items-center gap-1.5">
             <div className="w-24 h-2 rounded-full bg-muted overflow-hidden">
@@ -394,7 +432,7 @@ export const AdvancedDiffView = ({
         </div>
       </Card>
 
-      {/* Side by side view — aligned line rows so both columns have equal words per line */}
+      {/* Side by side view — word-level highlights only */}
       {viewMode === 'side-by-side' && (
         <Card className="overflow-hidden">
           {/* Column headers */}
@@ -408,56 +446,14 @@ export const AdvancedDiffView = ({
               <span className="text-xs text-muted-foreground">{stats.rChars} תווים · {stats.rWords} מילים</span>
             </div>
           </div>
-          {/* Single scroll area — rows shared between both columns guarantee equal visual lines */}
           <ScrollArea className="h-[500px]">
-            <div dir="rtl" style={textStyle}>
-              {alignedRows.map((row, idx) => (
-                <div
-                  key={idx}
-                  className="flex border-b border-muted/20 last:border-0 min-h-[1.5em]"
-                >
-                  {/* Left column */}
-                  <div
-                    className={cn(
-                      "flex-1 px-3 py-0.5 text-right whitespace-pre-wrap break-words border-l border-muted/20",
-                      row.rowType === 'delete' && "bg-destructive/15",
-                      row.rowType === 'change' && "bg-destructive/10",
-                      row.rowType === 'insert' && "bg-muted/10",
-                    )}
-                  >
-                    {row.leftLine !== null ? (
-                      <span
-                        className={cn(
-                          (row.rowType === 'delete' || row.rowType === 'change')
-                            && "line-through decoration-destructive/60 text-destructive/90"
-                        )}
-                      >
-                        {row.leftLine || '\u00A0'}
-                      </span>
-                    ) : <span>&nbsp;</span>}
-                  </div>
-                  {/* Right column */}
-                  <div
-                    className={cn(
-                      "flex-1 px-3 py-0.5 text-right whitespace-pre-wrap break-words",
-                      row.rowType === 'insert' && "bg-green-500/15",
-                      row.rowType === 'change' && "bg-green-500/10",
-                      row.rowType === 'delete' && "bg-muted/10",
-                    )}
-                  >
-                    {row.rightLine !== null ? (
-                      <span
-                        className={cn(
-                          (row.rowType === 'insert' || row.rowType === 'change')
-                            && "font-medium"
-                        )}
-                      >
-                        {row.rightLine || '\u00A0'}
-                      </span>
-                    ) : <span>&nbsp;</span>}
-                  </div>
-                </div>
-              ))}
+            <div className="grid grid-cols-2" dir="rtl" style={textStyle}>
+              <div className="min-h-[500px] border-l border-muted/20 px-4 py-3 text-right whitespace-pre-wrap break-words">
+                {renderSideChunks(wordDiff.leftChunks, "left")}
+              </div>
+              <div className="min-h-[500px] px-4 py-3 text-right whitespace-pre-wrap break-words">
+                {renderSideChunks(wordDiff.rightChunks, "right")}
+              </div>
             </div>
           </ScrollArea>
         </Card>
