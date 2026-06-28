@@ -9,6 +9,8 @@ import { debugLog } from "@/lib/debugLogger";
 import type { TextVersion } from "@/components/TextEditHistory";
 import type { WordTiming, SyncAudioPlayerRef } from "@/components/SyncAudioPlayer";
 import { TextStyleControl } from "@/components/TextStyleControl";
+import { Input } from "@/components/ui/input";
+import { Pencil, Check as CheckIcon } from "lucide-react";
 
 // Lazy-loaded heavy components
 const SyncAudioPlayer = lazy(() => import("@/components/SyncAudioPlayer").then(m => ({ default: m.SyncAudioPlayer })));
@@ -62,6 +64,96 @@ import {
 import { LazyErrorBoundary } from "@/components/LazyErrorBoundary";
 import { CollapsibleWidget } from "@/components/ui/CollapsibleWidget";
 import "@/styles/mobile-pages.css";
+
+// Inline editor for the transcript's title — shown at the top of the AI tab.
+function TranscriptTitleEditor({
+  transcriptId,
+  transcripts,
+  updateTranscript,
+}: {
+  transcriptId: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  transcripts: any[];
+  updateTranscript: (id: string, updates: { title?: string }) => Promise<unknown>;
+}) {
+  const current = transcriptId ? transcripts.find((t) => t.id === transcriptId) : null;
+  const remoteTitle = (current?.title as string | undefined) || "";
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(remoteTitle);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!editing) setValue(remoteTitle);
+  }, [remoteTitle, editing]);
+
+  if (!transcriptId) {
+    return (
+      <div className="rounded-lg border border-dashed bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
+        שמור את התמלול בענן כדי לערוך את שמו
+      </div>
+    );
+  }
+
+  const save = async () => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === remoteTitle) {
+      setEditing(false);
+      setValue(remoteTitle);
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateTranscript(transcriptId, { title: trimmed });
+      toast({ title: "שם התמלול עודכן ✅" });
+      setEditing(false);
+    } catch (e) {
+      toast({
+        title: "שגיאה בעדכון השם",
+        description: e instanceof Error ? e.message : "נסה שוב",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
+      <span className="text-xs text-muted-foreground shrink-0">שם התמלול:</span>
+      {editing ? (
+        <>
+          <Input
+            autoFocus
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save();
+              if (e.key === "Escape") {
+                setEditing(false);
+                setValue(remoteTitle);
+              }
+            }}
+            className="h-8 flex-1"
+            disabled={saving}
+          />
+          <Button size="sm" variant="default" onClick={save} disabled={saving}>
+            <CheckIcon className="h-4 w-4 me-1" /> שמור
+          </Button>
+        </>
+      ) : (
+        <>
+          <span className="flex-1 truncate text-sm font-medium" title={remoteTitle}>
+            {remoteTitle || "ללא שם"}
+          </span>
+          <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+            <Pencil className="h-4 w-4 me-1" /> ערוך
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
 
 const sourceLabels: Record<string, string> = {
   original: 'תמלול מקורי',
@@ -1556,6 +1648,11 @@ const TextEditor = () => {
           </TabsContent>
 
           <TabsContent value="ai" className="flex flex-col gap-3">
+            <TranscriptTitleEditor
+              transcriptId={transcriptId}
+              transcripts={transcripts}
+              updateTranscript={updateTranscript}
+            />
             <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <input
