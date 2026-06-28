@@ -158,6 +158,10 @@ export function AIVersionsGrid({ transcriptId, audioFilePath, onOpenInEditor, on
               onSaveLocal={handleSaveLocal}
               onAssignFolder={(id) => setFolderDialogIds([id])}
               onSendToCompare={onSendToCompare}
+              onRename={async (id, name) => {
+                try { await renameVersion(id, name); toast({ title: 'השם עודכן ✏️' }); }
+                catch (e: any) { toast({ title: 'שגיאה בעדכון השם', description: e.message, variant: 'destructive' }); }
+              }}
             />
           ))}
         </div>
