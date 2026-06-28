@@ -287,6 +287,25 @@ export const useCloudVersions = (transcriptId: string | null) => {
     }
   }, []);
 
+  const renameVersion = useCallback(async (id: string, newLabel: string): Promise<void> => {
+    const label = newLabel.trim() || null;
+    setVersions(prev => prev.map(v => v.id === id ? { ...v, action_label: label } : v));
+    try {
+      const { error } = await (supabase
+        .from('transcript_versions' as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+        .update({ action_label: label })
+        .eq('id', id) as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (error) throw error;
+      if (await isDbAvailable()) {
+        const existing = await db.versions.get(id);
+        if (existing) await db.versions.put({ ...existing, action_label: label });
+      }
+    } catch (err) {
+      debugLog.error('Versions', 'Failed to rename version', err instanceof Error ? err.message : String(err));
+      throw err;
+    }
+  }, []);
+
   const saveVersionToLocalOnly = useCallback(async (v: CloudVersion): Promise<void> => {
     if (!(await isDbAvailable())) return;
     await db.versions.put({
@@ -312,6 +331,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
     saveVersion,
     assignVersionsToFolder,
     deleteVersion,
+    renameVersion,
     saveVersionToLocalOnly,
     refetch: fetchVersions,
   };

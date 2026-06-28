@@ -17,7 +17,7 @@ interface Props {
 }
 
 export function AIVersionsGrid({ transcriptId, audioFilePath, onOpenInEditor, onCreateCloudTranscript, onSendToCompare }: Props) {
-  const { versions, isLoading, assignVersionsToFolder, deleteVersion, saveVersionToLocalOnly } = useCloudVersions(transcriptId);
+  const { versions, isLoading, assignVersionsToFolder, deleteVersion, saveVersionToLocalOnly, renameVersion } = useCloudVersions(transcriptId);
   const [search, setSearch] = useState("");
   const [modelFilter, setModelFilter] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -158,6 +158,10 @@ export function AIVersionsGrid({ transcriptId, audioFilePath, onOpenInEditor, on
               onSaveLocal={handleSaveLocal}
               onAssignFolder={(id) => setFolderDialogIds([id])}
               onSendToCompare={onSendToCompare}
+              onRename={async (id, name) => {
+                try { await renameVersion(id, name); toast({ title: 'השם עודכן ✏️' }); }
+                catch (e: any) { toast({ title: 'שגיאה בעדכון השם', description: e.message, variant: 'destructive' }); }
+              }}
             />
           ))}
         </div>
