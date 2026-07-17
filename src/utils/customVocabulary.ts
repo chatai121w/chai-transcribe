@@ -26,6 +26,19 @@ export interface VocabularyStats {
 }
 
 const VOCAB_KEY = 'custom_vocabulary';
+const VOCAB_ENABLED_KEY = 'custom_vocabulary_enabled';
+
+export function isCustomVocabularyEnabled(): boolean {
+  try {
+    return localStorage.getItem(VOCAB_ENABLED_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export function setCustomVocabularyEnabled(enabled: boolean): void {
+  localStorage.setItem(VOCAB_ENABLED_KEY, enabled ? '1' : '0');
+}
 
 function normalizeKey(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('he');

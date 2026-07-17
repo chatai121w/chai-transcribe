@@ -40,7 +40,7 @@ import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSugges
 import { PronunciationProfileSelector } from "@/components/PronunciationProfileSelector";
 import { PronunciationStack } from "@/components/PronunciationStack";
 import { applyLearnedCorrections, getLearnedHotwords } from "@/utils/correctionLearning";
-import { applyVocabularyCorrections, getHotwordsString } from "@/utils/customVocabulary";
+import { applyVocabularyCorrections, getHotwordsString, isCustomVocabularyEnabled, setCustomVocabularyEnabled } from "@/utils/customVocabulary";
 import { addRecentFile } from "@/components/RecentFiles";
 
 // Lazy-loaded heavy components
@@ -88,6 +88,7 @@ const Index = () => {
     updatePreference('loshon_kodesh_enabled', v);
   };
   const [personalModelOn, setPersonalModelOn] = useState<boolean>(() => isPersonalPronunciationEnabled());
+  const [customVocabularyOn, setCustomVocabularyOn] = useState<boolean>(() => isCustomVocabularyEnabled());
 
   useEffect(() => {
     setPersonalModelOn(preferences.personal_pronunciation_enabled);
@@ -390,7 +391,7 @@ const Index = () => {
     const profileResult = personalPronunciationOn
       ? applyProfileCorrections(correctionResult.text)
       : { text: correctionResult.text, appliedCount: 0 };
-    const vocabularyResult = personalPronunciationOn
+    const vocabularyResult = isCustomVocabularyEnabled()
       ? applyVocabularyCorrections(profileResult.text)
       : { text: profileResult.text, appliedCount: 0 };
     // Apply Loshon Kodesh phonetic→canonical replacements when LK mode is on
@@ -1294,9 +1295,8 @@ const Index = () => {
       const profileForcesLk = isProfileLoshonKodesh();
       const lkOn = isLoshonKodeshEnabled() || profileForcesLk;
       // When LK is on, merge user-edited LK hotwords + prefer LK prompt
-      const personalVocabularyOn = isPersonalPronunciationEnabled();
-      const vocabularyHotwords = personalVocabularyOn ? getHotwordsString() : '';
-      const learnedHotwords = personalVocabularyOn ? getLearnedHotwords(100) : '';
+      const vocabularyHotwords = isCustomVocabularyEnabled() ? getHotwordsString() : '';
+      const learnedHotwords = isPersonalPronunciationEnabled() ? getLearnedHotwords(100) : '';
       const baseHotwords = [preferences.cuda_hotwords || '', vocabularyHotwords, learnedHotwords, profileHotwordsStr]
         .filter(Boolean).join(', ');
       const mergedCudaHotwords = lkOn
@@ -2060,11 +2060,21 @@ const Index = () => {
             </div>
           }
           personalModelSlot={
-            <div
-              className="flex items-center justify-between gap-3 rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-sm"
-              dir="rtl"
-            >
-              <label className="flex items-center gap-2 cursor-pointer flex-1">
+            <div className="grid gap-2" dir="rtl">
+              <label className="flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={customVocabularyOn}
+                  onChange={(e) => {
+                    setCustomVocabularyEnabled(e.target.checked);
+                    setCustomVocabularyOn(e.target.checked);
+                  }}
+                  className="rounded"
+                />
+                <span className="font-medium">השתמש באוצר המילים</span>
+                <span className="text-xs text-muted-foreground">— מטה את המנוע למונחים ולווריאנטים שהוספת.</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-sm">
                 <input
                   type="checkbox"
                   checked={personalModelOn}
@@ -2072,17 +2082,12 @@ const Index = () => {
                     setPersonalPronunciationEnabled(e.target.checked);
                     setPersonalModelOn(e.target.checked);
                     updatePreference('personal_pronunciation_enabled', e.target.checked);
-                    debugLog.info('Index', 'Personal pronunciation toggle changed', {
-                      enabled: e.target.checked,
-                      isAuthenticated,
-                    });
+                    debugLog.info('Index', 'Learned corrections toggle changed', { enabled: e.target.checked, isAuthenticated });
                   }}
                   className="rounded border-purple-400"
                 />
-                <span className="font-medium flex items-center gap-1"><BrainCircuit className="w-4 h-4 text-[#0f1e43]" /> השתמש באוצר המילים ובתיקונים שלמדתי</span>
-                <span className="text-xs text-muted-foreground">
-                  — שולח מילים מוכרות למנוע ומחיל אוטומטית תיקוני שגוי → נכון לאחר התמלול.
-                </span>
+                <span className="font-medium flex items-center gap-1"><BrainCircuit className="w-4 h-4 text-[#0f1e43]" /> החל תיקונים נלמדים</span>
+                <span className="text-xs text-muted-foreground">— מבצע החלפות שגוי → נכון לאחר התמלול.</span>
               </label>
             </div>
           }

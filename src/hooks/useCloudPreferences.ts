@@ -72,7 +72,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   cuda_paragraph_threshold: 0,
   cuda_preload_mode: 'preload',
   cuda_cloud_save: 'immediate',
-  personal_pronunciation_enabled: true,
+  personal_pronunciation_enabled: false,
   loshon_kodesh_enabled: false,
   active_pronunciation_profile: '',
   diarize_enabled: false,

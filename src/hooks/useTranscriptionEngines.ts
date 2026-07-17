@@ -22,7 +22,7 @@ import {
   getProfileInitialPrompt,
   isProfileLoshonKodesh,
 } from "@/lib/pronunciationProfiles";
-import { getHotwordsString, applyVocabularyCorrections } from "@/utils/customVocabulary";
+import { getHotwordsString, applyVocabularyCorrections, isCustomVocabularyEnabled } from "@/utils/customVocabulary";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
 import { addNotification } from "@/hooks/useNotifications";
 import { isVideoFile, extractAudioFromVideo, VIDEO_NEEDS_EXTRACTION, MAX_VIDEO_SIZE_MB, MAX_AUDIO_SIZE_MB } from "@/lib/videoUtils";
@@ -101,7 +101,7 @@ export function useTranscriptionEngines(
     const profileResult = personalPronunciationOn
       ? applyProfileCorrections(correctionResult.text)
       : { text: correctionResult.text, appliedCount: 0 };
-    const vocabResult = personalPronunciationOn
+    const vocabResult = isCustomVocabularyEnabled()
       ? applyVocabularyCorrections(profileResult.text)
       : { text: profileResult.text, appliedCount: 0 };
     const finalText = vocabResult.text;
@@ -293,8 +293,8 @@ export function useTranscriptionEngines(
 
         // Bias Groq Whisper toward known vocabulary + learned corrections + Loshon Kodesh terms
         if (provider === 'groq') {
-          const vocab = getHotwordsString();
-          const learned = getLearnedHotwords(60);
+          const vocab = isCustomVocabularyEnabled() ? getHotwordsString() : '';
+          const learned = isPersonalPronunciationEnabled() ? getLearnedHotwords(60) : '';
           const base = [vocab, learned].filter(Boolean).join(', ');
           const hotwords = buildLoshonKodeshHotwords(base);
           if (hotwords) form.append('hotwords', hotwords);
@@ -522,7 +522,7 @@ export function useTranscriptionEngines(
       toast({ title: "מתמלל עם GPU...", description: "מעבד את הקובץ בשרת המקומי עם CUDA — תראה תוצאות בזמן אמת" });
 
       const personalPronunciationOn = isPersonalPronunciationEnabled();
-      const vocabHotwords = personalPronunciationOn ? getHotwordsString() : '';
+      const vocabHotwords = isCustomVocabularyEnabled() ? getHotwordsString() : '';
       const userHotwords = preferences.cuda_hotwords || '';
       const profileHotwords = buildProfileHotwords();
       const learnedHotwords = personalPronunciationOn ? getLearnedHotwords(100) : '';
