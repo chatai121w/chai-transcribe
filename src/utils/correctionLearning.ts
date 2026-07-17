@@ -44,6 +44,7 @@ export interface CorrectionStats {
 // ─── Storage Keys ───
 const CORRECTIONS_KEY = 'transcription_corrections';
 const CORRECTIONS_STATS_KEY = 'transcription_corrections_stats';
+export const CORRECTIONS_CHANGED_EVENT = 'transcription-corrections-changed';
 
 // ─── Helpers ───
 
@@ -61,6 +62,7 @@ function saveCorrections(corrections: CorrectionEntry[]): void {
     .sort((a, b) => (b.confidence * b.frequency) - (a.confidence * a.frequency))
     .slice(0, 2000);
   localStorage.setItem(CORRECTIONS_KEY, JSON.stringify(sorted));
+  window.dispatchEvent(new CustomEvent(CORRECTIONS_CHANGED_EVENT));
 }
 
 /**
@@ -426,6 +428,7 @@ export function deleteCorrection(original: string, corrected: string): void {
 export function clearAllCorrections(): void {
   localStorage.removeItem(CORRECTIONS_KEY);
   localStorage.removeItem(CORRECTIONS_STATS_KEY);
+  window.dispatchEvent(new CustomEvent(CORRECTIONS_CHANGED_EVENT));
 }
 
 /**
