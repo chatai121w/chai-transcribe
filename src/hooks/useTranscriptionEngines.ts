@@ -128,11 +128,12 @@ export function useTranscriptionEngines(
       const updated = [entry, ...history].slice(0, 50);
       localStorage.setItem('transcript_history', JSON.stringify(updated));
       lastSavedTranscriptIdRef.current = null;
-      return;
+      return finalText;
     }
     const saved = await saveTranscript(finalText, engineUsed, undefined, audioFile || currentFileRef.current || undefined, timings || null, folder);
     lastSavedTranscriptIdRef.current = saved?.id || null;
     addNotification({ type: 'success', title: 'תמלול הושלם', description: `מנוע: ${engineUsed} — ${finalText.split(/\s+/).length} מילים` });
+    return finalText;
   }, [saveTranscript, state]);
 
   const saveTextOnlyToCloud = useCallback(async (text: string, engineUsed: string, timings?: WordTiming[]) => {
@@ -205,12 +206,20 @@ export function useTranscriptionEngines(
     state.setWordTimings(timings);
     const processingTime = extra?.processingTime ?? (Date.now() - transcriptionStartRef.current) / 1000;
 
+    let finalText: string;
     if (extra?.cloudSaveMode === 'skip') {
-      await saveToHistory(text, engineLabel, true, timings);
+      finalText = await saveToHistory(text, engineLabel, true, timings);
     } else if (extra?.cloudSaveMode === 'text-only') {
-      await saveTextOnlyToCloud(text, engineLabel, timings);
+      const definitiveResult = areDefinitiveRulesEnabled() ? applyDefinitiveRulesToText(text) : { fixedText: text };
+      const correctionResult = isPersonalPronunciationEnabled()
+        ? applyLearnedCorrections(definitiveResult.fixedText, { engine: engineLabel })
+        : { text: definitiveResult.fixedText };
+      const profileResult = isPersonalPronunciationEnabled() ? applyProfileCorrections(correctionResult.text) : { text: correctionResult.text };
+      finalText = isCustomVocabularyEnabled() ? applyVocabularyCorrections(profileResult.text).text : profileResult.text;
+      state.setTranscript(finalText);
+      await saveTextOnlyToCloud(finalText, engineLabel, timings);
     } else {
-      await saveToHistory(text, engineLabel, undefined, timings);
+      finalText = await saveToHistory(text, engineLabel, undefined, timings);
     }
 
     addAnalyticsRecord({
@@ -239,7 +248,7 @@ export function useTranscriptionEngines(
     toast({ title: "הצלחה!", description: `התמלול עם ${engineLabel} הושלם בהצלחה - עובר לעריכת טקסט` });
     if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
     setTimeout(() => {
-      navigate('/text-editor', { state: { text, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+      navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
     }, 1000);
   }, [state, saveToHistory, saveTextOnlyToCloud, addAnalyticsRecord, perfMonitor, navigate]);
 

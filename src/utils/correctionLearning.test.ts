@@ -59,6 +59,25 @@ describe('extractCorrections', () => {
 });
 
 describe('learnFromCorrections + applyLearnedCorrections', () => {
+  it('applies a repeated manual Hebrew correction to a new transcript', () => {
+    const correction = {
+      original: 'בברא',
+      corrected: 'בבא',
+      frequency: 1,
+      engine: 'context-menu',
+      category: 'word' as const,
+      confidence: 0.75,
+      lastUsed: Date.now(),
+      createdAt: Date.now(),
+    };
+    learnFromCorrections([correction]);
+    learnFromCorrections([correction]);
+
+    const result = applyLearnedCorrections('כתוב במסכת בברא כך', { engine: 'Local CUDA' });
+    expect(result.text).toBe('כתוב במסכת בבא כך');
+    expect(result.applied).toContainEqual({ original: 'בברא', corrected: 'בבא' });
+  });
+
   it('learns corrections and applies them when confidence is high', () => {
     const corrections = extractCorrections('שלום עלום', 'שלום עולם', 'openai');
     
