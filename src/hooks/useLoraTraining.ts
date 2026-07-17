@@ -36,6 +36,11 @@ export interface LoraDataset {
   dataset_id: string;
   count: number;
   has_manifest: boolean;
+  train_count?: number;
+  eval_count?: number;
+  duration_seconds?: number;
+  ready_for_training?: boolean;
+  warnings?: string[];
 }
 
 interface StartJobOptions {
@@ -51,6 +56,7 @@ interface StartJobOptions {
   lora_dropout?: number;
   merge_and_convert?: boolean;
   max_samples?: number;
+  smoke_test?: boolean;
 }
 
 export function useLoraTraining() {
@@ -163,9 +169,26 @@ export function useLoraTraining() {
     fd.append('audio', audio, audio.name);
     fd.append('text', text);
     const res = await fetch(`${base()}/training/dataset/upload-pair`, { method: 'POST', body: fd });
-    if (!res.ok) throw new Error(`uploadPair failed: ${res.status}`);
-    return res.json();
-  }, []);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `uploadPair failed: ${res.status}`);
+    }
+    const data = await res.json();
+    await refreshDatasets();
+    return data;
+  }, [refreshDatasets]);
+
+  const addApprovedPair = useCallback(async (audio: File, text: string, datasetId = 'approved-ground-truth') => {
+    const fd = new FormData();
+    fd.append('dataset_id', datasetId);
+    fd.append('audio', audio, audio.name);
+    fd.append('text', text);
+    const res = await fetch(`${base()}/training/dataset/approved-pair`, { method: 'POST', body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `approval failed: ${res.status}`);
+    await refreshDatasets();
+    return data;
+  }, [refreshDatasets]);
 
   const finalizeDataset = useCallback(async (datasetId: string) => {
     const res = await fetch(`${base()}/training/dataset/${datasetId}/finalize`, { method: 'POST' });
@@ -200,15 +223,23 @@ export function useLoraTraining() {
     await refreshJobs();
   }, [refreshJobs]);
 
-  const setActiveModel = useCallback(async (ct2Path: string | null) => {
+  const setActiveModel = useCallback(async (ct2Path: string | null, jobId?: string) => {
     const res = await fetch(`${base()}/training/set-active-model`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ct2_path: ct2Path }),
+      body: JSON.stringify({ ct2_path: ct2Path, job_id: jobId }),
     });
     if (!res.ok) throw new Error(`set active failed: ${res.status}`);
+    const data = await res.json();
+    if (data.model_id) {
+      localStorage.setItem('preferred_local_model', data.model_id);
+      localStorage.setItem('preferred_local_model_runtime', 'local');
+    } else if (!ct2Path && localStorage.getItem('preferred_local_model')?.startsWith('lora:')) {
+      localStorage.removeItem('preferred_local_model');
+      localStorage.removeItem('preferred_local_model_runtime');
+    }
     await refreshActiveModel();
     toast({
-      title: ct2Path ? '✅ מודל מאומן מופעל' : 'מודל בסיס שוחזר',
+      title: ct2Path ? 'מודל מאומן נוסף ונבחר' : 'מודל בסיס שוחזר',
       description: ct2Path || 'המערכת תשתמש שוב במודל ה-Whisper הרגיל',
     });
   }, [refreshActiveModel]);
@@ -247,7 +278,7 @@ export function useLoraTraining() {
   return {
     jobs, datasets, activeCt2, polling,
     refreshJobs, refreshDatasets, refreshActiveModel,
-    createDataset, uploadPair, finalizeDataset,
+    createDataset, uploadPair, addApprovedPair, finalizeDataset,
     startJob, cancelJob, setActiveModel,
   };
 }

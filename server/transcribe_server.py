@@ -675,6 +675,7 @@ MODEL_REGISTRY = {
     # Ivrit.ai Hebrew-optimized models (pre-converted CT2 format on HuggingFace)
     "ivrit-ai/faster-whisper-v2-d4": "ivrit-ai/faster-whisper-v2-d4",
     "ivrit-ai/whisper-large-v3-turbo-ct2": "ivrit-ai/whisper-large-v3-turbo-ct2",
+    "ivrit-ai/whisper-large-v3-ct2": "ivrit-ai/whisper-large-v3-ct2",
     # ivrit-ai/whisper-large-v3-turbo — requires local HF→CT2 conversion (see MODELS_NEEDING_CONVERSION)
     # Yiddish-optimized (ivrit-ai fine-tune) — pre-converted CT2, ready for faster-whisper.
     # Closest available model for Yiddish / לשון-הקודש-style mixed speech.
@@ -862,13 +863,12 @@ def load_model(model_id: str, compute_type_override: str | None = None) -> faste
     if model_id in MODELS_NEEDING_CONVERSION:
         actual_path = convert_hf_to_ct2(model_id)
 
-    # Honor an active fine-tuned CT2 model (set via /training/set-active-model).
-    # If present, override the requested model with the user's LoRA-trained build.
+    # Resolve an explicitly selected fine-tuned model without overriding other requests.
     try:
-        from training_routes import get_active_ct2_path  # type: ignore
-        _ft = get_active_ct2_path()
+        from training_routes import resolve_trained_model  # type: ignore
+        _ft = resolve_trained_model(model_id)
         if _ft:
-            print(f"  🎯 Using fine-tuned model override: {_ft}")
+            print(f"  Using explicitly selected fine-tuned model: {_ft}")
             actual_path = _ft
     except Exception:
         pass
@@ -2986,6 +2986,59 @@ def download_model_endpoint():
     except Exception as e:
         print(f"  Download error for {resolved}: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+def _local_hf_revision(model_id: str) -> str | None:
+    """Read the Hugging Face cache's current main revision without downloading."""
+    repo_dir = f"models--{model_id.replace('/', '--')}"
+    roots = [
+        Path.home() / ".cache" / "whisper-models",
+        Path.home() / ".cache" / "huggingface" / "hub",
+    ]
+    for root in roots:
+        ref = root / repo_dir / "refs" / "main"
+        try:
+            if ref.is_file():
+                return ref.read_text(encoding="utf-8").strip() or None
+        except OSError:
+            continue
+    return None
+
+
+@app.route("/model-updates", methods=["POST"])
+def model_updates_endpoint():
+    """Compare installed HF model revisions with the current Hub revisions."""
+    data = request.get_json(silent=True) or {}
+    requested = data.get("models") or []
+    allowed = {value for value in MODEL_REGISTRY.values() if "/" in value}
+    model_ids = [MODEL_REGISTRY.get(item, item) for item in requested]
+    model_ids = list(dict.fromkeys(item for item in model_ids if item in allowed))
+
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi()
+        updates = []
+        for model_id in model_ids:
+            local_revision = _local_hf_revision(model_id)
+            try:
+                remote_revision = api.model_info(model_id, timeout=8).sha
+                updates.append({
+                    "model": model_id,
+                    "installed": local_revision is not None,
+                    "local_revision": local_revision,
+                    "remote_revision": remote_revision,
+                    "update_available": bool(local_revision and remote_revision and local_revision != remote_revision),
+                })
+            except Exception as exc:
+                updates.append({
+                    "model": model_id,
+                    "installed": local_revision is not None,
+                    "update_available": False,
+                    "error": str(exc),
+                })
+        return jsonify({"updates": updates, "checked_at": time.time()})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/unload-models", methods=["POST"])

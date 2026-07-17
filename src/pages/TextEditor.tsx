@@ -1189,6 +1189,49 @@ const TextEditor = () => {
     wordTimings,
   ]);
 
+  // Text of the "original" version — used as the baseline reference for the AI editor.
+  const originalVersionText = useMemo(
+    () => compareVersions.find(v => v.source === 'original')?.text || originalTextRef.current,
+    [compareVersions],
+  );
+
+  // The AI dual-editor is rendered in two places (the "ai" tab and inside the
+  // "compare" tab). Both share identical wiring; this builder keeps them in sync.
+  // `withColumns` mirrors the multi-column layout only in the standalone AI tab.
+  const renderAiEditor = (opts: { label: string; withColumns?: boolean }) => (
+    <div
+      style={{
+        fontSize: `${fontSize}px`,
+        fontFamily,
+        color: textColor,
+        lineHeight,
+        ...(opts.withColumns ? columnStyle : {}),
+      }}
+    >
+      <LazyErrorBoundary label={opts.label}>
+        <AIEditorDual
+          text={text}
+          onTextChange={(newText, source, customPrompt) => {
+            setText(newText);
+            addVersion(newText, source as TextVersion['source'], customPrompt);
+            // AI rewrote the text — advance baseline so we only learn from
+            // future manual edits, not the AI's stylistic changes.
+            if (typeof source === 'string' && source.startsWith('ai-')) {
+              learningBaselineRef.current = newText;
+            }
+          }}
+          onSaveVersion={handleSaveVersion}
+          onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
+          onDuplicateAndSave={handleDuplicateAndSave}
+          onSyncToPlayer={handleSyncToPlayer}
+          versions={compareVersions}
+          originalText={originalVersionText}
+          initialSourceId={aiPreselectSourceId}
+        />
+      </LazyErrorBoundary>
+    </div>
+  );
+
   return (
     <Suspense fallback={null}>
     <div className="mobile-optimized-page text-editor-page min-h-screen bg-background p-2 md:p-4" dir="rtl">
@@ -1708,35 +1751,7 @@ const TextEditor = () => {
             </div>
 
             {aiPolishEnabled ? (
-              <div
-                style={{
-                  fontSize: `${fontSize}px`,
-                  fontFamily: fontFamily,
-                  color: textColor,
-                  lineHeight: lineHeight,
-                  ...columnStyle,
-                }}
-              >
-                <LazyErrorBoundary label="עורך AI"><AIEditorDual 
-                  text={text} 
-                  onTextChange={(newText, source, customPrompt) => {
-                    setText(newText);
-                    addVersion(newText, source as TextVersion['source'], customPrompt);
-                    // AI rewrote the text — advance baseline so we only learn from
-                    // future manual edits, not the AI's stylistic changes.
-                    if (typeof source === 'string' && source.startsWith('ai-')) {
-                      learningBaselineRef.current = newText;
-                    }
-                  }}
-                  onSaveVersion={handleSaveVersion}
-                  onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
-                  onDuplicateAndSave={handleDuplicateAndSave}
-                  onSyncToPlayer={handleSyncToPlayer}
-                  versions={compareVersions}
-                  originalText={compareVersions.find(v => v.source === 'original')?.text || originalTextRef.current}
-                  initialSourceId={aiPreselectSourceId}
-                /></LazyErrorBoundary>
-              </div>
+              renderAiEditor({ label: "עורך AI", withColumns: true })
             ) : (
               <div className="rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">
                 עריכת AI כבויה. סמן את ה-V למעלה כדי להפעיל אותה ולהשתמש בשיפורי הניסוח, פיסוק והפסקאות.
@@ -1797,32 +1812,7 @@ const TextEditor = () => {
                 )}
 
                 {showCompareAi && aiPolishEnabled && (
-                  <div
-                    style={{
-                      fontSize: `${fontSize}px`,
-                      fontFamily: fontFamily,
-                      color: textColor,
-                      lineHeight: lineHeight,
-                    }}
-                  >
-                    <LazyErrorBoundary label="עורך AI בתוך השוואה"><AIEditorDual
-                      text={text}
-                      onTextChange={(newText, source, customPrompt) => {
-                        setText(newText);
-                        addVersion(newText, source as TextVersion['source'], customPrompt);
-                        if (typeof source === 'string' && source.startsWith('ai-')) {
-                          learningBaselineRef.current = newText;
-                        }
-                      }}
-                      onSaveVersion={handleSaveVersion}
-                      onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
-                      onDuplicateAndSave={handleDuplicateAndSave}
-                      onSyncToPlayer={handleSyncToPlayer}
-                      versions={compareVersions}
-                      originalText={compareVersions.find(v => v.source === 'original')?.text || originalTextRef.current}
-                      initialSourceId={aiPreselectSourceId}
-                    /></LazyErrorBoundary>
-                  </div>
+                  renderAiEditor({ label: "עורך AI בתוך השוואה" })
                 )}
               </TabsContent>
 

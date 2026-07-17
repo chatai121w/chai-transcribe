@@ -40,6 +40,7 @@ import {
   exportLocalSessionsJson, clearLocalSessions, removePendingCorrectionsFromLocalSessions, type LocalSession,
 } from '@/lib/asrLocalSessions';
 import LoraFineTuningPanel from '@/components/training/LoraFineTuningPanel';
+import { useLoraTraining } from '@/hooks/useLoraTraining';
 import { scoreCorrection, confidenceColor } from '@/utils/correctionConfidence';
 import { applyRulesToText, matchesHebrewRule } from '@/utils/hebrewRuleEngine';
 import { runAiAlignmentReview, type AiAlignment } from '@/utils/aiAlignmentReview';
@@ -224,6 +225,7 @@ function saveLocalPendingCorrections(items: PendingCorrection[]): void {
 
 export default function AsrTraining() {
   const { user } = useAuth();
+  const { addApprovedPair } = useLoraTraining();
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [sourceKind, setSourceKind] = useState<'tanakh' | 'text'>('tanakh');
   const [book, setBook] = useState<string>('Psalms');
@@ -244,6 +246,7 @@ export default function AsrTraining() {
   );
 
   const [running, setRunning] = useState(false);
+  const [addingToLora, setAddingToLora] = useState(false);
   const [results, setResults] = useState<EngineResult[]>([]);
   const [history, setHistory] = useState<SavedRun[]>([]);
   const [pending, setPending] = useState<PendingCorrection[]>(() => loadPersistentPendingCorrections());
@@ -661,6 +664,22 @@ export default function AsrTraining() {
       description: `${autoApplied.length} תיקונים אוטומטיים, ${queuedPending.length} ממתינים לאישור`,
     });
     void refreshLists();
+  };
+
+  const approveForLora = async () => {
+    if (!audioFile || !refText.trim() || results.length === 0) return;
+    setAddingToLora(true);
+    try {
+      const data = await addApprovedPair(audioFile, refText.trim());
+      toast({
+        title: 'הדוגמה אושרה לאימון LoRA',
+        description: `${data.rows} דוגמאות במאגר · ${data.eval_count || 0} לבדיקת איכות`,
+      });
+    } catch (err) {
+      toast({ title: 'לא ניתן להוסיף למאגר', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
+    } finally {
+      setAddingToLora(false);
+    }
   };
 
 
@@ -1540,6 +1559,13 @@ export default function AsrTraining() {
         <Card>
           <CardHeader><CardTitle>תוצאות</CardTitle></CardHeader>
         <CardContent className="space-y-3">
+          <div className="flex items-center justify-between gap-3 border-b pb-3">
+            <div className="text-sm text-muted-foreground">אשר את האודיו והטקסט הקנוני כזוג איכותי לאימון.</div>
+            <Button size="sm" onClick={() => void approveForLora()} disabled={addingToLora || !audioFile || !refText.trim()}>
+              {addingToLora ? <Loader2 className="h-4 w-4 ml-1 animate-spin" /> : <CheckCircle2 className="h-4 w-4 ml-1" />}
+              אשר והוסף ל-LoRA
+            </Button>
+          </div>
           {/* Manual add row */}
           <div className="flex flex-wrap items-end gap-2 p-3 rounded-md border bg-muted/20">
             <div className="flex-1 min-w-[140px]">

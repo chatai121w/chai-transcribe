@@ -6,6 +6,80 @@ import { componentTagger } from "lovable-tagger";
 import { spawn, type ChildProcess } from "child_process";
 import compression from "vite-plugin-compression";
 import fs from "fs";
+import http from "node:http";
+import net from "node:net";
+
+const WHISPER_PORTS = Array.from({ length: 20 }, (_, index) => 3000 + index);
+let activeWhisperPort = WHISPER_PORTS[0];
+
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host: '127.0.0.1', port });
+    let settled = false;
+    const finish = (available: boolean) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(available);
+    };
+    socket.setTimeout(500);
+    socket.once('connect', () => finish(false));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', (error: NodeJS.ErrnoException) => {
+      finish(error.code === 'ECONNREFUSED');
+    });
+  });
+}
+
+function isWhisperServer(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const request = http.get({ host: '127.0.0.1', port, path: '/health', timeout: 750 }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          resolve(response.statusCode === 200 && data?.status === 'ok');
+        } catch {
+          resolve(false);
+        }
+      });
+    });
+    request.once('timeout', () => { request.destroy(); resolve(false); });
+    request.once('error', () => resolve(false));
+  });
+}
+
+async function resolveWhisperPort(): Promise<{ port: number; alreadyRunning: boolean }> {
+  for (const port of WHISPER_PORTS) {
+    if (await isWhisperServer(port)) return { port, alreadyRunning: true };
+  }
+  for (const port of WHISPER_PORTS) {
+    if (await isPortAvailable(port)) return { port, alreadyRunning: false };
+  }
+  throw new Error('No free Whisper port found in range 3000-3019');
+}
+
+function proxyWhisperRequest(req: any, res: any): void {
+  const upstream = http.request({
+    host: '127.0.0.1',
+    port: activeWhisperPort,
+    path: req.url.replace(/^\/whisper/, '') || '/',
+    method: req.method,
+    headers: { ...req.headers, host: `127.0.0.1:${activeWhisperPort}` },
+  }, (upstreamResponse) => {
+    res.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
+    upstreamResponse.pipe(res);
+  });
+  upstream.once('error', (error) => {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+    }
+    res.end(JSON.stringify({ error: `Whisper server unavailable on port ${activeWhisperPort}`, detail: error.message }));
+  });
+  req.pipe(upstream);
+}
 
 /**
  * Vite plugin: exposes /__api/start-server and /__api/stop-server
@@ -17,11 +91,30 @@ function whisperServerLauncher(): Plugin {
   return {
     name: 'whisper-server-launcher',
     configureServer(server) {
-      server.middlewares.use((req, res, next) => {
+      server.middlewares.use(async (req, res, next) => {
+        if (req.url?.startsWith('/whisper')) {
+          proxyWhisperRequest(req, res);
+          return;
+        }
+
         if (req.method === 'POST' && req.url === '/__api/start-server') {
           if (serverProcess && !serverProcess.killed) {
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true, message: 'already running' }));
+            res.end(JSON.stringify({ ok: true, message: 'already running', port: activeWhisperPort }));
+            return;
+          }
+
+          try {
+            const resolved = await resolveWhisperPort();
+            activeWhisperPort = resolved.port;
+            if (resolved.alreadyRunning) {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: true, message: 'already running', port: activeWhisperPort }));
+              return;
+            }
+          } catch (err: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: err.message }));
             return;
           }
 
@@ -41,7 +134,7 @@ function whisperServerLauncher(): Plugin {
           const scriptPath = path.join(projectRoot, 'server', 'transcribe_server.py');
 
           try {
-            serverProcess = spawn(pythonExe, [scriptPath, '--port', '3000'], {
+            serverProcess = spawn(pythonExe, [scriptPath, '--port', String(activeWhisperPort)], {
               cwd: projectRoot,
               stdio: 'pipe',
               detached: false,
@@ -55,7 +148,7 @@ function whisperServerLauncher(): Plugin {
             });
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true, message: 'started' }));
+            res.end(JSON.stringify({ ok: true, message: 'started', port: activeWhisperPort }));
           } catch (err: any) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: err.message }));
@@ -78,7 +171,7 @@ function whisperServerLauncher(): Plugin {
 
         if (req.method === 'GET' && req.url === '/__api/server-status') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ running: !!(serverProcess && !serverProcess.killed) }));
+          res.end(JSON.stringify({ running: !!(serverProcess && !serverProcess.killed), port: activeWhisperPort }));
           return;
         }
 
@@ -125,13 +218,6 @@ export default defineConfig(({ mode }) => {
   server: {
     host: "::",
     port: 8080,
-    proxy: {
-      '/whisper': {
-        target: 'http://127.0.0.1:3000',
-        changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/whisper/, ''),
-      },
-    },
     hmr: {
       protocol: isLovableCloud ? "wss" : "ws",
       ...(isLovableCloud ? { clientPort: 443 } : { host: "localhost" }),

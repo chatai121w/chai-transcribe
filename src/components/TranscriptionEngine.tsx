@@ -165,7 +165,9 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
       if (data.ok) {
         toast({
           title: "🚀 השרת מופעל!",
-          description: data.message === 'already running' ? 'השרת כבר רץ, ממתין לחיבור...' : 'השרת עולה, ממתין לחיבור...',
+          description: data.message === 'already running'
+            ? `השרת כבר רץ בפורט ${data.port}, ממתין לחיבור...`
+            : `השרת עולה בפורט ${data.port}, ממתין לחיבור...`,
         });
         startPolling(3000, 120000);
       } else {
@@ -442,7 +444,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                     // 2. Fallback: just check if server is already running
                     const ok = await checkConnection();
                     if (ok) {
-                      toast({ title: '🟢 מחובר!', description: 'שרת CUDA זוהה ב־localhost:3000' });
+                      toast({ title: '🟢 מחובר!', description: 'שרת CUDA זוהה בפורט המקומי שנבחר אוטומטית' });
                       startPolling(10000);
                     } else {
                       toast({
@@ -530,7 +532,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
           )}
           {!isConnected && !isRemoteAccess && isNonLocalHost && (
             <div className="text-[11px] text-muted-foreground space-y-1.5 border-t pt-2">
-              <p className="font-medium flex items-center gap-1"><Monitor className="w-3.5 h-3.5 text-[#0f1e43] flex-shrink-0" /> עובד מול השרת המקומי (localhost:3000)</p>
+              <p className="font-medium flex items-center gap-1"><Monitor className="w-3.5 h-3.5 text-[#0f1e43] flex-shrink-0" /> עובד מול פורט מקומי שנבחר אוטומטית</p>
               <p className="text-muted-foreground">
                 לחץ "הפעל שרת" — האפליקציה תנסה להפעיל את השרת דרך ה-tray (פורט 8764).
                 אם ה-tray לא פועל, הפעל ידנית:

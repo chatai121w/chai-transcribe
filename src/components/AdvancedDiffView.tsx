@@ -56,10 +56,21 @@ type WordDiffChunk = {
   text: string;
 };
 
+/**
+ * One aligned row of the side-by-side view. `left` and `right` always occupy
+ * the SAME grid row, so the two columns mirror each other line-by-line:
+ *  - kind "equal":  identical text on both sides.
+ *  - kind "change": removed text on the left, added text on the right; if one
+ *    side is empty the cell renders blank but still fills the row's height.
+ */
+type DiffRow = {
+  kind: "equal" | "change";
+  left: WordDiffChunk[];
+  right: WordDiffChunk[];
+};
+
 type WordDiffResult = {
-  leftChunks: WordDiffChunk[];
-  rightChunks: WordDiffChunk[];
-  unifiedChunks: WordDiffChunk[];
+  rows: DiffRow[];
   addedWords: number;
   removedWords: number;
   unchangedWords: number;
@@ -88,6 +99,15 @@ function tokenizeWords(text: string): WordToken[] {
     .filter((token) => token.norm.length > 0);
 }
 
+type WordChunkResult = {
+  left: WordDiffChunk[];
+  right: WordDiffChunk[];
+  addedWords: number;
+  removedWords: number;
+  unchangedWords: number;
+};
+
+/** Merge a fragment into a chunk list, joining it with the previous same-op chunk. */
 function pushChunk(chunks: WordDiffChunk[], op: WordDiffChunk["op"], text: string) {
   if (!text) return;
   const last = chunks[chunks.length - 1];
@@ -95,33 +115,12 @@ function pushChunk(chunks: WordDiffChunk[], op: WordDiffChunk["op"], text: strin
   else chunks.push({ op, text });
 }
 
-function appendGap(
-  leftGap: WordToken[],
-  rightGap: WordToken[],
-  leftChunks: WordDiffChunk[],
-  rightChunks: WordDiffChunk[],
-  unifiedChunks: WordDiffChunk[],
-) {
-  const leftText = leftGap.map((token) => token.text).join("");
-  const rightText = rightGap.map((token) => token.text).join("");
-
-  if (leftText) {
-    pushChunk(leftChunks, -1, leftText);
-    pushChunk(unifiedChunks, -1, leftText);
-  }
-  if (rightText) {
-    pushChunk(rightChunks, 1, rightText);
-    pushChunk(unifiedChunks, 1, rightText);
-  }
-}
-
-function countChunkWords(chunks: WordDiffChunk[], op: WordDiffChunk["op"]): number {
-  return chunks
-    .filter((chunk) => chunk.op === op)
-    .reduce((sum, chunk) => sum + tokenizeWords(chunk.text).length, 0);
-}
-
-function buildWordDiff(left: string, right: string): WordDiffResult {
+/**
+ * Inline word-level diff between two strings, via LCS alignment.
+ * The result flows as continuous text — changed words are highlighted in place,
+ * so the text is NEVER broken into separate blocks (no empty half-lines).
+ */
+function wordDiffChunks(left: string, right: string): WordChunkResult {
   const leftTokens = tokenizeWords(left);
   const rightTokens = tokenizeWords(right);
   const dp = Array.from({ length: leftTokens.length + 1 }, () => new Uint16Array(rightTokens.length + 1));
@@ -136,16 +135,16 @@ function buildWordDiff(left: string, right: string): WordDiffResult {
 
   const leftChunks: WordDiffChunk[] = [];
   const rightChunks: WordDiffChunk[] = [];
-  const unifiedChunks: WordDiffChunk[] = [];
   let i = 0;
   let j = 0;
   let unchangedWords = 0;
+  let addedWords = 0;
+  let removedWords = 0;
 
   while (i < leftTokens.length || j < rightTokens.length) {
     if (i < leftTokens.length && j < rightTokens.length && leftTokens[i].norm === rightTokens[j].norm) {
       pushChunk(leftChunks, 0, leftTokens[i].text);
       pushChunk(rightChunks, 0, rightTokens[j].text);
-      pushChunk(unifiedChunks, 0, rightTokens[j].text);
       unchangedWords++;
       i++;
       j++;
@@ -160,24 +159,91 @@ function buildWordDiff(left: string, right: string): WordDiffResult {
       else j++;
     }
 
-    appendGap(
-      leftTokens.slice(leftStart, i),
-      rightTokens.slice(rightStart, j),
-      leftChunks,
-      rightChunks,
-      unifiedChunks,
-    );
+    const removed = leftTokens.slice(leftStart, i);
+    const added = rightTokens.slice(rightStart, j);
+    pushChunk(leftChunks, -1, removed.map((t) => t.text).join(""));
+    pushChunk(rightChunks, 1, added.map((t) => t.text).join(""));
+    removedWords += removed.length;
+    addedWords += added.length;
+  }
+
+  return { left: leftChunks, right: rightChunks, addedWords, removedWords, unchangedWords };
+}
+
+/** Split text into paragraphs at newlines, keeping the newline on each piece. */
+function splitParagraphs(text: string): string[] {
+  if (!text) return [];
+  return text.split(/\n/).map((p, idx, arr) => (idx < arr.length - 1 ? p + "\n" : p));
+}
+
+/** Normalized signature of a paragraph — used to align paragraphs between versions. */
+function normalizeParagraph(text: string): string {
+  return tokenizeWords(text).map((t) => t.norm).join(" ");
+}
+
+/**
+ * Paragraph-level diff. Paragraphs are aligned first (LCS), and each aligned
+ * pair is then word-diffed INLINE. Rows therefore break only at real paragraph
+ * boundaries — text inside a paragraph always flows naturally, with no empty
+ * fragments mid-line.
+ */
+function buildWordDiff(left: string, right: string): WordDiffResult {
+  const leftParas = splitParagraphs(left);
+  const rightParas = splitParagraphs(right);
+  const leftNorm = leftParas.map(normalizeParagraph);
+  const rightNorm = rightParas.map(normalizeParagraph);
+
+  const dp = Array.from({ length: leftParas.length + 1 }, () => new Uint16Array(rightParas.length + 1));
+  for (let i = leftParas.length - 1; i >= 0; i--) {
+    for (let j = rightParas.length - 1; j >= 0; j--) {
+      dp[i][j] = leftNorm[i] === rightNorm[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const rows: DiffRow[] = [];
+  let i = 0;
+  let j = 0;
+  let addedWords = 0;
+  let removedWords = 0;
+  let unchangedWords = 0;
+
+  const addRow = (kind: DiffRow["kind"], leftText: string, rightText: string) => {
+    const wd = wordDiffChunks(leftText, rightText);
+    rows.push({ kind, left: leftText ? wd.left : [], right: rightText ? wd.right : [] });
+    addedWords += wd.addedWords;
+    removedWords += wd.removedWords;
+    unchangedWords += wd.unchangedWords;
+  };
+
+  while (i < leftParas.length || j < rightParas.length) {
+    // Matching paragraph → one aligned row (still inline-diffed for tiny edits).
+    if (i < leftParas.length && j < rightParas.length && leftNorm[i] === rightNorm[j]) {
+      addRow("equal", leftParas[i], rightParas[j]);
+      i++;
+      j++;
+      continue;
+    }
+
+    // Run of changed paragraphs → one aligned row, removed left / added right.
+    const leftStart = i;
+    const rightStart = j;
+    while (i < leftParas.length || j < rightParas.length) {
+      if (i < leftParas.length && j < rightParas.length && leftNorm[i] === rightNorm[j]) break;
+      if (j >= rightParas.length || (i < leftParas.length && dp[i + 1][j] >= dp[i][j + 1])) i++;
+      else j++;
+    }
+    addRow("change", leftParas.slice(leftStart, i).join(""), rightParas.slice(rightStart, j).join(""));
   }
 
   return {
-    leftChunks,
-    rightChunks,
-    unifiedChunks,
-    addedWords: countChunkWords(rightChunks, 1),
-    removedWords: countChunkWords(leftChunks, -1),
+    rows,
+    addedWords,
+    removedWords,
     unchangedWords,
-    leftWords: leftTokens.length,
-    rightWords: rightTokens.length,
+    leftWords: tokenizeWords(left).length,
+    rightWords: tokenizeWords(right).length,
   };
 }
 
@@ -200,13 +266,19 @@ export const AdvancedDiffView = ({
   const [leftId, setLeftId] = useState(preselectedLeftId || defaultLeftId);
   const [rightId, setRightId] = useState(preselectedRightId || defaultRightId);
 
-  // Re-apply preselect when caller pushes a new pair
+  // Re-apply preselect when caller pushes a new pair. A distinct right version
+  // detaches the right column and loads that version, so the diff shows at once.
   useEffect(() => {
     if (preselectedLeftId && versions.some(v => v.id === preselectedLeftId)) {
       setLeftId(preselectedLeftId);
     }
-    if (preselectedRightId && versions.some(v => v.id === preselectedRightId)) {
-      setRightId(preselectedRightId);
+    const preRight = preselectedRightId
+      ? versions.find(v => v.id === preselectedRightId)
+      : undefined;
+    if (preRight) {
+      setRightId(preRight.id);
+      setRightText(preRight.text);
+      setRightDetached(true);
     }
   }, [preselectedLeftId, preselectedRightId, versions]);
   const [viewMode, setViewMode] = useState<'side-by-side' | 'unified' | 'stats'>('side-by-side');
@@ -250,23 +322,65 @@ export const AdvancedDiffView = ({
   const leftVersion = versions.find(v => v.id === leftId);
   const rightVersion = versions.find(v => v.id === rightId);
 
-  const wordDiff = useMemo(() => {
-    return buildWordDiff(leftVersion?.text || "", rightVersion?.text || "");
-  }, [leftVersion?.text, rightVersion?.text]);
+  // The base text that both columns mirror by default ("duplicate" / מכפלה).
+  const source = leftVersion?.text ?? "";
+
+  // Editable column buffers. By default BOTH columns show `source` (a copy of
+  // the base version). A side "detaches" the moment it is edited or loaded with
+  // a different version, and "החזר" re-syncs it back to an exact copy.
+  const [leftText, setLeftText] = useState(source);
+  const [rightText, setRightText] = useState(source);
+  const [leftDetached, setLeftDetached] = useState(false);
+  const [rightDetached, setRightDetached] = useState(false);
+  const [editingSide, setEditingSide] = useState<"left" | "right" | null>(null);
+
+  // Keep every non-detached column mirroring the base text.
+  useEffect(() => {
+    if (!leftDetached) setLeftText(source);
+    if (!rightDetached) setRightText(source);
+  }, [source, leftDetached, rightDetached]);
+
+  const editLeft = (value: string) => { setLeftDetached(true); setLeftText(value); };
+  const editRight = (value: string) => { setRightDetached(true); setRightText(value); };
+  const revertLeft = () => { setLeftDetached(false); setLeftText(source); setEditingSide((s) => (s === "left" ? null : s)); };
+  const revertRight = () => { setRightDetached(false); setRightText(source); setEditingSide((s) => (s === "right" ? null : s)); };
+
+  const wordDiff = useMemo(() => buildWordDiff(leftText, rightText), [leftText, rightText]);
+
+  // Per-column inline streams (flattened from the aligned rows). When the two
+  // buffers are identical (mirror state) these contain no highlights at all.
+  const leftFlow = useMemo(() => wordDiff.rows.flatMap((r) => r.left), [wordDiff]);
+  const rightFlow = useMemo(() => wordDiff.rows.flatMap((r) => r.right), [wordDiff]);
 
   const stats = useMemo(() => {
     const maxWords = Math.max(wordDiff.leftWords, wordDiff.rightWords);
     const similarity = maxWords > 0 ? Math.round((wordDiff.unchangedWords / maxWords) * 100) : 100;
     
-    const lWords = leftVersion?.text.split(/\s+/).filter(w => w).length || 0;
-    const rWords = rightVersion?.text.split(/\s+/).filter(w => w).length || 0;
-    const lChars = leftVersion?.text.length || 0;
-    const rChars = rightVersion?.text.length || 0;
+    const lWords = leftText.split(/\s+/).filter(w => w).length || 0;
+    const rWords = rightText.split(/\s+/).filter(w => w).length || 0;
+    const lChars = leftText.length;
+    const rChars = rightText.length;
+
+    // Character counts, summed over the aligned rows (single source of truth).
+    // Removed lives only on the left, added only on the right; unchanged text is
+    // identical on both sides, so count it once (from the left).
+    let added = 0;
+    let removed = 0;
+    let unchanged = 0;
+    for (const row of wordDiff.rows) {
+      for (const chunk of row.left) {
+        if (chunk.op === -1) removed += chunk.text.length;
+        else if (chunk.op === 0) unchanged += chunk.text.length;
+      }
+      for (const chunk of row.right) {
+        if (chunk.op === 1) added += chunk.text.length;
+      }
+    }
 
     return {
-      added: wordDiff.rightChunks.filter((chunk) => chunk.op === 1).reduce((sum, chunk) => sum + chunk.text.length, 0),
-      removed: wordDiff.leftChunks.filter((chunk) => chunk.op === -1).reduce((sum, chunk) => sum + chunk.text.length, 0),
-      unchanged: wordDiff.unifiedChunks.filter((chunk) => chunk.op === 0).reduce((sum, chunk) => sum + chunk.text.length, 0),
+      added,
+      removed,
+      unchanged,
       addedWords: wordDiff.addedWords,
       removedWords: wordDiff.removedWords,
       similarity,
@@ -275,29 +389,19 @@ export const AdvancedDiffView = ({
       lChars,
       rChars,
     };
-  }, [leftVersion, rightVersion, wordDiff]);
+  }, [leftText, rightText, wordDiff]);
 
-  const renderUnified = () => {
-    return wordDiff.unifiedChunks.map((chunk, i) => {
-      if (chunk.op === -1) return <span key={i} className="rounded bg-rose-500/20 px-0.5 text-rose-900 dark:text-rose-100">{chunk.text}</span>;
-      if (chunk.op === 1) return <span key={i} className="rounded bg-emerald-500/20 px-0.5 font-medium text-emerald-900 dark:text-emerald-100">{chunk.text}</span>;
-      return <span key={i}>{chunk.text}</span>;
-    });
-  };
-
-  const renderSideChunks = (chunks: WordDiffChunk[], side: "left" | "right") => {
+  // Single renderer for both views: colours each chunk by its op.
+  const renderChunks = (chunks: WordDiffChunk[]) => {
     return chunks.map((chunk, i) => {
       if (chunk.op === 0) return <Fragment key={i}>{chunk.text}</Fragment>;
-      const isRemoved = side === "left" && chunk.op === -1;
-      const isAdded = side === "right" && chunk.op === 1;
-      if (!isRemoved && !isAdded) return <Fragment key={i}>{chunk.text}</Fragment>;
       return (
         <span
           key={i}
           className={cn(
             "rounded px-0.5 font-medium",
-            isRemoved && "bg-rose-500/20 text-rose-900 dark:text-rose-100",
-            isAdded && "bg-emerald-500/20 text-emerald-900 dark:text-emerald-100",
+            chunk.op === -1 && "bg-rose-500/20 text-rose-900 dark:text-rose-100",
+            chunk.op === 1 && "bg-emerald-500/20 text-emerald-900 dark:text-emerald-100",
           )}
         >
           {chunk.text}
@@ -305,6 +409,12 @@ export const AdvancedDiffView = ({
       );
     });
   };
+
+  // Unified stream: flatten the aligned rows in order (removed then added).
+  const unifiedChunks = useMemo<WordDiffChunk[]>(
+    () => wordDiff.rows.flatMap((row) => (row.kind === "equal" ? row.left : [...row.left, ...row.right])),
+    [wordDiff],
+  );
 
   const copyDiff = () => {
     if (!rightVersion) return;
@@ -447,13 +557,32 @@ export const AdvancedDiffView = ({
             </div>
           </div>
           <ScrollArea className="h-[500px]">
-            <div className="grid grid-cols-2" dir="rtl" style={textStyle}>
-              <div className="min-h-[500px] border-l border-muted/20 px-4 py-3 text-right whitespace-pre-wrap break-words">
-                {renderSideChunks(wordDiff.leftChunks, "left")}
-              </div>
-              <div className="min-h-[500px] px-4 py-3 text-right whitespace-pre-wrap break-words">
-                {renderSideChunks(wordDiff.rightChunks, "right")}
-              </div>
+            {/* Each paragraph contributes a left + right cell into the SAME grid
+                row, so the browser auto-matches their height → the columns mirror
+                each other. Text flows naturally inside a cell (no empty fragments);
+                changed words are highlighted inline. An empty cell (a paragraph
+                that exists only on one side) is tinted to mark the gap. */}
+            <div className="grid grid-cols-2 items-stretch min-h-[500px]" dir="rtl" style={textStyle}>
+              {wordDiff.rows.map((row, idx) => (
+                <Fragment key={idx}>
+                  <div
+                    className={cn(
+                      "border-l border-muted/20 px-4 py-1 text-right whitespace-pre-wrap break-words",
+                      row.left.length === 0 && "bg-muted/20",
+                    )}
+                  >
+                    {renderChunks(row.left)}
+                  </div>
+                  <div
+                    className={cn(
+                      "px-4 py-1 text-right whitespace-pre-wrap break-words",
+                      row.right.length === 0 && "bg-muted/20",
+                    )}
+                  >
+                    {renderChunks(row.right)}
+                  </div>
+                </Fragment>
+              ))}
             </div>
           </ScrollArea>
         </Card>
@@ -468,7 +597,7 @@ export const AdvancedDiffView = ({
           </div>
           <ScrollArea className="h-[600px] p-4">
             <pre className="whitespace-pre-wrap text-right" dir="rtl" style={textStyle}>
-              {renderUnified()}
+              {renderChunks(unifiedChunks)}
             </pre>
           </ScrollArea>
           <div className="px-4 py-2 border-t text-xs text-muted-foreground flex gap-4 justify-end">

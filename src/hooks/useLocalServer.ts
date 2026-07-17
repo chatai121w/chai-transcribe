@@ -20,6 +20,15 @@ export interface ServerTranscriptionResult {
   stats?: TranscriptionStats;
 }
 
+export interface ModelUpdateInfo {
+  model: string;
+  installed: boolean;
+  local_revision?: string | null;
+  remote_revision?: string | null;
+  update_available: boolean;
+  error?: string;
+}
+
 export interface TranscriptionStats {
   rtf: number;              // Real-Time Factor (processing_time / audio_duration)
   file_size: number;        // bytes
@@ -845,6 +854,21 @@ export const useLocalServer = () => {
     await checkConnection(); // Refresh status
   };
 
+  const checkModelUpdates = async (modelIds: string[]): Promise<ModelUpdateInfo[]> => {
+    const res = await fetch(`${getBaseUrl()}/model-updates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getApiHeaders() },
+      body: JSON.stringify({ models: modelIds }),
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(err.error || `Update check failed (${res.status})`);
+    }
+    const data = await res.json();
+    return data.updates || [];
+  };
+
   const shutdownServer = useCallback(async () => {
     try {
       await fetch(`${getBaseUrl()}/shutdown`, { method: 'POST', headers: getApiHeaders(), signal: AbortSignal.timeout(3000) });
@@ -973,6 +997,7 @@ export const useLocalServer = () => {
     clearPartial,
     loadModel,
     downloadModel,
+    checkModelUpdates,
     preloadModelStream,
     cancelPreload,
     checkConnection,

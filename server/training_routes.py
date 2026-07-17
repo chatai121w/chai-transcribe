@@ -26,6 +26,7 @@ State on disk:
 """
 
 import json
+import hashlib
 import os
 import subprocess
 import sys
@@ -42,6 +43,7 @@ BASE_DIR = Path(__file__).resolve().parent / "lora_runs"
 DATASETS_DIR = BASE_DIR / "datasets"
 JOBS_DIR = BASE_DIR / "jobs"
 ACTIVE_MODEL_FILE = BASE_DIR / "active_model.json"
+TRAINED_MODELS_FILE = BASE_DIR / "trained_models.json"
 for _d in (BASE_DIR, DATASETS_DIR, JOBS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
@@ -70,6 +72,76 @@ def _safe_id(s: str) -> str:
     return "".join(c for c in s if c in keep)[:80] or uuid.uuid4().hex[:12]
 
 
+def _audio_duration(path: Path) -> Optional[float]:
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=15, check=True,
+        )
+        return float(json.loads(result.stdout)["format"]["duration"])
+    except Exception:
+        return None
+
+
+def _finalize_dataset(ds_dir: Path) -> dict:
+    rows = []
+    total_duration = 0.0
+    for audio_path in sorted((ds_dir / "audio").glob("*")):
+        text_path = ds_dir / "texts" / f"{audio_path.stem}.txt"
+        if not text_path.is_file():
+            continue
+        text = text_path.read_text(encoding="utf-8").strip()
+        if not text:
+            continue
+        duration = _audio_duration(audio_path)
+        if duration:
+            total_duration += duration
+        rows.append({"audio": str(audio_path.resolve()), "text": text, "duration": duration})
+
+    rows.sort(key=lambda row: hashlib.sha256(f'{row["audio"]}|{row["text"]}'.encode()).hexdigest())
+    eval_count = max(1, round(len(rows) * 0.15)) if len(rows) >= 10 else 0
+    eval_rows, train_rows = rows[:eval_count], rows[eval_count:]
+
+    def write_manifest(name: str, values: list[dict]):
+        path = ds_dir / name
+        with path.open("w", encoding="utf-8") as handle:
+            for row in values:
+                handle.write(json.dumps({"audio": row["audio"], "text": row["text"]}, ensure_ascii=False) + "\n")
+        return path
+
+    manifest = write_manifest("manifest.jsonl", rows)
+    write_manifest("manifest.train.jsonl", train_rows if eval_rows else rows)
+    eval_path = ds_dir / "manifest.eval.jsonl"
+    if eval_rows:
+        write_manifest(eval_path.name, eval_rows)
+    elif eval_path.exists():
+        eval_path.unlink()
+    warnings = []
+    if len(rows) < 20:
+        warnings.append("At least 20 approved clips are required for a real training run")
+    if not eval_rows:
+        warnings.append("At least 10 clips are required for a holdout evaluation split")
+    meta = {
+        "count": len(rows), "train_count": len(train_rows) if eval_rows else len(rows),
+        "eval_count": len(eval_rows), "duration_seconds": round(total_duration, 2),
+        "ready_for_training": len(rows) >= 20, "warnings": warnings,
+    }
+    (ds_dir / "dataset_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"manifest": str(manifest), "rows": len(rows), **meta}
+
+
+def resolve_trained_model(model_id: str) -> Optional[str]:
+    if not model_id.startswith("lora:") or not TRAINED_MODELS_FILE.is_file():
+        return None
+    try:
+        for item in json.loads(TRAINED_MODELS_FILE.read_text(encoding="utf-8")):
+            if item.get("model_id") == model_id and Path(item.get("ct2_path", "")).is_dir():
+                return item["ct2_path"]
+    except Exception:
+        pass
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────────
 #  Route registration — call from transcribe_server.py
 # ─────────────────────────────────────────────────────────────────────
@@ -88,9 +160,7 @@ def register_training_routes(app):
 
     @app.route("/training/dataset/upload-pair", methods=["POST"])
     def dataset_upload_pair():
-        ds_id = _safe_id(request.form.get("dataset_id") or "")
-        if not ds_id:
-            return jsonify({"error": "dataset_id required"}), 400
+        ds_id = _safe_id(request.form.get("dataset_id") or "approved-ground-truth")
         text = (request.form.get("text") or "").strip()
         if not text:
             return jsonify({"error": "text required"}), 400
@@ -107,8 +177,26 @@ def register_training_routes(app):
         audio_path = ds_dir / "audio" / f"{idx:05d}{suffix}"
         text_path = ds_dir / "texts" / f"{idx:05d}.txt"
         audio.save(str(audio_path))
+        duration = _audio_duration(audio_path)
+        if duration is None or duration < 0.25 or duration > 35:
+            audio_path.unlink(missing_ok=True)
+            return jsonify({"error": "audio must be readable and between 0.25 and 35 seconds"}), 400
+        digest = hashlib.sha256(audio_path.read_bytes()).hexdigest()
+        for existing in (ds_dir / "audio").glob("*"):
+            if existing != audio_path and hashlib.sha256(existing.read_bytes()).hexdigest() == digest:
+                audio_path.unlink(missing_ok=True)
+                return jsonify({"error": "this audio clip is already in the dataset"}), 409
         text_path.write_text(text, encoding="utf-8")
-        return jsonify({"index": idx, "audio": str(audio_path), "text": str(text_path)})
+        stats = _finalize_dataset(ds_dir)
+        return jsonify({"index": idx, "audio": str(audio_path), "text": str(text_path), "duration": duration, **stats})
+
+    @app.route("/training/dataset/approved-pair", methods=["POST"])
+    def dataset_approved_pair():
+        ds_id = _safe_id(request.form.get("dataset_id") or "approved-ground-truth")
+        ds_dir = DATASETS_DIR / ds_id
+        (ds_dir / "audio").mkdir(parents=True, exist_ok=True)
+        (ds_dir / "texts").mkdir(parents=True, exist_ok=True)
+        return dataset_upload_pair()
 
     @app.route("/training/dataset/<ds_id>/stats", methods=["GET"])
     def dataset_stats(ds_id):
@@ -117,11 +205,12 @@ def register_training_routes(app):
         if not ds_dir.is_dir():
             return jsonify({"error": "not found"}), 404
         audio_files = sorted((ds_dir / "audio").glob("*"))
+        stats = _finalize_dataset(ds_dir)
         return jsonify({
             "dataset_id": ds_id,
             "path": str(ds_dir),
             "count": len(audio_files),
-            "samples": [p.name for p in audio_files[:20]],
+            "samples": [p.name for p in audio_files[:20]], **stats,
         })
 
     @app.route("/training/dataset/<ds_id>/finalize", methods=["POST"])
@@ -130,20 +219,7 @@ def register_training_routes(app):
         ds_dir = DATASETS_DIR / ds_id
         if not ds_dir.is_dir():
             return jsonify({"error": "not found"}), 404
-        manifest = ds_dir / "manifest.jsonl"
-        rows = 0
-        with open(manifest, "w", encoding="utf-8") as f:
-            for audio_path in sorted((ds_dir / "audio").glob("*")):
-                stem = audio_path.stem
-                text_path = ds_dir / "texts" / f"{stem}.txt"
-                if not text_path.is_file():
-                    continue
-                text = text_path.read_text(encoding="utf-8").strip()
-                if not text:
-                    continue
-                f.write(json.dumps({"audio": str(audio_path.resolve()), "text": text}, ensure_ascii=False) + "\n")
-                rows += 1
-        return jsonify({"manifest": str(manifest), "rows": rows})
+        return jsonify(_finalize_dataset(ds_dir))
 
     @app.route("/training/datasets", methods=["GET"])
     def list_datasets():
@@ -151,10 +227,11 @@ def register_training_routes(app):
         for d in sorted(DATASETS_DIR.iterdir()):
             if not d.is_dir():
                 continue
+            stats = _finalize_dataset(d)
             out.append({
                 "dataset_id": d.name,
                 "count": len(list((d / "audio").glob("*"))) if (d / "audio").is_dir() else 0,
-                "has_manifest": (d / "manifest.jsonl").is_file(),
+                "has_manifest": (d / "manifest.jsonl").is_file(), **stats,
             })
         return jsonify({"datasets": out})
 
@@ -163,6 +240,7 @@ def register_training_routes(app):
     @app.route("/training/start", methods=["POST"])
     def training_start():
         body = request.get_json(silent=True) or {}
+        smoke_test = bool(body.get("smoke_test"))
         manifest = body.get("manifest")
         dataset_id = body.get("dataset_id")
         if not manifest and dataset_id:
@@ -187,6 +265,9 @@ def register_training_routes(app):
             manifest = str(manifest_path)
         if not manifest or not Path(manifest).is_file():
             return jsonify({"error": "manifest not found (provide 'manifest' or 'dataset_id' first)"}), 400
+        row_count = sum(1 for line in Path(manifest).read_text(encoding="utf-8").splitlines() if line.strip())
+        if row_count < 20 and not smoke_test:
+            return jsonify({"error": f"real training requires at least 20 approved clips; found {row_count}. Use smoke_test only to verify the pipeline."}), 400
 
         job_id = _safe_id(body.get("job_name") or f"lora_{int(time.time())}")
         job_dir = JOBS_DIR / job_id
@@ -219,11 +300,14 @@ def register_training_routes(app):
             "--lora-r", str(int(body.get("lora_r") or 32)),
             "--lora-alpha", str(int(body.get("lora_alpha") or 64)),
             "--lora-dropout", str(float(body.get("lora_dropout") or 0.05)),
+            "--eval-split", "0" if smoke_test else str(float(body.get("eval_split") or 0.15)),
         ]
         if body.get("merge_and_convert"):
             cmd.append("--merge-and-convert")
         if body.get("max_samples"):
             cmd.extend(["--max-samples", str(int(body["max_samples"]))])
+        elif smoke_test:
+            cmd.extend(["--max-samples", "1"])
 
         log_path = job_dir / "stdout.log"
         log_f = open(log_path, "ab")
@@ -245,7 +329,7 @@ def register_training_routes(app):
                        ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        return jsonify({"job_id": job_id, "pid": proc.pid, "log": str(log_path)})
+        return jsonify({"job_id": job_id, "pid": proc.pid, "log": str(log_path), "smoke_test": smoke_test})
 
     @app.route("/training/status/<job_id>", methods=["GET"])
     def training_status(job_id):
@@ -327,8 +411,21 @@ def register_training_routes(app):
             return jsonify({"ok": True, "active": None})
         if not Path(ct2).is_dir():
             return jsonify({"error": f"ct2_path not a directory: {ct2}"}), 400
-        ACTIVE_MODEL_FILE.write_text(json.dumps({"ct2_path": ct2}, ensure_ascii=False), encoding="utf-8")
-        return jsonify({"ok": True, "active": ct2})
+        job_id = _safe_id(body.get("job_id") or Path(ct2).parent.name)
+        progress = _read_progress(job_id)
+        if progress.get("wer_before") is None or progress.get("wer_after") is None:
+            return jsonify({"error": "model has no holdout evaluation; smoke-test models cannot be selected"}), 400
+        if progress["wer_after"] >= progress["wer_before"] and not body.get("force"):
+            return jsonify({"error": "model did not improve holdout WER"}), 400
+        models = []
+        if TRAINED_MODELS_FILE.is_file():
+            models = json.loads(TRAINED_MODELS_FILE.read_text(encoding="utf-8"))
+        model_id = f"lora:{job_id}"
+        models = [m for m in models if m.get("model_id") != model_id]
+        models.append({"model_id": model_id, "ct2_path": str(Path(ct2).resolve()), "wer_before": progress["wer_before"], "wer_after": progress["wer_after"]})
+        TRAINED_MODELS_FILE.write_text(json.dumps(models, ensure_ascii=False, indent=2), encoding="utf-8")
+        ACTIVE_MODEL_FILE.write_text(json.dumps({"active": model_id}, ensure_ascii=False), encoding="utf-8")
+        return jsonify({"ok": True, "active": model_id, "model_id": model_id})
 
     @app.route("/training/active-model", methods=["GET"])
     def get_active_model():
@@ -336,6 +433,14 @@ def register_training_routes(app):
             return jsonify({"active": None})
         try:
             return jsonify(json.loads(ACTIVE_MODEL_FILE.read_text(encoding="utf-8")))
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/training/models", methods=["GET"])
+    def get_trained_models():
+        try:
+            models = json.loads(TRAINED_MODELS_FILE.read_text(encoding="utf-8")) if TRAINED_MODELS_FILE.is_file() else []
+            return jsonify({"models": models})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 

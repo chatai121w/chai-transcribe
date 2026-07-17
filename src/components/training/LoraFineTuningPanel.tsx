@@ -65,6 +65,7 @@ export default function LoraFineTuningPanel() {
   const [lr, setLr] = useState(0.0001);
   const [loraR, setLoraR] = useState(32);
   const [mergeAndConvert, setMergeAndConvert] = useState(true);
+  const [smokeTest, setSmokeTest] = useState(false);
   const [starting, setStarting] = useState(false);
   const activeJob = jobs.find(j => ['preparing', 'training', 'merging', 'converting'].includes(j.status));
 
@@ -131,6 +132,7 @@ export default function LoraFineTuningPanel() {
         epochs, batch_size: batchSize, lr,
         lora_r: loraR, lora_alpha: loraR * 2,
         merge_and_convert: mergeAndConvert,
+        smoke_test: smokeTest,
       });
     } catch (e) {
       const msg = String(e);
@@ -206,6 +208,10 @@ export default function LoraFineTuningPanel() {
                 <div className="text-xs text-muted-foreground">
                   פעיל: <code>{selectedDs}</code> · {selectedDsInfo?.count ?? 0} זוגות
                 </div>
+                <div className="text-xs text-muted-foreground">
+                  אימון: {selectedDsInfo?.train_count ?? selectedDsInfo?.count ?? 0} · בדיקה: {selectedDsInfo?.eval_count ?? 0}
+                  {selectedDsInfo?.duration_seconds != null && ` · ${selectedDsInfo.duration_seconds.toFixed(1)} שניות`}
+                </div>
                 <div className="flex gap-2">
                   <Input
                     type="file"
@@ -269,16 +275,28 @@ export default function LoraFineTuningPanel() {
                   מזג והמר ל-CT2 (להפעלה אוטומטית עם faster-whisper)
                 </Label>
               </div>
+              <div className="flex items-end gap-2 col-span-2">
+                <Switch id="smoke-test" checked={smokeTest} onCheckedChange={setSmokeTest} />
+                <Label htmlFor="smoke-test" className="text-xs cursor-pointer">
+                  בדיקת תקינות בלבד (דוגמה אחת, ללא הפעלת המודל)
+                </Label>
+              </div>
             </div>
+
+            {!smokeTest && selectedDsInfo && !selectedDsInfo.ready_for_training && (
+              <div className="mt-3 text-xs text-destructive flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5" /> נדרשות לפחות 20 דוגמאות מאושרות לאימון אמיתי.
+              </div>
+            )}
 
             <Button
               onClick={handleStart}
-              disabled={starting || !selectedDs || !!activeJob}
+              disabled={starting || !selectedDs || !!activeJob || (!smokeTest && !selectedDsInfo?.ready_for_training)}
               className="mt-4 gap-2"
               size="lg"
             >
               {(starting || activeJob) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-              {activeJob ? `רץ: ${activeJob.status}…` : 'התחל אימון LoRA'}
+              {activeJob ? `רץ: ${activeJob.status}…` : smokeTest ? 'הרץ בדיקת תקינות' : 'התחל אימון LoRA'}
             </Button>
           </section>
 
@@ -318,14 +336,19 @@ export default function LoraFineTuningPanel() {
                               <TooltipTrigger asChild>
                                 <Button
                                   size="icon"
-                                  variant={activeCt2 === j.ct2_model_path ? 'default' : 'ghost'}
-                                  onClick={() => setActiveModel(activeCt2 === j.ct2_model_path ? null : j.ct2_model_path!)}
+                                  variant={activeCt2 === `lora:${j.job_id}` ? 'default' : 'ghost'}
+                                  disabled={j.wer_before == null || j.wer_after == null || j.wer_after >= j.wer_before}
+                                  onClick={() => setActiveModel(activeCt2 === `lora:${j.job_id}` ? null : j.ct2_model_path!, j.job_id)}
                                 >
                                   <Power className="w-4 h-4" />
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>
-                                {activeCt2 === j.ct2_model_path ? 'בטל הפעלה (חזור למודל בסיס)' : 'הפעל מודל זה'}
+                                {j.wer_before == null || j.wer_after == null
+                                  ? 'אין בדיקת איכות נפרדת; לא ניתן לבחור מודל בדיקה'
+                                  : j.wer_after >= j.wer_before
+                                  ? 'המודל לא שיפר WER ולכן אינו זמין לבחירה'
+                                  : activeCt2 === `lora:${j.job_id}` ? 'חזור למודל בסיס' : 'הוסף למודלים ובחר'}
                               </TooltipContent>
                             </Tooltip>
                           )}

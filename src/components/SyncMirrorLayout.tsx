@@ -82,6 +82,54 @@ const FONT_FAMILIES = [
   { value: "system-ui",        label: "מערכת" },
 ];
 
+type FontMetrics = {
+  weight: number;
+  size: number;
+  family: string;
+  wordSpacing: number;
+  letterSpacing: number;
+};
+
+/**
+ * Break a flat list of word-timings into visual lines using canvas measureText,
+ * so several columns can render IDENTICAL line breaks. Single source of truth
+ * shared by every line-measuring memo below (current text, locked snapshot,
+ * frozen compare snapshot) — previously this canvas logic was copy-pasted 3×.
+ */
+function measureLineBreaks(timings: WordTiming[], width: number, font: FontMetrics): WordTiming[][] {
+  if (!timings.length) return [];
+  const effectiveWidth = width > 0 ? width : 400;
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return [timings];
+  ctx.font = `${font.weight} ${font.size}px ${font.family}`;
+  const spaceW = ctx.measureText(" ").width + 1 + font.wordSpacing;
+  const result: WordTiming[][] = [];
+  let line: WordTiming[] = [];
+  let w = 0;
+  for (const wt of timings) {
+    const ww = ctx.measureText(wt.word).width + spaceW + wt.word.length * font.letterSpacing;
+    if (w + ww > effectiveWidth && line.length > 0) {
+      result.push(line);
+      line = [wt];
+      w = ww;
+    } else {
+      line.push(wt);
+      w += ww;
+    }
+  }
+  if (line.length) result.push(line);
+  return result;
+}
+
+/**
+ * Convert plain text into synthetic word-timings (one slot per word). Used for
+ * snapshots/baselines that carry no real audio timings of their own.
+ */
+function textToTimings(text: string): WordTiming[] {
+  return text.trim().split(/\s+/).filter(Boolean).map((word, i) => ({ word, start: i, end: i + 1 }));
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 export const SyncMirrorLayout = ({
   wordTimings,
@@ -310,7 +358,7 @@ export const SyncMirrorLayout = ({
   const displayTimings = useMemo((): WordTiming[] => {
     const words = text.trim().split(/\s+/).filter(Boolean);
     if (!words.length) return [];
-    if (!wordTimings.length) return words.map((word, i) => ({ word, start: i, end: i + 1 }));
+    if (!wordTimings.length) return textToTimings(text);
 
     // Convert userAnchors Map → UserAnchor[] for the alignment function
     const anchorsArr = Array.from(userAnchors.entries()).map(([editedIdx, { start, end }]) => ({
@@ -372,61 +420,24 @@ export const SyncMirrorLayout = ({
 
 
   // ── Canvas-measured line breaks ─────────────────────────────────────────────
-  const lines = useMemo((): WordTiming[][] => {
-    if (!displayTimings.length) return [];
+  const fontMetrics = useMemo<FontMetrics>(() => ({
+    weight: localFontWeight,
+    size: localFontSize,
+    family: localFontFamily,
+    wordSpacing: localWordSpacing,
+    letterSpacing: localLetterSpacing,
+  }), [localFontWeight, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing]);
 
-    // Fallback width estimate before ResizeObserver fires
-    const effectiveWidth = colWidth > 0 ? colWidth : 400;
-
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return [displayTimings];
-    ctx.font = `${localFontWeight} ${localFontSize}px ${localFontFamily}`;
-    const spaceW = ctx.measureText(" ").width + 1 + localWordSpacing;
-
-    const result: WordTiming[][] = [];
-    let line: WordTiming[] = [];
-    let w = 0;
-
-    for (const wt of displayTimings) {
-      // letter spacing adds (word.length * letterSpacing) to each word's width
-      const ww = ctx.measureText(wt.word).width + spaceW + wt.word.length * localLetterSpacing;
-      if (w + ww > effectiveWidth && line.length > 0) {
-        result.push(line);
-        line = [wt];
-        w = ww;
-      } else {
-        line.push(wt);
-        w += ww;
-      }
-    }
-    if (line.length) result.push(line);
-    return result;
-  }, [displayTimings, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
+  const lines = useMemo(
+    () => measureLineBreaks(displayTimings, colWidth, fontMetrics),
+    [displayTimings, colWidth, fontMetrics],
+  );
 
   // ── Snapshot lines (the locked side's frozen view) ──────────────────────────
-  const snapshotLines = useMemo((): WordTiming[][] => {
+  const snapshotLines = useMemo<WordTiming[][]>(() => {
     if (!lockedSnapshotText.trim()) return [];
-    const words = lockedSnapshotText.trim().split(/\s+/).filter(Boolean);
-    const snapTimings: WordTiming[] = words.map((word, i) => ({ word, start: i, end: i + 1 }));
-    const effectiveWidth = colWidth > 0 ? colWidth : 400;
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return [snapTimings];
-    ctx.font = `${localFontWeight} ${localFontSize}px ${localFontFamily}`;
-    const spaceW = ctx.measureText(' ').width + 1 + localWordSpacing;
-    const result: WordTiming[][] = [];
-    let line: WordTiming[] = [];
-    let w = 0;
-    for (const wt of snapTimings) {
-      const ww = ctx.measureText(wt.word).width + spaceW + wt.word.length * localLetterSpacing;
-      if (w + ww > effectiveWidth && line.length > 0) {
-        result.push(line); line = [wt]; w = ww;
-      } else { line.push(wt); w += ww; }
-    }
-    if (line.length) result.push(line);
-    return result;
-  }, [lockedSnapshotText, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
+    return measureLineBreaks(textToTimings(lockedSnapshotText), colWidth, fontMetrics);
+  }, [lockedSnapshotText, colWidth, fontMetrics]);
 
   // ── Padded alignment via line-level LCS ────────────────────────────────────
   // Returns two arrays of identical length where each slot is either a real
@@ -583,31 +594,10 @@ export const SyncMirrorLayout = ({
   }, [displayTimings]);
 
   // Lines for the frozen (right) panel in compare mode
-  const frozenLines = useMemo((): WordTiming[][] => {
+  const frozenLines = useMemo<WordTiming[][]>(() => {
     if (!compareMode || !frozenTimings.length) return [];
-    const effectiveWidth = colWidth > 0 ? colWidth : 400;
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return [frozenTimings];
-    ctx.font = `${localFontWeight} ${localFontSize}px ${localFontFamily}`;
-    const spaceW = ctx.measureText(" ").width + 1 + localWordSpacing;
-    const result: WordTiming[][] = [];
-    let line: WordTiming[] = [];
-    let w = 0;
-    for (const wt of frozenTimings) {
-      const ww = ctx.measureText(wt.word).width + spaceW + wt.word.length * localLetterSpacing;
-      if (w + ww > effectiveWidth && line.length > 0) {
-        result.push(line);
-        line = [wt];
-        w = ww;
-      } else {
-        line.push(wt);
-        w += ww;
-      }
-    }
-    if (line.length) result.push(line);
-    return result;
-  }, [compareMode, frozenTimings, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
+    return measureLineBreaks(frozenTimings, colWidth, fontMetrics);
+  }, [compareMode, frozenTimings, colWidth, fontMetrics]);
 
   // ── Baseline (original) snapshot — set once on first non-empty mount, persisted ──
   const BASELINE_KEY = 'sync_mirror_baseline_v1';
@@ -645,9 +635,7 @@ export const SyncMirrorLayout = ({
   const compareToBaseline = useCallback(() => {
     if (!hasBaseline) return;
     // Snapshot the baseline as the frozen panel and enter compare mode
-    const words = baselineText.trim().split(/\s+/).filter(Boolean);
-    const baselineTimings: WordTiming[] = words.map((word, i) => ({ word, start: i, end: i + 1 }));
-    setFrozenTimings(baselineTimings);
+    setFrozenTimings(textToTimings(baselineText));
     setCompareMode(true);
     toast({ title: 'משווה לגרסת בסיס', description: 'הצד הימני מציג כעת את גרסת הבסיס.' });
   }, [hasBaseline, baselineText]);
