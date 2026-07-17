@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor } from "lucide-react";
+import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor, MoreHorizontal } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -1070,9 +1070,9 @@ export const SyncMirrorLayout = ({
 
       {/* ── Regular word-view (hidden in full-edit mode) ── */}
       {!fullEditMode && <>
-      <div className={cn("flex items-center border-b bg-muted/10 sticky top-0 z-10 shrink-0 [&_svg]:text-[#0a1d3f] dark:[&_svg]:text-blue-300")} dir="rtl">
+      <div className={cn("grid grid-cols-2 items-stretch border-b bg-muted/10 sticky top-0 z-10 shrink-0 [&_svg]:text-[#0a1d3f] dark:[&_svg]:text-blue-300")} dir="rtl">
         {/* Visual mid-divider between right-half and left-half intent */}
-        <div className="flex-1 flex items-center gap-1.5 px-3 py-2 border-s border-border/40">
+        <div className="min-w-0 flex items-center gap-1.5 px-3 py-2 border-s border-border/40">
           <AlignRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <span className={cn("text-xs font-semibold", compareMode ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
             {compareMode ? "גרסה קפואה להשוואה" : "תמלול מסונכרן"}
@@ -1213,7 +1213,7 @@ export const SyncMirrorLayout = ({
         </div>
 
         {/* Left column label + controls */}
-        <div className="flex-1 flex items-center gap-1.5 px-3 py-2">
+        <div className="min-w-0 flex flex-wrap items-center gap-1.5 px-3 py-2">
           <Edit3 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <button
             onClick={toggleCompareMode}
@@ -1225,7 +1225,7 @@ export const SyncMirrorLayout = ({
           >
             {compareMode ? "לא מסונכרנת" : "עריכה מסונכרנת"}
           </button>
-          <div className="ms-auto flex items-center gap-1.5">
+          <div className="ms-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
             {/* Left column sync toggle */}
             <button
               onClick={() => setLeftWordHighlightOn(v => !v)}
@@ -1250,87 +1250,48 @@ export const SyncMirrorLayout = ({
               </Button>
             )}
 
-            {/* Baseline controls — restore / compare / set-new */}
-            <div className="inline-flex items-center gap-0.5 ms-0.5 ps-1 border-s border-border/40">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 w-6 p-0"
-                onClick={restoreToBaseline}
-                disabled={!isModifiedFromBaseline}
-                title={hasBaseline ? (isModifiedFromBaseline ? 'החזר לגרסת בסיס' : 'הטקסט זהה לבסיס') : 'אין בסיס שמור'}
-              >
-                <History className="w-3 h-3" />
-              </Button>
-              <Button
-                size="sm"
-                variant={compareMode ? 'default' : 'outline'}
-                className="h-6 w-6 p-0"
-                onClick={compareMode ? toggleCompareMode : compareToBaseline}
-                disabled={!hasBaseline}
-                title={compareMode ? 'סיים השוואה' : 'השווה לגרסת בסיס'}
-              >
-                <GitCompare className="w-3 h-3" />
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 w-6 p-0"
-                onClick={setNewBaseline}
-                title="קבע את הטקסט הנוכחי כבסיס חדש"
-              >
-                <Bookmark className="w-3 h-3" />
-              </Button>
-            </div>
-
-            {onDuplicateSave && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-[10px] px-2 gap-0.5"
-                onClick={() => { setDupName(""); setDupDialogOpen(true); }}
-                title="שכפל ושמור עם שם חדש"
-              >
-                <Copy className="w-2.5 h-2.5" />
-                שכפל ושמור
-              </Button>
-            )}
-            {onSaveLearning && (
-              <div className="inline-flex items-center">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-6 text-[10px] px-2 gap-0.5 rounded-e-none"
-                  onClick={() => openLearningPicker('quick')}
-                  disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}
-                  title="שמור ללמידה עם בחירת פרופיל"
-                >
-                  <Brain className="w-2.5 h-2.5" />
-                  שמור ללמידה
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[10px]" title="פעולות נוספות">
+                  <MoreHorizontal className="h-3 w-3" />
+                  פעולות
                 </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 rounded-s-none border-s-0 px-1"
-                      disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}
-                      title="אפשרויות שמירה ללמידה"
-                    >
-                      <ChevronDown className="w-2.5 h-2.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="text-xs">
-                    <DropdownMenuItem onClick={() => openLearningPicker('quick')}>
-                      שמירה מהירה ללמידה
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 text-xs" dir="rtl">
+                <DropdownMenuItem onClick={restoreToBaseline} disabled={!isModifiedFromBaseline}>
+                  <History className="me-2 h-3.5 w-3.5" /> החזר לגרסת בסיס
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={compareMode ? toggleCompareMode : compareToBaseline} disabled={!hasBaseline}>
+                  <GitCompare className="me-2 h-3.5 w-3.5" /> {compareMode ? 'סיים השוואה' : 'השווה לגרסת בסיס'}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={setNewBaseline}>
+                  <Bookmark className="me-2 h-3.5 w-3.5" /> קבע כגרסת בסיס
+                </DropdownMenuItem>
+                {onDuplicateSave && (
+                  <DropdownMenuItem onClick={() => { setDupName(""); setDupDialogOpen(true); }}>
+                    <Copy className="me-2 h-3.5 w-3.5" /> שכפל ושמור
+                  </DropdownMenuItem>
+                )}
+                {onSaveLearning && (
+                  <>
+                    <DropdownMenuItem onClick={() => openLearningPicker('quick')} disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}>
+                      <Brain className="me-2 h-3.5 w-3.5" /> שמור ללמידה
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => openLearningPicker('advanced')}>
-                      שמירה מתקדמת (עם הערה)
+                    <DropdownMenuItem onClick={() => openLearningPicker('advanced')} disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}>
+                      <Brain className="me-2 h-3.5 w-3.5" /> למידה עם הערה
                     </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            )}
+                  </>
+                )}
+                {enableRichEdit && (
+                  <DropdownMenuItem onClick={togglePreciseAlign}>
+                    <Rows3 className="me-2 h-3.5 w-3.5" /> {preciseAlign ? 'עבור לעריכה חופשית' : 'הפעל יישור מדויק'}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={toggleAlignmentMode}>
+                  <AlignJustify className="me-2 h-3.5 w-3.5" /> {alignmentMode === 'mirrored-padded' ? 'כבה יישור 1:1' : 'הפעל יישור 1:1'}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             {/* Typography popover */}
             <Popover>
               <PopoverTrigger asChild>
@@ -1569,34 +1530,6 @@ export const SyncMirrorLayout = ({
               </PopoverContent>
             </Popover>
 
-            {/* Precise row alignment toggle (only meaningful when rich-edit is enabled) */}
-            {enableRichEdit && (
-              <Button
-                size="sm"
-                variant={preciseAlign ? "default" : "outline"}
-                className="h-6 text-[10px] px-1.5 gap-0.5"
-                onClick={togglePreciseAlign}
-                title={preciseAlign
-                  ? "יישור שורות מדויק פעיל — שני הצדדים מתיישרים שורה-מול-שורה בכל גודל מסך. לחץ למעבר לעריכה חופשית."
-                  : "עריכה חופשית פעילה — שורות לא מובטחות זו מול זו. לחץ לחזרה ליישור מדויק."}
-              >
-                <Rows3 className="w-2.5 h-2.5" />
-                {preciseAlign ? "יישור מדויק" : "עריכה חופשית"}
-              </Button>
-            )}
-            {/* Mirrored-padded alignment toggle — keeps both columns line-aligned 1:1 by injecting phantom rows */}
-            <Button
-              size="sm"
-              variant={alignmentMode === 'mirrored-padded' ? "default" : "outline"}
-              className="h-6 text-[10px] px-1.5 gap-0.5"
-              onClick={toggleAlignmentMode}
-              title={alignmentMode === 'mirrored-padded'
-                ? "יישור 1:1 פעיל — שני הצדדים נשארים מסונכרנים שורה-מול-שורה גם אחרי עריכה (דורש נעילת צד). לחץ לכיבוי."
-                : "יישור 1:1 — כשצד אחד נעול, עריכה בצד השני מוסיפה שורות-רפאים אוטומטית כדי לשמור על יישור."}
-            >
-              <AlignJustify className="w-2.5 h-2.5" />
-              {alignmentMode === 'mirrored-padded' ? 'יישור 1:1' : 'יישור חופשי'}
-            </Button>
             {/* Full edit button */}
             <Button
               size="sm"
