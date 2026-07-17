@@ -86,7 +86,6 @@ const MeetingRecorder = lazyWithLog('MeetingRecorder', () => import("./pages/Mee
 const VoiceCommandAdmin = lazyWithLog('VoiceCommandAdmin', () => import("./pages/VoiceCommandAdmin"));
 const SystemDashboard   = lazyWithLog('SystemDashboard',   () => import("./pages/SystemDashboard"));
 const LashoKodesh       = lazyWithLog('LashoKodesh',       () => import("./pages/LashoKodesh"));
-const LoshonKodeshRules = lazyWithLog('LoshonKodeshRules', () => import("./pages/LoshonKodeshRules"));
 const PersonalLearning = lazyWithLog('PersonalLearning', () => import("./pages/PersonalLearning"));
 const CompareReport     = lazyWithLog('CompareReport',     () => import("./pages/CompareReport"));
 const ComparisonsHub    = lazyWithLog('ComparisonsHub',    () => import("./pages/ComparisonsHub"));
@@ -291,7 +290,7 @@ const App = () => {
                 <Route path="/voice-command-admin" element={<ProtectedRoute><VoiceCommandAdmin /></ProtectedRoute>} />
                 <Route path="/system-dashboard" element={<ProtectedRoute><SystemDashboard /></ProtectedRoute>} />
                 <Route path="/lashon-kodesh" element={<ProtectedRoute><LashoKodesh /></ProtectedRoute>} />
-                <Route path="/loshon-kodesh-rules" element={<ProtectedRoute><LoshonKodeshRules /></ProtectedRoute>} />
+                <Route path="/loshon-kodesh-rules" element={<Navigate to="/lashon-kodesh?tab=settings" replace />} />
                 <Route path="/personal-learning" element={<ProtectedRoute><PersonalLearning /></ProtectedRoute>} />
                 <Route path="/asr-training" element={<Navigate to="/compare?tab=ground-truth" replace />} />
                 <Route path="*" element={<NotFound />} />

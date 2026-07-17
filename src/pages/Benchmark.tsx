@@ -915,7 +915,7 @@ export default function Benchmark() {
                       <Star className={`w-3.5 h-3.5 ${learnedWords.has(wordDialog.word) ? "fill-current" : ""}`} />
                       {learnedWords.has(wordDialog.word) ? "נלמד" : "סמן כנלמד"}
                     </Button>
-                    <Button size="sm" variant="outline" className="gap-1" onClick={() => navigate("/lk?tab=training")}>
+                    <Button size="sm" variant="outline" className="gap-1" onClick={() => navigate("/lashon-kodesh?tab=training")}>
                       <ExternalLink className="w-3.5 h-3.5" />שלח לאימון לשון הקודש
                     </Button>
                   </div>

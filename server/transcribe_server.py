@@ -4263,9 +4263,10 @@ def lk_transcribe():
     model_id = request.form.get("model", _current_model_id or _default_model_for("he"))
     resolved = MODEL_REGISTRY.get(model_id, model_id)
     user_hotwords = request.form.get("hotwords", "")
+    user_initial_prompt = request.form.get("initial_prompt", "").strip()
 
     initial_prompt, hotwords = _resolve_prompt_and_hotwords(
-        "he", "", user_hotwords, loshon_kodesh=True
+        "he", user_initial_prompt, user_hotwords, loshon_kodesh=True
     )
 
     suffix = _safe_suffix(audio_file.filename)
