@@ -309,7 +309,8 @@ export function useTranscriptionEngines(
           const vocab = isCustomVocabularyEnabled() ? getHotwordsString() : '';
           const learned = isPersonalPronunciationEnabled() ? getLearnedHotwords(60) : '';
           const base = [vocab, learned].filter(Boolean).join(', ');
-          const hotwords = buildLoshonKodeshHotwords(base);
+          const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
+          const hotwords = lkActive ? buildLoshonKodeshHotwords(base) : base;
           if (hotwords) form.append('hotwords', hotwords);
         }
 
@@ -541,8 +542,8 @@ export function useTranscriptionEngines(
       const learnedHotwords = personalPronunciationOn ? getLearnedHotwords(100) : '';
       const baseMerged = [userHotwords, vocabHotwords, profileHotwords, learnedHotwords]
         .filter(Boolean).join(', ');
-      // Always pipe through LK builder so enabled dictionaries + LK base list are included
-      const mergedHotwords = buildLoshonKodeshHotwords(baseMerged) || undefined;
+      const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
+      const mergedHotwords = (lkActive ? buildLoshonKodeshHotwords(baseMerged) : baseMerged) || undefined;
       const profilePrompt = getProfileInitialPrompt();
       const cudaOptions: CudaOptions = {
         preset: preferences.cuda_preset || 'balanced',
@@ -553,7 +554,7 @@ export function useTranscriptionEngines(
         vadAggressive: preferences.cuda_vad_aggressive,
         hotwords: mergedHotwords,
         paragraphThreshold: preferences.cuda_paragraph_threshold || undefined,
-        loshonKodesh: isLoshonKodeshEnabled() || isProfileLoshonKodesh(),
+        loshonKodesh: lkActive,
         initialPrompt: profilePrompt || undefined,
       };
 

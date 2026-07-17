@@ -413,12 +413,14 @@ const Index = () => {
         debugLog.warn('Index', 'LK AI fix failed, keeping rules-only result', e);
       }
     }
-    if (definitiveResult.hits.length > 0 || correctionResult.appliedCount > 0 || profileResult.appliedCount > 0 || vocabularyResult.appliedCount > 0) {
+    const nonLkAppliedCount = definitiveResult.hits.length + correctionResult.appliedCount + profileResult.appliedCount + vocabularyResult.appliedCount;
+    if (finalText !== text) {
       debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile + ${vocabularyResult.appliedCount} vocabulary corrections`);
       setTranscript(finalText);
-      const totalApplied = definitiveResult.hits.length + correctionResult.appliedCount + profileResult.appliedCount + vocabularyResult.appliedCount;
+    }
+    if (nonLkAppliedCount > 0) {
       toast({
-        title: `הלמידה האישית החילה ${totalApplied} תיקונים`,
+        title: `הלמידה האישית החילה ${nonLkAppliedCount} תיקונים`,
         description: correctionResult.applied.length
           ? correctionResult.applied.slice(0, 3).map(item => `${item.original} → ${item.corrected}`).join(' · ')
           : 'הטקסט עודכן לפי אוצר המילים האישי',
