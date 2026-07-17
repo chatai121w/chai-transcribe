@@ -288,6 +288,43 @@ def _resolve_prompt_and_hotwords(language, user_initial_prompt, user_hotwords, l
     return prompt, hotwords
 
 
+def _fit_whisper_prompt_budget(model, initial_prompt, hotwords):
+    """Keep combined prompt and hotwords below Whisper's decoder context limit.
+
+    faster-whisper truncates each input independently to half the context. When
+    both are present their combined prompt can still exceed the 448-position
+    decoder limit. Reserve one shared half-context budget for both hints.
+    """
+    if not initial_prompt and not hotwords:
+        return initial_prompt, hotwords
+
+    try:
+        tokenizer = model.hf_tokenizer
+        max_length = int(model.model.max_length)
+        shared_budget = max(32, max_length // 2 - 16)
+        prompt_budget = min(96, shared_budget)
+
+        def trim(value, limit):
+            if not value or limit <= 0:
+                return None
+            token_ids = tokenizer.encode(" " + value.strip()).ids
+            if len(token_ids) <= limit:
+                return value
+            return tokenizer.decode(token_ids[:limit]).strip()
+
+        safe_prompt = trim(initial_prompt, prompt_budget)
+        prompt_tokens = len(tokenizer.encode(" " + safe_prompt).ids) if safe_prompt else 0
+        safe_hotwords = trim(hotwords, shared_budget - prompt_tokens)
+        return safe_prompt, safe_hotwords
+    except Exception as exc:
+        # Conservative fallback for unexpected model wrappers/tokenizers.
+        _log.warning("Could not tokenize Whisper hints; applying character limit: %s", exc)
+        safe_prompt = initial_prompt[:240] if initial_prompt else None
+        remaining = max(0, 520 - len(safe_prompt or ""))
+        safe_hotwords = hotwords[:remaining] if hotwords and remaining else None
+        return safe_prompt, safe_hotwords
+
+
 # Concurrency control — only 1 GPU transcription at a time
 import threading
 _transcribe_lock = threading.Lock()
@@ -1303,14 +1340,15 @@ def transcribe():
         def _run_transcribe(m):
             from faster_whisper import BatchedInferencePipeline
             pipeline = BatchedInferencePipeline(model=m)
+            safe_prompt, safe_hotwords = _fit_whisper_prompt_budget(m, initial_prompt, hotwords)
             return pipeline.transcribe(
                 transcribe_path,
                 language=language if language != "auto" else None,
                 word_timestamps=True,
                 beam_size=beam_size,
                 batch_size=auto_batch_size(),
-                initial_prompt=initial_prompt,
-                hotwords=hotwords,
+                initial_prompt=safe_prompt,
+                hotwords=safe_hotwords,
                 condition_on_previous_text=True,
             )
 
@@ -1612,6 +1650,7 @@ def transcribe_stream():
 
             def _do_transcribe(mdl, override_batch=None):
                 bs = override_batch if override_batch is not None else batch_size
+                safe_prompt, safe_hotwords = _fit_whisper_prompt_budget(mdl, hebrew_prompt, hotwords)
                 if fast_mode:
                     from faster_whisper import BatchedInferencePipeline
                     pipeline = BatchedInferencePipeline(model=mdl)
@@ -1622,8 +1661,8 @@ def transcribe_stream():
                         beam_size=beam_size or 1,
                         batch_size=bs,
                         condition_on_previous_text=condition_on_prev,
-                        hotwords=hotwords,
-                        initial_prompt=hebrew_prompt,
+                        hotwords=safe_hotwords,
+                        initial_prompt=safe_prompt,
                     )
                 else:
                     vad_params = dict(
@@ -1639,8 +1678,8 @@ def transcribe_stream():
                         vad_filter=True,
                         vad_parameters=vad_params,
                         condition_on_previous_text=condition_on_prev,
-                        hotwords=hotwords,
-                        initial_prompt=hebrew_prompt,
+                        hotwords=safe_hotwords,
+                        initial_prompt=safe_prompt,
                     )
 
             try:
@@ -1926,6 +1965,7 @@ def transcribe_live():
                     prompt = f"תמלול בעברית. {live_context}" if language == "he" else live_context
             else:
                 prompt = base_prompt or ("תמלול בעברית." if language == "he" else None)
+            safe_prompt, safe_hotwords = _fit_whisper_prompt_budget(m, prompt, resolved_hotwords)
             segments, info = m.transcribe(
                 tmp_path,
                 language=language if language != "auto" else None,
@@ -1937,8 +1977,8 @@ def transcribe_live():
                 temperature=0.0,
                 no_speech_threshold=0.6,
                 suppress_blank=True,
-                initial_prompt=prompt,
-                hotwords=resolved_hotwords,
+                initial_prompt=safe_prompt,
+                hotwords=safe_hotwords,
             )
             # Materialize segments to surface errors (e.g. flash attention)
             # inside this function rather than during lazy iteration.
@@ -4287,14 +4327,15 @@ def lk_transcribe():
 
         from faster_whisper import BatchedInferencePipeline
         pipeline = BatchedInferencePipeline(model=model)
+        safe_prompt, safe_hotwords = _fit_whisper_prompt_budget(model, initial_prompt, hotwords)
         segments_gen, info = pipeline.transcribe(
             transcribe_path,
             language="he",
             word_timestamps=True,
             beam_size=beam_size,
             batch_size=auto_batch_size(),
-            initial_prompt=initial_prompt,
-            hotwords=hotwords,
+            initial_prompt=safe_prompt,
+            hotwords=safe_hotwords,
             condition_on_previous_text=True,
         )
         segments = list(segments_gen)
