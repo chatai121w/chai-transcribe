@@ -27,6 +27,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import type { WordTiming } from "./SyncAudioPlayer";
 import { useTextMarking } from "@/hooks/useTextMarking";
 import { addDictionaryReplacement, addIgnoredWord } from "@/utils/hebrewGrammarDictionary";
+import { learnFromCorrections } from "@/utils/correctionLearning";
 import { WordContextMenu } from "@/components/WordContextMenu";
 import { alignEditedToWhisper } from "@/lib/whisperAlignment";
 import { getWordHighlightStyle, isWordApproved } from "@/lib/personalPronunciationModel";
@@ -549,9 +550,22 @@ export const SyncMirrorLayout = ({
       } else {
         const fixed = next.trim();
         if (fixed && fixed !== displayTimings[globalIdx]?.word) {
+          const original = normalizeWord(displayTimings[globalIdx]?.word ?? "");
           onWordReplace(globalIdx, fixed);
-          const clean = normalizeWord(displayTimings[globalIdx]?.word ?? "");
-          if (clean) addDictionaryReplacement(clean, fixed);
+          if (original) {
+            addDictionaryReplacement(original, fixed);
+            learnFromCorrections([{
+              original,
+              corrected: fixed,
+              frequency: 1,
+              engine: "context-menu",
+              category: fixed.includes(" ") ? "phrase" : "word",
+              confidence: 0.75,
+              lastUsed: Date.now(),
+              createdAt: Date.now(),
+              note: "תיקון ידני בלחיצה ימנית",
+            }]);
+          }
         }
       }
     },
