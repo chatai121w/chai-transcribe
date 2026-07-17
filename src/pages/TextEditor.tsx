@@ -239,8 +239,7 @@ const TextEditor = () => {
     { id: "pipeline", label: "צינור עיבוד", group: "primary" },
     { id: "prompts", label: "ספריית פרומפטים", group: "primary" },
     { id: "ollama", label: "Ollama", group: "secondary" },
-    { id: "learning", label: "למידה", group: "secondary" },
-    { id: "vocab", label: "מילון", group: "secondary" },
+    { id: "vocab", label: "בדיקת איות", group: "secondary" },
     { id: "summary", label: "סיכום", group: "secondary" },
     
     { id: "analytics", label: "אנליטיקה", group: "secondary" },
@@ -264,12 +263,24 @@ const TextEditor = () => {
     try {
       const parsed = JSON.parse(preferences.tab_settings_json);
       if (parsed?.visible && parsed?.order) {
+        const defaults = getDefaultTabConfig();
+        const validIds = new Set(defaults.order);
+        const visible = parsed.visible.filter((id: string) => validIds.has(id));
+        const order = parsed.order.filter((id: string) => validIds.has(id));
+        for (const id of defaults.order) {
+          if (!order.includes(id)) order.push(id);
+          if (!parsed.order.includes(id) && !visible.includes(id)) visible.push(id);
+        }
+        const migrated = { visible, order };
         cloudTabSettingsLoaded.current = true;
-        setTabSettings(parsed);
-        saveTabSettings(parsed.visible, parsed.order);
+        setTabSettings(migrated);
+        saveTabSettings(visible, order);
+        if (JSON.stringify(migrated) !== JSON.stringify(parsed)) {
+          updatePreference('tab_settings_json', JSON.stringify(migrated));
+        }
       }
     } catch {}
-  }, [preferences.tab_settings_json]);
+  }, [preferences.tab_settings_json, updatePreference]);
 
   // One-time migration: add new tabs from code, remove stale tabs from settings
   const hasMigrated = useRef(false);
@@ -337,8 +348,11 @@ const TextEditor = () => {
 
   // Loshon Kodesh embedded tab
   const [activeTab, setActiveTab] = useState<string>("player");
-  // Migrate stale "edit" tab → "player" (the two tabs were unified)
-  useEffect(() => { if (activeTab === "edit") setActiveTab("player"); }, [activeTab]);
+  // Migrate removed workflow tabs to their surviving focused tools.
+  useEffect(() => {
+    if (activeTab === "edit") setActiveTab("player");
+    if (activeTab === "learning") setActiveTab("vocab");
+  }, [activeTab]);
 
   // AI Polish opt-in — saves Lovable credits when off. Persists in localStorage.
   const [aiPolishEnabled, setAiPolishEnabled] = useState<boolean>(() => {
@@ -1852,28 +1866,19 @@ const TextEditor = () => {
             </CollapsibleWidget>
           </TabsContent>
 
-          <TabsContent value="learning" className="flex flex-col gap-3">
-            <div className="rounded-md border p-4 text-center space-y-3">
-              <p className="text-sm text-muted-foreground">ניהול התיקונים הנלמדים עבר למסך המרכזי.</p>
-              <Button onClick={() => navigate('/personal-learning?tab=corrections')}>פתח תיקונים נלמדים</Button>
-            </div>
-          </TabsContent>
           <TabsContent value="vocab" className="flex flex-col gap-3">
-            <CollapsibleWidget title="בדיקת מילון" storageKey="te_dict_validator">
-              <LazyErrorBoundary label="בדיקת מילון">
-                <DictionaryValidator text={text} onApplyFix={(original, fixed) => {
-                  const newText = text.replace(new RegExp(`\\b${original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`), fixed);
-                  if (newText !== text) {
-                    setText(newText);
-                    toast({ title: "תוקן", description: `"${original}" → "${fixed}"` });
-                  }
-                }} />
-              </LazyErrorBoundary>
-            </CollapsibleWidget>
-            <div className="rounded-md border p-4 text-center space-y-3">
-              <p className="text-sm text-muted-foreground">ניהול אוצר המילים מרוכז כעת במקום אחד.</p>
-              <Button onClick={() => navigate('/personal-learning?tab=vocabulary')}>פתח אוצר מילים</Button>
-            </div>
+            <LazyErrorBoundary label="בדיקת איות ודקדוק">
+              <DictionaryValidator text={text} onApplyFix={(_original, fixed, wordIndex) => {
+                const tokens = text.split(/(\s+)/);
+                let currentWord = -1;
+                const newText = tokens.map((token) => {
+                  if (/^\s+$/.test(token) || !token) return token;
+                  currentWord += 1;
+                  return currentWord === wordIndex ? fixed : token;
+                }).join('');
+                if (newText !== text) handleEditorChange(newText);
+              }} />
+            </LazyErrorBoundary>
           </TabsContent>
 
           <TabsContent value="summary" className="flex flex-col gap-3">

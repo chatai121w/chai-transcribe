@@ -29,13 +29,13 @@ const STORAGE_KEY = "tab_settings";
 export function getDefaultTabConfig(): { visible: string[]; order: string[] } {
   const allIds = [
     "player", "speakers", "templates", "ai", "pipeline", "prompts",
-    "ollama", "learning", "vocab", "summary", "analytics", "compare", "history",
+    "ollama", "vocab", "summary", "analytics", "compare", "history",
   ];
   return { visible: allIds, order: allIds };
 }
 
 // Remove legacy/removed tab ids (e.g. "ab" merged into "compare", "edit" merged into "player") from persisted settings.
-const REMOVED_TAB_IDS = new Set<string>(["ab", "edit"]);
+const REMOVED_TAB_IDS = new Set<string>(["ab", "edit", "learning"]);
 const stripRemoved = (ids: string[] | undefined): string[] =>
   Array.isArray(ids) ? ids.filter((id) => !REMOVED_TAB_IDS.has(id)) : [];
 
