@@ -39,7 +39,8 @@ import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt,
 import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSuggestion";
 import { PronunciationProfileSelector } from "@/components/PronunciationProfileSelector";
 import { PronunciationStack } from "@/components/PronunciationStack";
-import { applyLearnedCorrections } from "@/utils/correctionLearning";
+import { applyLearnedCorrections, getLearnedHotwords } from "@/utils/correctionLearning";
+import { applyVocabularyCorrections, getHotwordsString } from "@/utils/customVocabulary";
 import { addRecentFile } from "@/components/RecentFiles";
 
 // Lazy-loaded heavy components
@@ -389,9 +390,12 @@ const Index = () => {
     const profileResult = personalPronunciationOn
       ? applyProfileCorrections(correctionResult.text)
       : { text: correctionResult.text, appliedCount: 0 };
+    const vocabularyResult = personalPronunciationOn
+      ? applyVocabularyCorrections(profileResult.text)
+      : { text: profileResult.text, appliedCount: 0 };
     // Apply Loshon Kodesh phonetic→canonical replacements when LK mode is on
     const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
-    let finalText = lkActive ? applyLoshonKodeshReplacements(profileResult.text) : profileResult.text;
+    let finalText = lkActive ? applyLoshonKodeshReplacements(vocabularyResult.text) : vocabularyResult.text;
     // Layer 2: optional AI fix when auto-mode is on
     if (lkActive && isLkAiEnabled() && isLkAiAuto()) {
       try {
@@ -404,8 +408,16 @@ const Index = () => {
         debugLog.warn('Index', 'LK AI fix failed, keeping rules-only result', e);
       }
     }
-    if (correctionResult.appliedCount > 0 || profileResult.appliedCount > 0) {
-      debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile corrections`);
+    if (correctionResult.appliedCount > 0 || profileResult.appliedCount > 0 || vocabularyResult.appliedCount > 0) {
+      debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile + ${vocabularyResult.appliedCount} vocabulary corrections`);
+      setTranscript(finalText);
+      const totalApplied = correctionResult.appliedCount + profileResult.appliedCount + vocabularyResult.appliedCount;
+      toast({
+        title: `הלמידה האישית החילה ${totalApplied} תיקונים`,
+        description: correctionResult.applied.length
+          ? correctionResult.applied.slice(0, 3).map(item => `${item.original} → ${item.corrected}`).join(' · ')
+          : 'הטקסט עודכן לפי אוצר המילים האישי',
+      });
     }
     // Record that the active profile was used for this audio file (powers
     // future filename-based profile suggestions).
@@ -1282,7 +1294,11 @@ const Index = () => {
       const profileForcesLk = isProfileLoshonKodesh();
       const lkOn = isLoshonKodeshEnabled() || profileForcesLk;
       // When LK is on, merge user-edited LK hotwords + prefer LK prompt
-      const baseHotwords = [preferences.cuda_hotwords || '', profileHotwordsStr].filter(Boolean).join(', ');
+      const personalVocabularyOn = isPersonalPronunciationEnabled();
+      const vocabularyHotwords = personalVocabularyOn ? getHotwordsString() : '';
+      const learnedHotwords = personalVocabularyOn ? getLearnedHotwords(100) : '';
+      const baseHotwords = [preferences.cuda_hotwords || '', vocabularyHotwords, learnedHotwords, profileHotwordsStr]
+        .filter(Boolean).join(', ');
       const mergedCudaHotwords = lkOn
         ? (buildLoshonKodeshHotwords(baseHotwords) || undefined)
         : (baseHotwords || undefined);
@@ -2063,9 +2079,9 @@ const Index = () => {
                   }}
                   className="rounded border-purple-400"
                 />
-                <span className="font-medium flex items-center gap-1"><BrainCircuit className="w-4 h-4 text-[#0f1e43]" /> מודל הגייה אישי</span>
+                <span className="font-medium flex items-center gap-1"><BrainCircuit className="w-4 h-4 text-[#0f1e43]" /> השתמש באוצר המילים ובתיקונים שלמדתי</span>
                 <span className="text-xs text-muted-foreground">
-                  — תוספת למנוע: מחיל תיקונים שלמדתי בעבר ומילים שאימתתי כנכון.
+                  — שולח מילים מוכרות למנוע ומחיל אוטומטית תיקוני שגוי → נכון לאחר התמלול.
                 </span>
               </label>
             </div>

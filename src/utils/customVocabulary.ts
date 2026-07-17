@@ -27,6 +27,10 @@ export interface VocabularyStats {
 
 const VOCAB_KEY = 'custom_vocabulary';
 
+function normalizeKey(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('he');
+}
+
 function loadVocabulary(): VocabularyEntry[] {
   try {
     return JSON.parse(localStorage.getItem(VOCAB_KEY) || '[]');
@@ -50,7 +54,7 @@ export function addTerm(
   if (!trimmed) return false;
   
   // Check for duplicates
-  if (vocab.some(v => v.term === trimmed)) return false;
+  if (vocab.some(v => normalizeKey(v.term) === normalizeKey(trimmed))) return false;
   
   vocab.push({
     term: trimmed,
@@ -70,12 +74,13 @@ export function addTermsBulk(
   category: VocabularyEntry['category'] = 'other'
 ): number {
   const vocab = loadVocabulary();
-  const existingTerms = new Set(vocab.map(v => v.term));
+  const existingTerms = new Set(vocab.map(v => normalizeKey(v.term)));
   let added = 0;
   
   for (const raw of terms) {
     const trimmed = raw.trim();
-    if (!trimmed || existingTerms.has(trimmed)) continue;
+    const key = normalizeKey(trimmed);
+    if (!trimmed || existingTerms.has(key)) continue;
     vocab.push({
       term: trimmed,
       variants: [],
@@ -83,7 +88,7 @@ export function addTermsBulk(
       usageCount: 0,
       createdAt: Date.now(),
     });
-    existingTerms.add(trimmed);
+    existingTerms.add(key);
     added++;
   }
   
@@ -97,10 +102,14 @@ export function updateTerm(
   updates: Partial<Pick<VocabularyEntry, 'term' | 'category' | 'variants'>>
 ): boolean {
   const vocab = loadVocabulary();
-  const idx = vocab.findIndex(v => v.term === originalTerm);
+  const idx = vocab.findIndex(v => normalizeKey(v.term) === normalizeKey(originalTerm));
   if (idx < 0) return false;
   
-  if (updates.term !== undefined) vocab[idx].term = updates.term.trim();
+  if (updates.term !== undefined) {
+    const next = updates.term.trim();
+    if (vocab.some((v, i) => i !== idx && normalizeKey(v.term) === normalizeKey(next))) return false;
+    vocab[idx].term = next;
+  }
   if (updates.category !== undefined) vocab[idx].category = updates.category;
   if (updates.variants !== undefined) vocab[idx].variants = updates.variants;
   
@@ -165,11 +174,12 @@ export function importVocabulary(json: string): number {
     if (!Array.isArray(imported)) return -1;
     
     const vocab = loadVocabulary();
-    const existingTerms = new Set(vocab.map(v => v.term));
+    const existingTerms = new Set(vocab.map(v => normalizeKey(v.term)));
     let added = 0;
     
     for (const entry of imported) {
-      if (!entry.term || existingTerms.has(entry.term)) continue;
+      const key = normalizeKey(entry.term || '');
+      if (!entry.term || existingTerms.has(key)) continue;
       vocab.push({
         term: entry.term,
         variants: entry.variants || [],
@@ -177,7 +187,7 @@ export function importVocabulary(json: string): number {
         usageCount: entry.usageCount || 0,
         createdAt: entry.createdAt || Date.now(),
       });
-      existingTerms.add(entry.term);
+      existingTerms.add(key);
       added++;
     }
     

@@ -101,10 +101,20 @@ export function useTranscriptionEngines(
     const profileResult = personalPronunciationOn
       ? applyProfileCorrections(correctionResult.text)
       : { text: correctionResult.text, appliedCount: 0 };
-    const vocabResult = applyVocabularyCorrections(profileResult.text);
+    const vocabResult = personalPronunciationOn
+      ? applyVocabularyCorrections(profileResult.text)
+      : { text: profileResult.text, appliedCount: 0 };
     const finalText = vocabResult.text;
     if (correctionResult.appliedCount > 0 || vocabResult.appliedCount > 0 || profileResult.appliedCount > 0) {
       debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile + ${vocabResult.appliedCount} vocabulary corrections${getActiveProfileId() ? ` (profile: ${getActiveProfileId()})` : ''}`);
+      const totalApplied = correctionResult.appliedCount + profileResult.appliedCount + vocabResult.appliedCount;
+      state.setTranscript(finalText);
+      toast({
+        title: `הלמידה האישית החילה ${totalApplied} תיקונים`,
+        description: correctionResult.applied.length
+          ? correctionResult.applied.slice(0, 3).map(item => `${item.original} → ${item.corrected}`).join(' · ')
+          : 'הטקסט עודכן לפי אוצר המילים האישי',
+      });
     }
 
     if (skipCloud) {
@@ -119,7 +129,7 @@ export function useTranscriptionEngines(
     const saved = await saveTranscript(finalText, engineUsed, undefined, audioFile || currentFileRef.current || undefined, timings || null, folder);
     lastSavedTranscriptIdRef.current = saved?.id || null;
     addNotification({ type: 'success', title: 'תמלול הושלם', description: `מנוע: ${engineUsed} — ${finalText.split(/\s+/).length} מילים` });
-  }, [saveTranscript]);
+  }, [saveTranscript, state]);
 
   const saveTextOnlyToCloud = useCallback(async (text: string, engineUsed: string, timings?: WordTiming[]) => {
     const saved = await saveTranscript(text, engineUsed, undefined, undefined, timings || null);
@@ -511,10 +521,11 @@ export function useTranscriptionEngines(
       state.setLastStats(null);
       toast({ title: "מתמלל עם GPU...", description: "מעבד את הקובץ בשרת המקומי עם CUDA — תראה תוצאות בזמן אמת" });
 
-      const vocabHotwords = getHotwordsString();
+      const personalPronunciationOn = isPersonalPronunciationEnabled();
+      const vocabHotwords = personalPronunciationOn ? getHotwordsString() : '';
       const userHotwords = preferences.cuda_hotwords || '';
       const profileHotwords = buildProfileHotwords();
-      const learnedHotwords = getLearnedHotwords(100);
+      const learnedHotwords = personalPronunciationOn ? getLearnedHotwords(100) : '';
       const baseMerged = [userHotwords, vocabHotwords, profileHotwords, learnedHotwords]
         .filter(Boolean).join(', ');
       // Always pipe through LK builder so enabled dictionaries + LK base list are included
