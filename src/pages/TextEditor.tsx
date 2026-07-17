@@ -23,11 +23,9 @@ const TextEditHistory = lazy(() => import("@/components/TextEditHistory").then(m
 const PromptLibrary = lazy(() => import("@/components/PromptLibrary").then(m => ({ default: m.PromptLibrary })));
 const EditPipeline = lazy(() => import("@/components/EditPipeline").then(m => ({ default: m.EditPipeline })));
 const OllamaManager = lazy(() => import("@/components/OllamaManager").then(m => ({ default: m.OllamaManager })));
-const CorrectionLearningPanel = lazy(() => import("@/components/CorrectionLearningPanel").then(m => ({ default: m.CorrectionLearningPanel })));
 const SyncEditableView = lazy(() => import("@/components/SyncEditableView").then(m => ({ default: m.SyncEditableView })));
 const SyncTranscriptView = lazy(() => import("@/components/SyncTranscriptView").then(m => ({ default: m.SyncTranscriptView })));
 const SyncMirrorLayout = lazy(() => import("@/components/SyncMirrorLayout").then(m => ({ default: m.SyncMirrorLayout })));
-const VocabularyPanel = lazy(() => import("@/components/VocabularyPanel").then(m => ({ default: m.VocabularyPanel })));
 const DictionaryValidator = lazy(() => import("@/components/DictionaryValidator").then(m => ({ default: m.DictionaryValidator })));
 const TextMarkingOverlay = lazy(() => import("@/components/TextMarkingOverlay").then(m => ({ default: m.TextMarkingOverlay })));
 const AutoSummaryCard = lazy(() => import("@/components/AutoSummaryCard").then(m => ({ default: m.AutoSummaryCard })));
@@ -1855,9 +1853,10 @@ const TextEditor = () => {
           </TabsContent>
 
           <TabsContent value="learning" className="flex flex-col gap-3">
-            <CollapsibleWidget title="למידת תיקונים" storageKey="te_learning">
-              <LazyErrorBoundary label="למידת תיקונים"><CorrectionLearningPanel /></LazyErrorBoundary>
-            </CollapsibleWidget>
+            <div className="rounded-md border p-4 text-center space-y-3">
+              <p className="text-sm text-muted-foreground">ניהול התיקונים הנלמדים עבר למסך המרכזי.</p>
+              <Button onClick={() => navigate('/personal-learning?tab=corrections')}>פתח תיקונים נלמדים</Button>
+            </div>
           </TabsContent>
           <TabsContent value="vocab" className="flex flex-col gap-3">
             <CollapsibleWidget title="בדיקת מילון" storageKey="te_dict_validator">
@@ -1871,9 +1870,10 @@ const TextEditor = () => {
                 }} />
               </LazyErrorBoundary>
             </CollapsibleWidget>
-            <CollapsibleWidget title="אוצר מילים" storageKey="te_vocab">
-              <LazyErrorBoundary label="אוצר מילים"><VocabularyPanel /></LazyErrorBoundary>
-            </CollapsibleWidget>
+            <div className="rounded-md border p-4 text-center space-y-3">
+              <p className="text-sm text-muted-foreground">ניהול אוצר המילים מרוכז כעת במקום אחד.</p>
+              <Button onClick={() => navigate('/personal-learning?tab=vocabulary')}>פתח אוצר מילים</Button>
+            </div>
           </TabsContent>
 
           <TabsContent value="summary" className="flex flex-col gap-3">

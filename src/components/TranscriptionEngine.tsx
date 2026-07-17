@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, memo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
@@ -46,6 +47,7 @@ const hasCustomServerUrl = () => {
 };
 
 export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, onSourceLanguageChange, groqKeysText = "" }: TranscriptionEngineProps) => {
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { isConnected, serverStatus, checkConnection, startPolling, stopPolling, shutdownServer, warmupServer, preloadModelStream, cancelPreload, modelReady, modelLoading, getBaseUrl } = useLocalServer();
   const { preferences: cloudPrefs, updatePreferences, isLoaded: cloudLoaded } = useCloudPreferences();
@@ -69,7 +71,6 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
     setBeamSize(cloudPrefs.cuda_beam_size);
     setNoConditionPrev(cloudPrefs.cuda_no_condition_prev);
     setVadAggressive(cloudPrefs.cuda_vad_aggressive);
-    setHotwords(cloudPrefs.cuda_hotwords);
     setParagraphThreshold(cloudPrefs.cuda_paragraph_threshold);
     setPreloadMode(cloudPrefs.cuda_preload_mode as 'preload' | 'direct');
     setCloudSaveMode(cloudPrefs.cuda_cloud_save as 'immediate' | 'text-only' | 'skip');
@@ -103,7 +104,6 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
   const [preloadMode, setPreloadMode] = useState<'preload' | 'direct'>(() => (localStorage.getItem('cuda_preload_mode') as 'preload' | 'direct') || 'preload');
   const [preloadMsg, setPreloadMsg] = useState('');
   const [cloudSaveMode, setCloudSaveMode] = useState<'immediate' | 'text-only' | 'skip'>(() => (localStorage.getItem('cuda_cloud_save') as 'immediate' | 'text-only' | 'skip') || 'immediate');
-  const [hotwords, setHotwords] = useState(() => localStorage.getItem('cuda_hotwords') || '');
   const [paragraphThreshold, setParagraphThreshold] = useState(() => parseFloat(localStorage.getItem('cuda_paragraph_threshold') || '0'));
   const [serverUrl, setServerUrl] = useState(() => localStorage.getItem('whisper_server_url') || '');
   const [apiKey, setApiKey] = useState(() => getApiKey('whisper_api_key'));
@@ -739,17 +739,13 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                 />
               </div>
 
-              {/* Hotwords */}
+              {/* Vocabulary management */}
               <div className="space-y-1 border-t pt-2">
-                <Label className="text-xs font-medium text-right block">מילון מותאם אישית (Hotwords)</Label>
-                <textarea
-                  className="w-full h-16 text-xs rounded-md border bg-background px-3 py-2 text-right resize-none"
-                  dir="rtl"
-                  placeholder="הכנס מילים מופרדות בפסיקים: שלום, ירושלים, כנסת..."
-                  value={hotwords}
-                  onChange={(e) => { setHotwords(e.target.value); updatePreferences({ cuda_hotwords: e.target.value }); }}
-                />
-                <p className="text-[10px] text-muted-foreground text-right">מילים שחוזרות בהקלטה — משפר דיוק זיהוי שמות, מונחים מקצועיים</p>
+                <Label className="text-xs font-medium text-right block">מילון ולמידה אישית</Label>
+                <Button type="button" variant="outline" size="sm" className="w-full" onClick={() => navigate('/personal-learning?tab=vocabulary')}>
+                  נהל אוצר מילים ו-Hotwords
+                </Button>
+                <p className="text-[10px] text-muted-foreground text-right">המונחים מנוהלים במסך המרכזי ומשותפים לכל מנועי התמלול.</p>
               </div>
 
               {/* Auto Paragraph Detection */}

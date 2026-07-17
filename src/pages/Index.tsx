@@ -2089,6 +2089,9 @@ const Index = () => {
                 <span className="font-medium flex items-center gap-1"><BrainCircuit className="w-4 h-4 text-[#0f1e43]" /> החל תיקונים נלמדים</span>
                 <span className="text-xs text-muted-foreground">— מבצע החלפות שגוי → נכון לאחר התמלול.</span>
               </label>
+              <Button type="button" variant="outline" size="sm" onClick={() => navigate('/personal-learning')}>
+                נהל מילון ולמידה
+              </Button>
             </div>
           }
           profileSelectorSlot={

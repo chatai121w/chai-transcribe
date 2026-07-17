@@ -37,6 +37,7 @@ import {
   Scissors,
   Palette,
   GraduationCap,
+  BookOpen,
 } from "lucide-react";
 import { openQuickCut } from "@/lib/quickCutBus";
 import { cn } from "@/lib/utils";
@@ -69,6 +70,7 @@ const navItems: NavItem[] = [
   { label: "ניקוי קול", icon: Wand2, path: "/audio-clean" },
   { label: "תיקיות", icon: FolderOpen, path: "/folders" },
   { label: "עורך טקסט", icon: FileText, path: "/text-editor" },
+  { label: "מילון ולמידה אישית", icon: BookOpen, path: "/personal-learning" },
   { label: "זיהוי דוברים", icon: Users, path: "/diarization" },
   { label: "השוואות", icon: GitCompareArrows, path: "/compare" },
   { label: "ממיר ל-MP3", icon: Music, path: "/video-to-mp3" },
