@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { BookOpen, BrainCircuit, ScrollText, Users } from 'lucide-react';
+import { BookOpen, BrainCircuit, ScrollText, ShieldCheck, Users } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -9,8 +9,9 @@ const VocabularyPanel = lazy(() => import('@/components/VocabularyPanel').then(m
 const CorrectionLearningPanel = lazy(() => import('@/components/CorrectionLearningPanel').then(m => ({ default: m.CorrectionLearningPanel })));
 const PronunciationProfileSelector = lazy(() => import('@/components/PronunciationProfileSelector').then(m => ({ default: m.PronunciationProfileSelector })));
 const LoshonKodeshRules = lazy(() => import('@/pages/LoshonKodeshRules'));
+const DefinitiveRulesPanel = lazy(() => import('@/components/DefinitiveRulesPanel').then(m => ({ default: m.DefinitiveRulesPanel })));
 
-const VALID_TABS = new Set(['vocabulary', 'corrections', 'profiles', 'loshon-kodesh']);
+const VALID_TABS = new Set(['vocabulary', 'corrections', 'definitive', 'profiles', 'loshon-kodesh']);
 
 function LoadingPanel() {
   return <div className="space-y-3"><Skeleton className="h-10 w-full" /><Skeleton className="h-48 w-full" /></div>;
@@ -29,9 +30,10 @@ export default function PersonalLearning() {
       </header>
 
       <Tabs value={activeTab} onValueChange={(tab) => setSearchParams({ tab })}>
-        <TabsList className="grid h-auto w-full grid-cols-2 md:grid-cols-4">
+        <TabsList className="grid h-auto w-full grid-cols-2 md:grid-cols-5">
           <TabsTrigger value="vocabulary"><BookOpen className="h-4 w-4 ml-1" />אוצר מילים</TabsTrigger>
           <TabsTrigger value="corrections"><BrainCircuit className="h-4 w-4 ml-1" />תיקונים נלמדים</TabsTrigger>
+          <TabsTrigger value="definitive"><ShieldCheck className="h-4 w-4 ml-1" />תיקונים חד־משמעיים</TabsTrigger>
           <TabsTrigger value="profiles"><Users className="h-4 w-4 ml-1" />פרופילי הגייה</TabsTrigger>
           <TabsTrigger value="loshon-kodesh"><ScrollText className="h-4 w-4 ml-1" />לשון הקודש</TabsTrigger>
         </TabsList>
@@ -39,6 +41,7 @@ export default function PersonalLearning() {
         <Suspense fallback={<LoadingPanel />}>
           <TabsContent value="vocabulary" className="mt-4"><VocabularyPanel /></TabsContent>
           <TabsContent value="corrections" className="mt-4"><CorrectionLearningPanel /></TabsContent>
+          <TabsContent value="definitive" className="mt-4"><DefinitiveRulesPanel /></TabsContent>
           <TabsContent value="profiles" className="mt-4">
             <Card>
               <CardHeader><CardTitle className="text-base">פרופילי הגייה לפי דובר או הקשר</CardTitle></CardHeader>

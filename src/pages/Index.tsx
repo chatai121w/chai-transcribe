@@ -42,6 +42,7 @@ import { PronunciationStack } from "@/components/PronunciationStack";
 import { applyLearnedCorrections, getLearnedHotwords } from "@/utils/correctionLearning";
 import { applyVocabularyCorrections, getHotwordsString, isCustomVocabularyEnabled, setCustomVocabularyEnabled } from "@/utils/customVocabulary";
 import { addRecentFile } from "@/components/RecentFiles";
+import { applyDefinitiveRulesToText, areDefinitiveRulesEnabled } from '@/utils/hebrewRuleEngine';
 
 // Lazy-loaded heavy components
 const LiveTranscriber = lazy(() => import("@/components/LiveTranscriber").then(m => ({ default: m.LiveTranscriber })));
@@ -383,11 +384,14 @@ const Index = () => {
 
   // Save to cloud history (respects cloud save mode for CUDA engine)
   const saveToHistory = async (text: string, engineUsed: string, skipCloud?: boolean, timings?: Array<{word: string, start: number, end: number, probability?: number}>, audioFile?: File, folder?: string) => {
+    const definitiveResult = areDefinitiveRulesEnabled()
+      ? applyDefinitiveRulesToText(text)
+      : { fixedText: text, hits: [] };
     // Apply learned corrections to improve transcription
     const personalPronunciationOn = isPersonalPronunciationEnabled();
     const correctionResult = personalPronunciationOn
-      ? applyLearnedCorrections(text, { engine: engineUsed })
-      : { text, appliedCount: 0 };
+      ? applyLearnedCorrections(definitiveResult.fixedText, { engine: engineUsed })
+      : { text: definitiveResult.fixedText, appliedCount: 0, applied: [] };
     const profileResult = personalPronunciationOn
       ? applyProfileCorrections(correctionResult.text)
       : { text: correctionResult.text, appliedCount: 0 };
@@ -409,10 +413,10 @@ const Index = () => {
         debugLog.warn('Index', 'LK AI fix failed, keeping rules-only result', e);
       }
     }
-    if (correctionResult.appliedCount > 0 || profileResult.appliedCount > 0 || vocabularyResult.appliedCount > 0) {
+    if (definitiveResult.hits.length > 0 || correctionResult.appliedCount > 0 || profileResult.appliedCount > 0 || vocabularyResult.appliedCount > 0) {
       debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile + ${vocabularyResult.appliedCount} vocabulary corrections`);
       setTranscript(finalText);
-      const totalApplied = correctionResult.appliedCount + profileResult.appliedCount + vocabularyResult.appliedCount;
+      const totalApplied = definitiveResult.hits.length + correctionResult.appliedCount + profileResult.appliedCount + vocabularyResult.appliedCount;
       toast({
         title: `הלמידה האישית החילה ${totalApplied} תיקונים`,
         description: correctionResult.applied.length

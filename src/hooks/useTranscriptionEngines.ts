@@ -29,6 +29,7 @@ import { isVideoFile, extractAudioFromVideo, VIDEO_NEEDS_EXTRACTION, MAX_VIDEO_S
 import { compressAudio, needsCompression, formatFileSize, CLOUD_API_LIMIT } from "@/lib/audioCompression";
 import { db } from "@/lib/localDb";
 import { isLoshonKodeshEnabled, buildLoshonKodeshHotwords } from "@/lib/loshonKodesh";
+import { applyDefinitiveRulesToText, areDefinitiveRulesEnabled } from '@/utils/hebrewRuleEngine';
 
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
@@ -94,10 +95,13 @@ export function useTranscriptionEngines(
   // ── Helpers ─────────────────────────────────────────────────
 
   const saveToHistory = useCallback(async (text: string, engineUsed: string, skipCloud?: boolean, timings?: WordTiming[], audioFile?: File, folder?: string) => {
+    const definitiveResult = areDefinitiveRulesEnabled()
+      ? applyDefinitiveRulesToText(text)
+      : { fixedText: text, hits: [] };
     const personalPronunciationOn = isPersonalPronunciationEnabled();
     const correctionResult = personalPronunciationOn
-      ? applyLearnedCorrections(text, { engine: engineUsed })
-      : { text, appliedCount: 0 };
+      ? applyLearnedCorrections(definitiveResult.fixedText, { engine: engineUsed })
+      : { text: definitiveResult.fixedText, appliedCount: 0, applied: [] };
     const profileResult = personalPronunciationOn
       ? applyProfileCorrections(correctionResult.text)
       : { text: correctionResult.text, appliedCount: 0 };
@@ -105,9 +109,9 @@ export function useTranscriptionEngines(
       ? applyVocabularyCorrections(profileResult.text)
       : { text: profileResult.text, appliedCount: 0 };
     const finalText = vocabResult.text;
-    if (correctionResult.appliedCount > 0 || vocabResult.appliedCount > 0 || profileResult.appliedCount > 0) {
+    if (definitiveResult.hits.length > 0 || correctionResult.appliedCount > 0 || vocabResult.appliedCount > 0 || profileResult.appliedCount > 0) {
       debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile + ${vocabResult.appliedCount} vocabulary corrections${getActiveProfileId() ? ` (profile: ${getActiveProfileId()})` : ''}`);
-      const totalApplied = correctionResult.appliedCount + profileResult.appliedCount + vocabResult.appliedCount;
+      const totalApplied = definitiveResult.hits.length + correctionResult.appliedCount + profileResult.appliedCount + vocabResult.appliedCount;
       state.setTranscript(finalText);
       toast({
         title: `הלמידה האישית החילה ${totalApplied} תיקונים`,

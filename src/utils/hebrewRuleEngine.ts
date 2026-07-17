@@ -19,6 +19,22 @@ export interface RuleHit {
   reason: string;     // הסבר קצר בעברית
 }
 
+const DEFINITIVE_RULES_KEY = 'definitive_hebrew_rules_enabled';
+
+export function areDefinitiveRulesEnabled(): boolean {
+  try { return localStorage.getItem(DEFINITIVE_RULES_KEY) !== '0'; } catch { return true; }
+}
+
+export function setDefinitiveRulesEnabled(enabled: boolean): void {
+  localStorage.setItem(DEFINITIVE_RULES_KEY, enabled ? '1' : '0');
+}
+
+export const DEFINITIVE_RULES = [
+  { id: 'final-letter-required', title: 'אות סופית בסוף מילה', description: 'כ, מ, נ, פ, צ בסוף מילה הופכות ל-ך, ם, ן, ף, ץ', examples: ['חוקיכ → חוקיך', 'מצוותיכ → מצוותיך'] },
+  { id: 'final-letter-misplaced', title: 'אות סופית רק בסוף מילה', description: 'ך, ם, ן, ף, ץ באמצע מילה חוזרות לצורה הרגילה', examples: ['ךתב → כתב', 'םילה → מילה'] },
+  { id: 'normalize-spacing', title: 'רווחים ופיסוק', description: 'מסיר רווחים כפולים ורווח מיותר לפני סימן פיסוק', examples: ['שלום  עולם → שלום עולם'] },
+] as const;
+
 // אותיות סופיות וגרסאותיהן הרגילות
 const FINAL_MAP: Record<string, string> = {
   'כ': 'ך',
@@ -218,6 +234,27 @@ export function applyRulesToText(text: string): { fixedText: string; hits: RuleH
     } else {
       out.push(tok);
     }
+  }
+  return { fixedText: out.join(''), hits };
+}
+
+/** Applies only grammar rules that are safe enough to run unconditionally. */
+export function applyDefinitiveRulesToText(text: string): { fixedText: string; hits: RuleHit[] } {
+  const spacing = ruleNormalizeSpacing(text);
+  const tokens = spacing.text.split(/(\s+)/);
+  const hits: RuleHit[] = [];
+  const out = tokens.map((token) => {
+    if (!token || /^\s+$/.test(token)) return token;
+    const match = token.match(/^(\p{P}*)(.*?)(\p{P}*)$/u);
+    if (!match) return token;
+    const [, prefix, core, suffix] = match;
+    const hit = ruleFinalLetterMisplaced(core) ?? ruleFinalLetterRequired(core);
+    if (!hit) return token;
+    hits.push(hit);
+    return prefix + hit.to + suffix;
+  });
+  if (spacing.changed) {
+    hits.push({ from: text, to: spacing.text, ruleId: 'normalize-spacing', confidence: 100, reason: 'רווחים ופיסוק תקניים' });
   }
   return { fixedText: out.join(''), hits };
 }
