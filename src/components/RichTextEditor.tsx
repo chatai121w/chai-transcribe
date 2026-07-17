@@ -30,6 +30,7 @@ import {
 import { cn } from "@/lib/utils";
 import { spellCheckText, type SuspectWord, type SpellSuggestion } from "@/utils/hebrewSpellCheck";
 import { learnFromCorrections, type CorrectionEntry } from "@/utils/correctionLearning";
+import { WordContextMenu } from "@/components/WordContextMenu";
 
 interface RichTextEditorProps {
   text: string;
@@ -92,6 +93,8 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
   } | null>(null);
   const [customCorrection, setCustomCorrection] = useState("");
   const spellCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contextWordRangeRef = useRef<Range | null>(null);
+  const [contextWord, setContextWord] = useState("");
 
   const highlightColors = [
     "#ffff00", "#00ff00", "#00ffff", "#ff00ff", "#ffa500", "#ff0000",
@@ -382,6 +385,72 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
     if (spellCheckTimerRef.current) clearTimeout(spellCheckTimerRef.current);
     spellCheckTimerRef.current = setTimeout(runSpellCheck, 500);
   }, [syncContent, onWordCorrected, runSpellCheck]);
+
+  const rememberCorrection = useCallback((originalWord: string, correctedWord: string, engine: string) => {
+    const entry: CorrectionEntry = {
+      original: originalWord,
+      corrected: correctedWord,
+      frequency: 1,
+      engine,
+      category: correctedWord.includes(' ') ? 'phrase' : 'word',
+      confidence: 0.7,
+      lastUsed: Date.now(),
+      createdAt: Date.now(),
+    };
+    learnFromCorrections([entry]);
+    onWordCorrected?.(originalWord, correctedWord);
+  }, [onWordCorrected]);
+
+  const captureContextWord = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const doc = event.currentTarget.ownerDocument;
+    const caret = doc.caretRangeFromPoint?.(event.clientX, event.clientY);
+    const node = caret?.startContainer;
+    if (!caret || !node || node.nodeType !== Node.TEXT_NODE || !event.currentTarget.contains(node)) {
+      contextWordRangeRef.current = null;
+      setContextWord('');
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    const value = node.textContent || '';
+    const isWordChar = (char: string) => /[\u0590-\u05FFa-zA-Z0-9]/.test(char);
+    let start = Math.min(caret.startOffset, value.length);
+    let end = start;
+    if (start === value.length || !isWordChar(value[start] || '')) start--;
+    if (start < 0 || !isWordChar(value[start] || '')) {
+      contextWordRangeRef.current = null;
+      setContextWord('');
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    while (start > 0 && isWordChar(value[start - 1])) start--;
+    end = Math.max(end, start + 1);
+    while (end < value.length && isWordChar(value[end])) end++;
+
+    const range = doc.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    contextWordRangeRef.current = range;
+    setContextWord(range.toString());
+  }, []);
+
+  const handleContextReplace = useCallback((correctedWord: string) => {
+    const range = contextWordRangeRef.current;
+    const originalWord = contextWord;
+    if (!range || !originalWord || !correctedWord.trim() || correctedWord.trim() === originalWord) return;
+
+    const replacement = range.startContainer.ownerDocument.createTextNode(correctedWord.trim());
+    range.deleteContents();
+    range.insertNode(replacement);
+    replacement.parentNode?.normalize();
+    contextWordRangeRef.current = null;
+    setContextWord('');
+    syncContent();
+    rememberCorrection(originalWord, correctedWord.trim(), 'context-menu');
+    toast({ title: "התיקון נשמר", description: `"${originalWord}" → "${correctedWord.trim()}"` });
+  }, [contextWord, rememberCorrection, syncContent]);
 
   const handleExportTXT = () => {
     const blob = new Blob([plainText], { type: 'text/plain;charset=utf-8' });
@@ -774,10 +843,15 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
                   onExecCommand={execCommand}
                   onSyncContent={syncContent}
                 />
+                <WordContextMenu
+                  word={contextWord}
+                  onReplace={handleContextReplace}
+                >
                 <div
                   ref={editorRef}
                   contentEditable
                   dir="rtl"
+                  onContextMenuCapture={captureContextWord}
                   className={cn(
                     "rounded-md border border-input bg-background px-4 py-3",
                     "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
@@ -799,6 +873,7 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
                   onInput={syncContent}
                   suppressContentEditableWarning
                 />
+                </WordContextMenu>
               </div>
             </div>
           )}
