@@ -64,6 +64,9 @@ export const DEFAULT_LOSHON_KODESH_HOTWORDS: string[] = [
   'תורה', 'קודש', 'משה', 'אהרון', 'יעקב', 'יוסף', 'יצחק', 'אברהם', 'שלמה', 'דוד',
   'ברוך', 'ברכה', 'שבת', 'שמים', 'ארץ', 'אדם', 'עולם', 'שלום', 'אומר', 'רוצה',
   'פסוק', 'מקום', 'דבר', 'אמת', 'תפילה', 'מצוה', 'נשמה', 'בורא',
+  'פטר רחם', 'פדה תפדה', 'בכור האדם', 'בכור הבהמה הטמאה',
+  'פדיון הקדש', 'מעשר שני', 'ממון גבוה', 'ממון הדיוט', 'קדושת הגוף', 'קדושת דמים',
+  'רבי יוחנן וריש לקיש', 'מטלטלין', 'למאן דאמר', 'שדות בכסף יקנו',
 ];
 
 // ─────────────────────────────────────────────────────────────────────
@@ -115,6 +118,33 @@ export const DEFAULT_LOSHON_KODESH_REPLACEMENTS: LkReplacement[] = [
   { from: 'הלוכע',  to: 'הלכה',  category: 'terms' },
   { from: 'משנע',   to: 'משנה',  category: 'terms' },
   { from: 'תוספעס', to: 'תוספות', category: 'terms' },
+
+  // Context-safe rabbinic phrases. Multi-word rules avoid changing ordinary Hebrew homonyms.
+  { from: 'ביסודס הלמדניים', to: 'ביסודות הלמדניים', category: 'terms' },
+  { from: 'פדיון הקדיש', to: 'פדיון הקדש', category: 'terms' },
+  { from: 'הקדיש הוא רשות', to: 'הקדש הוא רשות', category: 'terms' },
+  { from: 'נכסים רבים היו להקדיש', to: 'נכסים רבים היו להקדש', category: 'terms' },
+  { from: 'מה שהקדיש מוכר', to: 'מה שהקדש מוכר', category: 'terms' },
+  { from: 'הקדיש בית ובית', to: 'הקדש בדק הבית', category: 'terms' },
+  { from: 'פדיון מעשה שני', to: 'פדיון מעשר שני', category: 'terms' },
+  { from: 'מעשה שני מומן גבוה', to: 'מעשר שני ממון גבוה', category: 'terms' },
+  { from: 'המעשה שני', to: 'המעשר שני', category: 'terms' },
+  { from: 'מומן גבוה', to: 'ממון גבוה', category: 'terms' },
+  { from: 'מומן בעלם', to: 'ממון בעלים', category: 'terms' },
+  { from: 'תוצאה של כליין', to: 'תוצאה של קניין', category: 'terms' },
+  { from: 'יוחנן ונשלוקש', to: 'רבי יוחנן וריש לקיש', category: 'names' },
+  { from: 'קונים מטלטלן', to: 'קונים מטלטלין', category: 'terms' },
+  { from: 'למן דאומר', to: 'למאן דאמר', category: 'terms' },
+  { from: 'נוביס, סודויס, בכסף יקנו', to: 'שדות בכסף יקנו', wholeWord: false, category: 'terms' },
+
+  // Bamidbar 18:15-16, split into anchored chunks so unrelated prose is untouched.
+  { from: 'כל פתע רחם', to: 'כל פטר רחם', category: 'terms' },
+  { from: 'לכל בוסר שיקריבו לשם', to: 'לכל בשר אשר יקריבו לה׳', category: 'terms' },
+  { from: 'בעודם ובבהמה יהיה לכה', to: 'באדם ובבהמה יהיה לך', category: 'terms' },
+  { from: 'אך פודי תבדס', to: 'אך פדה תפדה', category: 'terms' },
+  { from: 'בכל העודם', to: 'את בכור האדם', category: 'terms' },
+  { from: 'וספורי בהמה הטמיו תבדה', to: 'ואת בכור הבהמה הטמאה תפדה', category: 'terms' },
+  { from: 'ובדוי מבין חודש תבדה', to: 'ופדוייו מבן חודש תפדה', category: 'terms' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────
@@ -261,7 +291,11 @@ export function getLoshonKodeshHotwordsList(): string[] {
     const raw = localStorage.getItem(LS_HOTWORDS);
     if (!raw) return DEFAULT_LOSHON_KODESH_HOTWORDS;
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter(x => typeof x === 'string' && x.trim()) : DEFAULT_LOSHON_KODESH_HOTWORDS;
+    if (!Array.isArray(parsed)) return DEFAULT_LOSHON_KODESH_HOTWORDS;
+    return Array.from(new Set([
+      ...DEFAULT_LOSHON_KODESH_HOTWORDS,
+      ...parsed.filter(x => typeof x === 'string' && x.trim()),
+    ]));
   } catch { return DEFAULT_LOSHON_KODESH_HOTWORDS; }
 }
 export function setLoshonKodeshHotwordsList(list: string[]): void {
@@ -277,9 +311,10 @@ export function getLoshonKodeshReplacements(): LkReplacement[] {
     const raw = localStorage.getItem(LS_REPLACEMENTS);
     if (!raw) return DEFAULT_LOSHON_KODESH_REPLACEMENTS;
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.filter(x => x && typeof x.from === 'string' && typeof x.to === 'string' && x.from)
-      : DEFAULT_LOSHON_KODESH_REPLACEMENTS;
+    if (!Array.isArray(parsed)) return DEFAULT_LOSHON_KODESH_REPLACEMENTS;
+    const saved = parsed.filter(x => x && typeof x.from === 'string' && typeof x.to === 'string' && x.from);
+    const savedKeys = new Set(saved.map(x => x.from));
+    return [...saved, ...DEFAULT_LOSHON_KODESH_REPLACEMENTS.filter(x => !savedKeys.has(x.from))];
   } catch { return DEFAULT_LOSHON_KODESH_REPLACEMENTS; }
 }
 export function setLoshonKodeshReplacements(list: LkReplacement[]): void {

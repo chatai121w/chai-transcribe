@@ -27,7 +27,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import type { WordTiming } from "./SyncAudioPlayer";
 import { useTextMarking } from "@/hooks/useTextMarking";
 import { addDictionaryReplacement, addIgnoredWord } from "@/utils/hebrewGrammarDictionary";
-import { learnFromCorrections } from "@/utils/correctionLearning";
+import { learnFromCorrections, type CorrectionEntry } from "@/utils/correctionLearning";
 import { WordContextMenu } from "@/components/WordContextMenu";
 import { alignEditedToWhisper } from "@/lib/whisperAlignment";
 import { getWordHighlightStyle, isWordApproved } from "@/lib/personalPronunciationModel";
@@ -554,17 +554,39 @@ export const SyncMirrorLayout = ({
           onWordReplace(globalIdx, fixed);
           if (original) {
             addDictionaryReplacement(original, fixed);
-            learnFromCorrections([{
+            const now = Date.now();
+            const learnedEntries: CorrectionEntry[] = [{
               original,
               corrected: fixed,
               frequency: 1,
               engine: "context-menu",
               category: fixed.includes(" ") ? "phrase" : "word",
               confidence: 0.75,
-              lastUsed: Date.now(),
-              createdAt: Date.now(),
+              lastUsed: now,
+              createdAt: now,
               note: "תיקון ידני בלחיצה ימנית",
-            }]);
+            }];
+
+            const contextStart = Math.max(0, globalIdx - 2);
+            const contextEnd = Math.min(displayTimings.length, globalIdx + 3);
+            const contextWords = displayTimings.slice(contextStart, contextEnd).map((item) => item.word);
+            if (contextWords.length >= 3) {
+              const localIndex = globalIdx - contextStart;
+              const correctedContext = [...contextWords];
+              correctedContext[localIndex] = fixed;
+              learnedEntries.push({
+                original: contextWords.join(" "),
+                corrected: correctedContext.join(" "),
+                frequency: 1,
+                engine: "context-menu-context",
+                category: "phrase",
+                confidence: 0.7,
+                lastUsed: now,
+                createdAt: now,
+                note: "תיקון ידני עם שתי מילים של הקשר מכל צד",
+              });
+            }
+            learnFromCorrections(learnedEntries);
           }
         }
       }
