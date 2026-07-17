@@ -865,18 +865,16 @@ export const SyncMirrorLayout = ({
 
           return (
             <React.Fragment key={globalIdx}>
-              {side === "left" ? (
-                <WordContextMenu
-                  word={wt.word}
-                  suggestions={suggestions}
-                  onReplace={(next) => { applyWordReplace(globalIdx, next); setDictionaryVersion((v) => v + 1); }}
-                  onApproveAsCorrect={() => setDictionaryVersion((v) => v + 1)}
-                  isAnchor={isAnchor}
-                  onToggleAnchor={() => toggleUserAnchor(globalIdx, { start: wt.start, end: wt.end })}
-                >
-                  {wordSpan}
-                </WordContextMenu>
-              ) : wordSpan}
+              <WordContextMenu
+                word={wt.word}
+                suggestions={suggestions}
+                onReplace={(next) => { applyWordReplace(globalIdx, next); setDictionaryVersion((v) => v + 1); }}
+                onApproveAsCorrect={() => setDictionaryVersion((v) => v + 1)}
+                isAnchor={isAnchor}
+                onToggleAnchor={() => toggleUserAnchor(globalIdx, { start: wt.start, end: wt.end })}
+              >
+                {wordSpan}
+              </WordContextMenu>
               {' '}
             </React.Fragment>
           );
@@ -1615,7 +1613,6 @@ export const SyncMirrorLayout = ({
             style={{
               ...textStyle,
               paddingTop: 16,
-              pointerEvents: lockedPane === 'right' ? 'none' : undefined,
             }}
           >
             {paddedAlignment && !compareMode ? (() => {
