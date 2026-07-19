@@ -932,17 +932,17 @@ export const SyncMirrorLayout = ({
                   toast({
                     title: 'התיקון אושר ונשמר',
                     description: trustedSuggestion.text === '__DELETE__'
-                      ? `${wt.word} → מחיקה`
-                      : `${wt.word} → ${trustedSuggestion.text}`,
+                      ? `${wt.word} ← מחיקה`
+                      : `${wt.word} ← ${trustedSuggestion.text}`,
                   });
                   return;
                 }
                 onWordClick(wt.start);
               }}
               title={wasManuallyCorrected
-                ? `תוקן ידנית: ${correctionOriginal} → ${correctionResult}`
+                ? `תוקן ידנית: ${correctionOriginal} ← ${correctionResult}`
                 : trustedSuggestion
-                  ? `לחץ לתיקון: ${wt.word} → ${trustedSuggestion.text === '__DELETE__' ? 'מחיקה' : trustedSuggestion.text} | ${trustedSuggestion.reason}`
+                  ? `לחץ לתיקון: ${wt.word} ← ${trustedSuggestion.text === '__DELETE__' ? 'מחיקה' : trustedSuggestion.text} | ${trustedSuggestion.reason}`
                 : isAnchor
                   ? `⚓ עוגן (${wt.start.toFixed(2)}s) — קליק לקפיצה`
                   : `קליק לקפיצה (${wt.start.toFixed(1)}s)`}
