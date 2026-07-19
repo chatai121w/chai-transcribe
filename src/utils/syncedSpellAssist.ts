@@ -62,7 +62,7 @@ export function buildIssueMap(
 
     const baseSpellSuggestions = suspectWordsMap.get(clean) || [];
     baseSpellSuggestions.forEach((s: SpellSuggestion) => {
-      const score = s.source === "learned" ? 0.95 : s.source === "vocabulary" ? 0.85 : 0.7;
+      const score = s.source === "learned" ? s.confidence : s.source === "vocabulary" ? 0.85 : s.confidence;
       suggestions.push({ text: s.text, source: s.source, score });
     });
 

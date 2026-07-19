@@ -34,6 +34,7 @@ import { getWordHighlightStyle, isWordApproved } from "@/lib/personalPronunciati
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { RichTextEditorMirror } from "@/components/RichTextEditorMirror";
 import { TextMarkingOverlay } from "@/components/TextMarkingOverlay";
+import { getTrustedWordSuggestion } from '@/lib/trustedWordSuggestion';
 
 interface SyncMirrorLayoutProps {
   wordTimings: WordTiming[];
@@ -878,9 +879,13 @@ export const SyncMirrorLayout = ({
           const highlightStyle = side === "left" ? getWordHighlightStyle(wt.word) : undefined;
           const wordHasIssue = hasIssue && !wordApproved;
           const { localIssueMap, resultMap } = marking;
+          const localSuggestions = side === "left" && wordHasIssue
+            ? (localIssueMap.get(globalIdx) ?? [])
+            : [];
+          const trustedSuggestion = getTrustedWordSuggestion(localSuggestions);
           const suggestions = side === "left" && wordHasIssue
             ? [
-                ...(localIssueMap.get(globalIdx) ?? []).map((s) => s.text),
+                ...localSuggestions.map((s) => s.text),
                 ...(resultMap.get(globalIdx)?.suggestion ? [resultMap.get(globalIdx)!.suggestion!] : []),
               ]
             : [];
@@ -917,10 +922,27 @@ export const SyncMirrorLayout = ({
                 !isActive && isSearchMatch && "bg-yellow-200 dark:bg-yellow-800 rounded-sm",
                 !isActive && wordHasIssue && "underline decoration-red-500 decoration-wavy underline-offset-2",
                 wasManuallyCorrected && "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-400/70 dark:bg-emerald-950/60 dark:text-emerald-100",
+                trustedSuggestion && !wasManuallyCorrected && "bg-red-100 text-red-900 ring-1 ring-red-400/80 hover:bg-red-200 dark:bg-red-950/60 dark:text-red-100",
               )}
-              onClick={() => onWordClick(wt.start)}
+              onClick={(event) => {
+                if (trustedSuggestion && !wasManuallyCorrected) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  applyWordReplace(globalIdx, trustedSuggestion.text);
+                  toast({
+                    title: 'התיקון אושר ונשמר',
+                    description: trustedSuggestion.text === '__DELETE__'
+                      ? `${wt.word} → מחיקה`
+                      : `${wt.word} → ${trustedSuggestion.text}`,
+                  });
+                  return;
+                }
+                onWordClick(wt.start);
+              }}
               title={wasManuallyCorrected
                 ? `תוקן ידנית: ${correctionOriginal} → ${correctionResult}`
+                : trustedSuggestion
+                  ? `לחץ לתיקון: ${wt.word} → ${trustedSuggestion.text === '__DELETE__' ? 'מחיקה' : trustedSuggestion.text} | ${trustedSuggestion.reason}`
                 : isAnchor
                   ? `⚓ עוגן (${wt.start.toFixed(2)}s) — קליק לקפיצה`
                   : `קליק לקפיצה (${wt.start.toFixed(1)}s)`}
