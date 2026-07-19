@@ -3150,6 +3150,7 @@ def diarize_stream():
     min_gap = float(request.form.get("min_gap", "1.5"))
     hf_token = request.form.get("hf_token", "")
     diarization_engine = request.form.get("diarization_engine", "auto").strip().lower()
+    expected_speakers = max(0, int(request.form.get("expected_speakers", "0") or 0))
     pyannote_model_id = request.form.get("pyannote_model", "pyannote/speaker-diarization-3.1").strip() or "pyannote/speaker-diarization-3.1"
 
     resolved = MODEL_REGISTRY.get(model_id, model_id)
@@ -3218,7 +3219,7 @@ def diarize_stream():
                     pipe = PyannotePipeline.from_pretrained(pyannote_model_id, use_auth_token=hf_token)
                     if _has_torch and torch.cuda.is_available():
                         pipe.to(torch.device("cuda"))
-                    diarization = pipe(tmp_path)
+                    diarization = pipe(tmp_path, **({"num_speakers": expected_speakers} if expected_speakers else {}))
                     speaker_segments = []
                     for turn, _, speaker in diarization.itertracks(yield_label=True):
                         speaker_segments.append({"speaker": speaker, "start": round(turn.start, 3), "end": round(turn.end, 3)})
@@ -3246,7 +3247,7 @@ def diarize_stream():
                     if i > 0:
                         gap = seg["start"] - raw_segments[i - 1]["end"]
                         if gap >= min_gap:
-                            current_speaker = (current_speaker + 1) % 10
+                            current_speaker = (current_speaker + 1) % (expected_speakers or 10)
                     seg["speaker"] = f"SPEAKER_{current_speaker:02d}"
 
             # Normalize labels
@@ -3307,6 +3308,7 @@ def diarize():
     min_gap = float(request.form.get("min_gap", "1.5"))
     hf_token = request.form.get("hf_token", "")
     diarization_engine = request.form.get("diarization_engine", "auto").strip().lower()
+    expected_speakers = max(0, int(request.form.get("expected_speakers", "0") or 0))
     whisperx_model = request.form.get("whisperx_model", "large-v3").strip() or "large-v3"
     pyannote_model_id = request.form.get("pyannote_model", "pyannote/speaker-diarization-3.1").strip() or "pyannote/speaker-diarization-3.1"
 
@@ -3375,7 +3377,8 @@ def diarize():
                             use_auth_token=hf_token,
                             device=wx_device,
                         )
-                        diarized_segments = diarize_pipeline(tmp_path)
+                        diarization_kwargs = {"num_speakers": expected_speakers} if expected_speakers else {}
+                        diarized_segments = diarize_pipeline(tmp_path, **diarization_kwargs)
                         aligned = whisperx.assign_word_speakers(diarized_segments, aligned)
                         diarization_method = "whisperx+pyannote"
                     except Exception as wx_diar_err:
@@ -3417,7 +3420,7 @@ def diarize():
                         if i > 0:
                             gap = seg["start"] - raw_segments[i - 1]["end"]
                             if gap >= min_gap:
-                                current_speaker = (current_speaker + 1) % 10
+                                current_speaker = (current_speaker + 1) % (expected_speakers or 10)
                         seg["speaker"] = f"SPEAKER_{current_speaker:02d}"
 
                 # Normalize speaker labels to sequential Hebrew labels
@@ -3516,7 +3519,7 @@ def diarize():
                 )
                 if _has_torch and torch.cuda.is_available():
                     pipe.to(torch.device("cuda"))
-                diarization = pipe(tmp_path)
+                diarization = pipe(tmp_path, **({"num_speakers": expected_speakers} if expected_speakers else {}))
                 speaker_segments = []
                 for turn, _, speaker in diarization.itertracks(yield_label=True):
                     speaker_segments.append({
@@ -3549,7 +3552,7 @@ def diarize():
                 if i > 0:
                     gap = seg["start"] - raw_segments[i - 1]["end"]
                     if gap >= min_gap:
-                        current_speaker = (current_speaker + 1) % 10
+                        current_speaker = (current_speaker + 1) % (expected_speakers or 10)
                 seg["speaker"] = f"SPEAKER_{current_speaker:02d}"
 
         # Normalize speaker labels to sequential numbers

@@ -746,6 +746,7 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
         const formData = new FormData();
         formData.append("file", preparedFile);
         formData.append("min_gap", minGap.toString());
+        if (expectedSpeakers > 0) formData.append("expected_speakers", expectedSpeakers.toString());
         if (hfToken.trim()) formData.append("hf_token", hfToken.trim());
         if (mode === 'local') {
           formData.append("diarization_engine", hfToken.trim() ? "pyannote" : "silence-gap");
@@ -766,14 +767,25 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
         setStreamProgress({ stage: 'מתחבר לשרת...', percent: 0 });
         let resp: Response;
         try {
-          resp = await fetch(`${serverUrl}/diarize-stream`, { method: "POST", body: formData });
+          resp = await fetch(`${serverUrl}${mode === 'whisperx' ? '/diarize' : '/diarize-stream'}`, { method: "POST", body: formData });
         } catch (fetchErr) {
           throw new Error(`לא ניתן להתחבר לשרת המקומי (${serverUrl}). וודא שהשרת רץ או בחר מנוע ענן.`);
         }
-        if (!resp.ok || !resp.body) {
+        if (!resp.ok) {
           const err = await resp.json().catch(() => ({ error: "Server error" }));
           throw new Error(err.error || `HTTP ${resp.status}`);
         }
+
+        if (mode === 'whisperx') {
+          const finalResult = await resp.json() as DiarizationResult;
+          setResult(finalResult);
+          setStreamingSegments([]);
+          setStreamProgress(null);
+          toast({ title: "זיהוי דוברים הושלם", description: `${finalResult.speaker_count} דוברים זוהו (${finalResult.diarization_method})` });
+          return;
+        }
+
+        if (!resp.body) throw new Error("השרת לא החזיר זרם תוצאות");
 
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
@@ -822,7 +834,7 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
           // Clean up partial progress
           localStorage.removeItem('diarize_partial_segments');
           localStorage.removeItem('diarize_partial_file');
-          toast({ title: "זיהוי דוברים הושלם", description: `${finalResult.speaker_count} דוברים זוהו (${mode === 'whisperx' ? 'WhisperX' : 'מקומי'})` });
+          toast({ title: "זיהוי דוברים הושלם", description: `${finalResult.speaker_count} דוברים זוהו (${finalResult.diarization_method})` });
         } else {
           throw new Error("השרת לא החזיר תוצאה מלאה");
         }
@@ -1371,7 +1383,7 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
           </div>
         )}
 
-        {(mode === 'browser' || mode === 'assemblyai' || mode === 'deepgram') && (
+        {(mode === 'browser' || mode === 'local' || mode === 'whisperx' || mode === 'assemblyai' || mode === 'deepgram') && (
           <div className="flex items-center gap-2">
             <Label className="text-sm whitespace-nowrap min-w-[100px]">מספר דוברים</Label>
             <div className="flex gap-1 flex-wrap">
