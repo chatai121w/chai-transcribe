@@ -856,6 +856,7 @@ export const SyncMirrorLayout = ({
           const wordHighlightOn = side === "right" ? rightWordHighlightOn : leftWordHighlightOn;
           const isActiveVisible = isActive && wordHighlightOn;
           const isAnchor = userAnchors.has(globalIdx);
+          const wasManuallyCorrected = Boolean(wt.correctionOriginal && wt.correctionOriginal !== wt.word);
 
           const wordSpan = (
             <span
@@ -876,9 +877,14 @@ export const SyncMirrorLayout = ({
                 !isActive && isSearchActive && "bg-yellow-400 dark:bg-yellow-600 rounded-sm",
                 !isActive && isSearchMatch && "bg-yellow-200 dark:bg-yellow-800 rounded-sm",
                 !isActive && wordHasIssue && "underline decoration-red-500 decoration-wavy underline-offset-2",
+                wasManuallyCorrected && "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-400/70 dark:bg-emerald-950/60 dark:text-emerald-100",
               )}
               onClick={() => onWordClick(wt.start)}
-              title={isAnchor ? `⚓ עוגן (${wt.start.toFixed(2)}s) — קליק לקפיצה` : `קליק לקפיצה (${wt.start.toFixed(1)}s)`}
+              title={wasManuallyCorrected
+                ? `תוקן ידנית: ${wt.correctionOriginal} → ${wt.word}`
+                : isAnchor
+                  ? `⚓ עוגן (${wt.start.toFixed(2)}s) — קליק לקפיצה`
+                  : `קליק לקפיצה (${wt.start.toFixed(1)}s)`}
             >
               {isAnchor && <span className="text-amber-500 text-[8px] me-[1px] select-none">⚓</span>}
               {wt.word}

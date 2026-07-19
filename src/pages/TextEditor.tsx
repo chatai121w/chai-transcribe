@@ -506,33 +506,47 @@ const TextEditor = () => {
   useEffect(() => {
     // Get text from navigation state or localStorage
     const stateText = location.state?.text;
+    const stateTranscriptId = location.state?.transcriptId as string | undefined;
+    const savedTranscriptId = localStorage.getItem('current_transcript_id');
+    const savedText = localStorage.getItem('current_editing_text');
+    const savedVersions = localStorage.getItem('text_versions');
     if (stateText) {
-      setText(stateText);
+      // Browser refresh preserves router state. For the same transcript, resume
+      // the newer local edit instead of re-importing the original state text.
+      const resumeLocalEdit = Boolean(stateTranscriptId && savedTranscriptId === stateTranscriptId && savedText);
+      const editorText = resumeLocalEdit ? savedText! : stateText;
+      setText(editorText);
       originalTextRef.current = stateText;
-      learningBaselineRef.current = stateText;
+      learningBaselineRef.current = editorText;
       const initialVersion: TextVersion = {
         id: crypto.randomUUID(),
         text: stateText,
         timestamp: new Date(),
         source: 'original'
       };
-      setVersions([initialVersion]);
-      setSelectedVersionId(initialVersion.id);
-      // Save to localStorage for persistence
-      localStorage.setItem('current_editing_text', stateText);
-      localStorage.setItem('text_versions', JSON.stringify([initialVersion]));
+      let restoredVersions: TextVersion[] = [];
+      if (resumeLocalEdit && savedVersions) {
+        try {
+          restoredVersions = JSON.parse(savedVersions).map((version: TextVersion) => ({
+            ...version,
+            timestamp: new Date(version.timestamp),
+          }));
+        } catch { /* fall back to the original version */ }
+      }
+      const initialVersions = restoredVersions.length ? restoredVersions : [initialVersion];
+      setVersions(initialVersions);
+      setSelectedVersionId(initialVersions[initialVersions.length - 1].id);
+      localStorage.setItem('current_editing_text', editorText);
+      localStorage.setItem('text_versions', JSON.stringify(initialVersions));
       // Save initial version to cloud
-      if (location.state?.transcriptId) {
+      if (stateTranscriptId && !resumeLocalEdit) {
         // Defer to avoid calling saveCloudVersion before hook is ready
         setTimeout(() => {
-          saveCloudVersion(stateText, 'original', null, 'תמלול מקורי', { transcriptId: location.state.transcriptId });
+          saveCloudVersion(stateText, 'original', null, 'תמלול מקורי', { transcriptId: stateTranscriptId });
         }, 500);
       }
     } else {
       // Try to load from localStorage
-      const savedText = localStorage.getItem('current_editing_text');
-      const savedVersions = localStorage.getItem('text_versions');
-      
       if (savedVersions) {
         try {
           const parsedVersions = JSON.parse(savedVersions).map((v: any) => ({
@@ -709,6 +723,11 @@ const TextEditor = () => {
       if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current);
     };
   }, [text, versions]);
+
+  useEffect(() => {
+    if (!wordTimings.length) return;
+    try { localStorage.setItem('last_word_timings', JSON.stringify(wordTimings)); } catch { /* quota/unavailable */ }
+  }, [wordTimings]);
 
   const addVersion = (newText: string, source: TextVersion['source'], customPrompt?: string) => {
     const newVersion: TextVersion = {
@@ -1013,13 +1032,26 @@ const TextEditor = () => {
     if (!wordTimings.length || wordIndex < 0 || wordIndex >= wordTimings.length) return;
     if (!fixed && !isDelete) return;
 
+    const correctedAt = Date.now();
     const next = isDelete
       ? wordTimings.filter((_, i) => i !== wordIndex)
-      : wordTimings.map((w, i) => (i === wordIndex ? { ...w, word: fixed } : w));
+      : wordTimings.map((w, i) => (i === wordIndex ? {
+          ...w,
+          word: fixed,
+          correctionOriginal: w.correctionOriginal || w.word,
+          correctedAt,
+        } : w));
     const nextText = next.map((w) => w.word).join(' ');
     setWordTimings(next);
-    handleEditorChange(nextText);
-  }, [handleEditorChange, wordTimings]);
+    try {
+      localStorage.setItem('current_editing_text', nextText);
+      localStorage.setItem('last_word_timings', JSON.stringify(next));
+    } catch { /* quota/unavailable */ }
+    addVersion(nextText, 'manual', isDelete ? 'מחיקת מילה' : `תיקון ידני: ${wordTimings[wordIndex].word} → ${fixed}`);
+    if (transcriptIdRef.current) {
+      void updateTranscript(transcriptIdRef.current, { edited_text: nextText, word_timings: next });
+    }
+  }, [wordTimings, updateTranscript]);
 
   const buildSyncedTimings = useCallback((editedText: string): WordTiming[] | null => {
     if (!wordTimings.length) return null;

@@ -39,6 +39,8 @@ export interface WordTiming {
   start: number;
   end: number;
   probability?: number;
+  correctionOriginal?: string;
+  correctedAt?: number;
 }
 
 // ─── Visual Knob Component ─────────────────────────────────────
