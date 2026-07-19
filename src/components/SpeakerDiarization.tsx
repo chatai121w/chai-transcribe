@@ -156,6 +156,17 @@ function mergeConsecutiveSegments(segments: DiarizedSegment[]): DiarizedSegment[
 
 type DiarizationMode = 'local' | 'assemblyai' | 'deepgram' | 'openai' | 'browser' | 'whisperx';
 
+const DIARIZATION_MODES: DiarizationMode[] = ['local', 'assemblyai', 'deepgram', 'openai', 'browser', 'whisperx'];
+
+function getSavedDiarizationMode(): DiarizationMode | null {
+  try {
+    const saved = localStorage.getItem('diarization_preferred_mode') as DiarizationMode | null;
+    return saved && DIARIZATION_MODES.includes(saved) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
 interface SpeakerDiarizationProps {
   serverUrl?: string;
   initialAudioBlob?: Blob | null;
@@ -190,7 +201,13 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
   const [speakerRoles, setSpeakerRoles] = useState<Record<string, string>>({});
   const [editingSpeaker, setEditingSpeaker] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
-  const [mode, setMode] = useState<DiarizationMode>('browser');
+  const savedModeRef = useRef<DiarizationMode | null>(getSavedDiarizationMode());
+  const [mode, setMode] = useState<DiarizationMode>(savedModeRef.current || 'browser');
+  const selectMode = useCallback((nextMode: DiarizationMode) => {
+    savedModeRef.current = nextMode;
+    setMode(nextMode);
+    try { localStorage.setItem('diarization_preferred_mode', nextMode); } catch { /* storage unavailable */ }
+  }, []);
   const [cloudApiKey, setCloudApiKey] = useState("");
   const [rangeEnabled, setRangeEnabled] = useState(false);
   const [rangeStartSec, setRangeStartSec] = useState("0");
@@ -277,7 +294,8 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
     else if (mode === 'openai') setCloudApiKey(cloudKeys.openai_key);
     else setCloudApiKey('');
     if (cloudKeys.huggingface_key && !hfToken) setHfToken(cloudKeys.huggingface_key);
-  }, [mode, keysLoaded, cloudKeys]);
+    if (cloudKeys.huggingface_key && !savedModeRef.current) selectMode('whisperx');
+  }, [mode, keysLoaded, cloudKeys, hfToken, selectMode]);
 
   const saveApiKeyToCloud = useCallback((key: string) => {
     if (!key.trim()) return;
@@ -706,7 +724,8 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
     }
   };
 
-  const handleDiarize = async (file: File) => {
+  const handleDiarize = async (file: File, modeOverride?: DiarizationMode) => {
+    const effectiveMode = modeOverride || mode;
     setIsProcessing(true);
     setResult(null);
     setActiveSpeakerFilter(null);
@@ -737,24 +756,24 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
     setAudioUrl(url);
 
     try {
-      if (mode === 'browser') {
+      if (effectiveMode === 'browser') {
         const data = await diarizeInBrowser(preparedFile, (p) => setBrowserProgress(p), expectedSpeakers || undefined);
         setResult({ text: data.segments.map(s => s.text).join(" "), ...data });
         setBrowserProgress(null);
         toast({ title: "זיהוי דוברים הושלם", description: `${data.speaker_count} דוברים זוהו (בדפדפן) — ${data.processing_time} שניות` });
-      } else if (mode === 'local' || mode === 'whisperx') {
+      } else if (effectiveMode === 'local' || effectiveMode === 'whisperx') {
         const formData = new FormData();
         formData.append("file", preparedFile);
         formData.append("min_gap", minGap.toString());
         if (expectedSpeakers > 0) formData.append("expected_speakers", expectedSpeakers.toString());
         if (hfToken.trim()) formData.append("hf_token", hfToken.trim());
-        if (mode === 'local') {
+        if (effectiveMode === 'local') {
           formData.append("diarization_engine", hfToken.trim() ? "pyannote" : "silence-gap");
           if (hfToken.trim()) {
             formData.append("pyannote_model", pyannoteModel === 'community-1' ? 'pyannote/speaker-diarization-community-1' : 'pyannote/speaker-diarization-3.1');
           }
         }
-        if (mode === 'whisperx') {
+        if (effectiveMode === 'whisperx') {
           formData.append("use_whisperx", "1");
           formData.append("diarization_engine", "whisperx");
           if (hfToken.trim()) {
@@ -767,7 +786,7 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
         setStreamProgress({ stage: 'מתחבר לשרת...', percent: 0 });
         let resp: Response;
         try {
-          resp = await fetch(`${serverUrl}${mode === 'whisperx' ? '/diarize' : '/diarize-stream'}`, { method: "POST", body: formData });
+          resp = await fetch(`${serverUrl}${effectiveMode === 'whisperx' ? '/diarize' : '/diarize-stream'}`, { method: "POST", body: formData });
         } catch (fetchErr) {
           throw new Error(`לא ניתן להתחבר לשרת המקומי (${serverUrl}). וודא שהשרת רץ או בחר מנוע ענן.`);
         }
@@ -776,7 +795,7 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
           throw new Error(err.error || `HTTP ${resp.status}`);
         }
 
-        if (mode === 'whisperx') {
+        if (effectiveMode === 'whisperx') {
           const finalResult = await resp.json() as DiarizationResult;
           setResult(finalResult);
           setStreamingSegments([]);
@@ -838,7 +857,7 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
         } else {
           throw new Error("השרת לא החזיר תוצאה מלאה");
         }
-      } else if (mode === 'openai') {
+      } else if (effectiveMode === 'openai') {
         if (!cloudApiKey.trim()) throw new Error("נדרש מפתח API של OpenAI");
         const formData = new FormData();
         formData.append("file", preparedFile);
@@ -881,10 +900,10 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
         });
         toast({ title: "זיהוי דוברים הושלם", description: `${speakers.length} דוברים זוהו (OpenAI Whisper)` });
       } else {
-        if (!cloudApiKey.trim()) throw new Error(`נדרש מפתח API של ${mode === 'assemblyai' ? 'AssemblyAI' : 'Deepgram'}`);
+        if (!cloudApiKey.trim()) throw new Error(`נדרש מפתח API של ${effectiveMode === 'assemblyai' ? 'AssemblyAI' : 'Deepgram'}`);
         const formData = new FormData();
         formData.append("file", preparedFile);
-        formData.append("engine", mode);
+        formData.append("engine", effectiveMode);
         formData.append("apiKey", cloudApiKey.trim());
         formData.append("language", "he");
         const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
@@ -1351,7 +1370,7 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
               { value: 'local' as DiarizationMode, label: 'מקומי', icon: Server },
             ]).map(opt => (
               <Button key={opt.value} variant={mode === opt.value ? "default" : "outline"} size="sm"
-                className="text-xs gap-1 flex-1 min-w-0 px-2" onClick={() => setMode(opt.value)}>
+                className="text-xs gap-1 flex-1 min-w-0 px-2" onClick={() => selectMode(opt.value)}>
                 <opt.icon className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">{opt.label}</span>
               </Button>
@@ -1719,6 +1738,27 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
         </div>
       )}
 
+      {result?.diarization_method?.toLowerCase().includes('browser mfcc') && (
+        <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-md border border-amber-400/60 bg-amber-50 p-3 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold">מוצגת תוצאת דפדפן בסיסית</p>
+              <p className="text-xs opacity-80">MFCC מתאים לעבודה אופליין, אך אינו אמין מספיק להחלפות דובר קצרות. לתוצאה מקצועית יש להריץ WhisperX + Community-1.</p>
+            </div>
+          </div>
+          <Button size="sm" className="shrink-0" disabled={isProcessing || !preloadedFileRef.current} onClick={() => {
+            if (!preloadedFileRef.current) return;
+            selectMode('whisperx');
+            autoMergeApplied.current = false;
+            handleDiarize(preloadedFileRef.current, 'whisperx');
+          }}>
+            <Mic className="h-4 w-4" />
+            הרץ זיהוי מדויק
+          </Button>
+        </div>
+      )}
+
       {/* ──── Advanced Audio Player (SyncAudioPlayer) ──── */}
       {audioUrl && result && (
         <div className="mb-4 space-y-2">
@@ -1781,12 +1821,11 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
             </Button>
             {/* Re-run with different engine */}
             <Select value="" onValueChange={(engine) => {
-              const prev = mode;
-              setMode(engine as DiarizationMode);
+              const nextMode = engine as DiarizationMode;
+              selectMode(nextMode);
               if (preloadedFileRef.current) {
                 autoMergeApplied.current = false;
-                // brief delay to let mode state update
-                setTimeout(() => handleDiarize(preloadedFileRef.current!), 50);
+                handleDiarize(preloadedFileRef.current, nextMode);
               }
             }}>
               <SelectTrigger className="h-7 w-auto min-w-[130px] text-xs">
@@ -2364,13 +2403,9 @@ export const SpeakerDiarization = ({ serverUrl = "/whisper", initialAudioBlob, i
                         disabled={isProcessing}
                         onClick={async () => {
                           if (!preloadedFileRef.current) return;
-                          const prevMode = mode;
-                          setMode(eng.value);
-                          // Brief delay for state update, then run
-                          await new Promise(r => setTimeout(r, 50));
-                          // Run diarization and auto-add to compare
+                          selectMode(eng.value);
                           compareRunRef.current = eng.label;
-                          handleDiarize(preloadedFileRef.current!);
+                          handleDiarize(preloadedFileRef.current!, eng.value);
                         }}
                       >
                         <eng.icon className="w-3.5 h-3.5" />

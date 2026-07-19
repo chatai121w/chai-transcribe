@@ -3448,15 +3448,38 @@ def diarize():
                             "start": round(float(w.get("start", seg_start) or seg_start), 3),
                             "end": round(float(w.get("end", seg_end) or seg_end), 3),
                             "probability": round(float(w.get("score", w.get("probability", 0.0)) or 0.0), 3),
+                            "speaker": w.get("speaker") or seg.get("speaker"),
                         })
 
-                    raw_segments.append({
-                        "text": text,
-                        "start": seg_start,
-                        "end": seg_end,
-                        "words": words,
-                        "speaker": seg.get("speaker"),
-                    })
+                    # pyannote assigns speakers at word level. A Whisper segment may
+                    # contain a real speaker change, so retaining only seg["speaker"]
+                    # hides that boundary. Split on consecutive word-speaker runs.
+                    speaker_groups = []
+                    for word in words:
+                        word_speaker = word.get("speaker")
+                        if speaker_groups and speaker_groups[-1]["speaker"] == word_speaker:
+                            speaker_groups[-1]["words"].append(word)
+                        else:
+                            speaker_groups.append({"speaker": word_speaker, "words": [word]})
+
+                    if len(speaker_groups) > 1 and any(group["speaker"] for group in speaker_groups):
+                        for group in speaker_groups:
+                            group_words = group["words"]
+                            raw_segments.append({
+                                "text": " ".join(word["word"] for word in group_words),
+                                "start": group_words[0]["start"],
+                                "end": group_words[-1]["end"],
+                                "words": group_words,
+                                "speaker": group["speaker"] or seg.get("speaker"),
+                            })
+                    else:
+                        raw_segments.append({
+                            "text": text,
+                            "start": seg_start,
+                            "end": seg_end,
+                            "words": words,
+                            "speaker": seg.get("speaker"),
+                        })
 
                 # If speaker was not assigned by WhisperX diarization, use silence-gap heuristic.
                 current_speaker = 0
