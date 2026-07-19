@@ -42,6 +42,7 @@ interface SyncMirrorLayoutProps {
   onTextChange: (text: string) => void;
   onWordReplace: (wordIndex: number, replacement: string) => void;
   onWordClick: (time: number) => void;
+  correctionStorageKey?: string;
   fontSize?: number;
   fontFamily?: string;
   lineHeight?: number;
@@ -139,6 +140,7 @@ export const SyncMirrorLayout = ({
   onTextChange,
   onWordReplace,
   onWordClick,
+  correctionStorageKey = 'current-transcript',
   fontSize = 18,
   fontFamily = "Assistant",
   lineHeight = 1.6,
@@ -155,6 +157,30 @@ export const SyncMirrorLayout = ({
   onWordCorrected,
   richColumnStyle,
 }: SyncMirrorLayoutProps) => {
+  type ManualCorrectionMarker = {
+    wordIndex: number;
+    original: string;
+    corrected: string;
+    correctedAt: number;
+  };
+  const correctionMarkersKey = `manual_correction_markers_v1:${correctionStorageKey}`;
+  const [manualCorrectionMarkers, setManualCorrectionMarkers] = useState<ManualCorrectionMarker[]>([]);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(correctionMarkersKey) || '[]');
+      setManualCorrectionMarkers(Array.isArray(saved) ? saved : []);
+    } catch { setManualCorrectionMarkers([]); }
+  }, [correctionMarkersKey]);
+
+  const rememberManualCorrection = useCallback((marker: ManualCorrectionMarker) => {
+    setManualCorrectionMarkers((current) => {
+      const next = [...current.filter((item) => item.wordIndex !== marker.wordIndex), marker]
+        .sort((a, b) => a.wordIndex - b.wordIndex);
+      try { localStorage.setItem(correctionMarkersKey, JSON.stringify(next)); } catch { /* quota/unavailable */ }
+      return next;
+    });
+  }, [correctionMarkersKey]);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const leftRichRef = useRef<HTMLDivElement>(null);
@@ -551,6 +577,12 @@ export const SyncMirrorLayout = ({
         const fixed = next.trim();
         if (fixed && fixed !== displayTimings[globalIdx]?.word) {
           const original = normalizeWord(displayTimings[globalIdx]?.word ?? "");
+          rememberManualCorrection({
+            wordIndex: globalIdx,
+            original: displayTimings[globalIdx]?.word ?? original,
+            corrected: fixed,
+            correctedAt: Date.now(),
+          });
           onWordReplace(globalIdx, fixed);
           if (original) {
             addDictionaryReplacement(original, fixed);
@@ -591,7 +623,7 @@ export const SyncMirrorLayout = ({
         }
       }
     },
-    [displayTimings, onWordReplace],
+    [displayTimings, onWordReplace, rememberManualCorrection],
   );
 
   // ── Per-column word-highlight toggle + style ──────────────────────────────
@@ -856,7 +888,14 @@ export const SyncMirrorLayout = ({
           const wordHighlightOn = side === "right" ? rightWordHighlightOn : leftWordHighlightOn;
           const isActiveVisible = isActive && wordHighlightOn;
           const isAnchor = userAnchors.has(globalIdx);
-          const wasManuallyCorrected = Boolean(wt.correctionOriginal && wt.correctionOriginal !== wt.word);
+          const manualCorrection = manualCorrectionMarkers.find((marker) => {
+            const correctedWords = marker.corrected.split(/\s+/).filter(Boolean);
+            const offset = globalIdx - marker.wordIndex;
+            return offset >= 0 && offset < correctedWords.length && correctedWords[offset] === wt.word;
+          });
+          const correctionOriginal = manualCorrection?.original || wt.correctionOriginal;
+          const correctionResult = manualCorrection?.corrected || wt.word;
+          const wasManuallyCorrected = Boolean(correctionOriginal && correctionOriginal !== correctionResult);
 
           const wordSpan = (
             <span
@@ -881,7 +920,7 @@ export const SyncMirrorLayout = ({
               )}
               onClick={() => onWordClick(wt.start)}
               title={wasManuallyCorrected
-                ? `תוקן ידנית: ${wt.correctionOriginal} → ${wt.word}`
+                ? `תוקן ידנית: ${correctionOriginal} → ${correctionResult}`
                 : isAnchor
                   ? `⚓ עוגן (${wt.start.toFixed(2)}s) — קליק לקפיצה`
                   : `קליק לקפיצה (${wt.start.toFixed(1)}s)`}

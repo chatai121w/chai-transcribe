@@ -1753,6 +1753,7 @@ const TextEditor = () => {
                   onTextChange={handlePlayerEditorChange}
                   onWordReplace={handleSyncedWordReplace}
                   onWordClick={(time) => setPlayerTime(time)}
+                  correctionStorageKey={transcriptId || audioFileName || 'current-transcript'}
                   fontSize={fontSize}
                   fontFamily={fontFamily}
                   syncEnabled={syncEnabled}
