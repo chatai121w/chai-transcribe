@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -33,6 +33,7 @@ interface WorkspaceContextValue {
   preferences: Record<string, WidgetPreference>;
   move: (id: string, direction: -1 | 1) => void;
   patch: (id: string, changes: Partial<WidgetPreference>) => void;
+  register: (id: string, mounted: boolean) => void;
 }
 
 const STORAGE_KEY = "chai-transcribe-widget-layout-v1";
@@ -73,6 +74,16 @@ export function TranscriptionWidgetWorkspace({
 }) {
   const [customizing, setCustomizing] = useState(false);
   const [preferences, setPreferences] = useState<Record<string, WidgetPreference>>(() => loadPreferences(definitions));
+  const [mountedIds, setMountedIds] = useState<Set<string>>(() => new Set());
+
+  const register = useCallback((id: string, mounted: boolean) => {
+    setMountedIds((current) => {
+      const next = new Set(current);
+      if (mounted) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
@@ -85,7 +96,7 @@ export function TranscriptionWidgetWorkspace({
   const move = (id: string, direction: -1 | 1) => {
     setPreferences((current) => {
       const ordered = definitions
-        .filter((definition) => !current[definition.id].hidden)
+        .filter((definition) => mountedIds.has(definition.id) && !current[definition.id].hidden)
         .sort((a, b) => current[a.id].order - current[b.id].order);
       const index = ordered.findIndex((definition) => definition.id === id);
       const target = ordered[index + direction];
@@ -104,7 +115,7 @@ export function TranscriptionWidgetWorkspace({
   );
 
   return (
-    <WorkspaceContext.Provider value={{ customizing, preferences, move, patch }}>
+    <WorkspaceContext.Provider value={{ customizing, preferences, move, patch, register }}>
       <section className="space-y-3" dir="rtl">
         <div className="flex flex-wrap items-center justify-between gap-2 border-y border-border/60 py-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -165,6 +176,12 @@ export function TranscriptionWidget({
   const workspace = useContext(WorkspaceContext);
   if (!workspace) throw new Error("TranscriptionWidget must be rendered inside TranscriptionWidgetWorkspace");
   const preference = workspace.preferences[id];
+
+  useEffect(() => {
+    workspace.register(id, true);
+    return () => workspace.register(id, false);
+  }, [id, workspace.register]);
+
   if (!preference || preference.hidden) return null;
 
   return (

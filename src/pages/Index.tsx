@@ -67,6 +67,18 @@ const TRANSCRIPTION_WIDGETS: WidgetDefinition[] = [
   { id: "language", title: "שפה ולמידה", defaultSpan: "full" },
   { id: "trim", title: "חיתוך אודיו", defaultSpan: "half" },
   { id: "source", title: "מקור התמלול", defaultSpan: "half" },
+  { id: "recovery", title: "שחזור תמלול", defaultSpan: "full" },
+  { id: "performance", title: "ביצועים", defaultSpan: "full" },
+  { id: "stats", title: "נתוני תמלול", defaultSpan: "full" },
+  { id: "progress", title: "מצב התמלול", defaultSpan: "full" },
+  { id: "live-preview", title: "תצוגה מקדימה", defaultSpan: "full" },
+  { id: "background-jobs", title: "משימות רקע", defaultSpan: "full" },
+  { id: "local-queue", title: "תור תמלולים מקומי", defaultSpan: "full" },
+  { id: "live", title: "תמלול בזמן אמת", defaultSpan: "full" },
+  { id: "models", title: "מודלים מקומיים", defaultSpan: "full" },
+  { id: "history", title: "היסטוריית תמלולים", defaultSpan: "full" },
+  { id: "result", title: "נגן ותוצאת תמלול", defaultSpan: "full" },
+  { id: "diarization", title: "זיהוי דוברים", defaultSpan: "full" },
 ];
 
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
@@ -2228,10 +2240,10 @@ const Index = () => {
           />
         </div>
         </TranscriptionWidget>
-        </TranscriptionWidgetWorkspace>
 
         {/* Recovered partial transcript banner */}
         {recoveredPartialInfo && !isLoading && transcript && (
+          <TranscriptionWidget id="recovery" title="שחזור תמלול">
           <Card className="p-3 border-amber-500/40 bg-amber-500/5" dir="rtl">
             <input
               ref={resumeFileInputRef}
@@ -2287,19 +2299,23 @@ const Index = () => {
               </div>
             </div>
           </Card>
+          </TranscriptionWidget>
         )}
 
         {/* Performance Monitor Panel */}
         {perfMonitor.enabled && showPerfPanel && (
+          <TranscriptionWidget id="performance" title="ביצועים" icon={<Activity className="h-4 w-4 text-primary" />}>
           <PerfMonitorPanel
             records={perfMonitor.records}
             onClear={perfMonitor.clearRecords}
             onClose={() => setShowPerfPanel(false)}
           />
+          </TranscriptionWidget>
         )}
 
         {/* Transcription stats — shown after CUDA transcription completes */}
         {lastStats && !isLoading && (
+          <TranscriptionWidget id="stats" title="נתוני תמלול">
           <Card className="p-3 border-green-500/30 bg-green-500/5" dir="rtl">
             <div className="flex items-center justify-between">
               <Button
@@ -2321,10 +2337,12 @@ const Index = () => {
               </div>
             </div>
           </Card>
+          </TranscriptionWidget>
         )}
 
         {/* Active transcription progress panel */}
         {isLoading && (
+          <TranscriptionWidget id="progress" title="מצב התמלול">
           <Card className="p-4 border-primary/40 bg-primary/5 shadow-sm" dir="rtl">
             <div className="flex items-center gap-3">
               <div className="flex-1 space-y-2.5 text-right">
@@ -2426,10 +2444,12 @@ const Index = () => {
               </Button>
             </div>
           </Card>
+          </TranscriptionWidget>
         )}
 
         {/* Live transcript preview during streaming */}
         {isLoading && transcript && (
+          <TranscriptionWidget id="live-preview" title="תצוגה מקדימה חיה">
           <Card className="p-4 border-green-500/30 bg-green-500/5" dir="rtl">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs text-muted-foreground font-mono">
@@ -2444,12 +2464,14 @@ const Index = () => {
               {transcript}
             </div>
           </Card>
+          </TranscriptionWidget>
         )}
 
 
 
         {/* Background Jobs Panel */}
         {isAuthenticated && jobs.length > 0 && (
+          <TranscriptionWidget id="background-jobs" title="משימות רקע">
           <BackgroundJobsPanel
             jobs={jobs}
             onRetry={retryJob}
@@ -2459,10 +2481,12 @@ const Index = () => {
               saveToHistory(text, eng);
             }}
           />
+          </TranscriptionWidget>
         )}
 
         {/* Local CUDA Queue Panel */}
         {localQueue.queue.length > 0 && (
+          <TranscriptionWidget id="local-queue" title="תור תמלולים מקומי" icon={<Server className="h-4 w-4 text-primary" />}>
           <Card className="p-4 space-y-3" dir="rtl">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -2519,9 +2543,11 @@ const Index = () => {
               </div>
             ))}
           </Card>
+          </TranscriptionWidget>
         )}
 
         {/* Live Transcription */}
+        <TranscriptionWidget id="live" title="תמלול בזמן אמת" icon={<Mic className="h-4 w-4 text-primary" />}>
         <LiveTranscriber
           serverConnected={serverConnected}
           onTranscriptComplete={async (result: LiveTranscriptResult) => {
@@ -2555,11 +2581,13 @@ const Index = () => {
             toast({ title: "תמלול חי הושלם!", description: audioFile ? "הקלטה + תמלול נשמרו" : undefined });
           }}
         />
+        </TranscriptionWidget>
 
 
 
         {/* Local Model Manager - shown when local engine or local-server selected */}
         {(engine === 'local' || engine === 'local-server') && (
+          <TranscriptionWidget id="models" title="מודלים מקומיים" icon={<Cpu className="h-4 w-4 text-primary" />}>
           <Collapsible>
             <CollapsibleTrigger asChild>
               <Button variant="outline" className="w-full mb-4">
@@ -2571,8 +2599,11 @@ const Index = () => {
               <LocalModelManager />
             </CollapsibleContent>
           </Collapsible>
+          </TranscriptionWidget>
         )}
 
+        {(transcripts.length > 0 || isCloudLoading) && (
+        <TranscriptionWidget id="history" title="היסטוריית תמלולים">
         <CloudTranscriptHistory
           transcripts={transcripts}
           isCloud={isCloud}
@@ -2586,7 +2617,11 @@ const Index = () => {
           onUpdate={(id, updates) => updateTranscript(id, updates)}
           initialFolderFilter={folderFromUrl}
         />
+        </TranscriptionWidget>
+        )}
 
+        {(transcript || audioUrl) && (
+        <TranscriptionWidget id="result" title="נגן ותוצאת תמלול" icon={<FileEdit className="h-4 w-4 text-primary" />}>
         {transcript && (
           <>
             <div className="flex gap-2 items-center justify-end" dir="rtl">
@@ -2644,11 +2679,16 @@ const Index = () => {
             />
           </div>
         )}
+        </TranscriptionWidget>
+        )}
 
         {/* Speaker Diarization — available when local server is connected */}
         {serverConnected && (
+          <TranscriptionWidget id="diarization" title="זיהוי דוברים" icon={<Users className="h-4 w-4 text-primary" />}>
           <SpeakerDiarization />
+          </TranscriptionWidget>
         )}
+        </TranscriptionWidgetWorkspace>
       </div>
     </div>
     <KeyboardShortcutsDialog open={showHelp} onOpenChange={setShowHelp} />
