@@ -113,7 +113,12 @@ def _finalize_dataset(ds_dir: Path) -> dict:
     groups = {}
     for row in rows:
         groups.setdefault(row["group_id"], []).append(row)
-    ordered_groups = sorted(groups.items(), key=lambda item: hashlib.sha256(item[0].encode()).hexdigest())
+    # Prefer smaller recordings for holdout so most approved audio remains
+    # available for training while every recording stays entirely in one split.
+    ordered_groups = sorted(
+        groups.items(),
+        key=lambda item: (len(item[1]), hashlib.sha256(item[0].encode()).hexdigest()),
+    )
     eval_rows = []
     if len(rows) >= 10 and len(ordered_groups) >= 2:
         target_eval_count = max(1, round(len(rows) * 0.15))
@@ -472,7 +477,10 @@ def register_training_routes(app):
         models = [m for m in models if m.get("model_id") != model_id]
         models.append({"model_id": model_id, "ct2_path": str(Path(ct2).resolve()), "wer_before": progress["wer_before"], "wer_after": progress["wer_after"]})
         TRAINED_MODELS_FILE.write_text(json.dumps(models, ensure_ascii=False, indent=2), encoding="utf-8")
-        ACTIVE_MODEL_FILE.write_text(json.dumps({"active": model_id}, ensure_ascii=False), encoding="utf-8")
+        ACTIVE_MODEL_FILE.write_text(json.dumps({
+            "active": model_id,
+            "ct2_path": str(Path(ct2).resolve()),
+        }, ensure_ascii=False), encoding="utf-8")
         return jsonify({"ok": True, "active": model_id, "model_id": model_id})
 
     @app.route("/training/active-model", methods=["GET"])

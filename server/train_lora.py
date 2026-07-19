@@ -67,7 +67,9 @@ class ProgressMirror:
 
     def log(self, msg: str):
         line = f"[{time.strftime('%H:%M:%S')}] {msg}"
-        print(f"PROGRESS {line}", flush=True)
+        console_line = f"PROGRESS {line}"
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        print(console_line.encode(encoding, errors="replace").decode(encoding), flush=True)
         self._log_lines.append(line)
         if len(self._log_lines) > 200:
             self._log_lines = self._log_lines[-200:]
@@ -198,7 +200,10 @@ def main():
         lora_cfg = LoraConfig(
             r=args.lora_r, lora_alpha=args.lora_alpha, lora_dropout=args.lora_dropout,
             target_modules=["q_proj", "v_proj"],
-            bias="none", task_type="SEQ_2_SEQ_LM",
+            # Whisper accepts input_features rather than input_ids. Leaving
+            # task_type unset uses PEFT's generic wrapper and preserves the
+            # Whisper forward signature on current PEFT releases.
+            bias="none",
         )
         model = get_peft_model(model, lora_cfg)
         trainable, total = 0, 0
@@ -230,6 +235,7 @@ def main():
             def __call__(self, features):
                 input_features = [{"input_features": f["input_features"]} for f in features]
                 batch = self.processor.feature_extractor.pad(input_features, return_tensors="pt")
+                batch["input_features"] = batch["input_features"].to(dtype=dtype)
                 label_features = [{"input_ids": f["labels"]} for f in features]
                 labels_batch = self.processor.tokenizer.pad(label_features, return_tensors="pt")
                 labels = labels_batch["input_ids"].masked_fill(
@@ -337,7 +343,7 @@ def main():
             eval_dataset=eval_ds,
             data_collator=collator,
             compute_metrics=compute_metrics if eval_ds is not None else None,
-            tokenizer=processor.feature_extractor,
+            processing_class=processor.feature_extractor,
             callbacks=[ProgressCallback()],
         )
 
@@ -374,6 +380,14 @@ def main():
                 merged = model.merge_and_unload()
                 merged.save_pretrained(str(merged_dir), safe_serialization=True)
                 processor.save_pretrained(str(merged_dir))
+                processor_config = merged_dir / "processor_config.json"
+                legacy_preprocessor_config = merged_dir / "preprocessor_config.json"
+                if processor_config.is_file() and not legacy_preprocessor_config.is_file():
+                    processor_data = json.loads(processor_config.read_text(encoding="utf-8"))
+                    feature_config = processor_data.get("feature_extractor", processor_data)
+                    legacy_preprocessor_config.write_text(
+                        json.dumps(feature_config, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
 
                 progress.update(status="converting")
                 progress.log("Converting merged model → CTranslate2 (for faster-whisper)…")

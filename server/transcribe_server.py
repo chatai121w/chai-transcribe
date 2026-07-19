@@ -1483,7 +1483,14 @@ def transcribe_stream():
     start_from = max(0.0, float(request.form.get("start_from", "0")))
 
     # ── Input validation ──
-    if model_id not in MODEL_REGISTRY and not model_id.startswith("ivrit-ai/"):
+    trained_model_path = None
+    if model_id.startswith("lora:"):
+        try:
+            from training_routes import resolve_trained_model  # type: ignore
+            trained_model_path = resolve_trained_model(model_id)
+        except Exception:
+            trained_model_path = None
+    if model_id not in MODEL_REGISTRY and not model_id.startswith("ivrit-ai/") and not trained_model_path:
         return jsonify({"error": f"Unknown model: {model_id}", "available": list(MODEL_REGISTRY.keys())}), 400
 
     _VALID_LANGUAGES = {

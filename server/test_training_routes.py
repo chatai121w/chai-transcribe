@@ -40,6 +40,26 @@ class DatasetSplitTests(unittest.TestCase):
             self.assertTrue(evaluation)
             self.assertTrue(train.isdisjoint(evaluation))
 
+    @patch('training_routes._audio_duration', return_value=5.0)
+    def test_smaller_recording_is_used_for_evaluation(self, _duration):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for folder in ('audio', 'texts', 'metadata'):
+                (root / folder).mkdir()
+
+            for index in range(30):
+                stem = f'{index:05d}'
+                (root / 'audio' / f'{stem}.wav').write_bytes(b'audio')
+                (root / 'texts' / f'{stem}.txt').write_text(f'text {index}', encoding='utf-8')
+                group_id = 'large-recording' if index < 22 else 'small-recording'
+                (root / 'metadata' / f'{stem}.json').write_text(
+                    json.dumps({'groupId': group_id}), encoding='utf-8',
+                )
+
+            stats = _finalize_dataset(root)
+            self.assertEqual(stats['train_count'], 22)
+            self.assertEqual(stats['eval_count'], 8)
+
 
 if __name__ == '__main__':
     unittest.main()
