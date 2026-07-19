@@ -223,7 +223,11 @@ export const WordContextMenu = ({
                
                 autoFocus
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && verifyInput.trim()) {
+                  // Radix Menu uses printable keys for item typeahead. Keep
+                  // typing inside the input so focus does not jump to a menu item.
+                  if (e.key !== 'Escape') e.stopPropagation();
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing && verifyInput.trim()) {
+                    e.preventDefault();
                     handleVerify(verifyInput);
                     setVerifyInput('');
                   }
@@ -339,7 +343,10 @@ export const WordContextMenu = ({
               className="h-7 text-xs"
              
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && customInput.trim()) {
+                // Prevent the parent menu's typeahead from stealing input focus.
+                if (e.key !== 'Escape') e.stopPropagation();
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing && customInput.trim()) {
+                  e.preventDefault();
                   handleReplace(customInput);
                   setCustomInput('');
                 }
