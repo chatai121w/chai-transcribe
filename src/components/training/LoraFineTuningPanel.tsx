@@ -29,6 +29,7 @@ import {
   PowerOff, Trash2, FileAudio, Loader2,
 } from 'lucide-react';
 import { useLoraTraining, type LoraJob } from '@/hooks/useLoraTraining';
+import { ReferenceAudioImporter } from '@/components/training/ReferenceAudioImporter';
 
 const STATUS_COLORS: Record<LoraJob['status'], string> = {
   queued: 'bg-muted text-muted-foreground',
@@ -236,6 +237,7 @@ export default function LoraFineTuningPanel() {
                     סגור Dataset → צור Manifest
                   </Button>
                 </div>
+                <ReferenceAudioImporter datasetId={selectedDs} />
               </div>
             )}
           </section>
