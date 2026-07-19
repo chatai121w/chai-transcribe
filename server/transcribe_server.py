@@ -3361,6 +3361,12 @@ def diarize():
                 wx_compute_type = "float16" if wx_device == "cuda" else "int8"
                 wx_language = None if language == "auto" else language
 
+                # The regular faster-whisper model is preloaded by the server.
+                # Keeping it in VRAM alongside WhisperX and pyannote can terminate
+                # the process at native CUDA level on laptop GPUs.
+                _evict_all_whisper_models()
+                _cleanup_gpu_memory()
+
                 _log.info(
                     f"Using WhisperX (model={whisperx_model}, device={wx_device}, compute={wx_compute_type}, lang={wx_language or 'auto'})"
                 )
@@ -3387,13 +3393,33 @@ def diarize():
                     return_char_alignments=False,
                 )
 
+                # Transcription and alignment are complete. Their GPU models are
+                # no longer needed while pyannote computes speaker embeddings.
+                del wx_model, align_model
+                _cleanup_gpu_memory()
+
                 diarization_method = "whisperx+silence-gap"
 
                 # Optional neural diarization (pyannote via WhisperX)
                 if hf_token:
                     try:
+                        # SpeechBrain registers deprecated optional aliases as LazyModule
+                        # instances. Python 3.13 checkpoint inspection probes every loaded
+                        # module and can accidentally import optional k2_fsa, aborting an
+                        # otherwise valid pyannote pipeline load.
+                        try:
+                            import sys
+                            from speechbrain.utils.importutils import LazyModule
+
+                            for module_name, module in list(sys.modules.items()):
+                                if isinstance(module, LazyModule):
+                                    sys.modules.pop(module_name, None)
+                        except (ImportError, AttributeError):
+                            pass
+
                         from whisperx.diarize import DiarizationPipeline
                         diarize_pipeline = DiarizationPipeline(
+                            model_name=pyannote_model_id,
                             token=hf_token,
                             device=wx_device,
                         )
