@@ -953,6 +953,11 @@ export const useLocalServer = () => {
               setModelLoading(false);
               result = { ready: false };
               onProgress?.(evt.message || 'Error');
+            } else if (evt.status === 'cancelled') {
+              setModelReady(false);
+              setModelLoading(false);
+              result = { ready: false };
+              onProgress?.(evt.message || 'Model loading cancelled');
             }
           }
         }
@@ -971,10 +976,21 @@ export const useLocalServer = () => {
     }
   }, [checkConnection]);
 
-  const cancelPreload = useCallback(() => {
+  const cancelPreload = useCallback(async () => {
+    try {
+      await fetch(`${getBaseUrl()}/cancel-model-load`, {
+        method: 'POST',
+        headers: getApiHeaders(),
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch {
+      // Still abort the local stream if the server disconnected.
+    }
     if (preloadAbortRef.current) {
       preloadAbortRef.current.abort();
     }
+    setModelReady(false);
+    setModelLoading(false);
   }, []);
 
   return {

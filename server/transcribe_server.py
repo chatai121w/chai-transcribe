@@ -685,6 +685,7 @@ _model_loading_lock = threading.Lock()
 _model_loading: bool = False       # True while a model is being loaded in background
 _model_loading_id: str | None = None  # model being loaded
 _model_loading_progress: str = ''   # current loading phase description
+_model_loading_cancel_requested: bool = False
 
 # Device + GPU name cache
 _cached_device: str | None = None
@@ -2935,14 +2936,14 @@ def load_model_endpoint():
 @app.route("/preload-stream", methods=["POST"])
 def preload_stream():
     """Preload model via SSE — streams loading progress. Non-blocking if model already cached."""
-    global _model_loading, _model_loading_id, _model_loading_progress
+    global _model_loading, _model_loading_id, _model_loading_progress, _model_loading_cancel_requested
     data = request.get_json() or {}
     model_id = data.get("model", _current_model_id or DEFAULT_MODEL)
     resolved = MODEL_REGISTRY.get(model_id, model_id)
     compute_type = data.get("compute_type")
 
     def generate():
-        global _model_loading, _model_loading_id, _model_loading_progress
+        global _model_loading, _model_loading_id, _model_loading_progress, _model_loading_cancel_requested, _current_model_id
         device = get_device()
         ct = compute_type or ("float16" if device == "cuda" else "int8")
         cache_key = f"{resolved}::{ct}"
@@ -2971,6 +2972,7 @@ def preload_stream():
             _model_loading = True
             _model_loading_id = resolved
             _model_loading_progress = 'Initializing...'
+            _model_loading_cancel_requested = False
 
         yield f"data: {json.dumps({'type': 'status', 'status': 'loading', 'model': resolved, 'message': 'Loading model...'})}\n\n"
 
@@ -2989,6 +2991,24 @@ def preload_stream():
             load_model(resolved, compute_type_override=compute_type)
             elapsed = time.time() - start
 
+            if _model_loading_cancel_requested:
+                for cached_id in list(_model_cache.keys()):
+                    if cached_id.startswith(resolved + "::"):
+                        del _model_cache[cached_id]
+                        _model_last_used.pop(cached_id, None)
+                if _current_model_id == resolved:
+                    _current_model_id = None
+                import gc; gc.collect()
+                if get_device() == "cuda":
+                    try:
+                        import torch
+                        torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+                print(f"  [preload] Model load cancelled and released: {resolved}")
+                yield f"data: {json.dumps({'type': 'status', 'status': 'cancelled', 'model': resolved, 'message': 'Model loading cancelled'})}\n\n"
+                return
+
             _refresh_downloaded_models_cache()
             print(f"  [preload] Model {resolved} loaded in {elapsed:.1f}s")
             yield f"data: {json.dumps({'type': 'status', 'status': 'ready', 'model': resolved, 'elapsed': round(elapsed, 1), 'message': f'Model loaded in {elapsed:.1f}s'})}\n\n"
@@ -3002,11 +3022,25 @@ def preload_stream():
                 _model_loading = False
                 _model_loading_id = None
                 _model_loading_progress = ''
+                _model_loading_cancel_requested = False
 
     return Response(generate(), mimetype="text/event-stream", headers={
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
     })
+
+
+@app.route("/cancel-model-load", methods=["POST"])
+def cancel_model_load_endpoint():
+    """Request cancellation of an active model load and release it when the blocking load step returns."""
+    global _model_loading_cancel_requested, _model_loading_progress
+    with _model_loading_lock:
+        if not _model_loading:
+            return jsonify({"status": "idle", "cancelled": False})
+        _model_loading_cancel_requested = True
+        _model_loading_progress = 'Cancelling model load...'
+        model_id = _model_loading_id
+    return jsonify({"status": "cancelling", "cancelled": True, "model": model_id})
 
 
 @app.route("/download-model", methods=["POST"])

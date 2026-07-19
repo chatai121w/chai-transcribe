@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
-import { Globe, Cpu, Zap, Chrome, Mic, Waves, Server, Power, PowerOff, Loader2, CheckCircle2, XCircle, Copy, Rabbit, Turtle, Settings, ChevronDown, Flame, Download, Sparkles, Link2, KeyRound, Cloud, Monitor, Target, AlertTriangle, BrainCircuit } from "lucide-react";
+import { Globe, Cpu, Zap, Chrome, Mic, Waves, Server, Power, PowerOff, Loader2, CheckCircle2, XCircle, Copy, Rabbit, Turtle, Settings, ChevronDown, Flame, Download, Sparkles, Link2, KeyRound, Cloud, Monitor, Target, AlertTriangle, BrainCircuit, Square } from "lucide-react";
 import { useLocalServer } from "@/hooks/useLocalServer";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -619,9 +619,29 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
             </Button>
           )}
           {modelLoading && preloadMsg && (
-            <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
-              <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
-              <span className="truncate">{preloadMsg}</span>
+            <div className="flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
+              <div className="flex min-w-0 items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                <span className="truncate">{preloadMsg}</span>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 shrink-0 gap-1 border-destructive/40 px-2 text-xs text-destructive hover:bg-destructive/10"
+                onClick={async (event) => {
+                  event.preventDefault();
+                  setPreloadMsg('מבטל טעינה...');
+                  setPreloadMode('direct');
+                  updatePreferences({ cuda_preload_mode: 'direct' });
+                  await cancelPreload();
+                  setPreloadMsg('');
+                  toast({ title: 'טעינת המודל נעצרת', description: 'הזיכרון ישוחרר מיד כששלב הטעינה הנוכחי יסתיים' });
+                }}
+              >
+                <Square className="h-3 w-3" />
+                עצור
+              </Button>
             </div>
           )}
         </div>
