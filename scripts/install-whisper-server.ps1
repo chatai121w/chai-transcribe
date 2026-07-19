@@ -88,9 +88,25 @@ Write-Host "  [3/3] Installing Flask server..." -ForegroundColor Cyan
 }
 
 if ($WithWhisperX) {
-    Write-Host "  [4/4] Installing WhisperX (alignment + diarization)..." -ForegroundColor Cyan
-    & $pipPath install whisperx 2>&1 | ForEach-Object {
-        if ($_ -match "Successfully installed") { Write-Host "  $_" -ForegroundColor Green }
+    Write-Host "  [4/4] Checking WhisperX + pyannote (alignment + diarization)..." -ForegroundColor Cyan
+    & $pythonVenv -c "import torch, whisperx, pyannote.audio; assert torch.cuda.is_available(); assert torch.__version__.startswith('2.8.0+cu128')" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  [OK] WhisperX and pyannote already installed — skipped" -ForegroundColor Green
+    } else {
+        # Resolve the official WhisperX stack first. pip installs a CPU Torch wheel
+        # on Windows, so reinstall the matching CUDA build as the final package step.
+        & $pythonVenv -m pip install "whisperx==3.8.6"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & $pythonVenv -m pip install --force-reinstall --no-deps `
+            "torch==2.8.0+cu128" "torchaudio==2.8.0+cu128" "torchvision==0.23.0+cu128" `
+            --index-url https://download.pytorch.org/whl/cu128
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & $pythonVenv -m pip install "numpy==2.4.4" "fsspec[http]==2026.4.0"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & $pythonVenv -m pip check
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & $pythonVenv -c "import torch, whisperx, pyannote.audio; assert torch.cuda.is_available(); x=torch.ones(1, device='cuda'); print('  [OK] WhisperX + pyannote loaded on CUDA', torch.__version__)"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 }
 

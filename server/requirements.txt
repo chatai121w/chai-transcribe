@@ -22,4 +22,9 @@ evaluate>=0.4.1
 jiwer>=3.0.3
 librosa>=0.10.1
 audiomentations>=0.35.0
+# Speaker diarization. install-whisper-server.ps1 installs WhisperX and then
+# restores the validated Windows CUDA Torch build as the final package step.
+pyannote-audio==4.0.7
+nltk==3.10.0
+omegaconf==2.3.1
 

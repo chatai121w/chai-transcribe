@@ -3135,6 +3135,26 @@ def unload_models_endpoint():
     return jsonify({"status": "ok", "unloaded": count})
 
 
+def _load_pyannote_waveform(audio_path):
+    """Decode once with WhisperX/FFmpeg and bypass TorchCodec on Windows."""
+    import whisperx
+    audio = whisperx.load_audio(audio_path)
+    return {"waveform": torch.from_numpy(audio).unsqueeze(0), "sample_rate": 16000}
+
+
+def _load_pyannote_pipeline(model_id, hf_token):
+    from pyannote.audio import Pipeline as PyannotePipeline
+    try:
+        return PyannotePipeline.from_pretrained(model_id, token=hf_token)
+    except TypeError:
+        return PyannotePipeline.from_pretrained(model_id, use_auth_token=hf_token)
+
+
+def _iter_pyannote_tracks(output):
+    annotation = getattr(output, "speaker_diarization", output)
+    return annotation.itertracks(yield_label=True)
+
+
 @app.route("/diarize-stream", methods=["POST"])
 def diarize_stream():
     """Transcribe audio with speaker diarization — SSE streaming progress & partial segments.
@@ -3215,13 +3235,12 @@ def diarize_stream():
             if hf_token and diarization_engine in {"auto", "pyannote"}:
                 yield f"data: {json.dumps({'type': 'progress', 'stage': 'מריץ זיהוי דוברים (pyannote)...', 'percent': 65})}\n\n"
                 try:
-                    from pyannote.audio import Pipeline as PyannotePipeline
-                    pipe = PyannotePipeline.from_pretrained(pyannote_model_id, use_auth_token=hf_token)
+                    pipe = _load_pyannote_pipeline(pyannote_model_id, hf_token)
                     if _has_torch and torch.cuda.is_available():
                         pipe.to(torch.device("cuda"))
-                    diarization = pipe(tmp_path, **({"num_speakers": expected_speakers} if expected_speakers else {}))
+                    diarization = pipe(_load_pyannote_waveform(tmp_path), **({"num_speakers": expected_speakers} if expected_speakers else {}))
                     speaker_segments = []
-                    for turn, _, speaker in diarization.itertracks(yield_label=True):
+                    for turn, _, speaker in _iter_pyannote_tracks(diarization):
                         speaker_segments.append({"speaker": speaker, "start": round(turn.start, 3), "end": round(turn.end, 3)})
                     diarization_method = "pyannote"
                 except ImportError:
@@ -3373,8 +3392,9 @@ def diarize():
                 # Optional neural diarization (pyannote via WhisperX)
                 if hf_token:
                     try:
-                        diarize_pipeline = whisperx.DiarizationPipeline(
-                            use_auth_token=hf_token,
+                        from whisperx.diarize import DiarizationPipeline
+                        diarize_pipeline = DiarizationPipeline(
+                            token=hf_token,
                             device=wx_device,
                         )
                         diarization_kwargs = {"num_speakers": expected_speakers} if expected_speakers else {}
@@ -3511,17 +3531,13 @@ def diarize():
 
         if hf_token and diarization_engine in {"auto", "pyannote"}:
             try:
-                from pyannote.audio import Pipeline as PyannotePipeline
                 _log.info(f"Using pyannote.audio for speaker diarization (model={pyannote_model_id})")
-                pipe = PyannotePipeline.from_pretrained(
-                    pyannote_model_id,
-                    use_auth_token=hf_token,
-                )
+                pipe = _load_pyannote_pipeline(pyannote_model_id, hf_token)
                 if _has_torch and torch.cuda.is_available():
                     pipe.to(torch.device("cuda"))
-                diarization = pipe(tmp_path, **({"num_speakers": expected_speakers} if expected_speakers else {}))
+                diarization = pipe(_load_pyannote_waveform(tmp_path), **({"num_speakers": expected_speakers} if expected_speakers else {}))
                 speaker_segments = []
-                for turn, _, speaker in diarization.itertracks(yield_label=True):
+                for turn, _, speaker in _iter_pyannote_tracks(diarization):
                     speaker_segments.append({
                         "speaker": speaker,
                         "start": round(turn.start, 3),
