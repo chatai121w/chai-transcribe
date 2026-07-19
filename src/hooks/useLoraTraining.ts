@@ -39,6 +39,7 @@ export interface LoraDataset {
   train_count?: number;
   eval_count?: number;
   duration_seconds?: number;
+  recording_groups?: number;
   ready_for_training?: boolean;
   warnings?: string[];
 }
@@ -178,11 +179,17 @@ export function useLoraTraining() {
     return data;
   }, [refreshDatasets]);
 
-  const addApprovedPair = useCallback(async (audio: File, text: string, datasetId = 'approved-ground-truth') => {
+  const addApprovedPair = useCallback(async (
+    audio: File,
+    text: string,
+    datasetId = 'approved-ground-truth',
+    metadata?: Record<string, string | number>,
+  ) => {
     const fd = new FormData();
     fd.append('dataset_id', datasetId);
     fd.append('audio', audio, audio.name);
     fd.append('text', text);
+    if (metadata) fd.append('metadata', JSON.stringify(metadata));
     const res = await fetch(`${base()}/training/dataset/approved-pair`, { method: 'POST', body: fd });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `approval failed: ${res.status}`);

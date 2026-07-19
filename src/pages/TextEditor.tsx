@@ -27,6 +27,7 @@ const SyncEditableView = lazy(() => import("@/components/SyncEditableView").then
 const SyncTranscriptView = lazy(() => import("@/components/SyncTranscriptView").then(m => ({ default: m.SyncTranscriptView })));
 const SyncMirrorLayout = lazy(() => import("@/components/SyncMirrorLayout").then(m => ({ default: m.SyncMirrorLayout })));
 const LearningRegressionPanel = lazy(() => import("@/components/LearningRegressionPanel").then(m => ({ default: m.LearningRegressionPanel })));
+const AudioLearningQueue = lazy(() => import("@/components/AudioLearningQueue").then(m => ({ default: m.AudioLearningQueue })));
 const DictionaryValidator = lazy(() => import("@/components/DictionaryValidator").then(m => ({ default: m.DictionaryValidator })));
 const TextMarkingOverlay = lazy(() => import("@/components/TextMarkingOverlay").then(m => ({ default: m.TextMarkingOverlay })));
 const AutoSummaryCard = lazy(() => import("@/components/AutoSummaryCard").then(m => ({ default: m.AutoSummaryCard })));
@@ -62,6 +63,11 @@ import {
 } from "@/lib/pronunciationProfiles";
 import { LazyErrorBoundary } from "@/components/LazyErrorBoundary";
 import { CollapsibleWidget } from "@/components/ui/CollapsibleWidget";
+import {
+  readAudioLearningCandidates,
+  writeAudioLearningCandidates,
+  type AudioLearningCandidate,
+} from "@/lib/audioLearning";
 import "@/styles/mobile-pages.css";
 
 // Inline editor for the transcript's title — shown at the top of the AI tab.
@@ -214,6 +220,7 @@ const TextEditor = () => {
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioFileName, setAudioFileName] = useState<string>("");
   const [wordTimings, setWordTimings] = useState<WordTiming[]>([]);
+  const [audioLearningCandidates, setAudioLearningCandidates] = useState<AudioLearningCandidate[]>([]);
   const [playerTime, setPlayerTime] = useState(0);
   const lastWordIdxRef = useRef(-2); // -2 = uninitialised
   const playerTimeRef = useRef(0);
@@ -231,6 +238,25 @@ const TextEditor = () => {
   // not the AI's stylistic changes (punctuation, paragraph splits, rewording).
   const learningBaselineRef = useRef<string>("");
   const ownedAudioUrlRef = useRef<string | null>(null);
+  const audioLearningStorageKey = useMemo(
+    () => `audio_learning_candidates_v1:${transcriptId || audioFileName || 'current-transcript'}`,
+    [transcriptId, audioFileName],
+  );
+
+  useEffect(() => {
+    setAudioLearningCandidates(readAudioLearningCandidates(audioLearningStorageKey));
+  }, [audioLearningStorageKey]);
+
+  const updateAudioLearningCandidates = useCallback(
+    (updater: (current: AudioLearningCandidate[]) => AudioLearningCandidate[]) => {
+      setAudioLearningCandidates((current) => {
+        const next = updater(current);
+        writeAudioLearningCandidates(audioLearningStorageKey, next);
+        return next;
+      });
+    },
+    [audioLearningStorageKey],
+  );
 
   // Tab settings (visibility + order)
   const ALL_TABS: TabConfig[] = [
@@ -1052,6 +1078,30 @@ const TextEditor = () => {
     const nextText = next.map((w) => w.word).join(' ');
     setWordTimings(next);
     handleEditorChange(nextText);
+    if (!isDelete && originalTiming.word !== fixed && audioBlob) {
+      const contextStart = Math.max(0, wordIndex - 4);
+      const contextEnd = Math.min(next.length, wordIndex + replacementTimings.length + 4);
+      const context = next.slice(contextStart, contextEnd);
+      const candidate: AudioLearningCandidate = {
+        id: crypto.randomUUID(),
+        recordingKey: transcriptId || audioFileName || 'current-transcript',
+        original: originalTiming.word,
+        corrected: fixed,
+        referenceText: context.map((item) => item.word).join(' '),
+        start: Math.max(0, (context[0]?.start ?? originalTiming.start) - 1),
+        end: (context[context.length - 1]?.end ?? originalTiming.end) + 1,
+        createdAt: new Date().toISOString(),
+      };
+      updateAudioLearningCandidates((current) => [
+        candidate,
+        ...current.filter((item) => !(
+          item.recordingKey === candidate.recordingKey
+          && item.original === candidate.original
+          && item.corrected === candidate.corrected
+          && Math.abs(item.start - candidate.start) < 0.25
+        )),
+      ]);
+    }
     try {
       localStorage.setItem('current_editing_text', nextText);
       localStorage.setItem('last_word_timings', JSON.stringify(next));
@@ -1060,7 +1110,7 @@ const TextEditor = () => {
     if (transcriptIdRef.current) {
       void updateTranscript(transcriptIdRef.current, { edited_text: nextText, word_timings: next });
     }
-  }, [handleEditorChange, wordTimings, updateTranscript]);
+  }, [audioBlob, audioFileName, handleEditorChange, transcriptId, updateAudioLearningCandidates, wordTimings, updateTranscript]);
 
   const buildSyncedTimings = useCallback((editedText: string): WordTiming[] | null => {
     if (!wordTimings.length) return null;
@@ -1750,6 +1800,14 @@ const TextEditor = () => {
               currentText={text}
               recordingKey={transcriptId || audioFileName || 'current-transcript'}
               onCandidateReady={(candidateText, label) => addVersion(candidateText, 'manual', label)}
+            />
+
+            <AudioLearningQueue
+              audioBlob={audioBlob}
+              audioFileName={audioFileName}
+              candidates={audioLearningCandidates}
+              onRemove={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
+              onApproved={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
             />
 
             {/* ── Sync transcript mirror ── */}

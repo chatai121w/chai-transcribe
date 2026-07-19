@@ -111,6 +111,7 @@ def load_manifest(path: str) -> list[dict]:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", required=True, help="Path to manifest.jsonl")
+    parser.add_argument("--eval-dataset", default="", help="Optional leakage-safe evaluation manifest")
     parser.add_argument("--base-model", default="ivrit-ai/whisper-large-v3")
     parser.add_argument("--job-name", required=True)
     parser.add_argument("--output-dir", default="server/lora_adapters")
@@ -163,7 +164,12 @@ def main():
         progress.update(dataset_size=len(rows))
 
         ds = Dataset.from_list(rows).cast_column("audio", Audio(sampling_rate=16000))
-        if args.eval_split > 0 and len(rows) >= 10:
+        eval_rows = load_manifest(args.eval_dataset) if args.eval_dataset else []
+        if eval_rows:
+            train_ds = ds
+            eval_ds = Dataset.from_list(eval_rows).cast_column("audio", Audio(sampling_rate=16000))
+            progress.log(f"Using recording-group holdout with {len(eval_rows)} evaluation pairs")
+        elif args.eval_split > 0 and len(rows) >= 10:
             split = ds.train_test_split(test_size=args.eval_split, seed=42)
             train_ds, eval_ds = split["train"], split["test"]
         else:

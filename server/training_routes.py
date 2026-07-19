@@ -96,11 +96,34 @@ def _finalize_dataset(ds_dir: Path) -> dict:
         duration = _audio_duration(audio_path)
         if duration:
             total_duration += duration
-        rows.append({"audio": str(audio_path.resolve()), "text": text, "duration": duration})
+        metadata_path = ds_dir / "metadata" / f"{audio_path.stem}.json"
+        metadata = {}
+        if metadata_path.is_file():
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except Exception:
+                metadata = {}
+        group_id = str(metadata.get("groupId") or metadata.get("group_id") or audio_path.stem)
+        rows.append({
+            "audio": str(audio_path.resolve()), "text": text, "duration": duration,
+            "group_id": group_id, "metadata": metadata,
+        })
 
-    rows.sort(key=lambda row: hashlib.sha256(f'{row["audio"]}|{row["text"]}'.encode()).hexdigest())
-    eval_count = max(1, round(len(rows) * 0.15)) if len(rows) >= 10 else 0
-    eval_rows, train_rows = rows[:eval_count], rows[eval_count:]
+    rows.sort(key=lambda row: hashlib.sha256(f'{row["group_id"]}|{row["audio"]}|{row["text"]}'.encode()).hexdigest())
+    groups = {}
+    for row in rows:
+        groups.setdefault(row["group_id"], []).append(row)
+    ordered_groups = sorted(groups.items(), key=lambda item: hashlib.sha256(item[0].encode()).hexdigest())
+    eval_rows = []
+    if len(rows) >= 10 and len(ordered_groups) >= 2:
+        target_eval_count = max(1, round(len(rows) * 0.15))
+        for _, group_rows in ordered_groups[:-1]:
+            eval_rows.extend(group_rows)
+            if len(eval_rows) >= target_eval_count:
+                break
+    eval_audio = {row["audio"] for row in eval_rows}
+    train_rows = [row for row in rows if row["audio"] not in eval_audio]
+    eval_count = len(eval_rows)
 
     def write_manifest(name: str, values: list[dict]):
         path = ds_dir / name
@@ -120,11 +143,11 @@ def _finalize_dataset(ds_dir: Path) -> dict:
     if len(rows) < 20:
         warnings.append("At least 20 approved clips are required for a real training run")
     if not eval_rows:
-        warnings.append("At least 10 clips are required for a holdout evaluation split")
+        warnings.append("At least 10 clips from 2 different recordings are required for a leakage-safe holdout split")
     meta = {
         "count": len(rows), "train_count": len(train_rows) if eval_rows else len(rows),
-        "eval_count": len(eval_rows), "duration_seconds": round(total_duration, 2),
-        "ready_for_training": len(rows) >= 20, "warnings": warnings,
+        "eval_count": eval_count, "recording_groups": len(groups), "duration_seconds": round(total_duration, 2),
+        "ready_for_training": len(rows) >= 20 and bool(eval_rows), "warnings": warnings,
     }
     (ds_dir / "dataset_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"manifest": str(manifest), "rows": len(rows), **meta}
@@ -176,6 +199,7 @@ def register_training_routes(app):
             suffix = ".wav"
         audio_path = ds_dir / "audio" / f"{idx:05d}{suffix}"
         text_path = ds_dir / "texts" / f"{idx:05d}.txt"
+        metadata_path = ds_dir / "metadata" / f"{idx:05d}.json"
         audio.save(str(audio_path))
         duration = _audio_duration(audio_path)
         if duration is None or duration < 0.25 or duration > 35:
@@ -187,6 +211,18 @@ def register_training_routes(app):
                 audio_path.unlink(missing_ok=True)
                 return jsonify({"error": "this audio clip is already in the dataset"}), 409
         text_path.write_text(text, encoding="utf-8")
+        raw_metadata = request.form.get("metadata")
+        if raw_metadata:
+            try:
+                metadata = json.loads(raw_metadata)
+                if not isinstance(metadata, dict):
+                    raise ValueError("metadata is not an object")
+                metadata_path.parent.mkdir(parents=True, exist_ok=True)
+                metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                audio_path.unlink(missing_ok=True)
+                text_path.unlink(missing_ok=True)
+                return jsonify({"error": "metadata must be a valid JSON object"}), 400
         stats = _finalize_dataset(ds_dir)
         return jsonify({"index": idx, "audio": str(audio_path), "text": str(text_path), "duration": duration, **stats})
 
@@ -243,9 +279,11 @@ def register_training_routes(app):
         smoke_test = bool(body.get("smoke_test"))
         manifest = body.get("manifest")
         dataset_id = body.get("dataset_id")
+        eval_manifest = None
+        count_manifest = manifest
         if not manifest and dataset_id:
             ds_dir = DATASETS_DIR / _safe_id(dataset_id)
-            manifest_path = ds_dir / "manifest.jsonl"
+            manifest_path = ds_dir / "manifest.train.jsonl"
             # Auto-finalize if dataset dir exists but manifest hasn't been written yet
             if not manifest_path.is_file() and (ds_dir / "audio").is_dir():
                 rows = 0
@@ -262,12 +300,20 @@ def register_training_routes(app):
                         rows += 1
                 if rows == 0:
                     return jsonify({"error": "dataset is empty — upload audio+text pairs first"}), 400
+            _finalize_dataset(ds_dir)
             manifest = str(manifest_path)
+            count_manifest = str(ds_dir / "manifest.jsonl")
+            eval_path = ds_dir / "manifest.eval.jsonl"
+            if eval_path.is_file():
+                eval_manifest = str(eval_path)
         if not manifest or not Path(manifest).is_file():
             return jsonify({"error": "manifest not found (provide 'manifest' or 'dataset_id' first)"}), 400
-        row_count = sum(1 for line in Path(manifest).read_text(encoding="utf-8").splitlines() if line.strip())
+        row_count_path = Path(count_manifest or manifest)
+        row_count = sum(1 for line in row_count_path.read_text(encoding="utf-8").splitlines() if line.strip())
         if row_count < 20 and not smoke_test:
             return jsonify({"error": f"real training requires at least 20 approved clips; found {row_count}. Use smoke_test only to verify the pipeline."}), 400
+        if dataset_id and not eval_manifest and not smoke_test:
+            return jsonify({"error": "real training requires approved clips from at least 2 different recordings for a leakage-safe evaluation set"}), 400
 
         job_id = _safe_id(body.get("job_name") or f"lora_{int(time.time())}")
         job_dir = JOBS_DIR / job_id
@@ -302,6 +348,8 @@ def register_training_routes(app):
             "--lora-dropout", str(float(body.get("lora_dropout") or 0.05)),
             "--eval-split", "0" if smoke_test else str(float(body.get("eval_split") or 0.15)),
         ]
+        if eval_manifest and not smoke_test:
+            cmd.extend(["--eval-dataset", eval_manifest, "--eval-split", "0"])
         if body.get("merge_and_convert"):
             cmd.append("--merge-and-convert")
         if body.get("max_samples"):

@@ -210,6 +210,7 @@ export default function LoraFineTuningPanel() {
                 </div>
                 <div className="text-xs text-muted-foreground">
                   אימון: {selectedDsInfo?.train_count ?? selectedDsInfo?.count ?? 0} · בדיקה: {selectedDsInfo?.eval_count ?? 0}
+                  {selectedDsInfo?.recording_groups != null && ` · ${selectedDsInfo.recording_groups} הקלטות`}
                   {selectedDsInfo?.duration_seconds != null && ` · ${selectedDsInfo.duration_seconds.toFixed(1)} שניות`}
                 </div>
                 <div className="flex gap-2">
@@ -285,7 +286,7 @@ export default function LoraFineTuningPanel() {
 
             {!smokeTest && selectedDsInfo && !selectedDsInfo.ready_for_training && (
               <div className="mt-3 text-xs text-destructive flex items-center gap-1">
-                <AlertCircle className="w-3.5 h-3.5" /> נדרשות לפחות 20 דוגמאות מאושרות לאימון אמיתי.
+                <AlertCircle className="w-3.5 h-3.5" /> נדרשות לפחות 20 דוגמאות משתי הקלטות נפרדות לאימון אמיתי עם בדיקה אמינה.
               </div>
             )}
 
