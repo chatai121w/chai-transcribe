@@ -1033,16 +1033,25 @@ const TextEditor = () => {
     if (!fixed && !isDelete) return;
 
     const correctedAt = Date.now();
-    const next = isDelete
-      ? wordTimings.filter((_, i) => i !== wordIndex)
-      : wordTimings.map((w, i) => (i === wordIndex ? {
-          ...w,
-          word: fixed,
-          correctionOriginal: w.correctionOriginal || w.word,
-          correctedAt,
-        } : w));
+    const originalTiming = wordTimings[wordIndex];
+    const replacementWords = isDelete ? [] : fixed.split(/\s+/).filter(Boolean);
+    const duration = Math.max(0, originalTiming.end - originalTiming.start);
+    const replacementTimings = replacementWords.map((word, replacementIndex) => ({
+      ...originalTiming,
+      word,
+      start: originalTiming.start + (duration * replacementIndex) / replacementWords.length,
+      end: originalTiming.start + (duration * (replacementIndex + 1)) / replacementWords.length,
+      correctionOriginal: originalTiming.correctionOriginal || originalTiming.word,
+      correctedAt,
+    }));
+    const next = [
+      ...wordTimings.slice(0, wordIndex),
+      ...replacementTimings,
+      ...wordTimings.slice(wordIndex + 1),
+    ];
     const nextText = next.map((w) => w.word).join(' ');
     setWordTimings(next);
+    handleEditorChange(nextText);
     try {
       localStorage.setItem('current_editing_text', nextText);
       localStorage.setItem('last_word_timings', JSON.stringify(next));
@@ -1051,7 +1060,7 @@ const TextEditor = () => {
     if (transcriptIdRef.current) {
       void updateTranscript(transcriptIdRef.current, { edited_text: nextText, word_timings: next });
     }
-  }, [wordTimings, updateTranscript]);
+  }, [handleEditorChange, wordTimings, updateTranscript]);
 
   const buildSyncedTimings = useCallback((editedText: string): WordTiming[] | null => {
     if (!wordTimings.length) return null;
