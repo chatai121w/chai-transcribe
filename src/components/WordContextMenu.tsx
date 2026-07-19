@@ -59,6 +59,7 @@ import {
   type WordHighlightColor,
 } from '@/lib/personalPronunciationModel';
 import { toast } from '@/hooks/use-toast';
+import { uniqueWordSuggestions } from '@/lib/wordSuggestions';
 
 export interface WordContextMenuProps {
   /** The displayed word (with punctuation). */
@@ -93,6 +94,10 @@ export const WordContextMenu = ({
   const [verifyInput, setVerifyInput] = useState('');
 
   const similar = useMemo(() => getSimilarWords(word, 8), [word]);
+  const uniqueSuggestions = useMemo(
+    () => uniqueWordSuggestions(suggestions, word),
+    [suggestions, word],
+  );
   const currentHighlight = useMemo(() => getWordHighlight(word), [word]);
   const approved = isWordApproved(word);
 
@@ -155,14 +160,14 @@ export const WordContextMenu = ({
         <ContextMenuSeparator />
 
         {/* ─── Suggestions (from spell + AI) ─── */}
-        {suggestions.length > 0 && (
+        {uniqueSuggestions.length > 0 && (
           <ContextMenuSub>
             <ContextMenuSubTrigger className="gap-2 text-xs">
               <Wand2 className="w-3.5 h-3.5 text-primary" />
-              הצעות תיקון ({suggestions.length})
+              הצעות תיקון ({uniqueSuggestions.length})
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="w-56">
-              {suggestions.map((s, i) => (
+              {uniqueSuggestions.map((s, i) => (
                 <ContextMenuItem
                   key={`${s}-${i}`}
                   className="text-xs"
