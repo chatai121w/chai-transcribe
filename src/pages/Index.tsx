@@ -57,6 +57,18 @@ const BackgroundJobsPanel = lazy(() => import("@/components/BackgroundJobsPanel"
 const SpeakerDiarization = lazy(() => import("@/components/SpeakerDiarization").then(m => ({ default: m.SpeakerDiarization })));
 const YouTubeTranscriber = lazy(() => import("@/components/YouTubeTranscriber").then(m => ({ default: m.YouTubeTranscriber })));
 import { WaveformPlayer, type WaveformPlayerHandle } from "@/components/WaveformPlayer";
+import {
+  TranscriptionWidget,
+  TranscriptionWidgetWorkspace,
+  type WidgetDefinition,
+} from "@/components/transcription/TranscriptionWidgetWorkspace";
+
+const TRANSCRIPTION_WIDGETS: WidgetDefinition[] = [
+  { id: "engine", title: "מנוע ושמירה", defaultSpan: "full" },
+  { id: "language", title: "שפה ולמידה", defaultSpan: "full" },
+  { id: "trim", title: "חיתוך אודיו", defaultSpan: "half" },
+  { id: "source", title: "מקור התמלול", defaultSpan: "half" },
+];
 
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
@@ -1993,6 +2005,8 @@ const Index = () => {
           </Card>
         )}
 
+        <TranscriptionWidgetWorkspace definitions={TRANSCRIPTION_WIDGETS}>
+        <TranscriptionWidget id="engine" title="מנוע ושמירה" icon={<Cpu className="h-4 w-4 text-primary" />}>
         <TranscriptionEngine 
           selected={engine} 
           onChange={setEngine}
@@ -2042,7 +2056,9 @@ const Index = () => {
 
           </div>
         )}
+        </TranscriptionWidget>
 
+        <TranscriptionWidget id="language" title="שפה, הגייה ולמידה" icon={<BrainCircuit className="h-4 w-4 text-primary" />}>
         <PronunciationStack
           mode={(preferences.pronunciation_layout_mode as any) || 'rich'}
           onModeChange={(m) => updatePreference('pronunciation_layout_mode', m)}
@@ -2122,7 +2138,9 @@ const Index = () => {
             </label>
           </div>
         )}
+        </TranscriptionWidget>
 
+        <TranscriptionWidget id="trim" title="חיתוך אודיו" icon={<Scissors className="h-4 w-4 text-primary" />}>
         <div className="rounded-lg border border-border/60 bg-muted/20 p-3" dir="rtl">
           <div className="flex items-center justify-between gap-3 mb-2">
             <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -2175,8 +2193,10 @@ const Index = () => {
             </div>
           )}
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        </TranscriptionWidget>
+
+        <TranscriptionWidget id="source" title="העלאה או הקלטה" icon={<Mic className="h-4 w-4 text-primary" />}>
+        <div className="grid grid-cols-1 gap-4">
           <FileUploader 
             onFileSelect={handleFileSelect} 
             isLoading={isLoading}
@@ -2204,6 +2224,8 @@ const Index = () => {
             engine={engine}
           />
         </div>
+        </TranscriptionWidget>
+        </TranscriptionWidgetWorkspace>
 
         {/* Recovered partial transcript banner */}
         {recoveredPartialInfo && !isLoading && transcript && (
