@@ -8,6 +8,31 @@ export interface ReferenceSegment {
   text: string;
 }
 
+export interface ReferenceSegmentQuality {
+  safe: boolean;
+  wordsPerSecond: number;
+  reason?: string;
+}
+
+export const cleanReferenceText = (text: string) => text
+  .replace(/\([^)]*\)\s*\[([^\]]+)\]/g, '$1')
+  .replace(/\{[פס]\}/g, ' ')
+  .replace(/&(nbsp|thinsp);/gi, ' ')
+  .replace(/&#(?:160|8201);/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+export function assessReferenceSegment(segment: ReferenceSegment): ReferenceSegmentQuality {
+  const duration = segment.end - segment.start;
+  const wordCount = normalizeReferenceWords(segment.text).length;
+  const wordsPerSecond = duration > 0 ? wordCount / duration : Number.POSITIVE_INFINITY;
+  if (duration < 2) return { safe: false, wordsPerSecond, reason: 'הקטע קצר מדי' };
+  if (duration > 14.7) return { safe: false, wordsPerSecond, reason: 'הקטע ארוך מדי' };
+  if (wordsPerSecond < 0.35) return { safe: false, wordsPerSecond, reason: 'מעט מדי מילים ביחס לאורך' };
+  if (wordsPerSecond > 2.8) return { safe: false, wordsPerSecond, reason: 'יותר מדי מילים ביחס לאורך' };
+  return { safe: true, wordsPerSecond };
+}
+
 export const normalizeReferenceWords = (text: string) => text
   .replace(/[\u0591-\u05C7]/g, '')
   .replace(/[^\u05D0-\u05EA\s]/g, ' ')
@@ -36,7 +61,7 @@ export function referenceWordErrorRate(reference: string, hypothesis: string): n
 }
 
 export function buildReferenceSegments(reference: string, whisperTimings: WordTiming[]): ReferenceSegment[] {
-  const words = reference.trim().split(/\s+/).filter(Boolean);
+  const words = cleanReferenceText(reference).split(/\s+/).filter(Boolean);
   const aligned = alignEditedToWhisper(words, whisperTimings);
   const segments: ReferenceSegment[] = [];
   let startIndex = 0;

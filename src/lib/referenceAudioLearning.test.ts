@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildReferenceSegments, referenceWordErrorRate } from '@/lib/referenceAudioLearning';
+import { assessReferenceSegment, buildReferenceSegments, cleanReferenceText, referenceWordErrorRate } from '@/lib/referenceAudioLearning';
 
 describe('reference audio learning', () => {
   it('calculates word error rate after removing Hebrew marks and punctuation', () => {
@@ -32,5 +32,16 @@ describe('reference audio learning', () => {
     expect(segments.map((segment) => segment.text).join(' ')).toBe(words.join(' '));
     expect(segments.every((segment) => segment.end - segment.start <= 14.7)).toBe(true);
     vi.unstubAllGlobals();
+  });
+
+  it('removes Sefaria markup and keeps the read form of textual variants', () => {
+    expect(cleanReferenceText('מילה&nbsp; {פ} (וידעו) [וידעי] עדתיך')).toBe('מילה וידעי עדתיך');
+  });
+
+  it('rejects implausibly dense training segments', () => {
+    expect(assessReferenceSegment({
+      id: 'dense', start: 0, end: 5, text: Array.from({ length: 20 }, () => 'מילה').join(' '),
+    }).safe).toBe(false);
+    expect(assessReferenceSegment({ id: 'normal', start: 0, end: 8, text: 'אחת שתים שלש ארבע חמש שש שבע' }).safe).toBe(true);
   });
 });

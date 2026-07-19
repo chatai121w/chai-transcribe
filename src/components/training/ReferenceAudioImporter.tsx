@@ -10,7 +10,7 @@ import { toast } from '@/hooks/use-toast';
 import { useLoraTraining } from '@/hooks/useLoraTraining';
 import { cropLearningAudio } from '@/lib/audioLearning';
 import { getServerUrl } from '@/lib/serverConfig';
-import { buildReferenceSegments, referenceWordErrorRate, type ReferenceSegment } from '@/lib/referenceAudioLearning';
+import { assessReferenceSegment, buildReferenceSegments, referenceWordErrorRate, type ReferenceSegment } from '@/lib/referenceAudioLearning';
 import type { WordTiming } from '@/components/SyncAudioPlayer';
 
 export function ReferenceAudioImporter({ datasetId }: { datasetId: string }) {
@@ -30,7 +30,8 @@ export function ReferenceAudioImporter({ datasetId }: { datasetId: string }) {
   }, [preview]);
 
   const selected = useMemo(() => segments.filter((segment) => selectedIds.has(segment.id)), [segments, selectedIds]);
-  const allSelected = segments.length > 0 && selected.length === segments.length;
+  const safeIds = useMemo(() => new Set(segments.filter((segment) => assessReferenceSegment(segment).safe).map((segment) => segment.id)), [segments]);
+  const unsafeCount = segments.length - safeIds.size;
   const wer = rawTranscript ? referenceWordErrorRate(reference, rawTranscript) : null;
 
   const analyze = async () => {
@@ -53,8 +54,9 @@ export function ReferenceAudioImporter({ datasetId }: { datasetId: string }) {
       const next = buildReferenceSegments(reference, timings);
       setRawTranscript(result.text || '');
       setSegments(next);
-      setSelectedIds(new Set(next.map((segment) => segment.id)));
-      toast({ title: `הוכנו ${next.length} קטעים לבדיקה`, description: 'יש להאזין ולאשר רק קטעים שהיישור שלהם נכון' });
+      const safe = next.filter((segment) => assessReferenceSegment(segment).safe);
+      setSelectedIds(new Set(safe.map((segment) => segment.id)));
+      toast({ title: `הוכנו ${next.length} קטעים לבדיקה`, description: `${safe.length} קטעים עברו בדיקת איכות ונבחרו אוטומטית` });
     } catch (error) {
       toast({ title: 'הניתוח נכשל', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
     } finally {
@@ -133,6 +135,7 @@ export function ReferenceAudioImporter({ datasetId }: { datasetId: string }) {
         <div className="flex flex-wrap gap-2 text-xs">
           <Badge variant={wer > 0.4 ? 'destructive' : 'secondary'}>WER לפני למידה: {(wer * 100).toFixed(1)}%</Badge>
           <Badge variant="secondary">{segments.length} קטעים</Badge>
+          {unsafeCount > 0 && <Badge variant="destructive">{unsafeCount} דורשים בדיקה ידנית</Badge>}
         </div>
       )}
       {rawTranscript && (
@@ -145,7 +148,7 @@ export function ReferenceAudioImporter({ datasetId }: { datasetId: string }) {
       {segments.length > 0 && (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2 border-y py-2">
-            <label className="flex items-center gap-2 text-sm"><Checkbox checked={allSelected} onCheckedChange={() => setSelectedIds(allSelected ? new Set() : new Set(segments.map((segment) => segment.id)))} />בחר הכול</label>
+            <label className="flex items-center gap-2 text-sm"><Checkbox checked={selectedIds.size > 0 && selectedIds.size === safeIds.size} onCheckedChange={() => setSelectedIds(selectedIds.size === safeIds.size ? new Set() : new Set(safeIds))} />בחר קטעים תקינים</label>
             <Badge variant="outline">נבחרו {selected.length}</Badge>
             <Button size="sm" onClick={() => void approve()} disabled={!selected.length || approving} className="gap-1">
               {approving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="h-4 w-4" />}
@@ -155,11 +158,16 @@ export function ReferenceAudioImporter({ datasetId }: { datasetId: string }) {
           </div>
           <div className="max-h-96 space-y-2 overflow-y-auto pe-1">
             {segments.map((segment, index) => (
-              <div key={segment.id} className="flex items-start gap-2 rounded border p-2">
+              <div key={segment.id} className={`flex items-start gap-2 rounded border p-2 ${assessReferenceSegment(segment).safe ? '' : 'border-destructive/60 bg-destructive/5'}`}>
                 <Checkbox checked={selectedIds.has(segment.id)} onCheckedChange={() => setSelectedIds((current) => { const next = new Set(current); if (next.has(segment.id)) next.delete(segment.id); else next.add(segment.id); return next; })} />
                 <Badge variant="secondary">{index + 1}</Badge>
                 <Input value={segment.text} onChange={(event) => setSegments((current) => current.map((item) => item.id === segment.id ? { ...item, text: event.target.value } : item))} className="h-8 flex-1" />
                 <span className="whitespace-nowrap text-xs text-muted-foreground">{segment.start.toFixed(1)}–{segment.end.toFixed(1)}</span>
+                {!assessReferenceSegment(segment).safe && (
+                  <Badge variant="destructive" title={`${assessReferenceSegment(segment).wordsPerSecond.toFixed(1)} מילים לשנייה`}>
+                    {assessReferenceSegment(segment).reason}
+                  </Badge>
+                )}
                 <Button size="icon" variant="ghost" title="השמע" onClick={() => void play(segment)}><Play className="h-4 w-4" /></Button>
                 {preview?.id === segment.id && <audio src={preview.url} controls autoPlay className="h-8 w-40" />}
               </div>
