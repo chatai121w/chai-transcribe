@@ -39,6 +39,7 @@ import {
   Palette,
   Sparkles,
   Trash2,
+  Delete,
   Wand2,
   XCircle,
   BookPlus,
@@ -90,7 +91,7 @@ export const WordContextMenu = ({
   onToggleAnchor,
   children,
 }: WordContextMenuProps) => {
-  const [customInput, setCustomInput] = useState('');
+  const [customInput, setCustomInput] = useState(word);
   const [verifyInput, setVerifyInput] = useState('');
 
   const similar = useMemo(() => getSimilarWords(word, 8), [word]);
@@ -105,6 +106,12 @@ export const WordContextMenu = ({
     const trimmed = next.trim();
     if (!trimmed || trimmed === word) return;
     onReplace(trimmed);
+  };
+
+  const applyCharacterEdit = () => {
+    const edited = customInput.trim();
+    if (edited === word) return;
+    onReplace(edited || '__DELETE__');
   };
 
   const handleVerify = (corrected: string) => {
@@ -157,6 +164,50 @@ export const WordContextMenu = ({
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
           )}
         </ContextMenuLabel>
+        <ContextMenuSeparator />
+
+        <ContextMenuItem className="gap-2 text-xs text-destructive" onSelect={() => onReplace('__DELETE__')}>
+          <Trash2 className="h-3.5 w-3.5" />
+          מחק מילה
+        </ContextMenuItem>
+
+        <ContextMenuSub>
+          <ContextMenuSubTrigger className="gap-2 text-xs">
+            <Delete className="h-3.5 w-3.5 text-amber-600" />
+            עריכת תווים ופיסוק
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent className="w-72 p-2">
+            <p className="mb-1.5 text-[10px] text-muted-foreground">אפשר להוסיף או למחוק אות, נקודה, פסיק או כל תו אחר.</p>
+            <div className="flex gap-1.5">
+              <Input
+                value={customInput}
+                onChange={(event) => setCustomInput(event.target.value)}
+                className="h-8 text-sm"
+                dir="rtl"
+                autoFocus
+                onKeyDown={(event) => {
+                  if (event.key !== 'Escape') event.stopPropagation();
+                  if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    applyCharacterEdit();
+                  }
+                }}
+              />
+              <Button size="sm" className="h-8" onClick={applyCharacterEdit}>שמור</Button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1" dir="rtl">
+              {['.', ',', '?', '!', ':', ';'].map((mark) => (
+                <Button key={mark} type="button" size="sm" variant="outline" className="h-7 min-w-7 px-2" onClick={() => setCustomInput((value) => `${value}${mark}`)}>
+                  {mark}
+                </Button>
+              ))}
+              <Button type="button" size="sm" variant="outline" className="h-7" onClick={() => setCustomInput((value) => value.slice(0, -1))}>
+                מחק תו
+              </Button>
+            </div>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+
         <ContextMenuSeparator />
 
         {/* ─── Suggestions (from spell + AI) ─── */}

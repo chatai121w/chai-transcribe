@@ -66,6 +66,7 @@ import { CollapsibleWidget } from "@/components/ui/CollapsibleWidget";
 import {
   readAudioLearningCandidates,
   writeAudioLearningCandidates,
+  getAudioLearningOperation,
   type AudioLearningCandidate,
 } from "@/lib/audioLearning";
 import "@/styles/mobile-pages.css";
@@ -1078,7 +1079,8 @@ const TextEditor = () => {
     const nextText = next.map((w) => w.word).join(' ');
     setWordTimings(next);
     handleEditorChange(nextText);
-    if (!isDelete && originalTiming.word !== fixed && audioBlob) {
+    const correctedValue = isDelete ? '' : fixed;
+    if (originalTiming.word !== correctedValue && audioBlob) {
       const contextStart = Math.max(0, wordIndex - 4);
       const contextEnd = Math.min(next.length, wordIndex + replacementTimings.length + 4);
       const context = next.slice(contextStart, contextEnd);
@@ -1086,10 +1088,11 @@ const TextEditor = () => {
         id: crypto.randomUUID(),
         recordingKey: transcriptId || audioFileName || 'current-transcript',
         original: originalTiming.word,
-        corrected: fixed,
+        corrected: correctedValue,
+        operation: getAudioLearningOperation(originalTiming.word, correctedValue),
         referenceText: context.map((item) => item.word).join(' '),
-        start: Math.max(0, (context[0]?.start ?? originalTiming.start) - 1),
-        end: (context[context.length - 1]?.end ?? originalTiming.end) + 1,
+        start: Math.max(0, Math.min(context[0]?.start ?? originalTiming.start, originalTiming.start) - 1),
+        end: Math.max(context[context.length - 1]?.end ?? originalTiming.end, originalTiming.end) + 1,
         createdAt: new Date().toISOString(),
       };
       updateAudioLearningCandidates((current) => [

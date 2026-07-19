@@ -5,10 +5,17 @@ export interface AudioLearningCandidate {
   recordingKey: string;
   original: string;
   corrected: string;
+  operation?: 'replacement' | 'insertion' | 'deletion';
   referenceText: string;
   start: number;
   end: number;
   createdAt: string;
+}
+
+export function getAudioLearningOperation(original: string, corrected: string): NonNullable<AudioLearningCandidate['operation']> {
+  if (!corrected || (corrected.length < original.length && original.includes(corrected))) return 'deletion';
+  if (corrected.length > original.length && corrected.includes(original)) return 'insertion';
+  return 'replacement';
 }
 
 export async function cropLearningAudio(source: Blob, start: number, end: number): Promise<Blob> {

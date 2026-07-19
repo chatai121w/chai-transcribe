@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useLoraTraining } from '@/hooks/useLoraTraining';
-import { cropLearningAudio, type AudioLearningCandidate } from '@/lib/audioLearning';
+import { cropLearningAudio, getAudioLearningOperation, type AudioLearningCandidate } from '@/lib/audioLearning';
 import { toast } from '@/hooks/use-toast';
 
 interface AudioLearningQueueProps {
@@ -66,6 +66,7 @@ export function AudioLearningQueue({ audioBlob, audioFileName, candidates, onRem
         source: 'text-editor-correction',
         original: candidate.original,
         corrected: candidate.corrected,
+        operation: candidate.operation || getAudioLearningOperation(candidate.original, candidate.corrected),
         start: candidate.start,
         end: candidate.end,
     });
@@ -161,7 +162,10 @@ export function AudioLearningQueue({ audioBlob, audioFileName, candidates, onRem
                 aria-label={`בחר תיקון ${candidate.original} ל-${candidate.corrected}`}
                 disabled={bulkBusy}
               />
-              <span className="text-sm"><span className="text-red-700 line-through">{candidate.original}</span> ← <span className="font-semibold text-emerald-700">{candidate.corrected}</span></span>
+              <Badge variant="outline">
+                {{ replacement: 'החלפה', insertion: 'הוספה', deletion: 'מחיקה' }[candidate.operation || getAudioLearningOperation(candidate.original, candidate.corrected)]}
+              </Badge>
+              <span className="text-sm"><span className="text-red-700 line-through">{candidate.original || '∅'}</span> ← <span className="font-semibold text-emerald-700">{candidate.corrected || 'מחיקה'}</span></span>
               <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={candidate.referenceText}>{candidate.referenceText}</span>
               <Button size="icon" variant="ghost" title="השמע קטע" onClick={() => void playCandidate(candidate)} disabled={bulkBusy || busyId === candidate.id || !audioBlob}>
                 {busyId === candidate.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
