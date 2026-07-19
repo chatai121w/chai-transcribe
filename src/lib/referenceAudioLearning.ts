@@ -45,14 +45,14 @@ export function buildReferenceSegments(reference: string, whisperTimings: WordTi
     while (endIndex < aligned.length - 1) {
       const duration = aligned[endIndex].end - aligned[startIndex].start;
       const punctuationBoundary = /[.!?׃:]$/.test(words[endIndex]);
-      if ((duration >= 7 && punctuationBoundary) || duration >= 12) break;
+      if (duration >= 7 && punctuationBoundary) break;
+      const nextDuration = aligned[endIndex + 1].end - aligned[startIndex].start;
+      if (nextDuration > 14) break;
       endIndex += 1;
     }
     const start = Math.max(0, aligned[startIndex].start - 0.35);
     const end = aligned[endIndex].end + 0.35;
-    if (end - start >= 1.5 && end - start <= 20) {
-      segments.push({ id: crypto.randomUUID(), start, end, text: words.slice(startIndex, endIndex + 1).join(' ') });
-    }
+    segments.push({ id: crypto.randomUUID(), start, end, text: words.slice(startIndex, endIndex + 1).join(' ') });
     startIndex = endIndex + 1;
   }
   return segments;

@@ -36,6 +36,9 @@ export function ReferenceAudioImporter({ datasetId }: { datasetId: string }) {
   const analyze = async () => {
     if (!audio || !reference.trim()) return;
     setAnalyzing(true);
+    setRawTranscript('');
+    setSegments([]);
+    setSelectedIds(new Set());
     try {
       const form = new FormData();
       form.append('file', audio, audio.name);

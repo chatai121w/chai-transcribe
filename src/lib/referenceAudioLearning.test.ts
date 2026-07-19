@@ -17,4 +17,20 @@ describe('reference audio learning', () => {
     expect(segments.map((segment) => segment.text).join(' ')).toBe(words.join(' '));
     vi.unstubAllGlobals();
   });
+
+  it('does not drop reference words when timings contain a large recognition gap', () => {
+    vi.stubGlobal('crypto', { randomUUID: () => 'segment-id' });
+    const words = ['אחד', 'שנים', 'שלש', 'ארבע', 'חמש'];
+    const timings = [
+      { word: 'אחד', start: 0, end: 1 },
+      { word: 'שנים', start: 2, end: 3 },
+      { word: 'שלש', start: 30, end: 31 },
+      { word: 'ארבע', start: 32, end: 33 },
+      { word: 'חמש', start: 34, end: 35 },
+    ];
+    const segments = buildReferenceSegments(words.join(' '), timings);
+    expect(segments.map((segment) => segment.text).join(' ')).toBe(words.join(' '));
+    expect(segments.every((segment) => segment.end - segment.start <= 14.7)).toBe(true);
+    vi.unstubAllGlobals();
+  });
 });
