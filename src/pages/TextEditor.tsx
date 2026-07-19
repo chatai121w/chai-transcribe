@@ -61,6 +61,7 @@ import {
   getProfile,
   listProfiles,
 } from "@/lib/pronunciationProfiles";
+import { alignEditedToWhisper } from "@/lib/whisperAlignment";
 import { LazyErrorBoundary } from "@/components/LazyErrorBoundary";
 import { CollapsibleWidget } from "@/components/ui/CollapsibleWidget";
 import {
@@ -221,7 +222,13 @@ const TextEditor = () => {
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioFileName, setAudioFileName] = useState<string>("");
   const [wordTimings, setWordTimings] = useState<WordTiming[]>([]);
+  const wordTimingsRef = useRef<WordTiming[]>([]);
+  const wordTimingsRevisionRef = useRef(0);
   const [audioLearningCandidates, setAudioLearningCandidates] = useState<AudioLearningCandidate[]>([]);
+
+  useEffect(() => {
+    wordTimingsRef.current = wordTimings;
+  }, [wordTimings]);
   const [playerTime, setPlayerTime] = useState(0);
   const lastWordIdxRef = useRef(-2); // -2 = uninitialised
   const playerTimeRef = useRef(0);
@@ -643,24 +650,33 @@ const TextEditor = () => {
 
     // Load word timings from state, or fallback to localStorage, or fetch from cloud
     if (location.state?.wordTimings) {
+      wordTimingsRef.current = location.state.wordTimings;
       setWordTimings(location.state.wordTimings);
     } else if (location.state?.transcriptId) {
       // Try fetching word_timings from cloud
+      const requestedAtRevision = wordTimingsRevisionRef.current;
       supabase
         .from('transcripts')
         .select('word_timings')
         .eq('id', location.state.transcriptId)
         .maybeSingle()
         .then(({ data }) => {
-          if (data?.word_timings && Array.isArray(data.word_timings) && data.word_timings.length > 0) {
-            setWordTimings(data.word_timings as unknown as WordTiming[]);
+          if (data?.word_timings && Array.isArray(data.word_timings) && data.word_timings.length > 0
+              && wordTimingsRevisionRef.current === requestedAtRevision) {
+            const cloudTimings = data.word_timings as unknown as WordTiming[];
+            wordTimingsRef.current = cloudTimings;
+            setWordTimings(cloudTimings);
             debugLog.info('TextEditor', `Loaded ${(data.word_timings as any[]).length} word timings from cloud`);
           }
         });
     } else {
       try {
         const saved = localStorage.getItem('last_word_timings');
-        if (saved) setWordTimings(JSON.parse(saved));
+        if (saved) {
+          const restoredTimings = JSON.parse(saved) as WordTiming[];
+          wordTimingsRef.current = restoredTimings;
+          setWordTimings(restoredTimings);
+        }
       } catch { /* corrupted */ }
     }
 
@@ -740,7 +756,10 @@ const TextEditor = () => {
       if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
       cloudSaveTimerRef.current = setTimeout(() => {
         if (transcriptIdRef.current) {
-          updateTranscript(transcriptIdRef.current, { edited_text: text });
+          updateTranscript(transcriptIdRef.current, {
+            edited_text: text,
+            word_timings: wordTimingsRef.current,
+          });
           debugLog.info('TextEditor', 'Auto-saved edited_text to cloud');
         }
       }, 3000);
@@ -1056,11 +1075,20 @@ const TextEditor = () => {
   const handleSyncedWordReplace = useCallback((wordIndex: number, replacement: string) => {
     const fixed = replacement.trim();
     const isDelete = fixed === "__DELETE__";
-    if (!wordTimings.length || wordIndex < 0 || wordIndex >= wordTimings.length) return;
+    const visibleWords = latestTextRef.current.trim().split(/\s+/).filter(Boolean);
+    const storedTimings = wordTimingsRef.current;
+    const timingsMatchVisibleText = storedTimings.length === visibleWords.length
+      && storedTimings.every((timing, index) => timing.word === visibleWords[index]);
+    const currentTimings = timingsMatchVisibleText
+      ? storedTimings
+      : storedTimings.length === visibleWords.length
+        ? storedTimings.map((timing, index) => ({ ...timing, word: visibleWords[index] }))
+        : alignEditedToWhisper(visibleWords, storedTimings);
+    if (!currentTimings.length || wordIndex < 0 || wordIndex >= currentTimings.length) return;
     if (!fixed && !isDelete) return;
 
     const correctedAt = Date.now();
-    const originalTiming = wordTimings[wordIndex];
+    const originalTiming = currentTimings[wordIndex];
     const replacementWords = isDelete ? [] : fixed.split(/\s+/).filter(Boolean);
     const duration = Math.max(0, originalTiming.end - originalTiming.start);
     const replacementTimings = replacementWords.map((word, replacementIndex) => ({
@@ -1072,11 +1100,13 @@ const TextEditor = () => {
       correctedAt,
     }));
     const next = [
-      ...wordTimings.slice(0, wordIndex),
+      ...currentTimings.slice(0, wordIndex),
       ...replacementTimings,
-      ...wordTimings.slice(wordIndex + 1),
+      ...currentTimings.slice(wordIndex + 1),
     ];
     const nextText = next.map((w) => w.word).join(' ');
+    wordTimingsRef.current = next;
+    wordTimingsRevisionRef.current += 1;
     setWordTimings(next);
     handleEditorChange(nextText);
     const correctedValue = isDelete ? '' : fixed;
@@ -1109,11 +1139,8 @@ const TextEditor = () => {
       localStorage.setItem('current_editing_text', nextText);
       localStorage.setItem('last_word_timings', JSON.stringify(next));
     } catch { /* quota/unavailable */ }
-    addVersion(nextText, 'manual', isDelete ? 'מחיקת מילה' : `תיקון ידני: ${wordTimings[wordIndex].word} → ${fixed}`);
-    if (transcriptIdRef.current) {
-      void updateTranscript(transcriptIdRef.current, { edited_text: nextText, word_timings: next });
-    }
-  }, [audioBlob, audioFileName, handleEditorChange, transcriptId, updateAudioLearningCandidates, wordTimings, updateTranscript]);
+    addVersion(nextText, 'manual', isDelete ? 'מחיקת מילה' : `תיקון ידני: ${originalTiming.word} → ${fixed}`);
+  }, [audioBlob, audioFileName, handleEditorChange, transcriptId, updateAudioLearningCandidates]);
 
   const buildSyncedTimings = useCallback((editedText: string): WordTiming[] | null => {
     if (!wordTimings.length) return null;
