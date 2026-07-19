@@ -26,6 +26,7 @@ const OllamaManager = lazy(() => import("@/components/OllamaManager").then(m => 
 const SyncEditableView = lazy(() => import("@/components/SyncEditableView").then(m => ({ default: m.SyncEditableView })));
 const SyncTranscriptView = lazy(() => import("@/components/SyncTranscriptView").then(m => ({ default: m.SyncTranscriptView })));
 const SyncMirrorLayout = lazy(() => import("@/components/SyncMirrorLayout").then(m => ({ default: m.SyncMirrorLayout })));
+const LearningRegressionPanel = lazy(() => import("@/components/LearningRegressionPanel").then(m => ({ default: m.LearningRegressionPanel })));
 const DictionaryValidator = lazy(() => import("@/components/DictionaryValidator").then(m => ({ default: m.DictionaryValidator })));
 const TextMarkingOverlay = lazy(() => import("@/components/TextMarkingOverlay").then(m => ({ default: m.TextMarkingOverlay })));
 const AutoSummaryCard = lazy(() => import("@/components/AutoSummaryCard").then(m => ({ default: m.AutoSummaryCard })));
@@ -1681,6 +1682,14 @@ const TextEditor = () => {
                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setTranscriptSearchOpen(false); setTranscriptSearchQuery(""); setTranscriptSearchIdx(0); }} title="סגור (Escape)"><X className="w-3.5 h-3.5" /></Button>
               </div>
             )}
+
+            <LearningRegressionPanel
+              audioBlob={audioBlob}
+              audioFileName={audioFileName}
+              currentText={text}
+              recordingKey={transcriptId || audioFileName || 'current-transcript'}
+              onCandidateReady={(candidateText, label) => addVersion(candidateText, 'manual', label)}
+            />
 
             {/* ── Sync transcript mirror ── */}
             {playerLayout !== 'full' && (
