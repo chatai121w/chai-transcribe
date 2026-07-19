@@ -144,7 +144,7 @@ def main():
         import numpy as np
         import torch
         import librosa
-        from datasets import Dataset, Audio
+        from datasets import Dataset
         from transformers import (
             WhisperFeatureExtractor, WhisperTokenizer, WhisperProcessor,
             WhisperForConditionalGeneration,
@@ -163,11 +163,14 @@ def main():
         progress.log(f"Loaded {len(rows)} valid (audio,text) pairs")
         progress.update(dataset_size=len(rows))
 
-        ds = Dataset.from_list(rows).cast_column("audio", Audio(sampling_rate=16000))
+        # Keep paths as strings and decode with librosa below. Hugging Face's
+        # Audio feature requires torchcodec in newer releases, which is not
+        # needed for the local WAV/MP3 files used by this trainer.
+        ds = Dataset.from_list(rows)
         eval_rows = load_manifest(args.eval_dataset) if args.eval_dataset else []
         if eval_rows:
             train_ds = ds
-            eval_ds = Dataset.from_list(eval_rows).cast_column("audio", Audio(sampling_rate=16000))
+            eval_ds = Dataset.from_list(eval_rows)
             progress.log(f"Using recording-group holdout with {len(eval_rows)} evaluation pairs")
         elif args.eval_split > 0 and len(rows) >= 10:
             split = ds.train_test_split(test_size=args.eval_split, seed=42)
@@ -207,9 +210,9 @@ def main():
 
         # ── 4. Preprocess (audio → log-mel; text → label ids) ──────────
         def _prepare(batch):
-            audio = batch["audio"]
+            audio, sampling_rate = librosa.load(batch["audio"], sr=16000, mono=True)
             batch["input_features"] = feature_extractor(
-                audio["array"], sampling_rate=audio["sampling_rate"]
+                audio, sampling_rate=sampling_rate
             ).input_features[0]
             batch["labels"] = tokenizer(batch["text"]).input_ids
             return batch
