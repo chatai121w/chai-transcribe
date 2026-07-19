@@ -207,6 +207,8 @@ const TextEditor = () => {
   const location = useLocation();
   const { value: text, setValue: setText, undo: undoText, redo: redoText, canUndo, canRedo } = useUndoRedo("");
   const [versions, setVersions] = useState<TextVersion[]>([]);
+  const latestTextRef = useRef("");
+  const latestVersionsRef = useRef<TextVersion[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState<string>();
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -659,6 +661,28 @@ const TextEditor = () => {
   // Auto-save text and versions to localStorage + debounce cloud save
   const cloudSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  latestTextRef.current = text;
+  latestVersionsRef.current = versions;
+
+  // A refresh can happen before the debounced save fires. Persist the latest
+  // render synchronously so recent corrections survive reload/navigation.
+  useEffect(() => {
+    const flushLocalEdits = () => {
+      try {
+        localStorage.setItem('current_editing_text', latestTextRef.current);
+        if (latestVersionsRef.current.length > 0) {
+          localStorage.setItem('text_versions', JSON.stringify(latestVersionsRef.current));
+        }
+      } catch { /* storage can be unavailable during teardown */ }
+    };
+    window.addEventListener('pagehide', flushLocalEdits);
+    window.addEventListener('beforeunload', flushLocalEdits);
+    return () => {
+      window.removeEventListener('pagehide', flushLocalEdits);
+      window.removeEventListener('beforeunload', flushLocalEdits);
+    };
+  }, []);
+
   useEffect(() => {
     // Debounce localStorage writes (500ms)
     if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current);
@@ -986,20 +1010,16 @@ const TextEditor = () => {
   const handleSyncedWordReplace = useCallback((wordIndex: number, replacement: string) => {
     const fixed = replacement.trim();
     const isDelete = fixed === "__DELETE__";
+    if (!wordTimings.length || wordIndex < 0 || wordIndex >= wordTimings.length) return;
+    if (!fixed && !isDelete) return;
 
-    setWordTimings((prev) => {
-      if (!prev.length || wordIndex < 0 || wordIndex >= prev.length) return prev;
-      if (isDelete) {
-        const next = prev.filter((_, i) => i !== wordIndex);
-        setText(next.map((w) => w.word).join(' '));
-        return next;
-      }
-      if (!fixed) return prev;
-      const next = prev.map((w, i) => (i === wordIndex ? { ...w, word: fixed } : w));
-      setText(next.map((w) => w.word).join(' '));
-      return next;
-    });
-  }, []);
+    const next = isDelete
+      ? wordTimings.filter((_, i) => i !== wordIndex)
+      : wordTimings.map((w, i) => (i === wordIndex ? { ...w, word: fixed } : w));
+    const nextText = next.map((w) => w.word).join(' ');
+    setWordTimings(next);
+    handleEditorChange(nextText);
+  }, [handleEditorChange, wordTimings]);
 
   const buildSyncedTimings = useCallback((editedText: string): WordTiming[] | null => {
     if (!wordTimings.length) return null;
