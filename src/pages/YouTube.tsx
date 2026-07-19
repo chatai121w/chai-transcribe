@@ -34,7 +34,7 @@ export default function YouTubePage() {
   const [saveToCloud, setSaveToCloud] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const { jobs, loading, probeUrl, startJob, deleteJob } = useYoutubeJobs();
+  const { jobs, loading, probeUrl, deleteJob } = useYoutubeJobs();
   const { user } = useAuth();
   const { jobs: centralJobs } = useJobs();
   const [activeJobId, setActiveJobId] = useState<string | null>(null);

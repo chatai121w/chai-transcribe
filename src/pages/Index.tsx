@@ -16,7 +16,7 @@ import { useBackgroundTask } from "@/hooks/useBackgroundTask";
 import { debugLog } from "@/lib/debugLogger";
 import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
 import { useTranscriptionAnalytics } from "@/hooks/useTranscriptionAnalytics";
-import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Pause, Play, Square, Copy, Check, Keyboard, Activity, Users, Scissors, BrainCircuit } from "lucide-react";
+import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Pause, Play, Square, Copy, Check, Keyboard, Activity, Users, Scissors, BrainCircuit, Youtube } from "lucide-react";
 import { openQuickCut } from "@/lib/quickCutBus";
 import { usePerfMonitor } from "@/hooks/usePerfMonitor";
 import { PerfMonitorPanel } from "@/components/PerfMonitorPanel";
@@ -55,7 +55,6 @@ const TextStyleControl = lazy(() => import("@/components/TextStyleControl").then
 const LocalModelManager = lazy(() => import("@/components/LocalModelManager").then(m => ({ default: m.LocalModelManager })));
 const BackgroundJobsPanel = lazy(() => import("@/components/BackgroundJobsPanel").then(m => ({ default: m.BackgroundJobsPanel })));
 const SpeakerDiarization = lazy(() => import("@/components/SpeakerDiarization").then(m => ({ default: m.SpeakerDiarization })));
-const YouTubeTranscriber = lazy(() => import("@/components/YouTubeTranscriber").then(m => ({ default: m.YouTubeTranscriber })));
 import { WaveformPlayer, type WaveformPlayerHandle } from "@/components/WaveformPlayer";
 import {
   TranscriptionWidget,
@@ -1978,7 +1977,7 @@ const Index = () => {
 
         {/* Navigation Tabs */}
         <Tabs defaultValue="transcribe" className="w-full" dir="rtl">
-          <TabsList className="grid w-full grid-cols-2 mb-6">
+          <TabsList className="grid w-full grid-cols-3 mb-6">
             <TabsTrigger value="transcribe">תמלול</TabsTrigger>
             <TabsTrigger 
               value="edit"
@@ -1986,6 +1985,10 @@ const Index = () => {
             >
               <FileEdit className="w-4 h-4 ml-1 text-blue-900" />
               עריכת טקסט
+            </TabsTrigger>
+            <TabsTrigger value="youtube" onClick={() => navigate('/youtube')}>
+              <Youtube className="w-4 h-4 ml-1 text-red-500" />
+              YouTube
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -2640,23 +2643,6 @@ const Index = () => {
               onSearchOpenChange={setSearchOpen}
             />
           </div>
-        )}
-
-        {/* YouTube Transcription — available when local server is connected */}
-        {serverConnected && (
-          <YouTubeTranscriber
-            onTranscriptComplete={(text) => {
-              setTranscriptFromEngine(text);
-              saveToHistory(text, 'YouTube (Whisper GPU)').then((finalText) => {
-                setTimeout(() => navigate('/text-editor', { state: { text: finalText, transcriptId: lastSavedTranscriptIdRef.current } }), 1000);
-              });
-              addAnalyticsRecord({
-                engine: 'YouTube (Whisper GPU)', status: 'success',
-                charCount: text.length, wordCount: text.split(/\s+/).length,
-              });
-              toast({ title: "תמלול YouTube הושלם!" });
-            }}
-          />
         )}
 
         {/* Speaker Diarization — available when local server is connected */}
