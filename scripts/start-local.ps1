@@ -124,6 +124,6 @@ Start-Process "http://localhost:$VitePort"
 Write-Host "Press Ctrl+C to stop Vite (CUDA server stays running)" -ForegroundColor Gray
 Write-Host ""
 
-npm run dev -- --host 127.0.0.1 --port $VitePort --strictPort
+npm run dev:vite -- --host 127.0.0.1 --port $VitePort --strictPort
 
 Pop-Location

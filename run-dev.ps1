@@ -60,7 +60,7 @@ Start-Process -FilePath $python -ArgumentList $backendArgs -WorkingDirectory $PS
 
 # --- 5. Start frontend in its own window ---------------------------------
 Write-Host "[..] Starting FRONTEND on http://localhost:$FrontendPort" -ForegroundColor Yellow
-Start-Process -FilePath "cmd.exe" -ArgumentList "/k", "npm run dev -- --host 127.0.0.1 --port $FrontendPort --strictPort" -WorkingDirectory $PSScriptRoot
+Start-Process -FilePath "cmd.exe" -ArgumentList "/k", "npm run dev:vite -- --host 127.0.0.1 --port $FrontendPort --strictPort" -WorkingDirectory $PSScriptRoot
 Start-Process "http://localhost:$FrontendPort"
 
 Write-Host ""
