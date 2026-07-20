@@ -6,12 +6,20 @@
 # ============================================================
 param(
     [int]$Port      = 3000,    # backend port
+    [int]$FrontendPort = 8080, # preferred frontend port; advances if occupied
     [string]$Model  = "",      # optional: override default Whisper model
     [switch]$NoPreload         # optional: don't preload the model at startup
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
+. (Join-Path $PSScriptRoot "scripts\port-utils.ps1")
+
+$requestedFrontendPort = $FrontendPort
+$FrontendPort = Resolve-AvailablePort -PreferredPort $requestedFrontendPort
+if ($FrontendPort -ne $requestedFrontendPort) {
+    Write-Host "[Port] $requestedFrontendPort is occupied; using $FrontendPort for the frontend." -ForegroundColor Yellow
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " Smart Hebrew Transcriber - Dev launcher" -ForegroundColor Cyan
@@ -51,11 +59,12 @@ Write-Host "[..] Starting BACKEND  on http://localhost:$Port" -ForegroundColor Y
 Start-Process -FilePath $python -ArgumentList $backendArgs -WorkingDirectory $PSScriptRoot
 
 # --- 5. Start frontend in its own window ---------------------------------
-Write-Host "[..] Starting FRONTEND on http://localhost:8080" -ForegroundColor Yellow
-Start-Process -FilePath "cmd.exe" -ArgumentList "/k", "npm run dev" -WorkingDirectory $PSScriptRoot
+Write-Host "[..] Starting FRONTEND on http://localhost:$FrontendPort" -ForegroundColor Yellow
+Start-Process -FilePath "cmd.exe" -ArgumentList "/k", "npm run dev -- --host 127.0.0.1 --port $FrontendPort --strictPort" -WorkingDirectory $PSScriptRoot
+Start-Process "http://localhost:$FrontendPort"
 
 Write-Host ""
 Write-Host "Both started in separate windows." -ForegroundColor Green
-Write-Host "  Frontend : http://localhost:8080" -ForegroundColor Green
+Write-Host "  Frontend : http://localhost:$FrontendPort" -ForegroundColor Green
 Write-Host "  Backend  : http://localhost:$Port" -ForegroundColor Green
 Write-Host "Close those windows (or Ctrl+C in each) to stop." -ForegroundColor DarkGray

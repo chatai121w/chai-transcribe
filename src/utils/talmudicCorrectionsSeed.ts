@@ -14,7 +14,9 @@
 
 import { learnFromCorrections, type CorrectionEntry } from "./correctionLearning";
 
-const SEED_FLAG_KEY = "talmudic_corrections_seeded_v1";
+// Bump the flag whenever new safe variants are added so existing users receive
+// them without clearing or replacing their personal correction history.
+const SEED_FLAG_KEY = "talmudic_corrections_seeded_v2";
 
 // Mirrors tools/asr_eval/corrections.json — keep in sync if you edit it.
 const WORD_REPLACEMENTS: Record<string, string> = {
@@ -29,6 +31,14 @@ const WORD_REPLACEMENTS: Record<string, string> = {
   אבעיא: "איבעיא",
   "תה שמע": "תא שמע",
   "טא שמע": "תא שמע",
+  // Common fused/phonetic Whisper variants of canonical rabbinic terms.
+  // Keep the full phrase entries: learned corrections are applied longest-first.
+  "רב היגאון": "רב האי גאון",
+  היגאון: "האי גאון",
+  האיגון: "האי גאון",
+  "בברבטרה": "בבא בתרא",
+  בברא: "בבא",
+  בבה: "בבא",
 };
 
 export function seedTalmudicCorrections(force = false): number {
