@@ -704,6 +704,8 @@ export function useTranscriptionEngines(
         await transcribeCloudDiarize('assemblyai', 'transcribe-assemblyai', 'AssemblyAI', fileToTranscribe, url);
       } else if (engine === 'deepgram') {
         await transcribeCloudDiarize('deepgram', 'transcribe-deepgram', 'Deepgram', fileToTranscribe, url);
+      } else if (engine === 'gemini') {
+        await transcribeCloudXhr('gemini' as CloudProvider, 'transcribe-gemini', 'Gemini', fileToTranscribe, url);
       } else if (engine === 'local-server') {
         await transcribeWithLocalServer(fileToTranscribe, url);
       } else {
@@ -779,6 +781,7 @@ export function useTranscriptionEngines(
       groq: 'transcribe-groq',
       assemblyai: 'transcribe-assemblyai',
       deepgram: 'transcribe-deepgram',
+      gemini: 'transcribe-gemini',
     };
 
     if (engine === 'local') {
