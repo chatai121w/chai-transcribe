@@ -129,7 +129,7 @@ export const PromptLibrary = ({ text, onTextChange }: PromptLibraryProps) => {
 
   // Engine options: cloud + each Ollama model
   const engineOptions = [
-    { value: 'cloud', label: '☁️ ענן (Gemini Flash)' },
+    { value: 'cloud', label: '☁️ ענן (Gemini)' },
     ...ollama.models.map(m => ({
       value: `ollama:${m.name}`,
       label: `🖥️ ${m.name}`,
