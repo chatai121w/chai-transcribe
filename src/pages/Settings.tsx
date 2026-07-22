@@ -477,10 +477,14 @@ const Settings = () => {
                   <SelectContent>
                     {PERSONAL_GEMINI_MODELS.map((m) => (
                       <SelectItem key={m.id} value={m.id}>
-                        <span className="font-medium">{m.label}</span>
-                        {m.note && <span className="text-muted-foreground text-xs mr-2">— {m.note}</span>}
+                        <span className="inline-flex items-center gap-1.5">
+                          <GeminiBadge personal size={11} />
+                          <span className="font-medium">{m.label}</span>
+                          {m.note && <span className="text-muted-foreground text-xs mr-2">— {m.note}</span>}
+                        </span>
                       </SelectItem>
                     ))}
+
                   </SelectContent>
                 </Select>
               </div>
