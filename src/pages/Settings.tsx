@@ -27,6 +27,7 @@ import {
   isPersonalGeminiFallbackEnabled,
   setPersonalGeminiFallbackEnabled,
   PERSONAL_GEMINI_MODELS,
+  callPersonalGemini,
 } from "@/lib/personalGemini";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sparkles } from "lucide-react";
