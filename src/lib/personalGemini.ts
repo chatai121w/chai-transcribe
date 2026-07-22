@@ -18,6 +18,66 @@ const LS_ENABLED = "use_personal_gemini";
 const LS_MODEL = "personal_gemini_model";
 const LS_FALLBACK = "personal_gemini_fallback"; // "1" = fall back to Lovable on error
 const LS_EXHAUSTED_UNTIL = "personal_gemini_exhausted_until"; // epoch ms
+const LS_USAGE = "personal_gemini_usage"; // JSON usage counters
+
+// ── Usage tracking ───────────────────────────────────────────────
+export interface PersonalGeminiUsage {
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  byModel: Record<string, { calls: number; promptTokens: number; completionTokens: number; totalTokens: number }>;
+  lastUsedAt: number | null;
+  since: number; // epoch ms of first tracked call (or reset time)
+}
+
+const EMPTY_USAGE: PersonalGeminiUsage = {
+  calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0,
+  byModel: {}, lastUsedAt: null, since: Date.now(),
+};
+
+export function getPersonalGeminiUsage(): PersonalGeminiUsage {
+  try {
+    const raw = localStorage.getItem(LS_USAGE);
+    if (!raw) return { ...EMPTY_USAGE };
+    const parsed = JSON.parse(raw);
+    return { ...EMPTY_USAGE, ...parsed, byModel: parsed.byModel || {} };
+  } catch { return { ...EMPTY_USAGE }; }
+}
+
+export function resetPersonalGeminiUsage() {
+  try {
+    localStorage.setItem(LS_USAGE, JSON.stringify({ ...EMPTY_USAGE, since: Date.now() }));
+    window.dispatchEvent(new CustomEvent("personal-gemini-usage"));
+  } catch { /* noop */ }
+}
+
+export function recordPersonalGeminiUsage(model: string, prompt: number, completion: number) {
+  try {
+    const u = getPersonalGeminiUsage();
+    u.calls += 1;
+    u.promptTokens += prompt;
+    u.completionTokens += completion;
+    u.totalTokens += prompt + completion;
+    u.lastUsedAt = Date.now();
+    const m = u.byModel[model] || { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+    m.calls += 1;
+    m.promptTokens += prompt;
+    m.completionTokens += completion;
+    m.totalTokens += prompt + completion;
+    u.byModel[model] = m;
+    if (!u.since) u.since = Date.now();
+    localStorage.setItem(LS_USAGE, JSON.stringify(u));
+    window.dispatchEvent(new CustomEvent("personal-gemini-usage"));
+  } catch { /* noop */ }
+}
+
+/** True for any Gemini model identifier (google/gemini-…, gemini-…). */
+export function isGeminiModel(model?: string | null): boolean {
+  if (!model) return false;
+  return /gemini/i.test(model);
+}
+
 
 export const PERSONAL_GEMINI_MODELS: Array<{ id: string; label: string; note?: string }> = [
   { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", note: "מהיר וזול (ברירת מחדל)" },
