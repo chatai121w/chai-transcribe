@@ -16,7 +16,7 @@ import { useBackgroundTask } from "@/hooks/useBackgroundTask";
 import { debugLog } from "@/lib/debugLogger";
 import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
 import { useTranscriptionAnalytics } from "@/hooks/useTranscriptionAnalytics";
-import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Pause, Play, Square, Copy, Check, Keyboard, Activity, Users, Scissors, BrainCircuit, Youtube } from "lucide-react";
+import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Pause, Play, Square, Copy, Check, Keyboard, Activity, Users, Scissors, BrainCircuit, Youtube, Sparkles } from "lucide-react";
 import { openQuickCut } from "@/lib/quickCutBus";
 import { usePerfMonitor } from "@/hooks/usePerfMonitor";
 import { PerfMonitorPanel } from "@/components/PerfMonitorPanel";
