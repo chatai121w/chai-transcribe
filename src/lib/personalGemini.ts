@@ -139,11 +139,14 @@ export function setPersonalGeminiEnabled(enabled: boolean) {
 }
 
 export function getPersonalGeminiModel(): string {
-  try { return localStorage.getItem(LS_MODEL) || "gemini-2.5-flash"; } catch { return "gemini-2.5-flash"; }
+  try {
+    const stored = localStorage.getItem(LS_MODEL) || "gemini-flash-latest";
+    return resolvePersonalGeminiModel(stored);
+  } catch { return "gemini-flash-latest"; }
 }
 
 export function setPersonalGeminiModel(model: string) {
-  try { localStorage.setItem(LS_MODEL, model); } catch { /* noop */ }
+  try { localStorage.setItem(LS_MODEL, resolvePersonalGeminiModel(model)); } catch { /* noop */ }
 }
 
 export function isPersonalGeminiFallbackEnabled(): boolean {
