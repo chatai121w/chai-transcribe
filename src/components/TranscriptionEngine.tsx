@@ -321,7 +321,9 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
             <Label 
               htmlFor="local-server" 
               className={`flex flex-col items-center justify-center p-2.5 border rounded-xl cursor-pointer transition-all duration-150 hover:border-primary/60 hover:shadow-sm relative ${
-                selected === 'local-server' ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'border-border/50 bg-card'
+                completedEngine === 'local-server'
+                  ? 'border-sky-400 bg-sky-400/10 shadow-[0_0_18px_2px_rgba(56,189,248,0.55)] ring-2 ring-sky-400/70 animate-pulse'
+                  : selected === 'local-server' ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'border-border/50 bg-card'
               }`}
             >
               <RadioGroupItem value="local-server" id="local-server" className="sr-only" />
