@@ -500,7 +500,42 @@ export function useTranscriptionEngines(
     }
   }, [state, sourceLanguage, getProviderApiKeyPool, getProviderStartIndex, shouldRotateProviderKey, setProviderActiveKey, getProviderLabel, handleSuccess, handleError, navigate]);
 
+  // ── Gemini (Google GenAI) — personal key first, Lovable AI fallback ──
+
+  const transcribeWithGemini = useCallback(async (file: File, fileAudioUrl?: string) => {
+    state.setIsUploading(true);
+    try {
+      const { getPersonalGeminiKey, getPersonalGeminiModel } = await import('@/lib/personalGemini');
+      const personalKey = getPersonalGeminiKey();
+      const model = (localStorage.getItem('gemini_transcription_model')
+        || getPersonalGeminiModel()
+        || 'gemini-2.5-flash').replace(/^google\//, '');
+      toast({ title: '✨ שולח ל-Gemini...', description: personalKey ? `מפתח אישי · ${model}` : `Lovable AI · ${model}` });
+
+      const form = new FormData();
+      form.append('file', file, file.name);
+      form.append('model', model);
+      form.append('language', sourceLanguage);
+      if (personalKey) form.append('apiKey', personalKey);
+
+      const result = await xhrInvoke('transcribe-gemini', form, (p) => state.setUploadProgress(p));
+      if (result.error) throw result.error;
+      const data = result.data as { text?: string; provider?: string; fallbackReason?: string } | null;
+      if (!data?.text) throw new Error('לא התקבל תמלול מ-Gemini');
+      if (data.fallbackReason === 'personal_exhausted' && personalKey) {
+        toast({ title: 'מפתח Gemini האישי מוצה', description: 'התמלול הושלם דרך Lovable AI' });
+      }
+      await handleSuccess(data.text, [], `Gemini (${model})`, file, fileAudioUrl);
+    } catch (error) {
+      handleError('Gemini', file, error);
+      throw error;
+    } finally {
+      state.setIsUploading(false);
+    }
+  }, [state, sourceLanguage, xhrInvoke, handleSuccess, handleError]);
+
   // ── Local (browser ONNX) ──
+
 
   const transcribeLocally = useCallback(async (file: File, fileAudioUrl?: string) => {
     try {
@@ -705,7 +740,7 @@ export function useTranscriptionEngines(
       } else if (engine === 'deepgram') {
         await transcribeCloudDiarize('deepgram', 'transcribe-deepgram', 'Deepgram', fileToTranscribe, url);
       } else if (engine === 'gemini') {
-        await transcribeCloudXhr('gemini' as CloudProvider, 'transcribe-gemini', 'Gemini', fileToTranscribe, url);
+        await transcribeWithGemini(fileToTranscribe, url);
       } else if (engine === 'local-server') {
         await transcribeWithLocalServer(fileToTranscribe, url);
       } else {
