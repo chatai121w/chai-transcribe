@@ -30,6 +30,8 @@ import {
   callPersonalGemini,
   getPersonalGeminiUsage,
   resetPersonalGeminiUsage,
+  getLovableGatewayUsage,
+  resetLovableGatewayUsage,
   type PersonalGeminiUsage,
 } from "@/lib/personalGemini";
 import { estimateGeminiCostUsd, getGeminiPrice, formatUsd } from "@/lib/geminiPricing";
