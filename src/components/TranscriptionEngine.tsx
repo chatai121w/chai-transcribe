@@ -222,7 +222,9 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                 key={id}
                 htmlFor={id}
                 className={`relative flex flex-col items-center justify-center p-2.5 border rounded-xl cursor-pointer transition-all duration-150 hover:border-primary/60 hover:shadow-sm ${
-                  selected === id ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'border-border/50 bg-card'
+                  completedEngine === id
+                    ? 'border-sky-400 bg-sky-400/10 shadow-[0_0_18px_2px_rgba(56,189,248,0.55)] ring-2 ring-sky-400/70 animate-pulse'
+                    : selected === id ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'border-border/50 bg-card'
                 }`}
               >
                 <RadioGroupItem value={id} id={id} className="sr-only" />
