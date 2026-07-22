@@ -90,6 +90,9 @@ async function callLovableGemini(params: {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
   const gwModel = `google/${params.model}`;
+  // Lovable AI Gateway (OpenRouter-compatible) accepts inline audio for Gemini
+  // as an image_url data URL. `input_audio` is OpenAI-only and rejected by google/*.
+  const dataUrl = `data:${params.mimeType};base64,${params.audioB64}`;
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -103,10 +106,7 @@ async function callLovableGemini(params: {
           role: "user",
           content: [
             { type: "text", text: buildPrompt(params.lang) },
-            {
-              type: "input_audio",
-              input_audio: { data: params.audioB64, format: params.mimeType.split("/")[1] || "mp3" },
-            },
+            { type: "image_url", image_url: { url: dataUrl } },
           ],
         },
       ],
