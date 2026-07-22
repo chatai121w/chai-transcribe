@@ -30,6 +30,9 @@ const CloudKeySync = () => {
           if (data.claude_key) await setEncryptedKey('claude_api_key', data.claude_key);
           if (data.assemblyai_key) await setEncryptedKey('assemblyai_api_key', data.assemblyai_key);
           if (data.deepgram_key) await setEncryptedKey('deepgram_api_key', data.deepgram_key);
+          // Personal Gemini key (plaintext in localStorage for direct browser calls)
+          const geminiKey = (data as unknown as { gemini_key?: string | null }).gemini_key;
+          if (geminiKey) localStorage.setItem('gemini_api_key', geminiKey);
 
           // Additional keys
           if (data.huggingface_key) await setEncryptedKey('huggingface_api_key', data.huggingface_key);
