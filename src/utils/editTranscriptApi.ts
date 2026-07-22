@@ -111,6 +111,6 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
   if (error) throw error;
   if (!data?.text) throw new Error('לא התקבלה תשובה מ-AI');
   const usage = (data?.usage ?? {}) as { prompt_tokens?: number; completion_tokens?: number };
-  recordLovableGatewayUsage(routeModel, usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0);
+  recordLovableGatewayUsage(routeModel, usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0, "editing");
   return data.text;
 }
