@@ -16,6 +16,14 @@ import { ThemeManager } from "@/components/ThemeManager";
 import { getApiKey } from "@/lib/keyCrypto";
 import { ApiKeyUsagePanel } from "@/components/ApiKeyUsagePanel";
 import { AIPricingSettings } from "@/components/AIPricingSettings";
+import { Switch } from "@/components/ui/switch";
+import {
+  getPersonalGeminiKey,
+  isPersonalGeminiEnabled,
+  setPersonalGeminiKey,
+  setPersonalGeminiEnabled,
+} from "@/lib/personalGemini";
+import { Sparkles } from "lucide-react";
 
 const Settings = () => {
   const { isAuthenticated, logout, isLoading, isAdmin, user } = useAuth();
