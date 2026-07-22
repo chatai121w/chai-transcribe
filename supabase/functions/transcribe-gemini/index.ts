@@ -90,6 +90,9 @@ async function callLovableGemini(params: {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
   const gwModel = `google/${params.model}`;
+  // Lovable AI Gateway (OpenRouter-compatible) accepts inline audio for Gemini
+  // as an image_url data URL. `input_audio` is OpenAI-only and rejected by google/*.
+  const dataUrl = `data:${params.mimeType};base64,${params.audioB64}`;
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -103,10 +106,7 @@ async function callLovableGemini(params: {
           role: "user",
           content: [
             { type: "text", text: buildPrompt(params.lang) },
-            {
-              type: "input_audio",
-              input_audio: { data: params.audioB64, format: params.mimeType.split("/")[1] || "mp3" },
-            },
+            { type: "image_url", image_url: { url: dataUrl } },
           ],
         },
       ],
@@ -127,25 +127,21 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Lightweight auth: accept any Authorization header (publishable key or user JWT).
+    // Matches sibling transcribe-* functions. Try to extract a user id for logs, but
+    // do NOT block on it — the client's XHR sends the publishable key, not a user JWT.
+    const authHeader = req.headers.get("Authorization") || "";
+    let userId = "anon";
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
       });
-    }
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user } } = await userClient.auth.getUser();
-    if (!user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+      const { data } = await userClient.auth.getUser();
+      if (data?.user?.id) userId = data.user.id;
+    } catch { /* ignore */ }
+
 
     const form = await req.formData();
     const file = form.get("file");
@@ -161,7 +157,7 @@ serve(async (req) => {
     const lang = (form.get("language") as string | null) || "he";
     const mimeType = file.type || "audio/mpeg";
 
-    console.log(`[transcribe-gemini] user=${user.id} model=${model} lang=${lang} personal=${!!personalKey} size=${file.size}`);
+    console.log(`[transcribe-gemini] user=${userId} model=${model} lang=${lang} personal=${!!personalKey} size=${file.size}`);
 
     const audioB64 = await fileToBase64(file);
 
