@@ -157,7 +157,7 @@ serve(async (req) => {
     const lang = (form.get("language") as string | null) || "he";
     const mimeType = file.type || "audio/mpeg";
 
-    console.log(`[transcribe-gemini] user=${user.id} model=${model} lang=${lang} personal=${!!personalKey} size=${file.size}`);
+    console.log(`[transcribe-gemini] user=${userId} model=${model} lang=${lang} personal=${!!personalKey} size=${file.size}`);
 
     const audioB64 = await fileToBase64(file);
 
