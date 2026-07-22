@@ -618,6 +618,29 @@ const Settings = () => {
                       })}
                   </div>
                 )}
+                {Object.keys(geminiUsage.bySurface || {}).length > 0 && (
+                  <div className="space-y-1 pt-1">
+                    <div className="text-[11px] text-muted-foreground">פירוט לפי עמוד:</div>
+                    {(Object.entries(geminiUsage.bySurface || {}) as [keyof typeof SURFACE_LABELS, { calls: number; promptTokens: number; completionTokens: number; totalTokens: number }][])
+                      .sort((a, b) => b[1].totalTokens - a[1].totalTokens)
+                      .map(([surface, s]) => {
+                        const models = geminiUsage.bySurfaceModel?.[surface] || {};
+                        const cost = Object.entries(models).reduce(
+                          (sum, [m, mb]) => sum + estimateGeminiCostUsd(m, mb.promptTokens, mb.completionTokens),
+                          0,
+                        );
+                        return (
+                          <div key={surface} className="flex items-center justify-between gap-2 text-xs bg-yellow-500/5 rounded px-2 py-1">
+                            <span className="font-medium">{SURFACE_LABELS[surface]}</span>
+                            <span className="tabular-nums text-muted-foreground shrink-0">
+                              {s.calls} · {s.totalTokens.toLocaleString("he-IL")} tok · <span className="text-yellow-700 font-semibold">{formatUsd(cost)}</span>
+                            </span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+
                 <div className="text-[10px] text-muted-foreground">
                   {geminiUsage.lastUsedAt
                     ? `שימוש אחרון: ${new Date(geminiUsage.lastUsedAt).toLocaleString("he-IL")} · מחירים מ-ai.google.dev/gemini-api/docs/pricing`
