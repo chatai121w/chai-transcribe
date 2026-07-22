@@ -36,7 +36,7 @@ serve(async (req) => {
       });
     }
 
-    const { text } = await req.json();
+    const { text, model } = await req.json();
     
     if (!text) {
       throw new Error('No text provided');
@@ -51,7 +51,15 @@ serve(async (req) => {
 
     const systemPrompt = 'אתה עוזר שמסכם תמלולי אודיו בעברית. צור סיכום תמציתי של 3-5 משפטים, תוך שמירה על נקודות המפתח החשובות ביותר. הסיכום חייב להיות בעברית בלבד.';
     const userPrompt = `סכם את הטקסט הבא:\n\n${text}`;
-    const aiModel = 'google/gemini-2.5-flash';
+    // Allowlist Gemini models to prevent abuse
+    const ALLOWED = new Set([
+      'google/gemini-2.5-flash',
+      'google/gemini-2.5-pro',
+      'google/gemini-2.5-flash-lite',
+      'google/gemini-3-flash-preview',
+      'google/gemini-3.1-pro-preview',
+    ]);
+    const aiModel = (typeof model === 'string' && ALLOWED.has(model)) ? model : 'google/gemini-2.5-flash';
     const temperature = 0.7;
 
     const t0 = Date.now();
