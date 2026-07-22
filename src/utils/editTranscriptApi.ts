@@ -55,7 +55,9 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
         userPrompt: text,
         model: model || getPersonalGeminiModel(),
         temperature: 0.3,
+        surface: "editing",
       });
+
     } catch (e) {
       if (e instanceof PersonalGeminiExhaustedError && isPersonalGeminiFallbackEnabled()) {
         try { toast.warning("מפתח Gemini האישי מוצה — עוברים ל-Lovable AI"); } catch { /* noop */ }
