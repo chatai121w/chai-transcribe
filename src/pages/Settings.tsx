@@ -32,7 +32,10 @@ import {
   resetPersonalGeminiUsage,
   getLovableGatewayUsage,
   resetLovableGatewayUsage,
+  SURFACE_LABELS,
   type PersonalGeminiUsage,
+  type UsageSurface,
+
 } from "@/lib/personalGemini";
 import { estimateGeminiCostUsd, getGeminiPrice, formatUsd } from "@/lib/geminiPricing";
 import { GeminiBadge } from "@/components/GeminiBadge";
