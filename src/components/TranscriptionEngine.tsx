@@ -301,25 +301,26 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                 <Icon className="w-5 h-5 mb-1.5 text-primary/80" />
                 <span className="font-medium text-xs leading-tight">{label}</span>
                 <span className="text-[9px] text-muted-foreground mt-0.5 leading-tight">{sub}</span>
+                {id === 'gemini' && selected === 'gemini' && (
+                  <div
+                    className="mt-2 w-full"
+                    onClick={(e) => e.preventDefault()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <GeminiModelSelect
+                      value={geminiModel}
+                      onChange={handleGeminiModelChange}
+                      compact
+                      className="w-full h-7 text-[10px]"
+                    />
+                  </div>
+                )}
               </Label>
             ))}
           </div>
         </RadioGroup>
-        {selected === 'gemini' && (() => {
-          const stored = loadGeminiModel('gemini_transcription_model').replace(/^google\//, '');
-          const [gm, setGm] = [stored, (v: string) => {
-            try { localStorage.setItem('gemini_transcription_model', v.replace(/^google\//, '')); } catch { /* noop */ }
-            // force re-render via key change on card
-            window.dispatchEvent(new Event('gemini-transcription-model-changed'));
-          }];
-          return (
-            <div className="mt-2 flex items-center justify-end gap-2 text-xs">
-              <span className="text-muted-foreground">מודל Gemini לתמלול:</span>
-              <GeminiModelSelect value={`google/${gm}`} onChange={setGm} compact storageKey="gemini_transcription_model_full" />
-            </div>
-          );
-        })()}
       </div>
+
 
 
 
