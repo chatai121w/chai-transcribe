@@ -19,6 +19,7 @@ import { getApiKey } from "@/lib/keyCrypto";
 import { ApiKeyUsagePanel } from "@/components/ApiKeyUsagePanel";
 import { GeminiModelSelect, loadGeminiModel } from "@/components/GeminiModelSelect";
 import { GeminiHealthCheck } from "@/components/GeminiHealthCheck";
+import { GeminiBadge } from "@/components/GeminiBadge";
 
 
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
