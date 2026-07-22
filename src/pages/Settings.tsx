@@ -93,6 +93,8 @@ const Settings = () => {
     // Load personal Gemini prefs (localStorage first, cloud overrides in loadKeysFromCloud)
     setGeminiKey(getPersonalGeminiKey());
     setUsePersonalGeminiState(isPersonalGeminiEnabled());
+    setGeminiModelState(getPersonalGeminiModel());
+    setGeminiFallbackState(isPersonalGeminiFallbackEnabled());
 
     // Load from cloud
     loadKeysFromCloud(identifier);
