@@ -272,6 +272,8 @@ const Settings = () => {
       // Personal Gemini
       setPersonalGeminiKey(geminiKey.trim());
       setPersonalGeminiEnabled(usePersonalGemini && !!geminiKey.trim());
+      setPersonalGeminiModel(geminiModel);
+      setPersonalGeminiFallbackEnabled(geminiFallback);
 
       if (primaryOpenAI) setOpenaiKey(primaryOpenAI);
       if (primaryGoogle) setGoogleKey(primaryGoogle);
