@@ -315,6 +315,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                       compact
                       className="w-full h-7 text-[10px]"
                     />
+                    <GeminiHealthCheck model={geminiModel} />
                   </div>
                 )}
               </Label>
