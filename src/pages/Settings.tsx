@@ -561,38 +561,55 @@ const Settings = () => {
                     אפס מונים
                   </Button>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="grid grid-cols-4 gap-2 text-center">
                   <div className="rounded bg-yellow-500/5 p-2">
                     <div className="text-[11px] text-muted-foreground">קריאות</div>
                     <div className="text-sm font-bold tabular-nums">{geminiUsage.calls.toLocaleString("he-IL")}</div>
                   </div>
                   <div className="rounded bg-yellow-500/5 p-2">
-                    <div className="text-[11px] text-muted-foreground">Prompt tokens</div>
+                    <div className="text-[11px] text-muted-foreground">Prompt</div>
                     <div className="text-sm font-bold tabular-nums">{geminiUsage.promptTokens.toLocaleString("he-IL")}</div>
                   </div>
                   <div className="rounded bg-yellow-500/5 p-2">
                     <div className="text-[11px] text-muted-foreground">סה״כ tokens</div>
                     <div className="text-sm font-bold tabular-nums text-yellow-700">{geminiUsage.totalTokens.toLocaleString("he-IL")}</div>
                   </div>
+                  <div className="rounded bg-yellow-500/5 p-2">
+                    <div className="text-[11px] text-muted-foreground">עלות מוערכת</div>
+                    <div className="text-sm font-bold tabular-nums text-yellow-700">
+                      {formatUsd(
+                        Object.entries(geminiUsage.byModel).reduce(
+                          (sum, [m, s]) => sum + estimateGeminiCostUsd(m, s.promptTokens, s.completionTokens),
+                          0,
+                        ),
+                      )}
+                    </div>
+                  </div>
                 </div>
                 {Object.keys(geminiUsage.byModel).length > 0 && (
                   <div className="space-y-1 pt-1">
-                    <div className="text-[11px] text-muted-foreground">פירוט לפי מודל:</div>
+                    <div className="text-[11px] text-muted-foreground">פירוט לפי מודל (מחיר לפי Google, טיר בתשלום):</div>
                     {Object.entries(geminiUsage.byModel)
                       .sort((a, b) => b[1].totalTokens - a[1].totalTokens)
-                      .map(([m, s]) => (
-                        <div key={m} className="flex items-center justify-between text-xs bg-background/60 rounded px-2 py-1">
-                          <span className="font-mono truncate" dir="ltr">{m}</span>
-                          <span className="tabular-nums text-muted-foreground">
-                            {s.calls} · {s.totalTokens.toLocaleString("he-IL")} tok
-                          </span>
-                        </div>
-                      ))}
+                      .map(([m, s]) => {
+                        const price = getGeminiPrice(m);
+                        const cost = estimateGeminiCostUsd(m, s.promptTokens, s.completionTokens);
+                        return (
+                          <div key={m} className="flex items-center justify-between gap-2 text-xs bg-background/60 rounded px-2 py-1">
+                            <span className="font-mono truncate" dir="ltr" title={`${price.label} · in $${price.input}/1M · out $${price.output}/1M`}>
+                              {m}
+                            </span>
+                            <span className="tabular-nums text-muted-foreground shrink-0">
+                              {s.calls} · {s.totalTokens.toLocaleString("he-IL")} tok · <span className="text-yellow-700 font-semibold">{formatUsd(cost)}</span>
+                            </span>
+                          </div>
+                        );
+                      })}
                   </div>
                 )}
                 <div className="text-[10px] text-muted-foreground">
                   {geminiUsage.lastUsedAt
-                    ? `שימוש אחרון: ${new Date(geminiUsage.lastUsedAt).toLocaleString("he-IL")}`
+                    ? `שימוש אחרון: ${new Date(geminiUsage.lastUsedAt).toLocaleString("he-IL")} · מחירים מ-ai.google.dev/gemini-api/docs/pricing`
                     : "אין עדיין שימוש נספר. הספירה מתחילה כשמפעילים את המפתח האישי."}
                 </div>
               </div>
