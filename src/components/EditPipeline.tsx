@@ -13,6 +13,9 @@ import {
 import { toast } from "@/hooks/use-toast";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
 import { useOllama, isOllamaModel, getOllamaModelName } from "@/hooks/useOllama";
+import { GeminiBadge } from "@/components/GeminiBadge";
+import { isGeminiModel } from "@/lib/personalGemini";
+
 
 interface EditPipelineProps {
   text: string;
