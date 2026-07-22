@@ -384,6 +384,62 @@ const Settings = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* ── Personal Gemini (global toggle) ─────────────────── */}
+            <div className="rounded-lg border-2 border-yellow-500/40 bg-yellow-500/5 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-yellow-600" />
+                  <div>
+                    <h3 className="font-semibold text-base">מפתח Gemini פרטי (גלובלי)</h3>
+                    <p className="text-xs text-muted-foreground">
+                      כשמופעל — כל קריאות ה-AI (עריכת טקסט, AI Polish, ניתוח תיקונים) יעברו דרך המפתח שלך במקום דרך Lovable.
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={usePersonalGemini}
+                  onCheckedChange={(v) => {
+                    setUsePersonalGeminiState(v);
+                    setPersonalGeminiEnabled(v && !!geminiKey.trim());
+                  }}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="gemini">Gemini API Key (Google AI Studio)</Label>
+                <div className="relative">
+                  <Input
+                    id="gemini"
+                    type={showGemini ? "text" : "password"}
+                    placeholder="AIza... או AQ.Ab8..."
+                    value={geminiKey}
+                    onChange={(e) => setGeminiKey(e.target.value)}
+                    dir="ltr"
+                    className="pr-10"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute left-0 top-0 h-full px-3 hover:bg-transparent"
+                    onClick={() => setShowGemini(!showGemini)}
+                  >
+                    {showGemini ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  צור מפתח חינמי ב-{" "}
+                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline text-yellow-700">
+                    aistudio.google.com/apikey
+                  </a>
+                  . התמיכה כוללת מפתחות בפורמט הישן (<code>AIza…</code>) וגם החדש (<code>AQ.Ab8…</code>).
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  הערה: תמלול/דיאריזציה עדיין נשלטים במנוע שבחרת בעמוד הראשי (Groq/OpenAI וכו'). המתג הזה משפיע כרגע על כל שכבת ה-AI לעריכת טקסט וניתוח. הרחבה למנועי תמלול Gemini תתווסף בשלב הבא.
+                </p>
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="openai">OpenAI API Key</Label>
               <div className="relative">
