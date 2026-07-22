@@ -18,7 +18,8 @@ const LS_ENABLED = "use_personal_gemini";
 const LS_MODEL = "personal_gemini_model";
 const LS_FALLBACK = "personal_gemini_fallback"; // "1" = fall back to Lovable on error
 const LS_EXHAUSTED_UNTIL = "personal_gemini_exhausted_until"; // epoch ms
-const LS_USAGE = "personal_gemini_usage"; // JSON usage counters
+const LS_USAGE = "personal_gemini_usage"; // JSON usage counters (personal key path only)
+const LS_LOVABLE_USAGE = "lovable_gemini_usage"; // JSON usage counters (Lovable AI Gateway path)
 
 // ── Usage tracking ───────────────────────────────────────────────
 export interface PersonalGeminiUsage {
@@ -36,40 +37,55 @@ const EMPTY_USAGE: PersonalGeminiUsage = {
   byModel: {}, lastUsedAt: null, since: Date.now(),
 };
 
-export function getPersonalGeminiUsage(): PersonalGeminiUsage {
+function readUsage(lsKey: string): PersonalGeminiUsage {
   try {
-    const raw = localStorage.getItem(LS_USAGE);
+    const raw = localStorage.getItem(lsKey);
     if (!raw) return { ...EMPTY_USAGE };
     const parsed = JSON.parse(raw);
     return { ...EMPTY_USAGE, ...parsed, byModel: parsed.byModel || {} };
   } catch { return { ...EMPTY_USAGE }; }
 }
 
-export function resetPersonalGeminiUsage() {
+function writeUsage(lsKey: string, evt: string, usage: PersonalGeminiUsage) {
   try {
-    localStorage.setItem(LS_USAGE, JSON.stringify({ ...EMPTY_USAGE, since: Date.now() }));
-    window.dispatchEvent(new CustomEvent("personal-gemini-usage"));
+    localStorage.setItem(lsKey, JSON.stringify(usage));
+    window.dispatchEvent(new CustomEvent(evt));
   } catch { /* noop */ }
 }
 
+function bumpUsage(lsKey: string, evt: string, model: string, prompt: number, completion: number) {
+  const u = readUsage(lsKey);
+  u.calls += 1;
+  u.promptTokens += prompt;
+  u.completionTokens += completion;
+  u.totalTokens += prompt + completion;
+  u.lastUsedAt = Date.now();
+  const m = u.byModel[model] || { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  m.calls += 1;
+  m.promptTokens += prompt;
+  m.completionTokens += completion;
+  m.totalTokens += prompt + completion;
+  u.byModel[model] = m;
+  if (!u.since) u.since = Date.now();
+  writeUsage(lsKey, evt, u);
+}
+
+// Personal-key path (billed by Google, USD)
+export function getPersonalGeminiUsage(): PersonalGeminiUsage { return readUsage(LS_USAGE); }
+export function resetPersonalGeminiUsage() {
+  writeUsage(LS_USAGE, "personal-gemini-usage", { ...EMPTY_USAGE, since: Date.now() });
+}
 export function recordPersonalGeminiUsage(model: string, prompt: number, completion: number) {
-  try {
-    const u = getPersonalGeminiUsage();
-    u.calls += 1;
-    u.promptTokens += prompt;
-    u.completionTokens += completion;
-    u.totalTokens += prompt + completion;
-    u.lastUsedAt = Date.now();
-    const m = u.byModel[model] || { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-    m.calls += 1;
-    m.promptTokens += prompt;
-    m.completionTokens += completion;
-    m.totalTokens += prompt + completion;
-    u.byModel[model] = m;
-    if (!u.since) u.since = Date.now();
-    localStorage.setItem(LS_USAGE, JSON.stringify(u));
-    window.dispatchEvent(new CustomEvent("personal-gemini-usage"));
-  } catch { /* noop */ }
+  bumpUsage(LS_USAGE, "personal-gemini-usage", model, prompt, completion);
+}
+
+// Lovable AI Gateway path (billed in Lovable credits, no direct USD)
+export function getLovableGatewayUsage(): PersonalGeminiUsage { return readUsage(LS_LOVABLE_USAGE); }
+export function resetLovableGatewayUsage() {
+  writeUsage(LS_LOVABLE_USAGE, "lovable-gemini-usage", { ...EMPTY_USAGE, since: Date.now() });
+}
+export function recordLovableGatewayUsage(model: string, prompt = 0, completion = 0) {
+  bumpUsage(LS_LOVABLE_USAGE, "lovable-gemini-usage", model, prompt, completion);
 }
 
 /** True for any Gemini model identifier (google/gemini-…, gemini-…). */
