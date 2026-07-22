@@ -55,7 +55,9 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
         userPrompt: text,
         model: model || getPersonalGeminiModel(),
         temperature: 0.3,
+        surface: "editing",
       });
+
     } catch (e) {
       if (e instanceof PersonalGeminiExhaustedError && isPersonalGeminiFallbackEnabled()) {
         try { toast.warning("מפתח Gemini האישי מוצה — עוברים ל-Lovable AI"); } catch { /* noop */ }
@@ -87,7 +89,7 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
       // DB proxy routes through the user's stored Google key when present,
       // otherwise through Lovable's shared credentials. Either way it is NOT
       // the client-side personal path, so count it under the Lovable route.
-      recordLovableGatewayUsage(routeModel);
+      recordLovableGatewayUsage(routeModel, 0, 0, "editing");
       return result.text;
     }
 
@@ -109,6 +111,6 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
   if (error) throw error;
   if (!data?.text) throw new Error('לא התקבלה תשובה מ-AI');
   const usage = (data?.usage ?? {}) as { prompt_tokens?: number; completion_tokens?: number };
-  recordLovableGatewayUsage(routeModel, usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0);
+  recordLovableGatewayUsage(routeModel, usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0, "editing");
   return data.text;
 }
