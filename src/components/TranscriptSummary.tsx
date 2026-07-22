@@ -46,7 +46,9 @@ export const TranscriptSummary = ({ transcript }: TranscriptSummaryProps) => {
             userPrompt: `סכם את הטקסט הבא:\n\n${transcript}`,
             model,
             temperature: 0.7,
+            surface: "summary",
           });
+
         } catch (e) {
           if (e instanceof PersonalGeminiExhaustedError && isPersonalGeminiFallbackEnabled()) {
             toast({ title: "Gemini האישי מוצה", description: "עוברים ל-Lovable AI" });
