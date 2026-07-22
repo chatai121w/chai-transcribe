@@ -18,16 +18,22 @@ interface GeminiBadgeProps {
  */
 export function GeminiBadge({ personal, size = 12, className = "", hint }: GeminiBadgeProps) {
   const usingPersonal = personal ?? isPersonalGeminiEnabled();
-  const color = usingPersonal ? "text-yellow-500" : "text-muted-foreground";
+  const color = usingPersonal
+    ? "text-green-500 drop-shadow-[0_0_6px_rgba(34,197,94,0.9)]"
+    : "text-blue-600 font-bold drop-shadow-[0_0_4px_rgba(37,99,235,0.6)]";
   const label = usingPersonal
-    ? "Gemini — משתמש במפתח האישי שלך"
-    : "Gemini — דרך Lovable AI";
+    ? "Gemini — משתמש במפתח האישי שלך (ירוק זוהר)"
+    : "Gemini — דרך Lovable AI (כחול בולט)";
   return (
     <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>
           <span className={`inline-flex items-center ${color} ${className}`} aria-label={label}>
-            <Sparkles size={size} className={usingPersonal ? "fill-yellow-500/30" : ""} />
+            <Sparkles
+              size={size}
+              className={usingPersonal ? "fill-green-500/40" : "fill-blue-500/20"}
+              strokeWidth={usingPersonal ? 2 : 2.5}
+            />
           </span>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
