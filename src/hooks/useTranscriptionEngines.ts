@@ -255,18 +255,35 @@ export function useTranscriptionEngines(
   }, [state, saveToHistory, saveTextOnlyToCloud, addAnalyticsRecord, perfMonitor, navigate]);
 
   const handleError = useCallback((engineLabel: string, file: File, error: unknown) => {
-    debugLog.error(engineLabel, 'Transcription failed', error instanceof Error ? error.message : error);
+    const err = (error && typeof error === 'object') ? error as Record<string, unknown> : {};
+    const status = err.status as number | undefined;
+    const requestId = err.requestId as string | undefined;
+    const stage = err.stage as string | undefined;
+    const baseMsg = (err.error as string) || (err.message as string) || (error instanceof Error ? error.message : 'שגיאה לא ידועה');
+    const extraLines: string[] = [];
+    if (status !== undefined) extraLines.push(`סטטוס: ${status}`);
+    if (stage) extraLines.push(`שלב: ${stage}`);
+    if (err.personalStatus) extraLines.push(`Personal: ${err.personalStatus} — ${err.personalError ?? ''}`);
+    if (err.lovableStatus || err.lovableError) extraLines.push(`Lovable: ${err.lovableStatus ?? ''} — ${err.lovableError ?? ''}`);
+    if (requestId) extraLines.push(`Request ID: ${requestId}`);
+    const description = [baseMsg, ...extraLines].filter(Boolean).join('\n');
+    debugLog.error(engineLabel, 'Transcription failed', { status, requestId, stage, error: baseMsg, raw: err });
     addAnalyticsRecord({
       engine: engineLabel, status: 'failed',
       fileName: file.name, fileSize: file.size,
-      errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      errorMessage: description,
     });
     toast({
-      title: `שגיאה בתמלול ${engineLabel}`,
-      description: error instanceof Error ? error.message : "שגיאה לא ידועה",
+      title: `שגיאה בתמלול ${engineLabel}${status ? ` (${status})` : ''}`,
+      description,
       variant: "destructive",
+      duration: 15000,
     });
+    if (requestId) {
+      try { navigator.clipboard?.writeText(requestId); } catch { /* noop */ }
+    }
   }, [addAnalyticsRecord]);
+
 
   // ── Cloud engine helper (OpenAI/Groq — using XHR via supabase edge) ──
 
