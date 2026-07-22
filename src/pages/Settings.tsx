@@ -82,6 +82,10 @@ const Settings = () => {
     if (!identifier) return;
     setUserIdentifier(identifier);
 
+    // Load personal Gemini prefs (localStorage first, cloud overrides in loadKeysFromCloud)
+    setGeminiKey(getPersonalGeminiKey());
+    setUsePersonalGeminiState(isPersonalGeminiEnabled());
+
     // Load from cloud
     loadKeysFromCloud(identifier);
   }, [isAuthenticated, isLoading, navigate, user]);
@@ -122,6 +126,11 @@ const Settings = () => {
         if (data.assemblyai_key) setAssemblyaiKey(data.assemblyai_key);
         if (data.deepgram_key) setDeepgramKey(data.deepgram_key);
         if (data.huggingface_key) setHuggingfaceKey(data.huggingface_key);
+        const cloudGemini = (data as unknown as { gemini_key?: string | null }).gemini_key;
+        if (cloudGemini) {
+          setGeminiKey(cloudGemini);
+          setPersonalGeminiKey(cloudGemini);
+        }
 
         // Multi-key pools: load from cloud first, fall back to localStorage
         const loadPool = (cloudPool: any, poolStorageKey: string, fallback?: string, setter?: (v: string) => void) => {
