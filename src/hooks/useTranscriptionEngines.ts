@@ -172,25 +172,27 @@ export function useTranscriptionEngines(
       xhr.onload = () => {
         if (processingInterval) clearInterval(processingInterval);
         onProgress(100);
+        const requestId = xhr.getResponseHeader('x-request-id') || undefined;
         try {
           const json = JSON.parse(xhr.responseText || '{}');
           if (xhr.status >= 200 && xhr.status < 300) {
-            resolve({ data: json });
+            resolve({ data: { ...json, __requestId: requestId } });
           } else if (xhr.status === 429) {
             const retryAfter = parseInt(xhr.getResponseHeader('Retry-After') || '60', 10);
-            resolve({ error: { message: `RATE_LIMIT`, retryAfter } });
+            resolve({ error: { message: 'RATE_LIMIT', retryAfter, status: 429, requestId, body: json } });
           } else {
-            resolve({ error: json || { message: `HTTP ${xhr.status}` } });
+            resolve({ error: { ...(json || {}), status: xhr.status, requestId, body: json } });
           }
         } catch (e) {
-          resolve({ error: { message: 'Invalid JSON response' } });
+          resolve({ error: { message: `HTTP ${xhr.status} — תשובה לא-JSON`, status: xhr.status, requestId, raw: xhr.responseText?.slice(0, 300) } });
         }
       };
 
       xhr.onerror = () => {
         if (processingInterval) clearInterval(processingInterval);
-        resolve({ error: { message: 'Network error' } });
+        resolve({ error: { message: 'Network error', status: 0 } });
       };
+
 
       xhr.send(formData);
     });
