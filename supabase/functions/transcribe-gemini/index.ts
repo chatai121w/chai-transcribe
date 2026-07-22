@@ -185,7 +185,7 @@ serve(async (req) => {
 
     if (personalKey) {
       try {
-        const r = await callPersonalGoogle({ apiKey: personalKey, model, mimeType, audioB64, lang });
+        const r = await callPersonalGoogle({ apiKey: personalKey, model: resolvePersonalModel(model), mimeType, audioB64, lang });
         text = r.text; usage = r.usage; provider = "personal";
       } catch (e) {
         const exhausted = (e as { exhausted?: boolean }).exhausted;
