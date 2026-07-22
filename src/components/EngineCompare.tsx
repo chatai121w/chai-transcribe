@@ -6,6 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Zap, Trophy, ArrowLeftRight, Clock, Languages } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
+import { GeminiBadge } from "@/components/GeminiBadge";
+import { isGeminiModel } from "@/lib/personalGemini";
+
 
 interface EngineCompareProps {
   text: string;
