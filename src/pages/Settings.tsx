@@ -219,12 +219,13 @@ const Settings = () => {
           assemblyai_key: primaryAssembly || null,
           deepgram_key: primaryDeepgram || null,
           huggingface_key: huggingfaceKey.trim() || null,
+          gemini_key: geminiKey.trim() || null,
           openai_keys_pool: openaiPool.length ? openaiPool : null,
           google_keys_pool: googlePool.length ? googlePool : null,
           groq_keys_pool: groqPool.length ? groqPool : null,
           assemblyai_keys_pool: assemblyPool.length ? assemblyPool : null,
           deepgram_keys_pool: deepgramPool.length ? deepgramPool : null,
-        }, {
+        } as never, {
           onConflict: 'user_identifier'
         });
 
@@ -257,6 +258,10 @@ const Settings = () => {
         localStorage.setItem("deepgram_api_key", primaryDeepgram);
         localStorage.setItem("deepgram_api_keys_pool", JSON.stringify(deepgramPool));
       }
+
+      // Personal Gemini
+      setPersonalGeminiKey(geminiKey.trim());
+      setPersonalGeminiEnabled(usePersonalGemini && !!geminiKey.trim());
 
       if (primaryOpenAI) setOpenaiKey(primaryOpenAI);
       if (primaryGoogle) setGoogleKey(primaryGoogle);
