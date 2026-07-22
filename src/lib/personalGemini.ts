@@ -210,5 +210,15 @@ export async function callPersonalGemini(params: {
   const text =
     data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || "").join("") || "";
   if (!text) throw new Error("לא התקבל טקסט מ-Gemini");
+
+  // Record usage (best-effort — Google returns usageMetadata on success)
+  const usage = data?.usageMetadata as
+    | { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number }
+    | undefined;
+  const promptTok = usage?.promptTokenCount ?? 0;
+  const completionTok = usage?.candidatesTokenCount ?? Math.max(0, (usage?.totalTokenCount ?? 0) - promptTok);
+  recordPersonalGeminiUsage(model, promptTok, completionTok);
+
   return text.trim();
 }
+
