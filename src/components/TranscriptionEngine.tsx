@@ -28,6 +28,8 @@ interface TranscriptionEngineProps {
   sourceLanguage: SourceLanguage;
   onSourceLanguageChange: (lang: SourceLanguage) => void;
   groqKeysText?: string;
+  /** Engine that just finished transcription successfully — its card glows bright blue for a few seconds. */
+  completedEngine?: Engine | null;
 }
 
 const getLocalModelLabel = (): string => {
@@ -47,7 +49,7 @@ const hasCustomServerUrl = () => {
   return !url.includes('localhost') && !url.includes('127.0.0.1');
 };
 
-export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, onSourceLanguageChange, groqKeysText = "" }: TranscriptionEngineProps) => {
+export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, onSourceLanguageChange, groqKeysText = "", completedEngine = null }: TranscriptionEngineProps) => {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { isConnected, serverStatus, checkConnection, startPolling, stopPolling, shutdownServer, warmupServer, preloadModelStream, cancelPreload, modelReady, modelLoading, getBaseUrl } = useLocalServer();
