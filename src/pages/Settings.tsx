@@ -562,7 +562,7 @@ const Settings = () => {
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <GeminiBadge personal size={14} />
-                    <span className="text-sm font-semibold">שימוש במפתח האישי</span>
+                    <span className="text-sm font-semibold">מסלול 1 · מפתח Gemini אישי (חיוב Google, USD)</span>
                   </div>
                   <Button
                     type="button" variant="ghost" size="sm"
