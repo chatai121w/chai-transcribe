@@ -19,6 +19,7 @@ import { getApiKey } from "@/lib/keyCrypto";
 import { ApiKeyUsagePanel } from "@/components/ApiKeyUsagePanel";
 import { GeminiModelSelect, loadGeminiModel } from "@/components/GeminiModelSelect";
 import { GeminiHealthCheck } from "@/components/GeminiHealthCheck";
+import { GeminiBadge } from "@/components/GeminiBadge";
 
 
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
@@ -301,7 +302,10 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                   )
                 )}
                 <Icon className="w-5 h-5 mb-1.5 text-primary/80" />
-                <span className="font-medium text-xs leading-tight">{label}</span>
+                <span className="font-medium text-xs leading-tight flex items-center gap-1">
+                  {label}
+                  {id === 'gemini' && <GeminiBadge size={11} />}
+                </span>
                 <span className="text-[9px] text-muted-foreground mt-0.5 leading-tight">{sub}</span>
                 {id === 'gemini' && selected === 'gemini' && (
                   <div
