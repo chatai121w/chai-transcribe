@@ -28,7 +28,12 @@ import {
   setPersonalGeminiFallbackEnabled,
   PERSONAL_GEMINI_MODELS,
   callPersonalGemini,
+  getPersonalGeminiUsage,
+  resetPersonalGeminiUsage,
+  type PersonalGeminiUsage,
 } from "@/lib/personalGemini";
+import { GeminiBadge } from "@/components/GeminiBadge";
+
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sparkles } from "lucide-react";
 
