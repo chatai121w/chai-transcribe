@@ -296,7 +296,7 @@ export async function callPersonalGemini(params: {
     | undefined;
   const promptTok = usage?.promptTokenCount ?? 0;
   const completionTok = usage?.candidatesTokenCount ?? Math.max(0, (usage?.totalTokenCount ?? 0) - promptTok);
-  recordPersonalGeminiUsage(model, promptTok, completionTok);
+  recordPersonalGeminiUsage(model, promptTok, completionTok, params.surface ?? "other");
 
   return text.trim();
 }
