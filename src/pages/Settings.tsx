@@ -49,6 +49,9 @@ const Settings = () => {
   const [showDeepgram, setShowDeepgram] = useState(false);
   const [huggingfaceKey, setHuggingfaceKey] = useState("");
   const [showHuggingface, setShowHuggingface] = useState(false);
+  const [geminiKey, setGeminiKey] = useState("");
+  const [showGemini, setShowGemini] = useState(false);
+  const [usePersonalGemini, setUsePersonalGeminiState] = useState(false);
   const [userIdentifier, setUserIdentifier] = useState("");
   const [activeTab, setActiveTab] = useState<string>("api-keys");
   const location = useLocation();
