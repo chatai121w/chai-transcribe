@@ -9,13 +9,22 @@ const corsHeaders = {
 };
 
 const ALLOWED_MODELS = new Set([
+  "gemini-flash-latest",
+  "gemini-pro-latest",
   "gemini-2.5-flash",
   "gemini-2.5-pro",
   "gemini-2.5-flash-lite",
   "gemini-2.0-flash",
   "gemini-1.5-pro",
 ]);
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_MODEL = "gemini-flash-latest";
+
+// Google blocked gemini-2.5-* for new personal-API users → map to the -latest alias for the personal path.
+function resolvePersonalModel(m: string): string {
+  if (m === "gemini-2.5-flash") return "gemini-flash-latest";
+  if (m === "gemini-2.5-pro") return "gemini-pro-latest";
+  return m;
+}
 
 const buildPrompt = (lang: string) => {
   const langHint = lang === "he"
@@ -64,6 +73,13 @@ async function callPersonalGoogle(params: {
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
+    // Auto-retry once if this model is blocked for new users
+    if (res.status === 404 && /no longer available|not found/i.test(txt)) {
+      const fb = params.model.includes("pro") ? "gemini-pro-latest" : "gemini-flash-latest";
+      if (fb !== params.model) {
+        return callPersonalGoogle({ ...params, model: fb });
+      }
+    }
     const exhausted = res.status === 429 || res.status === 403 || res.status === 401 ||
       /quota|exhausted|billing|RESOURCE_EXHAUSTED/i.test(txt);
     const err = new Error(`Google API ${res.status}: ${txt.slice(0, 200)}`);
@@ -169,7 +185,7 @@ serve(async (req) => {
 
     if (personalKey) {
       try {
-        const r = await callPersonalGoogle({ apiKey: personalKey, model, mimeType, audioB64, lang });
+        const r = await callPersonalGoogle({ apiKey: personalKey, model: resolvePersonalModel(model), mimeType, audioB64, lang });
         text = r.text; usage = r.usage; provider = "personal";
       } catch (e) {
         const exhausted = (e as { exhausted?: boolean }).exhausted;

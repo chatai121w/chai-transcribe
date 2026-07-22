@@ -79,13 +79,26 @@ export function isGeminiModel(model?: string | null): boolean {
 }
 
 
+// Google's personal Generative Language API uses alias names.
+// gemini-2.5-flash/pro are blocked for NEW users ("no longer available to new users")
+// so we default to the "-latest" aliases which always route to the current stable model.
 export const PERSONAL_GEMINI_MODELS: Array<{ id: string; label: string; note?: string }> = [
-  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", note: "מהיר וזול (ברירת מחדל)" },
-  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", note: "איכות גבוהה, איטי יותר" },
+  { id: "gemini-flash-latest", label: "Gemini Flash (Latest)", note: "מהיר וזול, נתמך תמיד (מומלץ)" },
+  { id: "gemini-pro-latest", label: "Gemini Pro (Latest)", note: "איכות גבוהה, נתמך תמיד" },
+  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", note: "רק למשתמשים ותיקים - עלול להחזיר 404" },
+  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", note: "רק למשתמשים ותיקים - עלול להחזיר 404" },
   { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", note: "הכי זול, לפעולות פשוטות" },
-  { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash", note: "יציב, נמצא זמן רב" },
-  { id: "gemini-1.5-pro", label: "Gemini 1.5 Pro", note: "דור קודם, הקשר גדול" },
+  { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash", note: "יציב, זמין לכולם" },
 ];
+
+/** Map stored model IDs blocked for new users to a supported alias. */
+export function resolvePersonalGeminiModel(id: string): string {
+  const s = (id || "").replace(/^google\//, "").trim();
+  if (s === "gemini-2.5-flash") return "gemini-flash-latest";
+  if (s === "gemini-2.5-pro") return "gemini-pro-latest";
+  if (s === "gemini-1.5-pro" || s === "gemini-1.5-flash") return "gemini-pro-latest";
+  return s || "gemini-flash-latest";
+}
 
 export class PersonalGeminiExhaustedError extends Error {
   status?: number;
@@ -126,11 +139,14 @@ export function setPersonalGeminiEnabled(enabled: boolean) {
 }
 
 export function getPersonalGeminiModel(): string {
-  try { return localStorage.getItem(LS_MODEL) || "gemini-2.5-flash"; } catch { return "gemini-2.5-flash"; }
+  try {
+    const stored = localStorage.getItem(LS_MODEL) || "gemini-flash-latest";
+    return resolvePersonalGeminiModel(stored);
+  } catch { return "gemini-flash-latest"; }
 }
 
 export function setPersonalGeminiModel(model: string) {
-  try { localStorage.setItem(LS_MODEL, model); } catch { /* noop */ }
+  try { localStorage.setItem(LS_MODEL, resolvePersonalGeminiModel(model)); } catch { /* noop */ }
 }
 
 export function isPersonalGeminiFallbackEnabled(): boolean {
@@ -150,10 +166,10 @@ export function markPersonalGeminiExhausted(minutes = 60) {
   } catch { /* noop */ }
 }
 
-/** Map an internal model id to Google's REST model name. */
+/** Map an internal model id to Google's REST model name (and auto-upgrade blocked names). */
 export function normalizeGeminiModel(model?: string): string {
   if (!model) return getPersonalGeminiModel();
-  return model.replace(/^google\//, "");
+  return resolvePersonalGeminiModel(model);
 }
 
 /**
@@ -194,6 +210,14 @@ export async function callPersonalGemini(params: {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
+    // 404 "no longer available to new users" → retry once with the latest-alias
+    if (res.status === 404 && /no longer available|not found/i.test(errText)) {
+      const fallbackModel = model.includes("pro") ? "gemini-pro-latest" : "gemini-flash-latest";
+      if (fallbackModel !== model) {
+        try { setPersonalGeminiModel(fallbackModel); } catch { /* noop */ }
+        return callPersonalGemini({ ...params, model: fallbackModel });
+      }
+    }
     // Quota / auth → mark exhausted so callers fall back and future calls skip us
     if (res.status === 429 || res.status === 403 || res.status === 401 ||
         /quota|exhausted|billing|RESOURCE_EXHAUSTED/i.test(errText)) {
