@@ -7,6 +7,7 @@ import {
   isPersonalGeminiFallbackEnabled,
   PersonalGeminiExhaustedError,
   getPersonalGeminiModel,
+  recordLovableGatewayUsage,
 } from "@/lib/personalGemini";
 import { toast } from "sonner";
 
@@ -67,13 +68,15 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
 
 
 
+  const routeModel = model || 'gemini-2.5-flash';
+
   // ── Try DB proxy first (latest code, no deployment needed) ──
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.rpc as any)('edit_transcript_proxy', {
       p_text: text,
       p_action: action,
-      p_model: model || 'gemini-2.5-flash',
+      p_model: routeModel,
       p_custom_prompt: customPrompt || null,
       p_tone_style: toneStyle || null,
       p_target_language: targetLanguage || null,
@@ -81,6 +84,10 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
 
     const result = data as { text?: string; error?: string } | null;
     if (!error && result && !result.error && result.text) {
+      // DB proxy routes through the user's stored Google key when present,
+      // otherwise through Lovable's shared credentials. Either way it is NOT
+      // the client-side personal path, so count it under the Lovable route.
+      recordLovableGatewayUsage(routeModel);
       return result.text;
     }
 
@@ -91,7 +98,7 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
     console.warn('DB proxy exception, trying edge function:', e);
   }
 
-  // ── Fallback: edge function ──
+  // ── Fallback: edge function (Lovable AI Gateway) ──
   const body: Record<string, string> = { text, action };
   if (model) body.model = model;
   if (customPrompt) body.customPrompt = customPrompt;
@@ -101,5 +108,7 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
   const { data, error } = await supabase.functions.invoke('edit-transcript', { body });
   if (error) throw error;
   if (!data?.text) throw new Error('לא התקבלה תשובה מ-AI');
+  const usage = (data?.usage ?? {}) as { prompt_tokens?: number; completion_tokens?: number };
+  recordLovableGatewayUsage(routeModel, usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0);
   return data.text;
 }
