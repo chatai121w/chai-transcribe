@@ -17,6 +17,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
 import { getApiKey } from "@/lib/keyCrypto";
 import { ApiKeyUsagePanel } from "@/components/ApiKeyUsagePanel";
+import { GeminiModelSelect } from "@/components/GeminiModelSelect";
 
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
