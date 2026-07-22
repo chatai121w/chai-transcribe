@@ -5,25 +5,39 @@
  *
  * Key formats supported:
  *  - Google AI Studio keys: "AIza..." (classic) or "AQ.Ab8..." (new format)
+ *
+ * Features:
+ *  - Global toggle: routes ALL client-side AI text calls through personal key.
+ *  - Model selector: choose which Gemini variant to use (Flash / Pro / etc.).
+ *  - Auto-fallback: if the personal key errors (quota, 429, 401/403), the caller
+ *    can catch PersonalGeminiExhaustedError and fall back to Lovable Gateway.
  */
 
 const LS_KEY = "gemini_api_key";
 const LS_ENABLED = "use_personal_gemini";
+const LS_MODEL = "personal_gemini_model";
+const LS_FALLBACK = "personal_gemini_fallback"; // "1" = fall back to Lovable on error
+const LS_EXHAUSTED_UNTIL = "personal_gemini_exhausted_until"; // epoch ms
 
-export function getPersonalGeminiKey(): string {
-  try {
-    return (localStorage.getItem(LS_KEY) || "").trim();
-  } catch {
-    return "";
+export const PERSONAL_GEMINI_MODELS: Array<{ id: string; label: string; note?: string }> = [
+  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", note: "מהיר וזול (ברירת מחדל)" },
+  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", note: "איכות גבוהה, איטי יותר" },
+  { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", note: "הכי זול, לפעולות פשוטות" },
+  { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash", note: "יציב, נמצא זמן רב" },
+  { id: "gemini-1.5-pro", label: "Gemini 1.5 Pro", note: "דור קודם, הקשר גדול" },
+];
+
+export class PersonalGeminiExhaustedError extends Error {
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "PersonalGeminiExhaustedError";
+    this.status = status;
   }
 }
 
-export function isPersonalGeminiEnabled(): boolean {
-  try {
-    return localStorage.getItem(LS_ENABLED) === "1" && !!getPersonalGeminiKey();
-  } catch {
-    return false;
-  }
+export function getPersonalGeminiKey(): string {
+  try { return (localStorage.getItem(LS_KEY) || "").trim(); } catch { return ""; }
 }
 
 export function setPersonalGeminiKey(key: string) {
@@ -33,21 +47,58 @@ export function setPersonalGeminiKey(key: string) {
   } catch { /* noop */ }
 }
 
+export function isPersonalGeminiEnabled(): boolean {
+  try {
+    if (localStorage.getItem(LS_ENABLED) !== "1") return false;
+    if (!getPersonalGeminiKey()) return false;
+    // Respect cooldown after we hit a quota error
+    const until = parseInt(localStorage.getItem(LS_EXHAUSTED_UNTIL) || "0", 10);
+    if (until && Date.now() < until) return false;
+    return true;
+  } catch { return false; }
+}
+
 export function setPersonalGeminiEnabled(enabled: boolean) {
   try {
     localStorage.setItem(LS_ENABLED, enabled ? "1" : "0");
+    if (enabled) localStorage.removeItem(LS_EXHAUSTED_UNTIL);
   } catch { /* noop */ }
 }
 
-/** Map an internal model id (e.g. "gemini-2.5-flash", "google/gemini-2.5-flash") to Google's REST model name. */
+export function getPersonalGeminiModel(): string {
+  try { return localStorage.getItem(LS_MODEL) || "gemini-2.5-flash"; } catch { return "gemini-2.5-flash"; }
+}
+
+export function setPersonalGeminiModel(model: string) {
+  try { localStorage.setItem(LS_MODEL, model); } catch { /* noop */ }
+}
+
+export function isPersonalGeminiFallbackEnabled(): boolean {
+  try { return localStorage.getItem(LS_FALLBACK) !== "0"; } // default ON
+  catch { return true; }
+}
+
+export function setPersonalGeminiFallbackEnabled(enabled: boolean) {
+  try { localStorage.setItem(LS_FALLBACK, enabled ? "1" : "0"); } catch { /* noop */ }
+}
+
+/** Mark the personal key as exhausted (cooldown 1 hour). */
+export function markPersonalGeminiExhausted(minutes = 60) {
+  try {
+    localStorage.setItem(LS_EXHAUSTED_UNTIL, String(Date.now() + minutes * 60_000));
+    window.dispatchEvent(new CustomEvent("personal-gemini-exhausted"));
+  } catch { /* noop */ }
+}
+
+/** Map an internal model id to Google's REST model name. */
 export function normalizeGeminiModel(model?: string): string {
-  if (!model) return "gemini-2.5-flash";
+  if (!model) return getPersonalGeminiModel();
   return model.replace(/^google\//, "");
 }
 
 /**
  * Call Google's Generative Language API directly with the user's key.
- * Returns the plain text output.
+ * Throws PersonalGeminiExhaustedError on quota / auth failures so callers can fall back.
  */
 export async function callPersonalGemini(params: {
   systemPrompt?: string;
@@ -56,31 +107,42 @@ export async function callPersonalGemini(params: {
   temperature?: number;
 }): Promise<string> {
   const key = getPersonalGeminiKey();
-  if (!key) throw new Error("לא נמצא מפתח Gemini פרטי");
+  if (!key) throw new PersonalGeminiExhaustedError("לא נמצא מפתח Gemini פרטי");
 
   const model = normalizeGeminiModel(params.model);
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
 
   const body: Record<string, unknown> = {
-    contents: [
-      { role: "user", parts: [{ text: params.userPrompt }] },
-    ],
-    generationConfig: {
-      temperature: params.temperature ?? 0.3,
-    },
+    contents: [{ role: "user", parts: [{ text: params.userPrompt }] }],
+    generationConfig: { temperature: params.temperature ?? 0.3 },
   };
   if (params.systemPrompt) {
     body.systemInstruction = { role: "system", parts: [{ text: params.systemPrompt }] };
   }
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    // network — treat as transient, do NOT mark exhausted
+    throw new Error(`Gemini network error: ${(e as Error).message}`);
+  }
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
+    // Quota / auth → mark exhausted so callers fall back and future calls skip us
+    if (res.status === 429 || res.status === 403 || res.status === 401 ||
+        /quota|exhausted|billing|RESOURCE_EXHAUSTED/i.test(errText)) {
+      markPersonalGeminiExhausted(60);
+      throw new PersonalGeminiExhaustedError(
+        `Gemini האישי מוצה (${res.status}). עוברים ל-Lovable AI.`,
+        res.status,
+      );
+    }
     throw new Error(`Gemini API שגיאה (${res.status}): ${errText.slice(0, 200)}`);
   }
 

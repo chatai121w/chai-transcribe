@@ -22,7 +22,13 @@ import {
   isPersonalGeminiEnabled,
   setPersonalGeminiKey,
   setPersonalGeminiEnabled,
+  getPersonalGeminiModel,
+  setPersonalGeminiModel,
+  isPersonalGeminiFallbackEnabled,
+  setPersonalGeminiFallbackEnabled,
+  PERSONAL_GEMINI_MODELS,
 } from "@/lib/personalGemini";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sparkles } from "lucide-react";
 
 const Settings = () => {
@@ -52,6 +58,8 @@ const Settings = () => {
   const [geminiKey, setGeminiKey] = useState("");
   const [showGemini, setShowGemini] = useState(false);
   const [usePersonalGemini, setUsePersonalGeminiState] = useState(false);
+  const [geminiModel, setGeminiModelState] = useState("gemini-2.5-flash");
+  const [geminiFallback, setGeminiFallbackState] = useState(true);
   const [userIdentifier, setUserIdentifier] = useState("");
   const [activeTab, setActiveTab] = useState<string>("api-keys");
   const location = useLocation();
@@ -85,6 +93,8 @@ const Settings = () => {
     // Load personal Gemini prefs (localStorage first, cloud overrides in loadKeysFromCloud)
     setGeminiKey(getPersonalGeminiKey());
     setUsePersonalGeminiState(isPersonalGeminiEnabled());
+    setGeminiModelState(getPersonalGeminiModel());
+    setGeminiFallbackState(isPersonalGeminiFallbackEnabled());
 
     // Load from cloud
     loadKeysFromCloud(identifier);
@@ -262,6 +272,8 @@ const Settings = () => {
       // Personal Gemini
       setPersonalGeminiKey(geminiKey.trim());
       setPersonalGeminiEnabled(usePersonalGemini && !!geminiKey.trim());
+      setPersonalGeminiModel(geminiModel);
+      setPersonalGeminiFallbackEnabled(geminiFallback);
 
       if (primaryOpenAI) setOpenaiKey(primaryOpenAI);
       if (primaryGoogle) setGoogleKey(primaryGoogle);
@@ -434,11 +446,47 @@ const Settings = () => {
                   </a>
                   . התמיכה כוללת מפתחות בפורמט הישן (<code>AIza…</code>) וגם החדש (<code>AQ.Ab8…</code>).
                 </p>
-                <p className="text-[11px] text-muted-foreground">
-                  הערה: תמלול/דיאריזציה עדיין נשלטים במנוע שבחרת בעמוד הראשי (Groq/OpenAI וכו'). המתג הזה משפיע כרגע על כל שכבת ה-AI לעריכת טקסט וניתוח. הרחבה למנועי תמלול Gemini תתווסף בשלב הבא.
-                </p>
               </div>
+
+              {/* Model selector */}
+              <div className="space-y-2">
+                <Label>מודל Gemini לשימוש</Label>
+                <Select value={geminiModel} onValueChange={setGeminiModelState}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PERSONAL_GEMINI_MODELS.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        <span className="font-medium">{m.label}</span>
+                        {m.note && <span className="text-muted-foreground text-xs mr-2">— {m.note}</span>}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Fallback toggle */}
+              <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-background p-3">
+                <div>
+                  <div className="text-sm font-medium">Fallback אוטומטי ל-Lovable</div>
+                  <p className="text-xs text-muted-foreground">
+                    כשהמפתח שלך מוצה קרדיטים או מוחזר 429/403 — נעבור אוטומטית לקרדיטים של Lovable ונחכה שעה לפני ניסיון חוזר.
+                  </p>
+                </div>
+                <Switch checked={geminiFallback} onCheckedChange={(v) => {
+                  setGeminiFallbackState(v);
+                  setPersonalGeminiFallbackEnabled(v);
+                }} />
+              </div>
+
+              <p className="text-[11px] text-muted-foreground">
+                המתג משפיע על <strong>כל שכבת ה-AI לעריכה וניתוח</strong> (עריכת טקסט, AI Polish, ניתוח תיקוני ASR, סיכומים, בדיקת איות).
+                מנועי <strong>תמלול ודיאריזציה</strong> Gemini דורשים אינטגרציה נפרדת של מודל אודיו — יתווסף בהמשך כמנוע חדש בעמוד הראשי.
+              </p>
             </div>
+
+
 
             <div className="space-y-2">
               <Label htmlFor="openai">OpenAI API Key</Label>

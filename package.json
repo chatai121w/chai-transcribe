@@ -6,7 +6,7 @@
   "scripts": {
     "run": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/start-local.ps1",
     "run:accurate": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/start-local.ps1 -Model ivrit-ai/whisper-large-v3-ct2",
-    "dev": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/start-vite.ps1",
+    "dev": "vite",
     "dev:vite": "vite",
     "build": "vite build",
     "build:dev": "vite build --mode development",
@@ -20,7 +20,8 @@
     "test:report": "npx playwright show-report",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "dev:win": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/start-vite.ps1"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

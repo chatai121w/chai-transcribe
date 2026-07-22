@@ -1,7 +1,14 @@
 import { supabase } from "@/integrations/supabase/client";
 import { buildHebrewGuardPrefix } from "@/lib/hebrewGuard";
 import { ACTION_PROMPTS, TONE_PROMPTS } from "@/lib/prompts";
-import { isPersonalGeminiEnabled, callPersonalGemini } from "@/lib/personalGemini";
+import {
+  isPersonalGeminiEnabled,
+  callPersonalGemini,
+  isPersonalGeminiFallbackEnabled,
+  PersonalGeminiExhaustedError,
+  getPersonalGeminiModel,
+} from "@/lib/personalGemini";
+import { toast } from "sonner";
 
 interface EditTranscriptParams {
   text: string;
@@ -33,7 +40,7 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
     }
   }
 
-  // ── Personal Gemini path: bypass Lovable AI entirely when user opted in ──
+  // ── Personal Gemini path: try user's key first, fall back to Lovable on exhaustion ──
   if (isPersonalGeminiEnabled()) {
     let systemPrompt = '';
     if (action === 'custom' && customPrompt) systemPrompt = customPrompt;
@@ -41,13 +48,24 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
     else systemPrompt = (ACTION_PROMPTS as Record<string, string>)[action] || ACTION_PROMPTS.improve;
     if (targetLanguage) systemPrompt += `\nהחזר את הטקסט בשפה: ${targetLanguage}`;
     systemPrompt += '\nהחזר את הטקסט הסופי בלבד, ללא הסברים.';
-    return await callPersonalGemini({
-      systemPrompt,
-      userPrompt: text,
-      model: model || 'gemini-2.5-flash',
-      temperature: 0.3,
-    });
+    try {
+      return await callPersonalGemini({
+        systemPrompt,
+        userPrompt: text,
+        model: model || getPersonalGeminiModel(),
+        temperature: 0.3,
+      });
+    } catch (e) {
+      if (e instanceof PersonalGeminiExhaustedError && isPersonalGeminiFallbackEnabled()) {
+        try { toast.warning("מפתח Gemini האישי מוצה — עוברים ל-Lovable AI"); } catch { /* noop */ }
+        // fall through to DB proxy / edge function
+      } else {
+        throw e;
+      }
+    }
   }
+
+
 
   // ── Try DB proxy first (latest code, no deployment needed) ──
   try {
