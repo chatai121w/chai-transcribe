@@ -92,12 +92,20 @@ const Settings = () => {
     if (tab === 'ai-pricing') setActiveTab('ai-pricing');
   }, [location.hash, location.key, location.search]);
 
-  // Live-refresh personal Gemini usage counters
+  // Live-refresh usage counters (personal + Lovable Gateway)
   useEffect(() => {
-    const handler = () => setGeminiUsage(getPersonalGeminiUsage());
+    const handler = () => {
+      setGeminiUsage(getPersonalGeminiUsage());
+      setLovableUsage(getLovableGatewayUsage());
+    };
     window.addEventListener("personal-gemini-usage", handler);
+    window.addEventListener("lovable-gemini-usage", handler);
     const iv = window.setInterval(handler, 5000);
-    return () => { window.removeEventListener("personal-gemini-usage", handler); window.clearInterval(iv); };
+    return () => {
+      window.removeEventListener("personal-gemini-usage", handler);
+      window.removeEventListener("lovable-gemini-usage", handler);
+      window.clearInterval(iv);
+    };
   }, []);
 
 
