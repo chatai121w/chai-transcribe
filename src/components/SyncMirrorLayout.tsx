@@ -1344,7 +1344,7 @@ export const SyncMirrorLayout = ({
                   פעולות
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 text-xs" dir="rtl">
+              <DropdownMenuContent align="end" className="w-56 text-xs">
                 <DropdownMenuItem onClick={restoreToBaseline} disabled={!isModifiedFromBaseline}>
                   <History className="me-2 h-3.5 w-3.5" /> החזר לגרסת בסיס
                 </DropdownMenuItem>

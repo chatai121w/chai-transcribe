@@ -17,6 +17,9 @@ export interface WordTiming {
   word: string;
   start: number;
   end: number;
+  probability?: number;
+  correctionOriginal?: string;
+  correctedAt?: number;
 }
 
 // ── Hebrew normalization ─────────────────────────────────────────────────────
