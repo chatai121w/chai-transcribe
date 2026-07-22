@@ -9,13 +9,22 @@ const corsHeaders = {
 };
 
 const ALLOWED_MODELS = new Set([
+  "gemini-flash-latest",
+  "gemini-pro-latest",
   "gemini-2.5-flash",
   "gemini-2.5-pro",
   "gemini-2.5-flash-lite",
   "gemini-2.0-flash",
   "gemini-1.5-pro",
 ]);
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_MODEL = "gemini-flash-latest";
+
+// Google blocked gemini-2.5-* for new personal-API users → map to the -latest alias for the personal path.
+function resolvePersonalModel(m: string): string {
+  if (m === "gemini-2.5-flash") return "gemini-flash-latest";
+  if (m === "gemini-2.5-pro") return "gemini-pro-latest";
+  return m;
+}
 
 const buildPrompt = (lang: string) => {
   const langHint = lang === "he"
