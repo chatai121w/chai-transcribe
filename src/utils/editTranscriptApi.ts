@@ -7,6 +7,7 @@ import {
   isPersonalGeminiFallbackEnabled,
   PersonalGeminiExhaustedError,
   getPersonalGeminiModel,
+  recordLovableGatewayUsage,
 } from "@/lib/personalGemini";
 import { toast } from "sonner";
 
