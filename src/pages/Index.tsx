@@ -841,6 +841,7 @@ const Index = () => {
         await transcribeLocally(fileToTranscribe, url);
       }
       debugLog.info('bgTask', `✅ bgTask runner finished for ${engine}`);
+      flashEngineDone(engine);
     }).catch((err) => {
       debugLog.error('bgTask', `❌ bgTask rejected: ${err instanceof Error ? err.message : String(err)}`);
     });
