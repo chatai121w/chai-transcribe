@@ -73,6 +73,13 @@ async function callPersonalGoogle(params: {
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
+    // Auto-retry once if this model is blocked for new users
+    if (res.status === 404 && /no longer available|not found/i.test(txt)) {
+      const fb = params.model.includes("pro") ? "gemini-pro-latest" : "gemini-flash-latest";
+      if (fb !== params.model) {
+        return callPersonalGoogle({ ...params, model: fb });
+      }
+    }
     const exhausted = res.status === 429 || res.status === 403 || res.status === 401 ||
       /quota|exhausted|billing|RESOURCE_EXHAUSTED/i.test(txt);
     const err = new Error(`Google API ${res.status}: ${txt.slice(0, 200)}`);
