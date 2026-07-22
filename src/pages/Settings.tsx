@@ -88,6 +88,15 @@ const Settings = () => {
     if (tab === 'ai-pricing') setActiveTab('ai-pricing');
   }, [location.hash, location.key, location.search]);
 
+  // Live-refresh personal Gemini usage counters
+  useEffect(() => {
+    const handler = () => setGeminiUsage(getPersonalGeminiUsage());
+    window.addEventListener("personal-gemini-usage", handler);
+    const iv = window.setInterval(handler, 5000);
+    return () => { window.removeEventListener("personal-gemini-usage", handler); window.clearInterval(iv); };
+  }, []);
+
+
   useEffect(() => {
     if (isLoading) return;
     if (!isAuthenticated) {
