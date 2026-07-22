@@ -18,7 +18,7 @@ import { toast } from "@/hooks/use-toast";
 import { getApiKey } from "@/lib/keyCrypto";
 import { ApiKeyUsagePanel } from "@/components/ApiKeyUsagePanel";
 
-type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
+type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
 
 interface TranscriptionEngineProps {
@@ -206,13 +206,14 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
       <div className="mb-3">
         <h3 className="text-xs font-medium mb-2 text-right text-muted-foreground tracking-wide flex items-center justify-end gap-1"><Cloud className="w-3 h-3 text-[#0f1e43]" /> מנועים אונליין</h3>
         <RadioGroup value={selected} onValueChange={(value) => onChange(value as Engine)}>
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {([
               { id: 'groq' as Engine, icon: Zap, label: 'Groq', sub: 'whisper-large-v3-turbo' },
               { id: 'openai' as Engine, icon: Globe, label: 'OpenAI', sub: 'whisper-1' },
               { id: 'google' as Engine, icon: Chrome, label: 'Google', sub: 'Speech-to-Text' },
               { id: 'assemblyai' as Engine, icon: Mic, label: 'AssemblyAI', sub: 'Universal' },
               { id: 'deepgram' as Engine, icon: Waves, label: 'Deepgram', sub: 'nova-2' },
+              { id: 'gemini' as Engine, icon: Sparkles, label: 'Gemini', sub: 'Google AI · Audio' },
             ] as const).map(({ id, icon: Icon, label, sub }) => (
               <Label
                 key={id}
