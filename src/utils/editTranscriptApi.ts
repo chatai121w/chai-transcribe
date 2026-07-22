@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { buildHebrewGuardPrefix } from "@/lib/hebrewGuard";
 import { ACTION_PROMPTS, TONE_PROMPTS } from "@/lib/prompts";
+import { isPersonalGeminiEnabled, callPersonalGemini } from "@/lib/personalGemini";
 
 interface EditTranscriptParams {
   text: string;
@@ -30,6 +31,22 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
       action = 'custom';
       customPrompt = hebrewPrefix + '\n' + basePrompt;
     }
+  }
+
+  // ── Personal Gemini path: bypass Lovable AI entirely when user opted in ──
+  if (isPersonalGeminiEnabled()) {
+    let systemPrompt = '';
+    if (action === 'custom' && customPrompt) systemPrompt = customPrompt;
+    else if (action === 'tone') systemPrompt = TONE_PROMPTS[toneStyle || 'formal'] || TONE_PROMPTS.formal;
+    else systemPrompt = (ACTION_PROMPTS as Record<string, string>)[action] || ACTION_PROMPTS.improve;
+    if (targetLanguage) systemPrompt += `\nהחזר את הטקסט בשפה: ${targetLanguage}`;
+    systemPrompt += '\nהחזר את הטקסט הסופי בלבד, ללא הסברים.';
+    return await callPersonalGemini({
+      systemPrompt,
+      userPrompt: text,
+      model: model || 'gemini-2.5-flash',
+      temperature: 0.3,
+    });
   }
 
   // ── Try DB proxy first (latest code, no deployment needed) ──
