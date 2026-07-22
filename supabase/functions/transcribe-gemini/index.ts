@@ -127,25 +127,21 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Lightweight auth: accept any Authorization header (publishable key or user JWT).
+    // Matches sibling transcribe-* functions. Try to extract a user id for logs, but
+    // do NOT block on it — the client's XHR sends the publishable key, not a user JWT.
+    const authHeader = req.headers.get("Authorization") || "";
+    let userId = "anon";
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
       });
-    }
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user } } = await userClient.auth.getUser();
-    if (!user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+      const { data } = await userClient.auth.getUser();
+      if (data?.user?.id) userId = data.user.id;
+    } catch { /* ignore */ }
+
 
     const form = await req.formData();
     const file = form.get("file");
