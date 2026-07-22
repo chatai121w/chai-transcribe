@@ -32,6 +32,7 @@ import {
   resetPersonalGeminiUsage,
   type PersonalGeminiUsage,
 } from "@/lib/personalGemini";
+import { estimateGeminiCostUsd, getGeminiPrice, formatUsd } from "@/lib/geminiPricing";
 import { GeminiBadge } from "@/components/GeminiBadge";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
