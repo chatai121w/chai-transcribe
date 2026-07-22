@@ -1062,6 +1062,7 @@ export type Database = {
           created_at: string
           deepgram_key: string | null
           deepgram_keys_pool: Json | null
+          gemini_key: string | null
           google_key: string | null
           google_keys_pool: Json | null
           groq_key: string | null
@@ -1083,6 +1084,7 @@ export type Database = {
           created_at?: string
           deepgram_key?: string | null
           deepgram_keys_pool?: Json | null
+          gemini_key?: string | null
           google_key?: string | null
           google_keys_pool?: Json | null
           groq_key?: string | null
@@ -1104,6 +1106,7 @@ export type Database = {
           created_at?: string
           deepgram_key?: string | null
           deepgram_keys_pool?: Json | null
+          gemini_key?: string | null
           google_key?: string | null
           google_keys_pool?: Json | null
           groq_key?: string | null

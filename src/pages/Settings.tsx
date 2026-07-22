@@ -16,6 +16,14 @@ import { ThemeManager } from "@/components/ThemeManager";
 import { getApiKey } from "@/lib/keyCrypto";
 import { ApiKeyUsagePanel } from "@/components/ApiKeyUsagePanel";
 import { AIPricingSettings } from "@/components/AIPricingSettings";
+import { Switch } from "@/components/ui/switch";
+import {
+  getPersonalGeminiKey,
+  isPersonalGeminiEnabled,
+  setPersonalGeminiKey,
+  setPersonalGeminiEnabled,
+} from "@/lib/personalGemini";
+import { Sparkles } from "lucide-react";
 
 const Settings = () => {
   const { isAuthenticated, logout, isLoading, isAdmin, user } = useAuth();
@@ -41,6 +49,9 @@ const Settings = () => {
   const [showDeepgram, setShowDeepgram] = useState(false);
   const [huggingfaceKey, setHuggingfaceKey] = useState("");
   const [showHuggingface, setShowHuggingface] = useState(false);
+  const [geminiKey, setGeminiKey] = useState("");
+  const [showGemini, setShowGemini] = useState(false);
+  const [usePersonalGemini, setUsePersonalGeminiState] = useState(false);
   const [userIdentifier, setUserIdentifier] = useState("");
   const [activeTab, setActiveTab] = useState<string>("api-keys");
   const location = useLocation();
@@ -70,6 +81,10 @@ const Settings = () => {
     const identifier = user?.id || "";
     if (!identifier) return;
     setUserIdentifier(identifier);
+
+    // Load personal Gemini prefs (localStorage first, cloud overrides in loadKeysFromCloud)
+    setGeminiKey(getPersonalGeminiKey());
+    setUsePersonalGeminiState(isPersonalGeminiEnabled());
 
     // Load from cloud
     loadKeysFromCloud(identifier);
@@ -111,6 +126,11 @@ const Settings = () => {
         if (data.assemblyai_key) setAssemblyaiKey(data.assemblyai_key);
         if (data.deepgram_key) setDeepgramKey(data.deepgram_key);
         if (data.huggingface_key) setHuggingfaceKey(data.huggingface_key);
+        const cloudGemini = (data as unknown as { gemini_key?: string | null }).gemini_key;
+        if (cloudGemini) {
+          setGeminiKey(cloudGemini);
+          setPersonalGeminiKey(cloudGemini);
+        }
 
         // Multi-key pools: load from cloud first, fall back to localStorage
         const loadPool = (cloudPool: any, poolStorageKey: string, fallback?: string, setter?: (v: string) => void) => {
@@ -199,12 +219,13 @@ const Settings = () => {
           assemblyai_key: primaryAssembly || null,
           deepgram_key: primaryDeepgram || null,
           huggingface_key: huggingfaceKey.trim() || null,
+          gemini_key: geminiKey.trim() || null,
           openai_keys_pool: openaiPool.length ? openaiPool : null,
           google_keys_pool: googlePool.length ? googlePool : null,
           groq_keys_pool: groqPool.length ? groqPool : null,
           assemblyai_keys_pool: assemblyPool.length ? assemblyPool : null,
           deepgram_keys_pool: deepgramPool.length ? deepgramPool : null,
-        }, {
+        } as never, {
           onConflict: 'user_identifier'
         });
 
@@ -237,6 +258,10 @@ const Settings = () => {
         localStorage.setItem("deepgram_api_key", primaryDeepgram);
         localStorage.setItem("deepgram_api_keys_pool", JSON.stringify(deepgramPool));
       }
+
+      // Personal Gemini
+      setPersonalGeminiKey(geminiKey.trim());
+      setPersonalGeminiEnabled(usePersonalGemini && !!geminiKey.trim());
 
       if (primaryOpenAI) setOpenaiKey(primaryOpenAI);
       if (primaryGoogle) setGoogleKey(primaryGoogle);
@@ -359,6 +384,62 @@ const Settings = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* ── Personal Gemini (global toggle) ─────────────────── */}
+            <div className="rounded-lg border-2 border-yellow-500/40 bg-yellow-500/5 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-yellow-600" />
+                  <div>
+                    <h3 className="font-semibold text-base">מפתח Gemini פרטי (גלובלי)</h3>
+                    <p className="text-xs text-muted-foreground">
+                      כשמופעל — כל קריאות ה-AI (עריכת טקסט, AI Polish, ניתוח תיקונים) יעברו דרך המפתח שלך במקום דרך Lovable.
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={usePersonalGemini}
+                  onCheckedChange={(v) => {
+                    setUsePersonalGeminiState(v);
+                    setPersonalGeminiEnabled(v && !!geminiKey.trim());
+                  }}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="gemini">Gemini API Key (Google AI Studio)</Label>
+                <div className="relative">
+                  <Input
+                    id="gemini"
+                    type={showGemini ? "text" : "password"}
+                    placeholder="AIza... או AQ.Ab8..."
+                    value={geminiKey}
+                    onChange={(e) => setGeminiKey(e.target.value)}
+                    dir="ltr"
+                    className="pr-10"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute left-0 top-0 h-full px-3 hover:bg-transparent"
+                    onClick={() => setShowGemini(!showGemini)}
+                  >
+                    {showGemini ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  צור מפתח חינמי ב-{" "}
+                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline text-yellow-700">
+                    aistudio.google.com/apikey
+                  </a>
+                  . התמיכה כוללת מפתחות בפורמט הישן (<code>AIza…</code>) וגם החדש (<code>AQ.Ab8…</code>).
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  הערה: תמלול/דיאריזציה עדיין נשלטים במנוע שבחרת בעמוד הראשי (Groq/OpenAI וכו'). המתג הזה משפיע כרגע על כל שכבת ה-AI לעריכת טקסט וניתוח. הרחבה למנועי תמלול Gemini תתווסף בשלב הבא.
+                </p>
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="openai">OpenAI API Key</Label>
               <div className="relative">

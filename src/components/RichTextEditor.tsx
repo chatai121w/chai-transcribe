@@ -441,7 +441,8 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
     const originalWord = contextWord;
     if (!range || !originalWord || !correctedWord.trim() || correctedWord.trim() === originalWord) return;
 
-    const replacement = range.startContainer.ownerDocument.createTextNode(correctedWord.trim());
+    const doc = range.startContainer.ownerDocument ?? document;
+    const replacement = doc.createTextNode(correctedWord.trim());
     range.deleteContents();
     range.insertNode(replacement);
     replacement.parentNode?.normalize();
