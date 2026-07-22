@@ -172,25 +172,27 @@ export function useTranscriptionEngines(
       xhr.onload = () => {
         if (processingInterval) clearInterval(processingInterval);
         onProgress(100);
+        const requestId = xhr.getResponseHeader('x-request-id') || undefined;
         try {
           const json = JSON.parse(xhr.responseText || '{}');
           if (xhr.status >= 200 && xhr.status < 300) {
-            resolve({ data: json });
+            resolve({ data: { ...json, __requestId: requestId } });
           } else if (xhr.status === 429) {
             const retryAfter = parseInt(xhr.getResponseHeader('Retry-After') || '60', 10);
-            resolve({ error: { message: `RATE_LIMIT`, retryAfter } });
+            resolve({ error: { message: 'RATE_LIMIT', retryAfter, status: 429, requestId, body: json } });
           } else {
-            resolve({ error: json || { message: `HTTP ${xhr.status}` } });
+            resolve({ error: { ...(json || {}), status: xhr.status, requestId, body: json } });
           }
         } catch (e) {
-          resolve({ error: { message: 'Invalid JSON response' } });
+          resolve({ error: { message: `HTTP ${xhr.status} — תשובה לא-JSON`, status: xhr.status, requestId, raw: xhr.responseText?.slice(0, 300) } });
         }
       };
 
       xhr.onerror = () => {
         if (processingInterval) clearInterval(processingInterval);
-        resolve({ error: { message: 'Network error' } });
+        resolve({ error: { message: 'Network error', status: 0 } });
       };
+
 
       xhr.send(formData);
     });
@@ -253,18 +255,35 @@ export function useTranscriptionEngines(
   }, [state, saveToHistory, saveTextOnlyToCloud, addAnalyticsRecord, perfMonitor, navigate]);
 
   const handleError = useCallback((engineLabel: string, file: File, error: unknown) => {
-    debugLog.error(engineLabel, 'Transcription failed', error instanceof Error ? error.message : error);
+    const err = (error && typeof error === 'object') ? error as Record<string, unknown> : {};
+    const status = err.status as number | undefined;
+    const requestId = err.requestId as string | undefined;
+    const stage = err.stage as string | undefined;
+    const baseMsg = (err.error as string) || (err.message as string) || (error instanceof Error ? error.message : 'שגיאה לא ידועה');
+    const extraLines: string[] = [];
+    if (status !== undefined) extraLines.push(`סטטוס: ${status}`);
+    if (stage) extraLines.push(`שלב: ${stage}`);
+    if (err.personalStatus) extraLines.push(`Personal: ${err.personalStatus} — ${err.personalError ?? ''}`);
+    if (err.lovableStatus || err.lovableError) extraLines.push(`Lovable: ${err.lovableStatus ?? ''} — ${err.lovableError ?? ''}`);
+    if (requestId) extraLines.push(`Request ID: ${requestId}`);
+    const description = [baseMsg, ...extraLines].filter(Boolean).join('\n');
+    debugLog.error(engineLabel, 'Transcription failed', { status, requestId, stage, error: baseMsg, raw: err });
     addAnalyticsRecord({
       engine: engineLabel, status: 'failed',
       fileName: file.name, fileSize: file.size,
-      errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      errorMessage: description,
     });
     toast({
-      title: `שגיאה בתמלול ${engineLabel}`,
-      description: error instanceof Error ? error.message : "שגיאה לא ידועה",
+      title: `שגיאה בתמלול ${engineLabel}${status ? ` (${status})` : ''}`,
+      description,
       variant: "destructive",
+      duration: 15000,
     });
+    if (requestId) {
+      try { navigator.clipboard?.writeText(requestId); } catch { /* noop */ }
+    }
   }, [addAnalyticsRecord]);
+
 
   // ── Cloud engine helper (OpenAI/Groq — using XHR via supabase edge) ──
 

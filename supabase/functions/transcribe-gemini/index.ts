@@ -126,10 +126,11 @@ async function callLovableGemini(params: {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const requestId = crypto.randomUUID();
+  const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json", "x-request-id": requestId };
+
   try {
     // Lightweight auth: accept any Authorization header (publishable key or user JWT).
-    // Matches sibling transcribe-* functions. Try to extract a user id for logs, but
-    // do NOT block on it — the client's XHR sends the publishable key, not a user JWT.
     const authHeader = req.headers.get("Authorization") || "";
     let userId = "anon";
     try {
@@ -142,13 +143,11 @@ serve(async (req) => {
       if (data?.user?.id) userId = data.user.id;
     } catch { /* ignore */ }
 
-
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File)) {
-      return new Response(JSON.stringify({ error: "Missing audio file" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      return new Response(JSON.stringify({ error: "Missing audio file", requestId, stage: "validate" }), {
+        status: 400, headers: jsonHeaders,
       });
     }
     const personalKey = (form.get("apiKey") as string | null)?.trim() || "";
@@ -157,7 +156,7 @@ serve(async (req) => {
     const lang = (form.get("language") as string | null) || "he";
     const mimeType = file.type || "audio/mpeg";
 
-    console.log(`[transcribe-gemini] user=${userId} model=${model} lang=${lang} personal=${!!personalKey} size=${file.size}`);
+    console.log(`[transcribe-gemini] req=${requestId} user=${userId} model=${model} lang=${lang} personal=${!!personalKey} size=${file.size}`);
 
     const audioB64 = await fileToBase64(file);
 
@@ -165,6 +164,8 @@ serve(async (req) => {
     let usage: unknown = null;
     let provider: "personal" | "lovable" = "lovable";
     let fallbackReason: string | null = null;
+    let personalStatus: number | null = null;
+    let lovableError: { message: string; status?: number } | null = null;
 
     if (personalKey) {
       try {
@@ -172,37 +173,52 @@ serve(async (req) => {
         text = r.text; usage = r.usage; provider = "personal";
       } catch (e) {
         const exhausted = (e as { exhausted?: boolean }).exhausted;
-        console.warn(`[transcribe-gemini] personal key failed (exhausted=${exhausted}): ${(e as Error).message}`);
-        if (!exhausted) {
-          // Non-quota error: still try Lovable fallback but report why
-          fallbackReason = (e as Error).message;
-        } else {
-          fallbackReason = "personal_exhausted";
-        }
+        personalStatus = (e as { status?: number }).status ?? null;
+        console.warn(`[transcribe-gemini] req=${requestId} personal key failed status=${personalStatus} exhausted=${exhausted}: ${(e as Error).message}`);
+        fallbackReason = exhausted ? "personal_exhausted" : (e as Error).message;
       }
     }
 
     if (!text) {
-      const r = await callLovableGemini({ model, mimeType, audioB64, lang });
-      text = r.text; usage = r.usage; provider = "lovable";
+      try {
+        const r = await callLovableGemini({ model, mimeType, audioB64, lang });
+        text = r.text; usage = r.usage; provider = "lovable";
+      } catch (e) {
+        const msg = (e as Error).message || "Lovable AI failed";
+        const m = /Lovable AI (\d+)/.exec(msg);
+        lovableError = { message: msg, status: m ? Number(m[1]) : undefined };
+        console.error(`[transcribe-gemini] req=${requestId} lovable failed: ${msg}`);
+      }
     }
 
     if (!text) {
-      return new Response(JSON.stringify({ error: "Empty transcript from Gemini" }), {
-        status: 502,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          error: "Gemini transcription failed",
+          requestId,
+          stage: personalKey && !lovableError ? "personal" : "lovable",
+          model,
+          provider: personalKey ? "personal→lovable" : "lovable",
+          personalStatus,
+          personalError: fallbackReason,
+          lovableStatus: lovableError?.status ?? null,
+          lovableError: lovableError?.message ?? null,
+        }),
+        { status: 502, headers: jsonHeaders },
+      );
     }
 
     return new Response(
-      JSON.stringify({ text, model, provider, fallbackReason, usage }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      JSON.stringify({ text, model, provider, fallbackReason, usage, requestId }),
+      { headers: jsonHeaders },
     );
   } catch (error) {
-    console.error("[transcribe-gemini] error:", error);
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    console.error(`[transcribe-gemini] req=${requestId} fatal:`, msg);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      JSON.stringify({ error: msg, requestId, stage: "fatal" }),
+      { status: 500, headers: jsonHeaders },
     );
   }
 });
+
