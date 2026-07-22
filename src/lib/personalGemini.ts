@@ -234,7 +234,9 @@ export async function callPersonalGemini(params: {
   userPrompt: string;
   model?: string;
   temperature?: number;
+  surface?: UsageSurface;
 }): Promise<string> {
+
   const key = getPersonalGeminiKey();
   if (!key) throw new PersonalGeminiExhaustedError("לא נמצא מפתח Gemini פרטי");
 
