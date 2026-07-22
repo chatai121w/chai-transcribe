@@ -1761,18 +1761,33 @@ const Index = () => {
         navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: [], transcriptId: lastSavedTranscriptIdRef.current } });
       }, 800);
     } catch (error) {
-      debugLog.error('Gemini', 'Transcription failed', error instanceof Error ? error.message : error);
+      const err = (error && typeof error === 'object') ? error as Record<string, unknown> : {};
+      const status = err.status as number | undefined;
+      const requestId = err.requestId as string | undefined;
+      const stage = err.stage as string | undefined;
+      const baseMsg = (err.error as string) || (err.message as string) || (error instanceof Error ? error.message : 'שגיאה בתמלול הקובץ');
+      const lines: string[] = [baseMsg];
+      if (status !== undefined) lines.push(`סטטוס: ${status}`);
+      if (stage) lines.push(`שלב: ${stage}`);
+      if (err.personalStatus) lines.push(`Personal: ${err.personalStatus} — ${err.personalError ?? ''}`);
+      if (err.lovableStatus || err.lovableError) lines.push(`Lovable: ${err.lovableStatus ?? ''} — ${err.lovableError ?? ''}`);
+      if (requestId) lines.push(`Request ID: ${requestId} (הועתק)`);
+      const description = lines.filter(Boolean).join('\n');
+      debugLog.error('Gemini', 'Transcription failed', { status, requestId, stage, error: baseMsg, raw: err });
       addAnalyticsRecord({
         engine: 'Gemini', status: 'failed',
         fileName: file.name, fileSize: file.size,
-        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        errorMessage: description,
       });
       toast({
-        title: 'שגיאה בתמלול Gemini',
-        description: error instanceof Error ? error.message : 'שגיאה בתמלול הקובץ',
+        title: `שגיאה בתמלול Gemini${status ? ` (${status})` : ''}`,
+        description,
         variant: 'destructive',
+        duration: 15000,
       });
+      if (requestId) { try { navigator.clipboard?.writeText(requestId); } catch { /* noop */ } }
       throw error;
+
     } finally {
       setIsUploading(false);
     }
