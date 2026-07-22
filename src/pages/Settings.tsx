@@ -27,6 +27,7 @@ import {
   isPersonalGeminiFallbackEnabled,
   setPersonalGeminiFallbackEnabled,
   PERSONAL_GEMINI_MODELS,
+  callPersonalGemini,
 } from "@/lib/personalGemini";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sparkles } from "lucide-react";
@@ -60,6 +61,8 @@ const Settings = () => {
   const [usePersonalGemini, setUsePersonalGeminiState] = useState(false);
   const [geminiModel, setGeminiModelState] = useState("gemini-2.5-flash");
   const [geminiFallback, setGeminiFallbackState] = useState(true);
+  const [geminiTestStatus, setGeminiTestStatus] = useState<'idle' | 'testing' | 'ok' | 'err'>('idle');
+  const [geminiTestMsg, setGeminiTestMsg] = useState<string>("");
   const [userIdentifier, setUserIdentifier] = useState("");
   const [activeTab, setActiveTab] = useState<string>("api-keys");
   const location = useLocation();
@@ -478,6 +481,48 @@ const Settings = () => {
                   setGeminiFallbackState(v);
                   setPersonalGeminiFallbackEnabled(v);
                 }} />
+              </div>
+
+              {/* Test connection */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={geminiTestStatus === 'testing' || !geminiKey.trim()}
+                  onClick={async () => {
+                    const key = geminiKey.trim();
+                    if (!key) { toast.error("הזן מפתח קודם"); return; }
+                    setGeminiTestStatus('testing');
+                    setGeminiTestMsg("");
+                    // Save key first so callPersonalGemini can read it
+                    setPersonalGeminiKey(key);
+                    setPersonalGeminiModel(geminiModel);
+                    try {
+                      const out = await callPersonalGemini({
+                        userPrompt: "החזר בדיוק את המילה: OK",
+                        model: geminiModel,
+                        temperature: 0,
+                      });
+                      setGeminiTestStatus('ok');
+                      setGeminiTestMsg(`✓ המפתח עובד. תגובה: "${out.slice(0, 60)}"`);
+                      toast.success("המפתח תקין ומחובר ל-Google ✓");
+                    } catch (e) {
+                      setGeminiTestStatus('err');
+                      const msg = e instanceof Error ? e.message : String(e);
+                      setGeminiTestMsg(`✗ ${msg}`);
+                      toast.error(`בדיקה נכשלה: ${msg.slice(0, 120)}`);
+                    }
+                  }}
+                >
+                  {geminiTestStatus === 'testing' ? "בודק..." : "בדוק חיבור"}
+                </Button>
+                {geminiTestStatus === 'ok' && (
+                  <span className="text-xs text-green-600 font-medium">{geminiTestMsg}</span>
+                )}
+                {geminiTestStatus === 'err' && (
+                  <span className="text-xs text-red-600 font-medium">{geminiTestMsg}</span>
+                )}
               </div>
 
               <p className="text-[11px] text-muted-foreground">
