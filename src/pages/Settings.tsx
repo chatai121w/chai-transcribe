@@ -625,6 +625,59 @@ const Settings = () => {
                 </div>
               </div>
 
+              {/* ── Route 2: Lovable AI Gateway (credits) ──────────── */}
+              <div className="rounded-md border border-sky-500/30 bg-background p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <GeminiBadge size={14} />
+                    <span className="text-sm font-semibold">מסלול 2 · Lovable AI Gateway (חיוב בקרדיטים)</span>
+                  </div>
+                  <Button
+                    type="button" variant="ghost" size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => { resetLovableGatewayUsage(); setLovableUsage(getLovableGatewayUsage()); toast.success("איפוס מוני שימוש"); }}
+                  >
+                    אפס מונים
+                  </Button>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded bg-sky-500/5 p-2">
+                    <div className="text-[11px] text-muted-foreground">קריאות</div>
+                    <div className="text-sm font-bold tabular-nums">{lovableUsage.calls.toLocaleString("he-IL")}</div>
+                  </div>
+                  <div className="rounded bg-sky-500/5 p-2">
+                    <div className="text-[11px] text-muted-foreground">Prompt</div>
+                    <div className="text-sm font-bold tabular-nums">{lovableUsage.promptTokens.toLocaleString("he-IL")}</div>
+                  </div>
+                  <div className="rounded bg-sky-500/5 p-2">
+                    <div className="text-[11px] text-muted-foreground">סה״כ tokens</div>
+                    <div className="text-sm font-bold tabular-nums text-sky-700">{lovableUsage.totalTokens.toLocaleString("he-IL")}</div>
+                  </div>
+                </div>
+                {Object.keys(lovableUsage.byModel).length > 0 && (
+                  <div className="space-y-1 pt-1">
+                    <div className="text-[11px] text-muted-foreground">פירוט לפי מודל (עלות בקרדיטים של Lovable — ראו Settings → Plans & credits):</div>
+                    {Object.entries(lovableUsage.byModel)
+                      .sort((a, b) => b[1].totalTokens - a[1].totalTokens)
+                      .map(([m, s]) => (
+                        <div key={m} className="flex items-center justify-between gap-2 text-xs bg-background/60 rounded px-2 py-1">
+                          <span className="font-mono truncate" dir="ltr">{m}</span>
+                          <span className="tabular-nums text-muted-foreground shrink-0">
+                            {s.calls} · {s.totalTokens.toLocaleString("he-IL")} tok
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+                <div className="text-[10px] text-muted-foreground">
+                  {lovableUsage.lastUsedAt
+                    ? `שימוש אחרון: ${new Date(lovableUsage.lastUsedAt).toLocaleString("he-IL")} · נצרך מקרדיטים של Lovable`
+                    : "עוד לא נספרה קריאה דרך Lovable AI. הספירה מתחילה כשהמפתח האישי כבוי או ב-fallback."}
+                </div>
+              </div>
+
+
+
 
 
               <p className="text-[11px] text-muted-foreground">
