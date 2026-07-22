@@ -22,7 +22,13 @@ import {
   isPersonalGeminiEnabled,
   setPersonalGeminiKey,
   setPersonalGeminiEnabled,
+  getPersonalGeminiModel,
+  setPersonalGeminiModel,
+  isPersonalGeminiFallbackEnabled,
+  setPersonalGeminiFallbackEnabled,
+  PERSONAL_GEMINI_MODELS,
 } from "@/lib/personalGemini";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sparkles } from "lucide-react";
 
 const Settings = () => {
