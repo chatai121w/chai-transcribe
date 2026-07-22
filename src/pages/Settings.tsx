@@ -541,6 +541,59 @@ const Settings = () => {
                 )}
               </div>
 
+              {/* ── Usage counters ────────────────────────────────── */}
+              <div className="rounded-md border border-yellow-500/30 bg-background p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <GeminiBadge personal size={14} />
+                    <span className="text-sm font-semibold">שימוש במפתח האישי</span>
+                  </div>
+                  <Button
+                    type="button" variant="ghost" size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => { resetPersonalGeminiUsage(); setGeminiUsage(getPersonalGeminiUsage()); toast.success("איפוס מוני שימוש"); }}
+                  >
+                    אפס מונים
+                  </Button>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded bg-yellow-500/5 p-2">
+                    <div className="text-[11px] text-muted-foreground">קריאות</div>
+                    <div className="text-sm font-bold tabular-nums">{geminiUsage.calls.toLocaleString("he-IL")}</div>
+                  </div>
+                  <div className="rounded bg-yellow-500/5 p-2">
+                    <div className="text-[11px] text-muted-foreground">Prompt tokens</div>
+                    <div className="text-sm font-bold tabular-nums">{geminiUsage.promptTokens.toLocaleString("he-IL")}</div>
+                  </div>
+                  <div className="rounded bg-yellow-500/5 p-2">
+                    <div className="text-[11px] text-muted-foreground">סה״כ tokens</div>
+                    <div className="text-sm font-bold tabular-nums text-yellow-700">{geminiUsage.totalTokens.toLocaleString("he-IL")}</div>
+                  </div>
+                </div>
+                {Object.keys(geminiUsage.byModel).length > 0 && (
+                  <div className="space-y-1 pt-1">
+                    <div className="text-[11px] text-muted-foreground">פירוט לפי מודל:</div>
+                    {Object.entries(geminiUsage.byModel)
+                      .sort((a, b) => b[1].totalTokens - a[1].totalTokens)
+                      .map(([m, s]) => (
+                        <div key={m} className="flex items-center justify-between text-xs bg-background/60 rounded px-2 py-1">
+                          <span className="font-mono truncate" dir="ltr">{m}</span>
+                          <span className="tabular-nums text-muted-foreground">
+                            {s.calls} · {s.totalTokens.toLocaleString("he-IL")} tok
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+                <div className="text-[10px] text-muted-foreground">
+                  {geminiUsage.lastUsedAt
+                    ? `שימוש אחרון: ${new Date(geminiUsage.lastUsedAt).toLocaleString("he-IL")}`
+                    : "אין עדיין שימוש נספר. הספירה מתחילה כשמפעילים את המפתח האישי."}
+                </div>
+              </div>
+
+
+
               <p className="text-[11px] text-muted-foreground">
                 המתג משפיע על <strong>כל שכבת ה-AI לעריכה וניתוח</strong> (עריכת טקסט, AI Polish, ניתוח תיקוני ASR, סיכומים, בדיקת איות).
                 מנועי <strong>תמלול ודיאריזציה</strong> Gemini דורשים אינטגרציה נפרדת של מודל אודיו — יתווסף בהמשך כמנוע חדש בעמוד הראשי.
