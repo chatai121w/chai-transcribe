@@ -8,6 +8,7 @@ import {
   PersonalGeminiExhaustedError,
   getPersonalGeminiModel,
   recordLovableGatewayUsage,
+  isGeminiModel,
 } from "@/lib/personalGemini";
 import { toast } from "sonner";
 
