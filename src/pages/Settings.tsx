@@ -624,10 +624,10 @@ const Settings = () => {
                 {Object.keys(geminiUsage.bySurface || {}).length > 0 && (
                   <div className="space-y-1 pt-1">
                     <div className="text-[11px] text-muted-foreground">פירוט לפי עמוד:</div>
-                    {(Object.entries(geminiUsage.bySurface || {}) as [keyof typeof SURFACE_LABELS, { calls: number; promptTokens: number; completionTokens: number; totalTokens: number }][])
+                    {(Object.entries(geminiUsage.bySurface || {}) as Array<[UsageSurface, { calls: number; promptTokens: number; completionTokens: number; totalTokens: number }]>)
                       .sort((a, b) => b[1].totalTokens - a[1].totalTokens)
                       .map(([surface, s]) => {
-                        const models = geminiUsage.bySurfaceModel?.[surface] || {};
+                        const models = (geminiUsage.bySurfaceModel?.[surface] || {}) as Record<string, { promptTokens: number; completionTokens: number }>;
                         const cost = Object.entries(models).reduce(
                           (sum, [m, mb]) => sum + estimateGeminiCostUsd(m, mb.promptTokens, mb.completionTokens),
                           0,
@@ -641,6 +641,7 @@ const Settings = () => {
                           </div>
                         );
                       })}
+
                   </div>
                 )}
 
