@@ -210,6 +210,14 @@ export async function callPersonalGemini(params: {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
+    // 404 "no longer available to new users" → retry once with the latest-alias
+    if (res.status === 404 && /no longer available|not found/i.test(errText)) {
+      const fallbackModel = model.includes("pro") ? "gemini-pro-latest" : "gemini-flash-latest";
+      if (fallbackModel !== model) {
+        try { setPersonalGeminiModel(fallbackModel); } catch { /* noop */ }
+        return callPersonalGemini({ ...params, model: fallbackModel });
+      }
+    }
     // Quota / auth → mark exhausted so callers fall back and future calls skip us
     if (res.status === 429 || res.status === 403 || res.status === 401 ||
         /quota|exhausted|billing|RESOURCE_EXHAUSTED/i.test(errText)) {
