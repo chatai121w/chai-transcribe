@@ -133,6 +133,11 @@ const Index = () => {
   const [originalTranscript, setOriginalTranscript] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [completedEngine, setCompletedEngine] = useState<Engine | null>(null);
+  const flashEngineDone = useCallback((eng: Engine) => {
+    setCompletedEngine(eng);
+    window.setTimeout(() => setCompletedEngine((prev) => (prev === eng ? null : prev)), 5000);
+  }, []);
 
   // Audio & word timing state for sync player
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -836,6 +841,7 @@ const Index = () => {
         await transcribeLocally(fileToTranscribe, url);
       }
       debugLog.info('bgTask', `✅ bgTask runner finished for ${engine}`);
+      flashEngineDone(engine);
     }).catch((err) => {
       debugLog.error('bgTask', `❌ bgTask rejected: ${err instanceof Error ? err.message : String(err)}`);
     });
@@ -2099,6 +2105,7 @@ const Index = () => {
           sourceLanguage={sourceLanguage}
           onSourceLanguageChange={setSourceLanguage}
           groqKeysText={groqPoolText}
+          completedEngine={completedEngine}
         />
 
         {engine === 'local-server' && (
