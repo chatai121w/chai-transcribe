@@ -446,8 +446,46 @@ const Settings = () => {
                   </a>
                   . התמיכה כוללת מפתחות בפורמט הישן (<code>AIza…</code>) וגם החדש (<code>AQ.Ab8…</code>).
                 </p>
-                <p className="text-[11px] text-muted-foreground">
-                  הערה: תמלול/דיאריזציה עדיין נשלטים במנוע שבחרת בעמוד הראשי (Groq/OpenAI וכו'). המתג הזה משפיע כרגע על כל שכבת ה-AI לעריכת טקסט וניתוח. הרחבה למנועי תמלול Gemini תתווסף בשלב הבא.
+              </div>
+
+              {/* Model selector */}
+              <div className="space-y-2">
+                <Label>מודל Gemini לשימוש</Label>
+                <Select value={geminiModel} onValueChange={setGeminiModelState}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PERSONAL_GEMINI_MODELS.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        <span className="font-medium">{m.label}</span>
+                        {m.note && <span className="text-muted-foreground text-xs mr-2">— {m.note}</span>}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Fallback toggle */}
+              <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-background p-3">
+                <div>
+                  <div className="text-sm font-medium">Fallback אוטומטי ל-Lovable</div>
+                  <p className="text-xs text-muted-foreground">
+                    כשהמפתח שלך מוצה קרדיטים או מוחזר 429/403 — נעבור אוטומטית לקרדיטים של Lovable ונחכה שעה לפני ניסיון חוזר.
+                  </p>
+                </div>
+                <Switch checked={geminiFallback} onCheckedChange={(v) => {
+                  setGeminiFallbackState(v);
+                  setPersonalGeminiFallbackEnabled(v);
+                }} />
+              </div>
+
+              <p className="text-[11px] text-muted-foreground">
+                המתג משפיע על <strong>כל שכבת ה-AI לעריכה וניתוח</strong> (עריכת טקסט, AI Polish, ניתוח תיקוני ASR, סיכומים, בדיקת איות).
+                מנועי <strong>תמלול ודיאריזציה</strong> Gemini דורשים אינטגרציה נפרדת של מודל אודיו — יתווסף בהמשך כמנוע חדש בעמוד הראשי.
+              </p>
+            </div>
+
                 </p>
               </div>
             </div>
