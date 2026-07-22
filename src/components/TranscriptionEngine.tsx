@@ -291,7 +291,14 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
             ))}
           </div>
         </RadioGroup>
+        {selected === 'gemini' && (
+          <div className="mt-2 flex items-center justify-end gap-2 text-xs">
+            <span className="text-muted-foreground">מודל Gemini לתמלול:</span>
+            <GeminiModelSelect storageKey="gemini_transcription_model" />
+          </div>
+        )}
       </div>
+
 
       <div>
         <h3 className="text-xs font-medium mb-2 text-right text-muted-foreground tracking-wide flex items-center justify-end gap-1"><Monitor className="w-3 h-3 text-[#0f1e43]" /> מנועים מקומיים</h3>
