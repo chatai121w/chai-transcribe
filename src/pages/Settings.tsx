@@ -68,6 +68,8 @@ const Settings = () => {
   const [geminiFallback, setGeminiFallbackState] = useState(true);
   const [geminiTestStatus, setGeminiTestStatus] = useState<'idle' | 'testing' | 'ok' | 'err'>('idle');
   const [geminiTestMsg, setGeminiTestMsg] = useState<string>("");
+  const [geminiUsage, setGeminiUsage] = useState<PersonalGeminiUsage>(() => getPersonalGeminiUsage());
+
   const [userIdentifier, setUserIdentifier] = useState("");
   const [activeTab, setActiveTab] = useState<string>("api-keys");
   const location = useLocation();
