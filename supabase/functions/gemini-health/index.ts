@@ -138,15 +138,20 @@ serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const personalKey = (body.apiKey as string | undefined)?.trim() || "";
-    const model = ((body.model as string | undefined) || "gemini-2.5-flash").replace(/^google\//, "");
+    const rawModel = ((body.model as string | undefined) || "gemini-flash-latest").replace(/^google\//, "");
+    // Google blocked gemini-2.5-* for new personal-API users → map to -latest for the personal probe.
+    const personalModel = rawModel === "gemini-2.5-flash" ? "gemini-flash-latest"
+      : rawModel === "gemini-2.5-pro" ? "gemini-pro-latest"
+      : rawModel;
+    const model = rawModel;
 
-    const results: Record<string, unknown> = { requestId, model, hasPersonalKey: !!personalKey };
+    const results: Record<string, unknown> = { requestId, model, personalModel, hasPersonalKey: !!personalKey };
 
     if (personalKey) {
-      results.personalAuth = await checkPersonal(personalKey, model);
+      results.personalAuth = await checkPersonal(personalKey, personalModel);
     }
     results.lovable = await checkLovable(model);
-    results.audioFormat = await checkAudioFormat(personalKey || null, model);
+    results.audioFormat = await checkAudioFormat(personalKey || null, personalKey ? personalModel : model);
 
     const authOk = personalKey ? (results.personalAuth as { ok?: boolean }).ok : (results.lovable as { ok?: boolean }).ok;
     const formatOk = (results.audioFormat as { ok?: boolean }).ok;
