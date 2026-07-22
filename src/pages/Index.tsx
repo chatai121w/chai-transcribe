@@ -16,7 +16,7 @@ import { useBackgroundTask } from "@/hooks/useBackgroundTask";
 import { debugLog } from "@/lib/debugLogger";
 import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
 import { useTranscriptionAnalytics } from "@/hooks/useTranscriptionAnalytics";
-import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Pause, Play, Square, Copy, Check, Keyboard, Activity, Users, Scissors, BrainCircuit, Youtube } from "lucide-react";
+import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Pause, Play, Square, Copy, Check, Keyboard, Activity, Users, Scissors, BrainCircuit, Youtube, Sparkles } from "lucide-react";
 import { openQuickCut } from "@/lib/quickCutBus";
 import { usePerfMonitor } from "@/hooks/usePerfMonitor";
 import { PerfMonitorPanel } from "@/components/PerfMonitorPanel";
@@ -81,7 +81,7 @@ const TRANSCRIPTION_WIDGETS: WidgetDefinition[] = [
   { id: "diarization", title: "זיהוי דוברים", defaultSpan: "full" },
 ];
 
-type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
+type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
 
 const Index = () => {
@@ -828,6 +828,8 @@ const Index = () => {
         await transcribeWithAssemblyAI(fileToTranscribe, url);
       } else if (engine === 'deepgram') {
         await transcribeWithDeepgram(fileToTranscribe, url);
+      } else if (engine === 'gemini') {
+        await transcribeWithGemini(fileToTranscribe, url);
       } else if (engine === 'local-server') {
         await transcribeWithLocalServer(fileToTranscribe, url);
       } else {
@@ -1699,6 +1701,75 @@ const Index = () => {
     }
   };
 
+  const transcribeWithGemini = async (file: File, fileAudioUrl?: string) => {
+    setIsUploading(true);
+    try {
+      // Personal Gemini key + selected model — client controls both, edge fn falls back to Lovable AI.
+      const { getPersonalGeminiKey, getPersonalGeminiModel } = await import('@/lib/personalGemini');
+      const personalKey = getPersonalGeminiKey();
+      const model = (localStorage.getItem('gemini_transcription_model')
+        || getPersonalGeminiModel()
+        || 'gemini-2.5-flash').replace(/^google\//, '');
+
+      setUploadProgress(0);
+      toast({
+        title: '✨ שולח ל-Gemini...',
+        description: personalKey ? `מפתח אישי · ${model}` : `Lovable AI · ${model}`,
+      });
+
+      const form = new FormData();
+      form.append('file', file, file.name);
+      form.append('model', model);
+      form.append('language', sourceLanguage);
+      if (personalKey) form.append('apiKey', personalKey);
+
+      const result = await xhrInvoke('transcribe-gemini', form, (p) => setUploadProgress(p));
+      if (result.error) throw result.error;
+      const data = result.data as { text?: string; provider?: string; fallbackReason?: string } | null;
+      if (!data?.text) throw new Error('לא התקבל תמלול מ-Gemini');
+
+      if (data.fallbackReason === 'personal_exhausted' && personalKey) {
+        toast({ title: 'מפתח Gemini האישי מוצה', description: 'התמלול הושלם דרך Lovable AI' });
+      }
+
+      const finalText = await saveToHistory(data.text, `Gemini (${model})`, undefined, []);
+      setTranscriptFromEngine(data.text);
+      setWordTimings([]);
+      addAnalyticsRecord({
+        engine: 'Gemini', status: 'success',
+        fileName: file.name, fileSize: file.size,
+        processingTime: (Date.now() - transcriptionStartRef.current) / 1000,
+        charCount: data.text.length, wordCount: data.text.split(/\s+/).length,
+      });
+      perfMonitor.record({
+        engine: 'Gemini', status: 'success',
+        fileName: file.name, fileSize: file.size,
+        audioDuration: 0,
+        processingTime: (Date.now() - transcriptionStartRef.current) / 1000,
+        text: data.text, wordTimings: [],
+      });
+      toast({ title: 'הצלחה!', description: `תמלול Gemini הושלם (${data.provider === 'personal' ? 'מפתח אישי' : 'Lovable AI'})` });
+      setTimeout(() => {
+        navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: [], transcriptId: lastSavedTranscriptIdRef.current } });
+      }, 800);
+    } catch (error) {
+      debugLog.error('Gemini', 'Transcription failed', error instanceof Error ? error.message : error);
+      addAnalyticsRecord({
+        engine: 'Gemini', status: 'failed',
+        fileName: file.name, fileSize: file.size,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      });
+      toast({
+        title: 'שגיאה בתמלול Gemini',
+        description: error instanceof Error ? error.message : 'שגיאה בתמלול הקובץ',
+        variant: 'destructive',
+      });
+      throw error;
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const isLoading = isUploading || isLocalLoading || isServerLoading || bgTask.isRunning;
   const progress = engine === 'local' ? localProgress : engine === 'local-server' ? serverProgress : (isUploading ? uploadProgress : undefined);
 
@@ -2353,6 +2424,7 @@ const Index = () => {
                     engine === 'google' ? 'text-blue-500 border-blue-500/30' :
                     engine === 'assemblyai' ? 'text-green-500 border-green-500/30' :
                     engine === 'deepgram' ? 'text-purple-500 border-purple-500/30' :
+                    engine === 'gemini' ? 'text-yellow-600 border-yellow-500/40' :
                     engine === 'local-server' ? 'text-purple-500 border-purple-500/30' :
                     engine === 'local' ? 'text-accent border-accent/30' :
                     'text-primary border-primary/30'
@@ -2362,9 +2434,10 @@ const Index = () => {
                     {engine === 'google' && <Chrome className="w-3 h-3" />}
                     {engine === 'assemblyai' && <Mic className="w-3 h-3" />}
                     {engine === 'deepgram' && <Waves className="w-3 h-3" />}
+                    {engine === 'gemini' && <Sparkles className="w-3 h-3" />}
                     {engine === 'local-server' && <Server className="w-3 h-3" />}
                     {engine === 'local' && <Cpu className="w-3 h-3" />}
-                    {engine === 'groq' ? 'Groq' : engine === 'openai' ? 'OpenAI' : engine === 'google' ? 'Google' : engine === 'assemblyai' ? 'AssemblyAI' : engine === 'deepgram' ? 'Deepgram' : engine === 'local-server' ? 'CUDA' : 'ONNX'}
+                    {engine === 'groq' ? 'Groq' : engine === 'openai' ? 'OpenAI' : engine === 'google' ? 'Google' : engine === 'assemblyai' ? 'AssemblyAI' : engine === 'deepgram' ? 'Deepgram' : engine === 'gemini' ? 'Gemini' : engine === 'local-server' ? 'CUDA' : 'ONNX'}
                   </span>
                   <span className="font-medium text-sm">
                     {progress !== undefined && progress > 0
