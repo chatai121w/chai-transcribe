@@ -8,6 +8,7 @@ import {
   PersonalGeminiExhaustedError,
   getPersonalGeminiModel,
   recordLovableGatewayUsage,
+  isGeminiModel,
 } from "@/lib/personalGemini";
 import { toast } from "sonner";
 
@@ -42,7 +43,7 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
   }
 
   // ── Personal Gemini path: try user's key first, fall back to Lovable on exhaustion ──
-  if (isPersonalGeminiEnabled()) {
+  if (isPersonalGeminiEnabled() && isGeminiModel(model || getPersonalGeminiModel())) {
     let systemPrompt = '';
     if (action === 'custom' && customPrompt) systemPrompt = customPrompt;
     else if (action === 'tone') systemPrompt = TONE_PROMPTS[toneStyle || 'formal'] || TONE_PROMPTS.formal;
