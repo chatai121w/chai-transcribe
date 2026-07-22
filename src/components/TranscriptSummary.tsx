@@ -13,6 +13,7 @@ import {
   callPersonalGemini,
   isPersonalGeminiFallbackEnabled,
   PersonalGeminiExhaustedError,
+  recordLovableGatewayUsage,
 } from "@/lib/personalGemini";
 
 interface TranscriptSummaryProps {
