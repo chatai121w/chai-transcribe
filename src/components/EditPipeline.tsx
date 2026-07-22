@@ -13,6 +13,9 @@ import {
 import { toast } from "@/hooks/use-toast";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
 import { useOllama, isOllamaModel, getOllamaModelName } from "@/hooks/useOllama";
+import { GeminiBadge } from "@/components/GeminiBadge";
+import { isGeminiModel } from "@/lib/personalGemini";
+
 
 interface EditPipelineProps {
   text: string;
@@ -236,7 +239,13 @@ export const EditPipeline = ({ text, onTextChange }: EditPipelineProps) => {
           </SelectTrigger>
           <SelectContent dir="rtl">
             {CLOUD_MODELS.map(m => (
-              <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+              <SelectItem key={m.value} value={m.value}>
+                <span className="inline-flex items-center gap-1.5">
+                  {isGeminiModel(m.value) && <GeminiBadge size={11} />}
+                  {m.label}
+                </span>
+              </SelectItem>
+
             ))}
             {ollama.models.length > 0 && (
               <>

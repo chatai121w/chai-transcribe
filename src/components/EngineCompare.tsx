@@ -6,6 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Zap, Trophy, ArrowLeftRight, Clock, Languages } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
+import { GeminiBadge } from "@/components/GeminiBadge";
+import { isGeminiModel } from "@/lib/personalGemini";
+
 
 interface EngineCompareProps {
   text: string;
@@ -111,10 +114,16 @@ export const EngineCompare = memo(({ text }: EngineCompareProps) => {
               </SelectTrigger>
               <SelectContent>
                 {COMPARE_MODELS.map(m => (
-                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                  <SelectItem key={m.value} value={m.value}>
+                    <span className="inline-flex items-center gap-1.5">
+                      {isGeminiModel(m.value) && <GeminiBadge size={11} />}
+                      {m.label}
+                    </span>
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+
           </div>
           <div className="space-y-1">
             <div className="text-xs text-white/50">מודל B</div>
@@ -124,9 +133,15 @@ export const EngineCompare = memo(({ text }: EngineCompareProps) => {
               </SelectTrigger>
               <SelectContent>
                 {COMPARE_MODELS.map(m => (
-                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                  <SelectItem key={m.value} value={m.value}>
+                    <span className="inline-flex items-center gap-1.5">
+                      {isGeminiModel(m.value) && <GeminiBadge size={11} />}
+                      {m.label}
+                    </span>
+                  </SelectItem>
                 ))}
               </SelectContent>
+
             </Select>
           </div>
         </div>
