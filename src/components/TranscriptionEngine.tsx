@@ -113,6 +113,15 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
   const [ollamaUrl, setOllamaUrl] = useState(() => localStorage.getItem('ollama_base_url') || '');
   const [groqUsageOpen, setGroqUsageOpen] = useState(false);
   const [groqMaxUsagePct, setGroqMaxUsagePct] = useState(0);
+  const [geminiModel, setGeminiModel] = useState<string>(() => {
+    try { return `google/${(localStorage.getItem('gemini_transcription_model') || 'gemini-2.5-flash').replace(/^google\//, '')}`; }
+    catch { return 'google/gemini-2.5-flash'; }
+  });
+  const handleGeminiModelChange = useCallback((v: string) => {
+    setGeminiModel(v);
+    try { localStorage.setItem('gemini_transcription_model', v.replace(/^google\//, '')); } catch { /* noop */ }
+    window.dispatchEvent(new Event('gemini-transcription-model-changed'));
+  }, []);
 
   const groqUsageColorClass = groqMaxUsagePct > 80
     ? "text-red-600"
