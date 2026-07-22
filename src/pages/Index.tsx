@@ -81,7 +81,7 @@ const TRANSCRIPTION_WIDGETS: WidgetDefinition[] = [
   { id: "diarization", title: "זיהוי דוברים", defaultSpan: "full" },
 ];
 
-type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
+type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
 
 const Index = () => {

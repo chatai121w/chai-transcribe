@@ -31,7 +31,7 @@ import { db } from "@/lib/localDb";
 import { isLoshonKodeshEnabled, buildLoshonKodeshHotwords } from "@/lib/loshonKodesh";
 import { applyDefinitiveRulesToText, areDefinitiveRulesEnabled } from '@/utils/hebrewRuleEngine';
 
-type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
+type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
 type WordTiming = { word: string; start: number; end: number; probability?: number };
 
