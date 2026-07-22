@@ -22,28 +22,51 @@ const LS_USAGE = "personal_gemini_usage"; // JSON usage counters (personal key p
 const LS_LOVABLE_USAGE = "lovable_gemini_usage"; // JSON usage counters (Lovable AI Gateway path)
 
 // ── Usage tracking ───────────────────────────────────────────────
-export interface PersonalGeminiUsage {
+export type UsageSurface = "transcription" | "editing" | "summary" | "other";
+
+export const SURFACE_LABELS: Record<UsageSurface, string> = {
+  transcription: "תמלול",
+  editing: "עריכה עם AI",
+  summary: "סיכום",
+  other: "אחר",
+};
+
+interface UsageBucket {
   calls: number;
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
-  byModel: Record<string, { calls: number; promptTokens: number; completionTokens: number; totalTokens: number }>;
+}
+
+export interface PersonalGeminiUsage extends UsageBucket {
+  byModel: Record<string, UsageBucket>;
+  bySurface: Partial<Record<UsageSurface, UsageBucket>>;
+  bySurfaceModel: Partial<Record<UsageSurface, Record<string, UsageBucket>>>;
   lastUsedAt: number | null;
-  since: number; // epoch ms of first tracked call (or reset time)
+  since: number;
 }
 
 const EMPTY_USAGE: PersonalGeminiUsage = {
   calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0,
-  byModel: {}, lastUsedAt: null, since: Date.now(),
+  byModel: {}, bySurface: {}, bySurfaceModel: {},
+  lastUsedAt: null, since: Date.now(),
 };
+
+const emptyBucket = (): UsageBucket => ({ calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 });
 
 function readUsage(lsKey: string): PersonalGeminiUsage {
   try {
     const raw = localStorage.getItem(lsKey);
-    if (!raw) return { ...EMPTY_USAGE };
+    if (!raw) return { ...EMPTY_USAGE, byModel: {}, bySurface: {}, bySurfaceModel: {} };
     const parsed = JSON.parse(raw);
-    return { ...EMPTY_USAGE, ...parsed, byModel: parsed.byModel || {} };
-  } catch { return { ...EMPTY_USAGE }; }
+    return {
+      ...EMPTY_USAGE,
+      ...parsed,
+      byModel: parsed.byModel || {},
+      bySurface: parsed.bySurface || {},
+      bySurfaceModel: parsed.bySurfaceModel || {},
+    };
+  } catch { return { ...EMPTY_USAGE, byModel: {}, bySurface: {}, bySurfaceModel: {} }; }
 }
 
 function writeUsage(lsKey: string, evt: string, usage: PersonalGeminiUsage) {
@@ -53,19 +76,32 @@ function writeUsage(lsKey: string, evt: string, usage: PersonalGeminiUsage) {
   } catch { /* noop */ }
 }
 
-function bumpUsage(lsKey: string, evt: string, model: string, prompt: number, completion: number) {
+function addToBucket(b: UsageBucket, prompt: number, completion: number) {
+  b.calls += 1;
+  b.promptTokens += prompt;
+  b.completionTokens += completion;
+  b.totalTokens += prompt + completion;
+}
+
+function bumpUsage(lsKey: string, evt: string, model: string, prompt: number, completion: number, surface: UsageSurface) {
   const u = readUsage(lsKey);
-  u.calls += 1;
-  u.promptTokens += prompt;
-  u.completionTokens += completion;
-  u.totalTokens += prompt + completion;
+  addToBucket(u, prompt, completion);
   u.lastUsedAt = Date.now();
-  const m = u.byModel[model] || { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-  m.calls += 1;
-  m.promptTokens += prompt;
-  m.completionTokens += completion;
-  m.totalTokens += prompt + completion;
+
+  const m = u.byModel[model] || emptyBucket();
+  addToBucket(m, prompt, completion);
   u.byModel[model] = m;
+
+  const s = u.bySurface[surface] || emptyBucket();
+  addToBucket(s, prompt, completion);
+  u.bySurface[surface] = s;
+
+  const smMap = u.bySurfaceModel[surface] || {};
+  const sm = smMap[model] || emptyBucket();
+  addToBucket(sm, prompt, completion);
+  smMap[model] = sm;
+  u.bySurfaceModel[surface] = smMap;
+
   if (!u.since) u.since = Date.now();
   writeUsage(lsKey, evt, u);
 }
@@ -73,20 +109,21 @@ function bumpUsage(lsKey: string, evt: string, model: string, prompt: number, co
 // Personal-key path (billed by Google, USD)
 export function getPersonalGeminiUsage(): PersonalGeminiUsage { return readUsage(LS_USAGE); }
 export function resetPersonalGeminiUsage() {
-  writeUsage(LS_USAGE, "personal-gemini-usage", { ...EMPTY_USAGE, since: Date.now() });
+  writeUsage(LS_USAGE, "personal-gemini-usage", { ...EMPTY_USAGE, byModel: {}, bySurface: {}, bySurfaceModel: {}, since: Date.now() });
 }
-export function recordPersonalGeminiUsage(model: string, prompt: number, completion: number) {
-  bumpUsage(LS_USAGE, "personal-gemini-usage", model, prompt, completion);
+export function recordPersonalGeminiUsage(model: string, prompt: number, completion: number, surface: UsageSurface = "other") {
+  bumpUsage(LS_USAGE, "personal-gemini-usage", model, prompt, completion, surface);
 }
 
 // Lovable AI Gateway path (billed in Lovable credits, no direct USD)
 export function getLovableGatewayUsage(): PersonalGeminiUsage { return readUsage(LS_LOVABLE_USAGE); }
 export function resetLovableGatewayUsage() {
-  writeUsage(LS_LOVABLE_USAGE, "lovable-gemini-usage", { ...EMPTY_USAGE, since: Date.now() });
+  writeUsage(LS_LOVABLE_USAGE, "lovable-gemini-usage", { ...EMPTY_USAGE, byModel: {}, bySurface: {}, bySurfaceModel: {}, since: Date.now() });
 }
-export function recordLovableGatewayUsage(model: string, prompt = 0, completion = 0) {
-  bumpUsage(LS_LOVABLE_USAGE, "lovable-gemini-usage", model, prompt, completion);
+export function recordLovableGatewayUsage(model: string, prompt = 0, completion = 0, surface: UsageSurface = "other") {
+  bumpUsage(LS_LOVABLE_USAGE, "lovable-gemini-usage", model, prompt, completion, surface);
 }
+
 
 /** True for any Gemini model identifier (google/gemini-…, gemini-…). */
 export function isGeminiModel(model?: string | null): boolean {
