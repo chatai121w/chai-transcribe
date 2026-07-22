@@ -166,10 +166,10 @@ export function markPersonalGeminiExhausted(minutes = 60) {
   } catch { /* noop */ }
 }
 
-/** Map an internal model id to Google's REST model name. */
+/** Map an internal model id to Google's REST model name (and auto-upgrade blocked names). */
 export function normalizeGeminiModel(model?: string): string {
   if (!model) return getPersonalGeminiModel();
-  return model.replace(/^google\//, "");
+  return resolvePersonalGeminiModel(model);
 }
 
 /**
