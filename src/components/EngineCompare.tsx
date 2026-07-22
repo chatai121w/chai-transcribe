@@ -133,9 +133,15 @@ export const EngineCompare = memo(({ text }: EngineCompareProps) => {
               </SelectTrigger>
               <SelectContent>
                 {COMPARE_MODELS.map(m => (
-                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                  <SelectItem key={m.value} value={m.value}>
+                    <span className="inline-flex items-center gap-1.5">
+                      {isGeminiModel(m.value) && <GeminiBadge size={11} />}
+                      {m.label}
+                    </span>
+                  </SelectItem>
                 ))}
               </SelectContent>
+
             </Select>
           </div>
         </div>
