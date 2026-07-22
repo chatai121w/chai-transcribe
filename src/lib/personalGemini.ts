@@ -79,13 +79,26 @@ export function isGeminiModel(model?: string | null): boolean {
 }
 
 
+// Google's personal Generative Language API uses alias names.
+// gemini-2.5-flash/pro are blocked for NEW users ("no longer available to new users")
+// so we default to the "-latest" aliases which always route to the current stable model.
 export const PERSONAL_GEMINI_MODELS: Array<{ id: string; label: string; note?: string }> = [
-  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", note: "מהיר וזול (ברירת מחדל)" },
-  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", note: "איכות גבוהה, איטי יותר" },
+  { id: "gemini-flash-latest", label: "Gemini Flash (Latest)", note: "מהיר וזול, נתמך תמיד (מומלץ)" },
+  { id: "gemini-pro-latest", label: "Gemini Pro (Latest)", note: "איכות גבוהה, נתמך תמיד" },
+  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", note: "רק למשתמשים ותיקים - עלול להחזיר 404" },
+  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", note: "רק למשתמשים ותיקים - עלול להחזיר 404" },
   { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", note: "הכי זול, לפעולות פשוטות" },
-  { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash", note: "יציב, נמצא זמן רב" },
-  { id: "gemini-1.5-pro", label: "Gemini 1.5 Pro", note: "דור קודם, הקשר גדול" },
+  { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash", note: "יציב, זמין לכולם" },
 ];
+
+/** Map stored model IDs blocked for new users to a supported alias. */
+export function resolvePersonalGeminiModel(id: string): string {
+  const s = (id || "").replace(/^google\//, "").trim();
+  if (s === "gemini-2.5-flash") return "gemini-flash-latest";
+  if (s === "gemini-2.5-pro") return "gemini-pro-latest";
+  if (s === "gemini-1.5-pro" || s === "gemini-1.5-flash") return "gemini-pro-latest";
+  return s || "gemini-flash-latest";
+}
 
 export class PersonalGeminiExhaustedError extends Error {
   status?: number;
