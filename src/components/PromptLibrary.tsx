@@ -26,6 +26,7 @@ import { editTranscriptCloud } from "@/utils/editTranscriptApi";
 import { useOllama, isOllamaModel, getOllamaModelName } from "@/hooks/useOllama";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { GeminiModelSelect, loadGeminiModel } from "@/components/GeminiModelSelect";
 
 interface PromptLibraryProps {
   text: string;
@@ -114,6 +115,7 @@ export const PromptLibrary = ({ text, onTextChange }: PromptLibraryProps) => {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [activePrompt, setActivePrompt] = useState<string | null>(null);
   const [selectedEngine, setSelectedEngine] = useState('cloud');
+  const [geminiModel, setGeminiModel] = useState<string>(() => loadGeminiModel('prompt_library_gemini_model'));
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
     return (localStorage.getItem('prompt_library_view') as 'grid' | 'list') || 'grid';
   });
@@ -264,7 +266,7 @@ export const PromptLibrary = ({ text, onTextChange }: PromptLibraryProps) => {
       } else {
         // Cloud execution via DB proxy → edge function fallback
         resultText = await editTranscriptCloud({
-          text, action: 'custom', customPrompt: prompt,
+          text, action: 'custom', customPrompt: prompt, model: geminiModel,
         });
       }
 
@@ -336,12 +338,21 @@ export const PromptLibrary = ({ text, onTextChange }: PromptLibraryProps) => {
               <SelectValue />
             </SelectTrigger>
             <SelectContent dir="rtl">
-              <SelectItem value="cloud">☁️ ענן (Gemini Flash)</SelectItem>
+              <SelectItem value="cloud">☁️ ענן (Gemini)</SelectItem>
               {ollama.models.map(m => (
                 <SelectItem key={`ollama:${m.name}`} value={`ollama:${m.name}`}>🖥️ {m.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
+
+          {selectedEngine === 'cloud' && (
+            <GeminiModelSelect
+              value={geminiModel}
+              onChange={setGeminiModel}
+              storageKey="prompt_library_gemini_model"
+              compact
+            />
+          )}
 
           <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
             <DialogTrigger asChild>
