@@ -89,7 +89,7 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
       // DB proxy routes through the user's stored Google key when present,
       // otherwise through Lovable's shared credentials. Either way it is NOT
       // the client-side personal path, so count it under the Lovable route.
-      recordLovableGatewayUsage(routeModel);
+      recordLovableGatewayUsage(routeModel, 0, 0, "editing");
       return result.text;
     }
 
