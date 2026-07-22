@@ -72,6 +72,7 @@ const Settings = () => {
   const [geminiTestStatus, setGeminiTestStatus] = useState<'idle' | 'testing' | 'ok' | 'err'>('idle');
   const [geminiTestMsg, setGeminiTestMsg] = useState<string>("");
   const [geminiUsage, setGeminiUsage] = useState<PersonalGeminiUsage>(() => getPersonalGeminiUsage());
+  const [lovableUsage, setLovableUsage] = useState<PersonalGeminiUsage>(() => getLovableGatewayUsage());
 
   const [userIdentifier, setUserIdentifier] = useState("");
   const [activeTab, setActiveTab] = useState<string>("api-keys");
