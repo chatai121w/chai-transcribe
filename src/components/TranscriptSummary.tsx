@@ -63,6 +63,9 @@ export const TranscriptSummary = ({ transcript }: TranscriptSummaryProps) => {
         });
         if (error) throw error;
         text = data?.summary ?? null;
+        // Track Lovable Gateway usage (credits, not USD).
+        const usage = (data?.usage ?? {}) as { prompt_tokens?: number; completion_tokens?: number };
+        recordLovableGatewayUsage(model, usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0);
       }
 
       if (text) {
