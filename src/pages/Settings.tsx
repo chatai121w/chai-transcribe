@@ -251,33 +251,46 @@ const Settings = () => {
       const primaryAssembly = assemblyPool[0] || assemblyaiKey.trim() || "";
       const primaryDeepgram = deepgramPool[0] || deepgramKey.trim() || "";
 
-      // Save to cloud (tied to user ID)
-      const { error } = await supabase
+      // Build payload with ONLY non-empty fields so we never wipe existing cloud values.
+      const payload: Record<string, unknown> = { user_identifier: userIdentifier };
+      const setIf = (key: string, val: string | null | undefined) => {
+        if (val && String(val).trim()) payload[key] = String(val).trim();
+      };
+      const setPoolIf = (key: string, pool: string[]) => {
+        if (pool.length > 0) payload[key] = pool;
+      };
+      setIf('openai_key', primaryOpenAI);
+      setIf('google_key', primaryGoogle);
+      setIf('groq_key', primaryGroq);
+      setIf('claude_key', claudeKey);
+      setIf('assemblyai_key', primaryAssembly);
+      setIf('deepgram_key', primaryDeepgram);
+      setIf('huggingface_key', huggingfaceKey);
+      setIf('gemini_key', geminiKey);
+      setPoolIf('openai_keys_pool', openaiPool);
+      setPoolIf('google_keys_pool', googlePool);
+      setPoolIf('groq_keys_pool', groqPool);
+      setPoolIf('assemblyai_keys_pool', assemblyPool);
+      setPoolIf('deepgram_keys_pool', deepgramPool);
+
+      console.log('[Settings] Saving keys to cloud:', {
+        user_identifier: userIdentifier,
+        fields: Object.keys(payload).filter(k => k !== 'user_identifier'),
+      });
+
+      // Save to cloud (tied to user ID) — partial upsert (only non-empty fields)
+      const { error, data: saved } = await supabase
         .from('user_api_keys')
-        .upsert({
-          user_identifier: userIdentifier,
-          openai_key: primaryOpenAI || null,
-          google_key: primaryGoogle || null,
-          groq_key: primaryGroq || null,
-          claude_key: claudeKey || null,
-          assemblyai_key: primaryAssembly || null,
-          deepgram_key: primaryDeepgram || null,
-          huggingface_key: huggingfaceKey.trim() || null,
-          gemini_key: geminiKey.trim() || null,
-          openai_keys_pool: openaiPool.length ? openaiPool : null,
-          google_keys_pool: googlePool.length ? googlePool : null,
-          groq_keys_pool: groqPool.length ? groqPool : null,
-          assemblyai_keys_pool: assemblyPool.length ? assemblyPool : null,
-          deepgram_keys_pool: deepgramPool.length ? deepgramPool : null,
-        } as never, {
-          onConflict: 'user_identifier'
-        });
+        .upsert(payload as never, { onConflict: 'user_identifier' })
+        .select()
+        .maybeSingle();
 
       if (error) {
-        console.error("Error saving to cloud:", error);
-        toast.error("שגיאה בשמירת המפתחות בענן");
+        console.error("[Settings] Cloud save error:", error);
+        toast.error(`שגיאת שמירה בענן: ${error.message} (code: ${error.code})`, { duration: 8000 });
         return;
       }
+      console.log('[Settings] Cloud save success. Row updated_at:', (saved as any)?.updated_at);
 
       // Also save locally for quick access
       if (primaryOpenAI) {
@@ -321,9 +334,48 @@ const Settings = () => {
       toast.success("המפתחות נשמרו בהצלחה בענן! ☁️");
     } catch (error) {
       console.error("Error saving keys:", error);
-      toast.error("שגיאה בשמירת המפתחות");
+      const msg = error instanceof Error ? error.message : String(error);
+      toast.error(`שגיאה בשמירת המפתחות: ${msg}`, { duration: 8000 });
     }
   };
+
+  // Dedicated save for Gemini key only — bypasses whole-form save so nothing else is touched.
+  const handleSaveGeminiOnly = async () => {
+    const key = geminiKey.trim();
+    if (!userIdentifier) { toast.error("לא מחובר — התחבר מחדש"); return; }
+    if (!key) { toast.error("שדה Gemini ריק"); return; }
+    try {
+      console.log('[Settings] Saving Gemini key only for', userIdentifier);
+      const { error, data } = await supabase
+        .from('user_api_keys')
+        .upsert(
+          { user_identifier: userIdentifier, gemini_key: key } as never,
+          { onConflict: 'user_identifier' }
+        )
+        .select('user_identifier, gemini_key, updated_at')
+        .maybeSingle();
+      if (error) {
+        console.error('[Settings] Gemini save error:', error);
+        toast.error(`שמירה בענן נכשלה: ${error.message}`, { duration: 8000 });
+        return;
+      }
+      const savedLen = ((data as any)?.gemini_key || '').length;
+      console.log('[Settings] Gemini saved. Length in DB:', savedLen);
+      // Mirror locally + enable
+      setPersonalGeminiKey(key);
+      if (!isPersonalGeminiEnabled() && localStorage.getItem('use_personal_gemini') !== '0') {
+        setPersonalGeminiEnabled(true);
+        setUsePersonalGeminiState(true);
+      }
+      localStorage.removeItem('personal_gemini_exhausted_until');
+      toast.success(`מפתח Gemini נשמר בענן ✓ (${savedLen} תווים)`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[Settings] Gemini save exception:', e);
+      toast.error(`שגיאה: ${msg}`, { duration: 8000 });
+    }
+  };
+
 
   const handleLogout = () => {
     logout();
@@ -473,6 +525,16 @@ const Settings = () => {
                     {showGemini ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleSaveGeminiOnly}
+                  disabled={!geminiKey.trim()}
+                  className="w-full"
+                >
+                  💾 שמור מפתח Gemini בענן (ישיר)
+                </Button>
                 <p className="text-xs text-muted-foreground">
                   צור מפתח חינמי ב-{" "}
                   <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline text-yellow-700">
