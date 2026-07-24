@@ -525,6 +525,16 @@ const Settings = () => {
                     {showGemini ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleSaveGeminiOnly}
+                  disabled={!geminiKey.trim()}
+                  className="w-full"
+                >
+                  💾 שמור מפתח Gemini בענן (ישיר)
+                </div>
                 <p className="text-xs text-muted-foreground">
                   צור מפתח חינמי ב-{" "}
                   <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline text-yellow-700">
