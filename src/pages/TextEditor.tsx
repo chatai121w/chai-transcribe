@@ -10,6 +10,7 @@ import type { TextVersion } from "@/components/TextEditHistory";
 import type { WordTiming, SyncAudioPlayerRef } from "@/components/SyncAudioPlayer";
 import { TextStyleControl } from "@/components/TextStyleControl";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Pencil, Check as CheckIcon, Eraser } from "lucide-react";
 
 // Lazy-loaded heavy components
@@ -39,7 +40,7 @@ const FloatingPlayerPortal = lazy(() => import("@/components/FloatingPlayerPorta
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })));
 const LoshonKodeshRules = lazy(() => import("@/pages/LoshonKodeshRules"));
 const AIVersionsGrid = lazy(() => import("@/components/AIVersionsGrid").then(m => ({ default: m.AIVersionsGrid })));
-import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle } from "lucide-react";
+import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle, Link } from "lucide-react";
 import { uploadToDrive } from "@/components/GoogleDriveBrowser";
 import { DriveFolderPicker } from "@/components/DriveFolderPicker";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
@@ -422,6 +423,13 @@ const TextEditor = () => {
     columnGap: '2rem',
     columnRule: '1px solid hsl(var(--border))',
   } : {};
+  const textWordCount = useMemo(() => {
+    const trimmed = text.trim();
+    return trimmed ? trimmed.split(/\s+/).length : 0;
+  }, [text]);
+  const isLargeEditorSession = text.length > 18_000 || textWordCount > 2_500 || wordTimings.length > 2_500;
+  const [forceFullSyncView, setForceFullSyncView] = useState(false);
+  const shouldUseFastEditor = isLargeEditorSession && !forceFullSyncView;
 
   // Recover audio from Dexie IndexedDB (last saved blob)
   const tryRecoverAudioFromDexie = useCallback(async () => {
@@ -493,10 +501,14 @@ const TextEditor = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
 
-    // Preload SyncAudioPlayer chunk in background so tab opens instantly
-    import("@/components/SyncAudioPlayer").catch(() => {});
+    // Preload SyncAudioPlayer after first paint. Immediate preloading competes
+    // with the editor's first render on long Groq transcripts and can freeze UI.
+    const preloadTimer = window.setTimeout(() => {
+      import("@/components/SyncAudioPlayer").catch(() => {});
+    }, 1200);
 
     return () => {
+      window.clearTimeout(preloadTimer);
       window.removeEventListener('keydown', handleKeyDown);
       if (ownedAudioUrlRef.current) {
         URL.revokeObjectURL(ownedAudioUrlRef.current);
@@ -1027,8 +1039,13 @@ const TextEditor = () => {
   // first ניקוד click is instant instead of waiting ~5s for a cold start.
   useEffect(() => {
     const ctrl = new AbortController();
-    fetch(`${getServerUrl()}/nikud/warmup`, { method: 'POST', signal: ctrl.signal }).catch(() => {});
-    return () => ctrl.abort();
+    const timer = window.setTimeout(() => {
+      fetch(`${getServerUrl()}/nikud/warmup`, { method: 'POST', signal: ctrl.signal }).catch(() => {});
+    }, 2500);
+    return () => {
+      window.clearTimeout(timer);
+      ctrl.abort();
+    };
   }, []);
 
   const handleEditorChange = useCallback((newText: string) => {
@@ -1824,24 +1841,53 @@ const TextEditor = () => {
               </div>
             )}
 
-            <LearningRegressionPanel
-              audioBlob={audioBlob}
-              audioFileName={audioFileName}
-              currentText={text}
-              recordingKey={transcriptId || audioFileName || 'current-transcript'}
-              onCandidateReady={(candidateText, label) => addVersion(candidateText, 'manual', label)}
-            />
+            {!shouldUseFastEditor && (
+              <>
+                <LearningRegressionPanel
+                  audioBlob={audioBlob}
+                  audioFileName={audioFileName}
+                  currentText={text}
+                  recordingKey={transcriptId || audioFileName || 'current-transcript'}
+                  onCandidateReady={(candidateText, label) => addVersion(candidateText, 'manual', label)}
+                />
 
-            <AudioLearningQueue
-              audioBlob={audioBlob}
-              audioFileName={audioFileName}
-              candidates={audioLearningCandidates}
-              onRemove={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
-              onApproved={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
-            />
+                <AudioLearningQueue
+                  audioBlob={audioBlob}
+                  audioFileName={audioFileName}
+                  candidates={audioLearningCandidates}
+                  onRemove={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
+                  onApproved={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
+                />
+              </>
+            )}
 
             {/* ── Sync transcript mirror ── */}
-            {playerLayout !== 'full' && (
+            {playerLayout !== 'full' && shouldUseFastEditor && (
+              <div className="rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden p-3 space-y-3" dir="rtl">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="text-xs text-muted-foreground">
+                    מצב מהיר פעיל לתמלול גדול · {textWordCount.toLocaleString('he-IL')} מילים
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs gap-1.5"
+                    onClick={() => setForceFullSyncView(true)}
+                  >
+                    <Link className="w-3.5 h-3.5" />
+                    פתח סנכרון מלא
+                  </Button>
+                </div>
+                <Textarea
+                  value={text}
+                  onChange={(event) => handlePlayerEditorChange(event.target.value)}
+                  dir="rtl"
+                  className="min-h-[55vh] resize-y text-base leading-8"
+                  style={{ fontFamily, fontSize: `${fontSize}px`, lineHeight }}
+                />
+              </div>
+            )}
+            {playerLayout !== 'full' && !shouldUseFastEditor && (
               <div className="rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden" style={{ minHeight: '55vh' }}>
                 <SyncMirrorLayout
                   wordTimings={wordTimings}
