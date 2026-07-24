@@ -534,7 +534,7 @@ const Settings = () => {
                   className="w-full"
                 >
                   💾 שמור מפתח Gemini בענן (ישיר)
-                </div>
+                </Button>
                 <p className="text-xs text-muted-foreground">
                   צור מפתח חינמי ב-{" "}
                   <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline text-yellow-700">
