@@ -539,15 +539,20 @@ export function useTranscriptionEngines(
 
       const result = await xhrInvoke('transcribe-gemini', form, (p) => state.setUploadProgress(p));
       if (result.error) throw result.error;
-      const data = result.data as { text?: string; provider?: string; fallbackReason?: string; usage?: { prompt_tokens?: number; completion_tokens?: number } } | null;
+      const data = result.data as { text?: string; provider?: "personal" | "lovable"; fallbackReason?: string; usage?: Record<string, unknown> } | null;
       if (!data?.text) throw new Error('לא התקבל תמלול מ-Gemini');
-      const usedPersonal = !!personalKey && data.fallbackReason !== 'personal_exhausted';
       try {
-        const { recordPersonalGeminiUsage, recordLovableGatewayUsage } = await import('@/lib/personalGemini');
-        const pTok = data.usage?.prompt_tokens ?? 0;
-        const cTok = data.usage?.completion_tokens ?? 0;
-        if (usedPersonal) recordPersonalGeminiUsage(model, pTok, cTok, 'transcription');
-        else recordLovableGatewayUsage(model, pTok, cTok, 'transcription');
+        const {
+          normalizeGeminiUsage,
+          recordPersonalGeminiUsage,
+          recordLovableGatewayUsage,
+        } = await import('@/lib/personalGemini');
+        const usage = normalizeGeminiUsage(data.usage);
+        if (data.provider === 'personal') {
+          recordPersonalGeminiUsage(model, usage.promptTokens, usage.completionTokens, 'transcription');
+        } else {
+          recordLovableGatewayUsage(model, usage.promptTokens, usage.completionTokens, 'transcription');
+        }
       } catch { /* noop */ }
       if (data.fallbackReason === 'personal_exhausted' && personalKey) {
         toast({ title: 'מפתח Gemini האישי מוצה', description: 'התמלול הושלם דרך Lovable AI' });

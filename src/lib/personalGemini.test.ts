@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getLovableGatewayUsage,
   getPersonalGeminiUsage,
+  normalizeGeminiUsage,
   recordLovableGatewayUsage,
   recordPersonalGeminiUsage,
 } from "./personalGemini";
@@ -25,6 +26,28 @@ beforeEach(() => {
 });
 
 describe("Gemini usage route separation", () => {
+  it("normalizes Google and Lovable token metadata and includes thinking tokens", () => {
+    expect(normalizeGeminiUsage({
+      promptTokenCount: 100,
+      candidatesTokenCount: 20,
+      thoughtsTokenCount: 30,
+      totalTokenCount: 150,
+    })).toEqual({
+      promptTokens: 100,
+      completionTokens: 50,
+      totalTokens: 150,
+    });
+    expect(normalizeGeminiUsage({
+      prompt_tokens: 80,
+      completion_tokens: 25,
+      total_tokens: 105,
+    })).toEqual({
+      promptTokens: 80,
+      completionTokens: 25,
+      totalTokens: 105,
+    });
+  });
+
   it("records personal API usage without changing Lovable usage", () => {
     recordPersonalGeminiUsage("gemini-flash-latest", 120, 30, "transcription");
 

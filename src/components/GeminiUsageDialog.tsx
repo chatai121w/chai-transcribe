@@ -7,7 +7,8 @@ import {
   getPersonalGeminiUsage,
   type PersonalGeminiUsage,
 } from "@/lib/personalGemini";
-import { estimateGeminiCostUsd, formatUsd } from "@/lib/geminiPricing";
+import { estimateGeminiCostUsd, formatUsd, getGeminiPrice } from "@/lib/geminiPricing";
+import { GEMINI_MODELS } from "@/components/GeminiModelSelect";
 
 const numberFormat = new Intl.NumberFormat("he-IL");
 
@@ -73,6 +74,40 @@ export function GeminiUsageDialog() {
           />
         </div>
 
+        <section className="rounded-md border p-3">
+          <h3 className="mb-2 text-sm font-semibold">מחירון Google API למודלים הזמינים</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[34rem] text-xs">
+              <thead className="text-muted-foreground">
+                <tr className="border-b">
+                  <th className="px-2 py-1.5 text-right font-medium">מודל</th>
+                  <th className="px-2 py-1.5 text-center font-medium">קלט טקסט / 1M</th>
+                  <th className="px-2 py-1.5 text-center font-medium">קלט אודיו / 1M</th>
+                  <th className="px-2 py-1.5 text-center font-medium">פלט / 1M</th>
+                </tr>
+              </thead>
+              <tbody>
+                {GEMINI_MODELS.map(({ value, label }) => {
+                  const price = getGeminiPrice(value);
+                  return (
+                    <tr key={value} className="border-b last:border-0">
+                      <td className="px-2 py-2">{label.replace(/\s*\(.+\)$/, "")}</td>
+                      <td className="px-2 py-2 text-center tabular-nums">${price.input}</td>
+                      <td className="px-2 py-2 text-center font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
+                        ${price.audioInput ?? price.input}
+                      </td>
+                      <td className="px-2 py-2 text-center tabular-nums">${price.output}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            תעריפי Paid Tier רגילים בדולר. ב־Free Tier העלות עשויה להיות $0, בכפוף למכסה ולפרויקט Google שלך.
+          </p>
+        </section>
+
         <p className="text-[11px] text-muted-foreground">
           הנתונים נמדדים בנפרד לכל מסלול. טוקנים שלא הוחזרו על ידי ספק התמלול יוצגו כ־0, אך הקריאה עדיין תיספר.
         </p>
@@ -98,11 +133,17 @@ function UsageRoute({
 }) {
   const models = Object.entries(usage.byModel).sort((a, b) => b[1].totalTokens - a[1].totalTokens);
   const estimatedCost = useMemo(
-    () => models.reduce(
-      (sum, [model, bucket]) => sum + estimateGeminiCostUsd(model, bucket.promptTokens, bucket.completionTokens),
-      0,
-    ),
-    [models],
+    () => Object.entries(usage.bySurfaceModel).reduce((surfaceSum, [surface, byModel]) => (
+      surfaceSum + Object.entries(byModel || {}).reduce((modelSum, [model, bucket]) => (
+        modelSum + estimateGeminiCostUsd(
+          model,
+          bucket.promptTokens,
+          bucket.completionTokens,
+          surface === "transcription" ? "audio" : "text",
+        )
+      ), 0)
+    ), 0),
+    [usage.bySurfaceModel],
   );
 
   return (
@@ -138,25 +179,33 @@ function UsageRoute({
         {models.length === 0 ? (
           <p className="rounded border border-dashed px-2 py-3 text-center text-xs text-muted-foreground">עדיין אין שימוש מתועד במסלול זה</p>
         ) : (
-          models.map(([model, bucket]) => (
-            <div key={model} className="rounded border bg-background px-2.5 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate font-mono text-[11px]" dir="ltr" title={model}>{model}</span>
-                <span className="whitespace-nowrap text-xs font-semibold tabular-nums">{numberFormat.format(bucket.totalTokens)}</span>
+          models.map(([model, bucket]) => {
+            const price = getGeminiPrice(model);
+            return (
+              <div key={model} className="rounded border bg-background px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-mono text-[11px]" dir="ltr" title={model}>{model}</span>
+                  <span className="whitespace-nowrap text-xs font-semibold tabular-nums">{numberFormat.format(bucket.totalTokens)}</span>
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+                  <span>{numberFormat.format(bucket.calls)} קריאות</span>
+                  <span>קלט {numberFormat.format(bucket.promptTokens)}</span>
+                  <span>פלט {numberFormat.format(bucket.completionTokens)}</span>
+                  {showEstimatedCost && (
+                    <span className="w-full text-emerald-700 dark:text-emerald-400">
+                      מחיר ל־1M: טקסט ${price.input} · אודיו ${price.audioInput ?? price.input} · פלט ${price.output}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="mt-1 flex gap-3 text-[10px] text-muted-foreground">
-                <span>{numberFormat.format(bucket.calls)} קריאות</span>
-                <span>קלט {numberFormat.format(bucket.promptTokens)}</span>
-                <span>פלט {numberFormat.format(bucket.completionTokens)}</span>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
       <div className="mt-3 border-t pt-2 text-[11px] text-muted-foreground">
         {showEstimatedCost
-          ? `עלות Google משוערת: ${formatUsd(estimatedCost)}`
+          ? `עלות Google משוערת לפי סוג הקלט: ${formatUsd(estimatedCost)}`
           : "החיוב נצרך מקרדיטי Lovable"}
         {usage.lastUsedAt && ` · שימוש אחרון: ${new Date(usage.lastUsedAt).toLocaleString("he-IL")}`}
       </div>

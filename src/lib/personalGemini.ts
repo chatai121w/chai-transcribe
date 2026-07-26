@@ -38,6 +38,37 @@ interface UsageBucket {
   totalTokens: number;
 }
 
+export interface NormalizedGeminiUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export function normalizeGeminiUsage(usage?: Record<string, unknown> | null): NormalizedGeminiUsage {
+  const number = (...values: unknown[]) => {
+    for (const value of values) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    }
+    return 0;
+  };
+  const promptTokens = number(usage?.prompt_tokens, usage?.promptTokenCount, usage?.input_tokens);
+  const reportedCompletion = number(
+    usage?.completion_tokens,
+    usage?.candidatesTokenCount,
+    usage?.output_tokens,
+  );
+  const reportedTotal = number(usage?.total_tokens, usage?.totalTokenCount);
+  // Google bills thinking tokens as output. totalTokenCount includes them,
+  // while candidatesTokenCount does not always do so.
+  const completionTokens = Math.max(reportedCompletion, reportedTotal - promptTokens, 0);
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: Math.max(reportedTotal, promptTokens + completionTokens),
+  };
+}
+
 export interface PersonalGeminiUsage extends UsageBucket {
   byModel: Record<string, UsageBucket>;
   bySurface: Partial<Record<UsageSurface, UsageBucket>>;
