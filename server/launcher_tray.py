@@ -125,15 +125,38 @@ def check_vite():
 
 
 def find_available_port(preferred: int, attempts: int = 100) -> int:
-    """Return the preferred port or the first available port after it."""
+    """Return a port available on both IPv4 and IPv6 localhost."""
     import socket
     for port in range(preferred, preferred + attempts):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        occupied = False
+        for address in ("127.0.0.1", "::1"):
             try:
-                sock.bind(("127.0.0.1", port))
-                return port
+                with socket.create_connection((address, port), timeout=0.15):
+                    occupied = True
+                    break
             except OSError:
-                continue
+                pass
+        if occupied:
+            continue
+
+        sockets = []
+        try:
+            for family, address in (
+                (socket.AF_INET, "127.0.0.1"),
+                (socket.AF_INET6, "::1"),
+            ):
+                sock = socket.socket(family, socket.SOCK_STREAM)
+                sockets.append(sock)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                if family == socket.AF_INET6:
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                sock.bind((address, port))
+            return port
+        except OSError:
+            continue
+        finally:
+            for sock in sockets:
+                sock.close()
     raise RuntimeError(
         f"No available local port found from {preferred} through {preferred + attempts - 1}"
     )
