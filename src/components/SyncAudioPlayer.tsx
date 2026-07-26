@@ -3229,7 +3229,8 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
               </div>
             )}
 
-            {/* ─── Time Slider ── */}
+            {/* ─── Compact transport deck ── */}
+            <div className="rounded-lg border bg-card/70 shadow-sm p-2.5 space-y-2">
             {!seekBarCollapsed ? (
               <div
                 className="relative"
@@ -3251,10 +3252,10 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                     <TooltipContent side="bottom">מזער פס סינכרון</TooltipContent>
                   </Tooltip>
                 )}
-                <div className="flex items-center gap-3" dir="ltr">
-                  <span className="text-xs text-muted-foreground font-mono min-w-[40px] text-center">{formatTime(effectiveDuration)}</span>
+                <div className="flex items-center gap-2" dir="ltr">
+                  <span className="text-[11px] text-muted-foreground font-mono min-w-[42px] text-center">{formatTime(effectiveDuration)}</span>
                   <Slider value={[currentTime]} max={effectiveDuration || 1} step={0.1} onValueChange={handleSliderSeek} className="flex-1" dir="rtl" />
-                  <span className="text-xs text-muted-foreground font-mono min-w-[40px] text-center">{formatTime(currentTime)}</span>
+                  <span className="text-[11px] text-muted-foreground font-mono min-w-[42px] text-center">{formatTime(currentTime)}</span>
                 </div>
               </div>
             ) : (
@@ -3282,8 +3283,8 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
               </div>
             )}
 
-            {/* ─── Main Controls ── */}
-            <div className="flex items-center justify-center gap-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-0.5">
               <Tooltip><TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={restart}><RotateCcw className="w-4 h-4 no-theme-icon" /></Button>
               </TooltipTrigger><TooltipContent>התחל מההתחלה</TooltipContent></Tooltip>
@@ -3317,6 +3318,31 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                   {speed.toFixed(2).replace(/\.00$/, '')}x
                 </Button>
               </TooltipTrigger><TooltipContent>מהירות ניגון (לחץ לפתיחת סליידר)</TooltipContent></Tooltip>
+              </div>
+
+              <div className="flex items-center gap-1 rounded-md bg-muted/40 px-1.5 py-0.5 min-w-0">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={toggleMute}
+                  title={isMuted ? "בטל השתקה" : "השתק"}
+                >
+                  <VolumeIcon className="w-3.5 h-3.5 no-theme-icon" />
+                </Button>
+                <Slider
+                  value={[isMuted ? 0 : volume]}
+                  max={1}
+                  step={0.01}
+                  onValueChange={handleVolumeChange}
+                  className="w-20 sm:w-28"
+                  aria-label="עוצמת קול"
+                />
+                <span className="text-[10px] text-muted-foreground tabular-nums w-8 text-center">
+                  {Math.round((isMuted ? 0 : volume) * 100)}%
+                </span>
+              </div>
+            </div>
             </div>
 
             {/* ─── Speed Control ── */}
@@ -3343,7 +3369,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
             {/* ─── Focus Segment (A-B) ── */}
             {!compact && (
-              <div className="space-y-2 rounded-lg border bg-muted/20 p-3 group/panel-focus">
+              <div className="space-y-2 rounded-lg border bg-muted/15 p-2.5 group/panel-focus">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Label className="text-xs font-medium">התמקדות בקטע (A-B)</Label>
@@ -3440,18 +3466,6 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
               </div>
             )}
 
-            {/* ─── Volume ── */}
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={toggleMute}>
-                <VolumeIcon className="w-3.5 h-3.5 no-theme-icon" />
-              </Button>
-              <Slider value={[isMuted ? 0 : volume]} max={1} step={0.01} onValueChange={handleVolumeChange} className="flex-1 min-w-[160px]" />
-              <span className="text-xs text-muted-foreground tabular-nums w-10 text-center">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
-            </div>
-
-            <p className="text-[10px] text-muted-foreground text-center opacity-60">
-              ⌨️ Space=נגן/עצור · Ctrl+←→=±5s · Shift+←→=מילה · M=השתק · Alt+S=מהירות
-            </p>
           </div>
           </div>
           )}
