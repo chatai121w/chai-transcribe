@@ -22,6 +22,39 @@ export interface WordTiming {
   correctedAt?: number;
 }
 
+/**
+ * Find the word that is actually audible at `time`.
+ * Timings are sorted, so this stays fast even for long transcripts and
+ * returns no word during a real silence instead of holding the previous one.
+ */
+export function findActiveWordIndex(
+  timings: Array<Pick<WordTiming, 'start' | 'end'>>,
+  time: number,
+  toleranceSeconds = 0.04,
+): number {
+  if (!timings.length || !Number.isFinite(time)) return -1;
+
+  let low = 0;
+  let high = timings.length - 1;
+  let candidate = -1;
+  while (low <= high) {
+    const middle = (low + high) >>> 1;
+    if (timings[middle].start <= time + toleranceSeconds) {
+      candidate = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  if (candidate < 0) return -1;
+  const timing = timings[candidate];
+  const end = Number.isFinite(timing.end) && timing.end >= timing.start
+    ? timing.end
+    : timings[candidate + 1]?.start ?? timing.start;
+  return time <= end + toleranceSeconds ? candidate : -1;
+}
+
 // ── Hebrew normalization ─────────────────────────────────────────────────────
 
 const NIQQUD = /[\u0591-\u05C7]/g;           // cantillation + vowel points

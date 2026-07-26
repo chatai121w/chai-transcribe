@@ -33,6 +33,7 @@ import {
   setStudioEditModeEnabled,
 } from "@/lib/studioLayout";
 import { usePlayerShortcuts } from "@/hooks/usePlayerShortcuts";
+import { findActiveWordIndex } from "@/lib/whisperAlignment";
 
 export interface WordTiming {
   word: string;
@@ -967,10 +968,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   // Current word index for sync
   const currentWordIndex = useMemo(() => {
     if (!isSyncEnabled || !wordTimings.length) return -1;
-    for (let i = wordTimings.length - 1; i >= 0; i--) {
-      if (currentTime >= wordTimings[i].start) return i;
-    }
-    return -1;
+    return findActiveWordIndex(wordTimings, currentTime);
   }, [currentTime, wordTimings, isSyncEnabled]);
 
   useEffect(() => {
@@ -2228,6 +2226,29 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     onTimeUpdate?.(t);
   }, [onTimeUpdate, focusEnabled, focusLoop, canEnableFocusLoop, focusEnd, focusStart, externalTime]);
 
+  // Native `timeupdate` may fire only a few times per second. Publish a bounded
+  // 20 Hz clock while playing so short words update promptly without driving
+  // the editor at animation-frame frequency.
+  useEffect(() => {
+    if (!isPlaying) return;
+    let frame = 0;
+    let lastPublishedAt = 0;
+    const tick = (now: number) => {
+      const audio = audioRef.current;
+      if (!audio || audio.paused || audio.ended) return;
+      if (now - lastPublishedAt >= 50) {
+        const time = audio.currentTime;
+        lastPublishedAt = now;
+        setCurrentTime(time);
+        lastEmittedTimeRef.current = time;
+        onTimeUpdate?.(time);
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [isPlaying, onTimeUpdate]);
+
   const handleLoadedMetadata = useCallback(() => {
     if (!audioRef.current) return;
     const d = audioRef.current.duration;
@@ -2782,6 +2803,8 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           onLoadedMetadata={handleLoadedMetadata}
           onDurationChange={handleDurationChange}
           onEnded={handleEnded}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
           preload="auto"
           crossOrigin="anonymous"
         />

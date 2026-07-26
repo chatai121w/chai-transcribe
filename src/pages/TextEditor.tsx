@@ -62,7 +62,7 @@ import {
   getProfile,
   listProfiles,
 } from "@/lib/pronunciationProfiles";
-import { alignEditedToWhisper } from "@/lib/whisperAlignment";
+import { alignEditedToWhisper, findActiveWordIndex } from "@/lib/whisperAlignment";
 import { LazyErrorBoundary } from "@/components/LazyErrorBoundary";
 import { CollapsibleWidget } from "@/components/ui/CollapsibleWidget";
 import {
@@ -233,6 +233,7 @@ const TextEditor = () => {
   const [playerTime, setPlayerTime] = useState(0);
   const lastWordIdxRef = useRef(-2); // -2 = uninitialised
   const playerTimeRef = useRef(0);
+  const lastPlayerRenderAtRef = useRef(-1);
   const transcriptIdRef = useRef<string | null>(null);
   const manualVersionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { updateTranscript, getAudioUrl, saveTranscript, transcripts } = useCloudTranscripts();
@@ -1065,20 +1066,19 @@ const TextEditor = () => {
     }, 2000);
   }, [learnCorrections]);
 
-  // Throttle playerTime updates – only re-render when active word index changes.
-  // This prevents hundreds of re-renders per second while audio plays.
+  // Keep interpolated and inserted words accurate while bounding full editor
+  // renders to 20 Hz.
   const handlePlayerTimeUpdate = useCallback((t: number) => {
     playerTimeRef.current = t;
     if (!wordTimings.length) {
       setPlayerTime(t);
       return;
     }
-    let idx = -1;
-    for (let i = wordTimings.length - 1; i >= 0; i--) {
-      if (t >= wordTimings[i].start) { idx = i; break; }
-    }
-    if (idx !== lastWordIdxRef.current) {
+    const idx = findActiveWordIndex(wordTimings, t);
+    const elapsed = Math.abs(t - lastPlayerRenderAtRef.current);
+    if (idx !== lastWordIdxRef.current || elapsed >= 0.05 || t < lastPlayerRenderAtRef.current) {
       lastWordIdxRef.current = idx;
+      lastPlayerRenderAtRef.current = t;
       setPlayerTime(t);
     }
   }, [wordTimings]);
@@ -1161,17 +1161,9 @@ const TextEditor = () => {
 
   const buildSyncedTimings = useCallback((editedText: string): WordTiming[] | null => {
     if (!wordTimings.length) return null;
-    const totalDuration = wordTimings[wordTimings.length - 1]?.end || 0;
-    if (totalDuration <= 0) return null;
     const words = editedText.split(/\s+/).filter(Boolean);
     if (words.length === 0) return null;
-
-    const wordDuration = totalDuration / words.length;
-    return words.map((word, i) => ({
-      word,
-      start: i * wordDuration,
-      end: (i + 1) * wordDuration,
-    }));
+    return alignEditedToWhisper(words, wordTimings);
   }, [wordTimings]);
 
   const handleSyncToPlayer = useCallback((editedText: string) => {

@@ -29,7 +29,7 @@ import { useTextMarking } from "@/hooks/useTextMarking";
 import { addDictionaryReplacement, addIgnoredWord } from "@/utils/hebrewGrammarDictionary";
 import { learnFromCorrections, type CorrectionEntry } from "@/utils/correctionLearning";
 import { WordContextMenu } from "@/components/WordContextMenu";
-import { alignEditedToWhisper } from "@/lib/whisperAlignment";
+import { alignEditedToWhisper, findActiveWordIndex } from "@/lib/whisperAlignment";
 import { getWordHighlightStyle, isWordApproved } from "@/lib/personalPronunciationModel";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { RichTextEditorMirror } from "@/components/RichTextEditorMirror";
@@ -521,10 +521,7 @@ export const SyncMirrorLayout = ({
   // ── Active word index (timing sync) ────────────────────────────────────────
   const activeIdx = useMemo(() => {
     if (!syncEnabled || !displayTimings.length) return -1;
-    for (let i = displayTimings.length - 1; i >= 0; i--) {
-      if (currentTime >= displayTimings[i].start) return i;
-    }
-    return -1;
+    return findActiveWordIndex(displayTimings, currentTime);
   }, [displayTimings, currentTime, syncEnabled]);
 
   // ── Active line index ───────────────────────────────────────────────────────
