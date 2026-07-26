@@ -19,7 +19,10 @@ import time
 import threading
 import warnings
 import logging
+import re
+import unicodedata
 import traceback as _tb_module
+from difflib import SequenceMatcher
 from pathlib import Path
 from collections import deque
 from datetime import datetime, timezone
@@ -3140,6 +3143,275 @@ def _load_pyannote_waveform(audio_path):
     import whisperx
     audio = whisperx.load_audio(audio_path)
     return {"waveform": torch.from_numpy(audio).unsqueeze(0), "sample_rate": 16000}
+
+
+def _alignment_segments(text, approximate_timings, duration, max_segment_seconds=24.0):
+    """Build bounded WhisperX segments without changing the supplied text."""
+    words = [word for word in text.split() if word]
+    if not words:
+        return []
+
+    valid_timings = (
+        isinstance(approximate_timings, list)
+        and len(approximate_timings) == len(words)
+        and all(
+            isinstance(item, dict)
+            and isinstance(item.get("start"), (int, float))
+            and isinstance(item.get("end"), (int, float))
+            for item in approximate_timings
+        )
+    )
+    if not valid_timings:
+        return [{"start": 0.0, "end": round(duration, 3), "text": " ".join(words)}]
+
+    segments = []
+    start_index = 0
+    for index in range(1, len(words) + 1):
+        segment_start = float(approximate_timings[start_index]["start"])
+        segment_end = float(approximate_timings[index - 1]["end"])
+        at_end = index == len(words)
+        next_gap = (
+            float(approximate_timings[index]["start"]) - segment_end
+            if not at_end else 0.0
+        )
+        should_split = (
+            at_end
+            or segment_end - segment_start >= max_segment_seconds
+            or next_gap >= 1.2
+            or index - start_index >= 120
+        )
+        if not should_split:
+            continue
+        segments.append({
+            "start": round(max(0.0, segment_start - 0.6), 3),
+            "end": round(min(duration, max(segment_end + 0.6, segment_start + 0.1)), 3),
+            "text": " ".join(words[start_index:index]),
+        })
+        start_index = index
+    return segments
+
+
+def _alignment_word_key(value):
+    """Normalize Hebrew words for acoustic/reference matching only."""
+    value = unicodedata.normalize("NFKD", str(value or ""))
+    value = "".join(char for char in value if unicodedata.category(char) != "Mn")
+    value = re.sub(r"[^\w\u05d0-\u05ea]", "", value, flags=re.UNICODE)
+    return value.translate(str.maketrans("ךםןףץ", "כמנפצ")).lower()
+
+
+def _map_reference_to_acoustic_timings(text, acoustic_timings, duration):
+    """Transfer acoustic anchors to corrected text and interpolate edited words."""
+    reference_words = [word for word in text.split() if word]
+    usable_acoustic = [
+        item for item in (acoustic_timings or [])
+        if (
+            isinstance(item, dict)
+            and _alignment_word_key(item.get("word"))
+            and isinstance(item.get("start"), (int, float))
+            and isinstance(item.get("end"), (int, float))
+        )
+    ]
+    if not reference_words or not usable_acoustic:
+        return []
+
+    matcher = SequenceMatcher(
+        None,
+        [_alignment_word_key(word) for word in reference_words],
+        [_alignment_word_key(item["word"]) for item in usable_acoustic],
+        autojunk=False,
+    )
+    anchors = {}
+    for block in matcher.get_matching_blocks():
+        for offset in range(block.size):
+            ref_index = block.a + offset
+            source = usable_acoustic[block.b + offset]
+            anchors[ref_index] = (float(source["start"]), float(source["end"]))
+
+    # A few exact anchors are enough to constrain interpolation; for heavily
+    # edited text, duration-based interpolation is still safer than one huge segment.
+    timings = [None] * len(reference_words)
+    for index, (start, end) in anchors.items():
+        timings[index] = {"word": reference_words[index], "start": start, "end": end}
+
+    anchor_indices = sorted(anchors)
+    boundaries = [-1] + anchor_indices + [len(reference_words)]
+    for boundary_index in range(len(boundaries) - 1):
+        left_index = boundaries[boundary_index]
+        right_index = boundaries[boundary_index + 1]
+        missing = right_index - left_index - 1
+        if missing <= 0:
+            continue
+        left_time = timings[left_index]["end"] if left_index >= 0 else 0.0
+        right_time = (
+            timings[right_index]["start"]
+            if right_index < len(reference_words)
+            else duration
+        )
+        span = max(0.05 * missing, right_time - left_time)
+        step = span / missing
+        for offset in range(1, missing + 1):
+            index = left_index + offset
+            start = min(duration, left_time + step * (offset - 1))
+            end = min(duration, max(start + 0.03, left_time + step * offset))
+            timings[index] = {
+                "word": reference_words[index],
+                "start": round(start, 3),
+                "end": round(end, 3),
+            }
+
+    return timings
+
+
+def _bootstrap_alignment_timings(audio_path, text, language, model_id, duration):
+    """Use local Whisper only to locate corrected text before forced alignment."""
+    model = load_model(model_id)
+    transcribe_options = {
+        "language": language if language != "auto" else None,
+        "word_timestamps": True,
+        "beam_size": 1,
+        "vad_filter": True,
+        "condition_on_previous_text": False,
+    }
+    try:
+        segments, _ = model.transcribe(audio_path, **transcribe_options)
+        segments = list(segments)
+    except Exception as exc:
+        if "flash attention" not in str(exc).lower():
+            raise
+        model = _reload_model_without_flash(model_id)
+        segments, _ = model.transcribe(audio_path, **transcribe_options)
+        segments = list(segments)
+    acoustic_timings = []
+    for segment in segments:
+        for word in segment.words or []:
+            if word.word and word.end >= word.start:
+                acoustic_timings.append({
+                    "word": word.word.strip(),
+                    "start": float(word.start),
+                    "end": float(word.end),
+                })
+    return _map_reference_to_acoustic_timings(text, acoustic_timings, duration)
+
+
+@app.route("/align-text", methods=["POST"])
+def align_text_to_audio():
+    """Force-align corrected text to audio while preserving the text verbatim."""
+    if "file" not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+
+    text = (request.form.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "No reference text provided"}), 400
+
+    language = (request.form.get("language") or "he").strip() or "he"
+    try:
+        approximate_timings = json.loads(request.form.get("approximate_timings") or "null")
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid approximate_timings JSON"}), 400
+
+    audio_file = request.files["file"]
+    suffix = _safe_suffix(audio_file.filename)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        audio_file.save(tmp)
+        tmp_path = tmp.name
+
+    started = time.time()
+    previous_model_id = _current_model_id
+    align_model = None
+    try:
+        import whisperx  # type: ignore
+
+        device = "cuda" if (_has_torch and torch.cuda.is_available()) else "cpu"
+        audio = whisperx.load_audio(tmp_path)
+        duration = max(0.1, len(audio) / 16000.0)
+        alignment_source = "provided-timings"
+        if not (
+            isinstance(approximate_timings, list)
+            and len(approximate_timings) == len(text.split())
+        ):
+            bootstrap_model_id = previous_model_id or _default_model_for(language)
+            approximate_timings = _bootstrap_alignment_timings(
+                tmp_path, text, language, bootstrap_model_id, duration
+            )
+            alignment_source = "local-whisper-bootstrap"
+
+        _evict_all_whisper_models()
+        _cleanup_gpu_memory()
+        segments = _alignment_segments(text, approximate_timings, duration)
+        if not segments:
+            return jsonify({"error": "Reference text has no alignable words"}), 400
+
+        align_model, align_meta = whisperx.load_align_model(
+            language_code=language,
+            device=device,
+        )
+        aligned = whisperx.align(
+            segments,
+            align_model,
+            align_meta,
+            tmp_path,
+            device,
+            return_char_alignments=False,
+        )
+
+        word_timings = []
+        for item in aligned.get("word_segments", []) or []:
+            word = str(item.get("word") or "").strip()
+            start = item.get("start")
+            end = item.get("end")
+            if not word or not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+                continue
+            if end < start:
+                continue
+            word_timings.append({
+                "word": word,
+                "start": round(float(start), 3),
+                "end": round(float(end), 3),
+                "probability": round(float(item.get("score", 0.0) or 0.0), 4),
+            })
+
+        monotonic = all(
+            word_timings[index]["start"] >= word_timings[index - 1]["start"]
+            for index in range(1, len(word_timings))
+        )
+        input_word_count = len(text.split())
+        coverage = min(1.0, len(word_timings) / max(1, input_word_count))
+        scores = [item["probability"] for item in word_timings if item["probability"] > 0]
+        mean_score = sum(scores) / len(scores) if scores else 0.0
+
+        return jsonify({
+            "wordTimings": word_timings,
+            "inputWordCount": input_word_count,
+            "alignedWordCount": len(word_timings),
+            "coverage": round(coverage, 4),
+            "meanConfidence": round(mean_score, 4),
+            "monotonic": monotonic,
+            "language": language,
+            "method": "whisperx-forced-alignment",
+            "alignmentSource": alignment_source,
+            "processingTime": round(time.time() - started, 2),
+        })
+    except ImportError:
+        return jsonify({
+            "error": "WhisperX is not installed",
+            "install": "pip install whisperx==3.8.6",
+        }), 503
+    except Exception as exc:
+        _log.error(f"Forced alignment failed: {exc}\n{_tb_module.format_exc()}")
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        if align_model is not None:
+            del align_model
+        _cleanup_gpu_memory()
+        if previous_model_id:
+            try:
+                load_model(previous_model_id)
+            except Exception as restore_exc:
+                _log.warning(f"Could not restore Whisper model after alignment: {restore_exc}")
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 def _load_pyannote_pipeline(model_id, hf_token):

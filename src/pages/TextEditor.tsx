@@ -40,7 +40,7 @@ const FloatingPlayerPortal = lazy(() => import("@/components/FloatingPlayerPorta
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })));
 const LoshonKodeshRules = lazy(() => import("@/pages/LoshonKodeshRules"));
 const AIVersionsGrid = lazy(() => import("@/components/AIVersionsGrid").then(m => ({ default: m.AIVersionsGrid })));
-import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle, Link } from "lucide-react";
+import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle, Link, AudioWaveform } from "lucide-react";
 import { uploadToDrive } from "@/components/GoogleDriveBrowser";
 import { DriveFolderPicker } from "@/components/DriveFolderPicker";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
@@ -238,6 +238,12 @@ const TextEditor = () => {
   const manualVersionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { updateTranscript, getAudioUrl, saveTranscript, transcripts } = useCloudTranscripts();
   const [syncEnabled, setSyncEnabled] = useState(true);
+  const [forcedAlignmentState, setForcedAlignmentState] = useState<{
+    status: 'idle' | 'aligning' | 'aligned' | 'partial' | 'error';
+    coverage?: number;
+    confidence?: number;
+  }>({ status: 'idle' });
+  const alignmentAbortRef = useRef<AbortController | null>(null);
   const [transcriptId, setTranscriptId] = useState<string | null>(null);
   const { versions: cloudVersions, isLoading: cloudVersionsLoading, saveVersion: saveCloudVersion } = useCloudVersions(transcriptId);
   const ollama = useOllama();
@@ -1178,6 +1184,112 @@ const TextEditor = () => {
     toast({ title: "מסונכרן לנגן ✅", description: `${newTimings.length} מילים סונכרנו עם האודיו` });
   }, [buildSyncedTimings]);
 
+  const handleForcedAlignment = useCallback(async () => {
+    const referenceText = latestTextRef.current.trim();
+    if (!audioBlob || !referenceText) {
+      toast({
+        title: "לא ניתן לבצע יישור מדויק",
+        description: "נדרשים אודיו וטקסט לפני הפעלת היישור",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    alignmentAbortRef.current?.abort();
+    const controller = new AbortController();
+    alignmentAbortRef.current = controller;
+    setForcedAlignmentState({ status: 'aligning' });
+
+    const approximateTimings = buildSyncedTimings(referenceText) || wordTimingsRef.current;
+    const formData = new FormData();
+    formData.append('file', audioBlob, audioFileName || 'audio.webm');
+    formData.append('text', referenceText);
+    formData.append('language', 'he');
+    if (approximateTimings.length > 0) {
+      formData.append('approximate_timings', JSON.stringify(approximateTimings));
+    }
+
+    try {
+      const response = await fetch(`${getServerUrl()}/align-text`, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || `Alignment failed (${response.status})`);
+
+      if (latestTextRef.current.trim() !== referenceText) {
+        setForcedAlignmentState({ status: 'partial' });
+        toast({
+          title: "הטקסט השתנה בזמן היישור",
+          description: "התוצאה לא הוחלה כדי לא לדרוס את העריכה החדשה",
+        });
+        return;
+      }
+
+      const rawTimings = Array.isArray(result?.wordTimings)
+        ? result.wordTimings.filter((item: WordTiming) =>
+          item
+          && typeof item.word === 'string'
+          && Number.isFinite(item.start)
+          && Number.isFinite(item.end)
+          && item.end >= item.start
+        )
+        : [];
+      const monotonic = rawTimings.every((item: WordTiming, index: number) =>
+        index === 0 || item.start >= rawTimings[index - 1].start
+      );
+      const coverage = Number(result?.coverage) || 0;
+      const confidence = Number(result?.meanConfidence) || 0;
+
+      if (!monotonic || coverage < 0.72 || rawTimings.length < 3) {
+        setForcedAlignmentState({ status: 'error', coverage, confidence });
+        toast({
+          title: "היישור לא עבר בדיקת איכות",
+          description: `כיסוי ${Math.round(coverage * 100)}% — התזמון הקיים נשמר ללא שינוי`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const words = referenceText.split(/\s+/).filter(Boolean);
+      const alignedTimings = alignEditedToWhisper(words, rawTimings);
+      wordTimingsRef.current = alignedTimings;
+      wordTimingsRevisionRef.current += 1;
+      setWordTimings(alignedTimings);
+      setSyncEnabled(true);
+      setForcedAlignmentState({
+        status: coverage >= 0.9 ? 'aligned' : 'partial',
+        coverage,
+        confidence,
+      });
+      try {
+        localStorage.setItem('last_word_timings', JSON.stringify(alignedTimings));
+      } catch { /* quota/unavailable */ }
+
+      const id = transcriptIdRef.current;
+      if (id) {
+        await updateTranscript(id, { word_timings: alignedTimings });
+      }
+      toast({
+        title: "הטקסט יושר לאודיו",
+        description: `${Math.round(coverage * 100)}% כיסוי • ${alignedTimings.length} מילים`,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setForcedAlignmentState({ status: 'error' });
+      toast({
+        title: "היישור המדויק נכשל",
+        description: error instanceof Error ? error.message : String(error),
+        variant: "destructive",
+      });
+    } finally {
+      if (alignmentAbortRef.current === controller) alignmentAbortRef.current = null;
+    }
+  }, [audioBlob, audioFileName, buildSyncedTimings, updateTranscript]);
+
+  useEffect(() => () => alignmentAbortRef.current?.abort(), []);
+
   const handleSaveAndReplaceOriginal = useCallback(async (
     editedText: string,
     source: string,
@@ -1694,6 +1806,33 @@ const TextEditor = () => {
 
               {/* Left: floating toggles */}
               <div className="flex items-center gap-2">
+                <Button
+                  variant={forcedAlignmentState.status === 'aligned' ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-8 px-3 text-xs gap-1.5"
+                  onClick={handleForcedAlignment}
+                  disabled={!audioBlob || !text.trim() || forcedAlignmentState.status === 'aligning'}
+                  title="יישור כפוי של הטקסט המתוקן לאודיו באמצעות WhisperX"
+                >
+                  {forcedAlignmentState.status === 'aligning'
+                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    : <AudioWaveform className="w-3.5 h-3.5" />}
+                  {forcedAlignmentState.status === 'aligning' ? 'מיישר...' : 'יישור מדויק'}
+                </Button>
+                {forcedAlignmentState.coverage != null && (
+                  <span
+                    className={`text-[10px] rounded border px-2 py-1 ${
+                      forcedAlignmentState.status === 'error'
+                        ? 'border-destructive/40 text-destructive'
+                        : forcedAlignmentState.status === 'aligned'
+                          ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+                          : 'border-amber-500/40 text-amber-700 dark:text-amber-300'
+                    }`}
+                    title="אחוז המילים שקיבלו התאמה אקוסטית ישירה"
+                  >
+                    {Math.round(forcedAlignmentState.coverage * 100)}% מיושר
+                  </span>
+                )}
                 <Button
                   variant={isPlayerFloating ? 'default' : 'outline'}
                   size="sm"
