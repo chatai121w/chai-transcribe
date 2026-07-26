@@ -60,7 +60,7 @@ async function checkLovable(model: string) {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: `google/${model}`,
+        model: `google/${resolveGatewayModel(model)}`,
         messages: [{ role: "user", content: "ping" }],
         max_tokens: 1,
       }),
@@ -111,7 +111,7 @@ async function checkAudioFormat(personalKey: string | null, model: string) {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: `google/${model}`,
+        model: `google/${resolveGatewayModel(model)}`,
         messages: [{
           role: "user",
           content: [
@@ -129,6 +129,12 @@ async function checkAudioFormat(personalKey: string | null, model: string) {
   } catch (e) {
     return { ok: false, status: 0, latencyMs: Date.now() - t0, error: (e as Error).message, hint: "שגיאת רשת" };
   }
+}
+
+function resolveGatewayModel(m: string): string {
+  if (m === "gemini-flash-latest" || m === "gemini-2.0-flash") return "gemini-2.5-flash";
+  if (m === "gemini-pro-latest" || m === "gemini-1.5-pro") return "gemini-2.5-pro";
+  return m;
 }
 
 serve(async (req) => {
