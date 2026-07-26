@@ -560,6 +560,33 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       return next;
     });
   };
+  type StudioWidgetId = 'player' | 'studio';
+  const widgetDragRef = useRef<StudioWidgetId | null>(null);
+  const [widgetDragOver, setWidgetDragOver] = useState<StudioWidgetId | null>(null);
+  const handleWidgetDragStart = (event: React.DragEvent, id: StudioWidgetId) => {
+    widgetDragRef.current = id;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', id);
+  };
+  const handleWidgetDragOver = (event: React.DragEvent, id: StudioWidgetId) => {
+    if (!widgetDragRef.current || widgetDragRef.current === id) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setWidgetDragOver(id);
+  };
+  const handleWidgetDrop = (event: React.DragEvent, targetId: StudioWidgetId) => {
+    event.preventDefault();
+    const sourceId = widgetDragRef.current;
+    if (sourceId && sourceId !== targetId) {
+      swapWidgetOrder();
+    }
+    widgetDragRef.current = null;
+    setWidgetDragOver(null);
+  };
+  const handleWidgetDragEnd = () => {
+    widgetDragRef.current = null;
+    setWidgetDragOver(null);
+  };
 
   // ── Feature order (drag-and-drop in popover) ──────────────────────────
   const ALL_FEATURE_IDS = ['noise', 'eq', 'doubler', 'waveform', 'focus', 'noise-details', 'mixer-details'] as const;
@@ -3006,8 +3033,21 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         <div className={`studio-grid flex flex-col gap-4 ${layoutEditMode ? 'is-editing' : ''}`} dir="rtl">
           {/* ═══ WIDGET 1: Player ═══ */}
           {!hiddenWidgets.has('player') && (
-          <div className="studio-widget-body" ref={playerBodyRef} dir="rtl" style={{ order: widgetOrder.indexOf('player') }}>
-            <div className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <div
+            className={`studio-widget-body transition-colors ${widgetDragOver === 'player' ? 'ring-2 ring-primary/50 bg-primary/5' : ''}`}
+            ref={playerBodyRef}
+            dir="rtl"
+            style={{ order: widgetOrder.indexOf('player') }}
+            onDragOver={(event) => handleWidgetDragOver(event, 'player')}
+            onDrop={(event) => handleWidgetDrop(event, 'player')}
+          >
+            <div
+              className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground cursor-grab active:cursor-grabbing select-none"
+              draggable
+              onDragStart={(event) => handleWidgetDragStart(event, 'player')}
+              onDragEnd={handleWidgetDragEnd}
+              title="גרור לשינוי מיקום הווידג'ט"
+            >
               <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
               <span>נגן סינכרוני</span>
             </div>
@@ -3418,8 +3458,21 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
           {/* ═══ WIDGET 2: Studio (Mixer & Processing) ═══ */}
           {!hiddenWidgets.has('studio') && (
-          <div className="studio-widget-body" ref={studioBodyRef} dir="rtl" style={{ order: widgetOrder.indexOf('studio') }}>
-            <div className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <div
+            className={`studio-widget-body transition-colors ${widgetDragOver === 'studio' ? 'ring-2 ring-primary/50 bg-primary/5' : ''}`}
+            ref={studioBodyRef}
+            dir="rtl"
+            style={{ order: widgetOrder.indexOf('studio') }}
+            onDragOver={(event) => handleWidgetDragOver(event, 'studio')}
+            onDrop={(event) => handleWidgetDrop(event, 'studio')}
+          >
+            <div
+              className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground cursor-grab active:cursor-grabbing select-none"
+              draggable
+              onDragStart={(event) => handleWidgetDragStart(event, 'studio')}
+              onDragEnd={handleWidgetDragEnd}
+              title="גרור לשינוי מיקום הווידג'ט"
+            >
               <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
               <span>סטודיו (מיקסר ועיבוד)</span>
             </div>
