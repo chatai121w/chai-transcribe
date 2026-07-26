@@ -295,9 +295,7 @@ const TextEditor = () => {
   const tabOrder = tabSettings.order;
 
   // Load tab settings from cloud when preferences are available
-  const cloudTabSettingsLoaded = useRef(false);
   useEffect(() => {
-    if (cloudTabSettingsLoaded.current) return;
     if (!preferences.tab_settings_json) return;
     try {
       const parsed = JSON.parse(preferences.tab_settings_json);
@@ -311,9 +309,11 @@ const TextEditor = () => {
           if (!parsed.order.includes(id) && !visible.includes(id)) visible.push(id);
         }
         const migrated = { visible, order };
-        cloudTabSettingsLoaded.current = true;
-        setTabSettings(migrated);
-        saveTabSettings(visible, order);
+        setTabSettings(current => {
+          if (JSON.stringify(current) === JSON.stringify(migrated)) return current;
+          saveTabSettings(visible, order);
+          return migrated;
+        });
         if (JSON.stringify(migrated) !== JSON.stringify(parsed)) {
           updatePreference('tab_settings_json', JSON.stringify(migrated));
         }

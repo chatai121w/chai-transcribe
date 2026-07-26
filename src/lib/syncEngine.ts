@@ -192,6 +192,15 @@ export async function syncPreferencesDown(userId: string): Promise<void> {
       ? (data as Record<string, unknown>).custom_themes as string
       : JSON.stringify((data as Record<string, unknown>).custom_themes ?? []),
     editor_columns: (data as Record<string, unknown>).editor_columns as number ?? 1,
+    dashboard_view_mode: (data as Record<string, unknown>).dashboard_view_mode as string ?? 'cards',
+    folder_view_mode: (data as Record<string, unknown>).folder_view_mode as string ?? 'cards',
+    folder_sort_key: (data as Record<string, unknown>).folder_sort_key as string ?? 'date',
+    folder_sort_asc: (data as Record<string, unknown>).folder_sort_asc as boolean ?? false,
+    player_layout: (data as Record<string, unknown>).player_layout as string ?? 'split',
+    tab_settings_json: typeof (data as Record<string, unknown>).tab_settings_json === 'string'
+      ? (data as Record<string, unknown>).tab_settings_json as string
+      : JSON.stringify((data as Record<string, unknown>).tab_settings_json ?? ''),
+    default_ai_model: (data as Record<string, unknown>).default_ai_model as string ?? '',
     cuda_preset: (data as Record<string, unknown>).cuda_preset as string ?? 'balanced',
     cuda_fast_mode: (data as Record<string, unknown>).cuda_fast_mode as boolean ?? true,
     cuda_compute_type: (data as Record<string, unknown>).cuda_compute_type as string ?? 'int8_float16',
@@ -203,13 +212,19 @@ export async function syncPreferencesDown(userId: string): Promise<void> {
     cuda_preload_mode: (data as Record<string, unknown>).cuda_preload_mode as string ?? 'preload',
     cuda_cloud_save: (data as Record<string, unknown>).cuda_cloud_save as string ?? 'immediate',
     personal_pronunciation_enabled: (data as Record<string, unknown>).personal_pronunciation_enabled as boolean ?? true,
+    loshon_kodesh_enabled: (data as Record<string, unknown>).loshon_kodesh_enabled as boolean ?? false,
+    active_pronunciation_profile: (data as Record<string, unknown>).active_pronunciation_profile as string ?? '',
+    diarize_enabled: (data as Record<string, unknown>).diarize_enabled as boolean ?? false,
+    live_chunk_sec: (data as Record<string, unknown>).live_chunk_sec as number ?? 5,
+    live_mic_gain: Number((data as Record<string, unknown>).live_mic_gain) || 3.5,
+    pronunciation_layout_mode: (data as Record<string, unknown>).pronunciation_layout_mode as string ?? 'rich',
     updated_at: data.updated_at,
     _dirty: false,
   });
 }
 
 /** Push dirty preferences → cloud */
-async function pushDirtyPreferences(userId: string): Promise<void> {
+export async function pushDirtyPreferences(userId: string): Promise<void> {
   if (!(await isDbAvailable())) return;
 
   const prefs = await db.preferences.get('current');
@@ -217,6 +232,8 @@ async function pushDirtyPreferences(userId: string): Promise<void> {
 
   let customThemesParsed: unknown = [];
   try { customThemesParsed = JSON.parse(prefs.custom_themes); } catch { /* parse error ok */ }
+  let tabSettingsParsed: unknown = null;
+  try { if (prefs.tab_settings_json) tabSettingsParsed = JSON.parse(prefs.tab_settings_json); } catch { /* parse error ok */ }
 
   const { error } = await supabase
     .from('user_preferences')
@@ -232,6 +249,13 @@ async function pushDirtyPreferences(userId: string): Promise<void> {
       source_language: prefs.source_language,
       custom_themes: customThemesParsed,
       editor_columns: prefs.editor_columns,
+      dashboard_view_mode: prefs.dashboard_view_mode,
+      folder_view_mode: prefs.folder_view_mode,
+      folder_sort_key: prefs.folder_sort_key,
+      folder_sort_asc: prefs.folder_sort_asc,
+      player_layout: prefs.player_layout,
+      tab_settings_json: tabSettingsParsed,
+      default_ai_model: prefs.default_ai_model || null,
       cuda_preset: prefs.cuda_preset,
       cuda_fast_mode: prefs.cuda_fast_mode,
       cuda_compute_type: prefs.cuda_compute_type,
@@ -243,6 +267,12 @@ async function pushDirtyPreferences(userId: string): Promise<void> {
       cuda_preload_mode: prefs.cuda_preload_mode,
       cuda_cloud_save: prefs.cuda_cloud_save,
       personal_pronunciation_enabled: prefs.personal_pronunciation_enabled,
+      loshon_kodesh_enabled: prefs.loshon_kodesh_enabled,
+      active_pronunciation_profile: prefs.active_pronunciation_profile,
+      diarize_enabled: prefs.diarize_enabled,
+      live_chunk_sec: prefs.live_chunk_sec,
+      live_mic_gain: prefs.live_mic_gain,
+      pronunciation_layout_mode: prefs.pronunciation_layout_mode,
       updated_at: new Date().toISOString(),
     } as any, { onConflict: 'user_id' });
 

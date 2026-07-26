@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, createContext, useContext, Re
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { db, isDbAvailable } from '@/lib/localDb';
-import { getLocalPreferences, savePreferencesLocally, syncPreferencesDown } from '@/lib/syncEngine';
+import { getLocalPreferences, pushDirtyPreferences, savePreferencesLocally } from '@/lib/syncEngine';
 import { debugLog } from '@/lib/debugLogger';
 
 export interface UserPreferences {
@@ -86,6 +86,8 @@ const useCloudPreferencesImpl = () => {
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   const [isLoaded, setIsLoaded] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const saveRevisionRef = useRef(0);
 
   // Load preferences: local DB → localStorage → cloud
   useEffect(() => {
@@ -190,6 +192,15 @@ const useCloudPreferencesImpl = () => {
         .maybeSingle();
 
       if (data) {
+        const localUpdatedAt = localPrefs?.updated_at ? new Date(localPrefs.updated_at).getTime() : 0;
+        const cloudRowUpdatedAt = data.updated_at ? new Date(data.updated_at).getTime() : 0;
+        if (localPrefs?._dirty && localUpdatedAt >= cloudRowUpdatedAt) {
+          // A reload may happen before the debounced cloud write. Keep and retry
+          // the newer local snapshot instead of replacing it with stale cloud data.
+          void pushDirtyPreferences(user.id);
+          setIsLoaded(true);
+          return;
+        }
         // ── Conflict resolution: prefer local theme if it changed AFTER cloud's updated_at
         const localThemeMtime = Number(localStorage.getItem('app_theme_updated_at') || 0);
         const cloudUpdatedAt = data.updated_at ? new Date(data.updated_at).getTime() : 0;
@@ -341,8 +352,19 @@ const useCloudPreferencesImpl = () => {
           const cloudTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
           const localTime = Number(localStorage.getItem('app_theme_updated_at') || 0);
           const localPersonalTime = Number(localStorage.getItem('personal_pronunciation_updated_at') || 0);
+          const localPreferencesTime = Number(localStorage.getItem('user_preferences_updated_at') || 0);
           // Ignore echoes of our own writes
-          if (localTime >= cloudTime && localPersonalTime >= cloudTime) return;
+          if (localPreferencesTime >= cloudTime) return;
+          const remoteLayout = {
+            editor_columns: row.editor_columns ?? DEFAULT_PREFERENCES.editor_columns,
+            player_layout: row.player_layout ?? DEFAULT_PREFERENCES.player_layout,
+            tab_settings_json: typeof row.tab_settings_json === 'string'
+              ? row.tab_settings_json
+              : JSON.stringify(row.tab_settings_json ?? ''),
+          };
+          localStorage.setItem('editor_columns', String(remoteLayout.editor_columns));
+          localStorage.setItem('user_preferences_updated_at', String(cloudTime));
+          setPreferences(prev => ({ ...prev, ...remoteLayout }));
           if (row.theme && row.theme !== localStorage.getItem('app_theme_id')) {
             localStorage.setItem('app_theme_id', row.theme);
             localStorage.setItem('app_theme_updated_at', String(cloudTime));
@@ -394,8 +416,10 @@ const useCloudPreferencesImpl = () => {
 
   // Save to cloud (debounced by default; some critical keys go immediate)
   const saveToCloud = useCallback((updated: UserPreferences, opts?: { immediate?: boolean }) => {
+    const revision = ++saveRevisionRef.current;
     // Always save to localStorage for quick access
     localStorage.setItem('user_preferences', JSON.stringify(updated));
+    localStorage.setItem('user_preferences_updated_at', String(Date.now()));
 
     // Mirror individual localStorage keys for backward compat
     localStorage.setItem('transcript_engine', updated.engine);
@@ -522,6 +546,13 @@ const useCloudPreferencesImpl = () => {
         }
       } else {
         const serverTime = row?.updated_at ? new Date(row.updated_at).getTime() : Date.now();
+        if (revision === saveRevisionRef.current) {
+          await db.preferences.update('current', {
+            _dirty: false,
+            updated_at: new Date(serverTime).toISOString(),
+          });
+        }
+        localStorage.setItem('user_preferences_updated_at', String(serverTime));
         // Align local timestamp with server-trigger updated_at so it always wins on reload
         localStorage.setItem('personal_pronunciation_updated_at', String(serverTime));
         debugLog.info('CloudPreferences', 'Upsert OK', {
@@ -532,10 +563,15 @@ const useCloudPreferencesImpl = () => {
     };
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    const enqueueSave = () => {
+      saveQueueRef.current = saveQueueRef.current
+        .catch(() => undefined)
+        .then(doUpsert);
+    };
     if (opts?.immediate) {
-      void doUpsert();
+      enqueueSave();
     } else {
-      saveTimerRef.current = setTimeout(doUpsert, 500);
+      saveTimerRef.current = setTimeout(enqueueSave, 500);
     }
   }, [user]);
 
@@ -545,6 +581,9 @@ const useCloudPreferencesImpl = () => {
     'active_pronunciation_profile',
     'diarize_enabled',
     'pronunciation_layout_mode',
+    'editor_columns',
+    'player_layout',
+    'tab_settings_json',
   ];
 
   const updatePreference = useCallback(<K extends keyof UserPreferences>(
