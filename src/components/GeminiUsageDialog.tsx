@@ -62,12 +62,14 @@ export function GeminiUsageDialog() {
             icon={<KeyRound className="h-4 w-4 text-emerald-600" />}
             usage={personal}
             showEstimatedCost
+            tone="personal"
           />
           <UsageRoute
             title="Lovable AI"
             description="שימוש דרך הקרדיטים של Lovable"
             icon={<Cloud className="h-4 w-4 text-sky-600" />}
             usage={lovable}
+            tone="lovable"
           />
         </div>
 
@@ -85,12 +87,14 @@ function UsageRoute({
   icon,
   usage,
   showEstimatedCost = false,
+  tone,
 }: {
   title: string;
   description: string;
   icon: React.ReactNode;
   usage: PersonalGeminiUsage;
   showEstimatedCost?: boolean;
+  tone: "personal" | "lovable";
 }) {
   const models = Object.entries(usage.byModel).sort((a, b) => b[1].totalTokens - a[1].totalTokens);
   const estimatedCost = useMemo(
@@ -102,7 +106,10 @@ function UsageRoute({
   );
 
   return (
-    <section className="rounded-md border bg-muted/15 p-3">
+    <section className={tone === "personal"
+      ? "rounded-md border border-emerald-300 bg-emerald-500/5 p-3 dark:border-emerald-800"
+      : "rounded-md border border-sky-300 bg-sky-500/5 p-3 dark:border-sky-800"
+    }>
       <div className="mb-3 flex items-start gap-2">
         <div className="mt-0.5">{icon}</div>
         <div>
@@ -118,7 +125,12 @@ function UsageRoute({
       </div>
       <div className="mt-2 flex items-center justify-between rounded border bg-background px-2.5 py-2">
         <span className="text-xs text-muted-foreground">סה״כ טוקנים</span>
-        <strong className="text-base tabular-nums">{numberFormat.format(usage.totalTokens)}</strong>
+        <strong className={tone === "personal"
+          ? "text-base tabular-nums text-emerald-700 dark:text-emerald-400"
+          : "text-base tabular-nums text-sky-700 dark:text-sky-400"
+        }>
+          {numberFormat.format(usage.totalTokens)}
+        </strong>
       </div>
 
       <div className="mt-3 space-y-1.5">
