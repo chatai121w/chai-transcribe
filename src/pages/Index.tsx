@@ -32,6 +32,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
 import { getApiKey, getEncryptedKey } from "@/lib/keyCrypto";
+import { recoverProviderKeysFromCloud } from "@/lib/cloudKeyFallback";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
 import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, buildLoshonKodeshHotwords, applyLoshonKodeshReplacements, isLkAiEnabled, isLkAiAuto, applyLkAiFix } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
