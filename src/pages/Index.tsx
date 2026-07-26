@@ -32,6 +32,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
 import { getApiKey, getEncryptedKey } from "@/lib/keyCrypto";
+import { recoverProviderKeysFromCloud } from "@/lib/cloudKeyFallback";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
 import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, buildLoshonKodeshHotwords, applyLoshonKodeshReplacements, isLkAiEnabled, isLkAiAuto, applyLkAiFix } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
@@ -604,7 +605,12 @@ const Index = () => {
     if (single && !merged.includes(single)) {
       merged.unshift(single);
     }
-    return Array.from(new Set(merged));
+    const local = Array.from(new Set(merged));
+    if (local.length > 0) return local;
+
+    // Nothing usable locally (fresh session → encrypted blob can't be decrypted,
+    // or CloudKeySync hasn't run yet) — recover straight from the cloud.
+    return await recoverProviderKeysFromCloud(provider);
   };
 
   const shouldRotateProviderKey = (err: any): boolean => {
