@@ -976,7 +976,27 @@ const TextEditor = () => {
       }
     }
 
-    return Array.from(byId.values()).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    const sorted = Array.from(byId.values()).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    const uniqueByText = new Map<string, TextVersion>();
+    const duplicateCounts = new Map<string, number>();
+    for (const version of sorted) {
+      const signature = version.text.normalize("NFKC").replace(/\s+/g, " ").trim();
+      if (!uniqueByText.has(signature)) {
+        uniqueByText.set(signature, { ...version });
+        duplicateCounts.set(signature, 1);
+        continue;
+      }
+      duplicateCounts.set(signature, (duplicateCounts.get(signature) || 1) + 1);
+    }
+    return Array.from(uniqueByText.entries()).map(([signature, version]) => {
+      const count = duplicateCounts.get(signature) || 1;
+      return count === 1
+        ? version
+        : {
+            ...version,
+            customPrompt: joinVersionLabels(version.customPrompt, `${count} הרצות עם טקסט זהה`),
+          };
+    });
   }, [versions, cloudVersions, transcripts, transcriptId, text]);
 
   const sendVersionToCompare = useCallback((versionId: string) => {
@@ -2209,6 +2229,7 @@ const TextEditor = () => {
                       setText(newText);
                     }}
                     onSendToAiEditor={sendVersionToAiEditor}
+                    preferenceStorageKey={transcriptIdRef.current || transcriptId || "current"}
                   /></LazyErrorBoundary>
                 ) : (
                   <div className="text-center py-6 text-muted-foreground text-sm">

@@ -1,11 +1,11 @@
-import { Fragment, useState, useMemo, useEffect } from "react";
+import { Fragment, useState, useMemo, useEffect, type Dispatch, type SetStateAction } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowRightLeft, Copy, ArrowUp, ArrowDown, Layers } from "lucide-react";
+import { ArrowRightLeft, Copy, ArrowUp, ArrowDown, Layers, Star, Trash2, RotateCcw } from "lucide-react";
 import { TextVersion } from "@/components/TextEditHistory";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,7 @@ interface AdvancedDiffViewProps {
   preselectedRightId?: string;
   /** Optional: send the selected version into the AI editor as input */
   onSendToAiEditor?: (versionId: string) => void;
+  preferenceStorageKey?: string;
 }
 
 type VersionFilter = "all" | "ai" | "manual" | "original" | "cloud" | "local";
@@ -257,7 +258,20 @@ export const AdvancedDiffView = ({
   preselectedLeftId,
   preselectedRightId,
   onSendToAiEditor,
+  preferenceStorageKey = "advanced-diff",
 }: AdvancedDiffViewProps) => {
+  const favoritesKey = `compare_favorites_v1:${preferenceStorageKey}`;
+  const hiddenKey = `compare_hidden_v1:${preferenceStorageKey}`;
+  const readPreferenceSet = (key: string) => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+      return new Set<string>(Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : []);
+    } catch {
+      return new Set<string>();
+    }
+  };
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(() => readPreferenceSet(favoritesKey));
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => readPreferenceSet(hiddenKey));
   const defaultLeftId = useMemo(() => versions.find(v => v.source === 'original')?.id || versions[0]?.id || '', [versions]);
   const defaultRightId = useMemo(() => {
     const nonOriginal = [...versions].reverse().find(v => v.source !== 'original');
@@ -271,6 +285,11 @@ export const AdvancedDiffView = ({
   useEffect(() => {
     if (preselectedLeftId && versions.some(v => v.id === preselectedLeftId)) {
       setLeftId(preselectedLeftId);
+      const preLeft = versions.find(v => v.id === preselectedLeftId);
+      if (preLeft) {
+        setLeftText(preLeft.text);
+        setLeftDetached(false);
+      }
     }
     const preRight = preselectedRightId
       ? versions.find(v => v.id === preselectedRightId)
@@ -286,13 +305,30 @@ export const AdvancedDiffView = ({
 
   const selectableVersions = useMemo(() => {
     const isCloudVersion = (v: TextVersion) => v.id.includes("-") && v.id.length >= 30;
-    if (versionFilter === "all") return versions;
-    if (versionFilter === "ai") return versions.filter((v) => v.source.startsWith("ai-"));
-    if (versionFilter === "manual") return versions.filter((v) => v.source === "manual");
-    if (versionFilter === "original") return versions.filter((v) => v.source === "original");
-    if (versionFilter === "cloud") return versions.filter((v) => isCloudVersion(v));
-    return versions.filter((v) => !isCloudVersion(v));
-  }, [versions, versionFilter]);
+    const visible = versions.filter((version) => !hiddenIds.has(version.id));
+    let filtered = visible;
+    if (versionFilter === "ai") filtered = visible.filter((v) => v.source.startsWith("ai-"));
+    else if (versionFilter === "manual") filtered = visible.filter((v) => v.source === "manual");
+    else if (versionFilter === "original") filtered = visible.filter((v) => v.source === "original");
+    else if (versionFilter === "cloud") filtered = visible.filter((v) => isCloudVersion(v));
+    else if (versionFilter === "local") filtered = visible.filter((v) => !isCloudVersion(v));
+    return [...filtered].sort((a, b) => Number(favoriteIds.has(b.id)) - Number(favoriteIds.has(a.id)));
+  }, [versions, versionFilter, hiddenIds, favoriteIds]);
+
+  const updatePreferenceSet = (
+    setter: Dispatch<SetStateAction<Set<string>>>,
+    storageKey: string,
+    id: string,
+    enabled: boolean,
+  ) => {
+    setter((previous) => {
+      const next = new Set(previous);
+      if (enabled) next.add(id);
+      else next.delete(id);
+      try { localStorage.setItem(storageKey, JSON.stringify(Array.from(next))); } catch { /* unavailable */ }
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!versions.length) {
@@ -322,28 +358,52 @@ export const AdvancedDiffView = ({
   const leftVersion = versions.find(v => v.id === leftId);
   const rightVersion = versions.find(v => v.id === rightId);
 
-  // The base text that both columns mirror by default ("duplicate" / מכפלה).
-  const source = leftVersion?.text ?? "";
-
-  // Editable column buffers. By default BOTH columns show `source` (a copy of
-  // the base version). A side "detaches" the moment it is edited or loaded with
-  // a different version, and "החזר" re-syncs it back to an exact copy.
-  const [leftText, setLeftText] = useState(source);
-  const [rightText, setRightText] = useState(source);
+  // Each side owns its selected version. Editing changes only the local buffer;
+  // selecting another version always reloads that version's stored text.
+  const [leftText, setLeftText] = useState(leftVersion?.text ?? "");
+  const [rightText, setRightText] = useState(rightVersion?.text ?? "");
   const [leftDetached, setLeftDetached] = useState(false);
   const [rightDetached, setRightDetached] = useState(false);
   const [editingSide, setEditingSide] = useState<"left" | "right" | null>(null);
 
-  // Keep every non-detached column mirroring the base text.
   useEffect(() => {
-    if (!leftDetached) setLeftText(source);
-    if (!rightDetached) setRightText(source);
-  }, [source, leftDetached, rightDetached]);
+    if (!leftDetached) setLeftText(leftVersion?.text ?? "");
+  }, [leftVersion?.id, leftVersion?.text, leftDetached]);
+
+  useEffect(() => {
+    if (!rightDetached) setRightText(rightVersion?.text ?? "");
+  }, [rightVersion?.id, rightVersion?.text, rightDetached]);
 
   const editLeft = (value: string) => { setLeftDetached(true); setLeftText(value); };
   const editRight = (value: string) => { setRightDetached(true); setRightText(value); };
-  const revertLeft = () => { setLeftDetached(false); setLeftText(source); setEditingSide((s) => (s === "left" ? null : s)); };
-  const revertRight = () => { setRightDetached(false); setRightText(source); setEditingSide((s) => (s === "right" ? null : s)); };
+  const revertLeft = () => { setLeftDetached(false); setLeftText(leftVersion?.text ?? ""); setEditingSide((s) => (s === "left" ? null : s)); };
+  const revertRight = () => { setRightDetached(false); setRightText(rightVersion?.text ?? ""); setEditingSide((s) => (s === "right" ? null : s)); };
+
+  const selectLeftVersion = (nextId: string) => {
+    const next = versions.find((version) => version.id === nextId);
+    if (!next) return;
+    if (nextId === rightId && leftVersion) {
+      setRightId(leftVersion.id);
+      setRightText(leftVersion.text);
+      setRightDetached(false);
+    }
+    setLeftId(nextId);
+    setLeftText(next.text);
+    setLeftDetached(false);
+  };
+
+  const selectRightVersion = (nextId: string) => {
+    const next = versions.find((version) => version.id === nextId);
+    if (!next) return;
+    if (nextId === leftId && rightVersion) {
+      setLeftId(rightVersion.id);
+      setLeftText(rightVersion.text);
+      setLeftDetached(false);
+    }
+    setRightId(nextId);
+    setRightText(next.text);
+    setRightDetached(false);
+  };
 
   const wordDiff = useMemo(() => buildWordDiff(leftText, rightText), [leftText, rightText]);
 
@@ -426,8 +486,37 @@ export const AdvancedDiffView = ({
 
   const getLabel = (v: TextVersion) => {
     const base = sourceLabels[v.source];
-    return v.customPrompt ? `${base} (${v.customPrompt})` : base;
+    const label = v.customPrompt ? `${base} (${v.customPrompt})` : base;
+    return favoriteIds.has(v.id) ? `★ ${label}` : label;
   };
+
+  const renderVersionActions = (versionId: string) => (
+    <>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="h-8 w-8 shrink-0"
+        onClick={() => updatePreferenceSet(setFavoriteIds, favoritesKey, versionId, !favoriteIds.has(versionId))}
+        title={favoriteIds.has(versionId) ? "הסר ממועדפים" : "סמן כמועדף"}
+      >
+        <Star className={cn("h-4 w-4", favoriteIds.has(versionId) && "fill-amber-400 text-amber-600")} />
+      </Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+        onClick={() => {
+          updatePreferenceSet(setHiddenIds, hiddenKey, versionId, true);
+          toast({ title: "הגרסה הוסרה מההשוואה", description: "התמלול המקורי נשאר שמור בהיסטוריה" });
+        }}
+        title="הסר מרשימת ההשוואה"
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </>
+  );
 
   return (
     <div className="space-y-4" dir="rtl">
@@ -465,10 +554,27 @@ export const AdvancedDiffView = ({
               </SelectContent>
             </Select>
             <span className="text-[11px] text-muted-foreground">{selectableVersions.length} גרסאות זמינות לבחירה</span>
+            {hiddenIds.size > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+                onClick={() => {
+                  setHiddenIds(new Set());
+                  try { localStorage.removeItem(hiddenKey); } catch { /* unavailable */ }
+                  toast({ title: "הגרסאות שהוסרו הוחזרו להשוואה" });
+                }}
+                title="החזר את כל הגרסאות שהוסרו מרשימת ההשוואה"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                שחזר מוסתרים ({hiddenIds.size})
+              </Button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="shrink-0 text-xs">בסיס</Badge>
-            <Select value={leftId} onValueChange={setLeftId}>
+            <Select value={leftId} onValueChange={selectLeftVersion}>
               <SelectTrigger className="text-xs h-8" dir="rtl"><SelectValue /></SelectTrigger>
               <SelectContent dir="rtl">
                 {selectableVersions.map(v => (
@@ -476,6 +582,7 @@ export const AdvancedDiffView = ({
                 ))}
               </SelectContent>
             </Select>
+            {leftId && renderVersionActions(leftId)}
             {onSendToAiEditor && leftId && (
               <Button
                 size="sm"
@@ -490,7 +597,7 @@ export const AdvancedDiffView = ({
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="default" className="shrink-0 text-xs">חדש</Badge>
-            <Select value={rightId} onValueChange={setRightId}>
+            <Select value={rightId} onValueChange={selectRightVersion}>
               <SelectTrigger className="text-xs h-8" dir="rtl"><SelectValue /></SelectTrigger>
               <SelectContent dir="rtl">
                 {selectableVersions.map(v => (
@@ -498,6 +605,7 @@ export const AdvancedDiffView = ({
                 ))}
               </SelectContent>
             </Select>
+            {rightId && renderVersionActions(rightId)}
             {onSendToAiEditor && rightId && (
               <Button
                 size="sm"
