@@ -62,7 +62,7 @@ import {
   getProfile,
   listProfiles,
 } from "@/lib/pronunciationProfiles";
-import { alignEditedToWhisper, findActiveWordIndex } from "@/lib/whisperAlignment";
+import { alignEditedToWhisper, findActiveWordIndex, fitTimingsToDuration } from "@/lib/whisperAlignment";
 import { LazyErrorBoundary } from "@/components/LazyErrorBoundary";
 import { CollapsibleWidget } from "@/components/ui/CollapsibleWidget";
 import {
@@ -1239,28 +1239,34 @@ const TextEditor = () => {
       const monotonic = rawTimings.every((item: WordTiming, index: number) =>
         index === 0 || item.start >= rawTimings[index - 1].start
       );
-      const coverage = Number(result?.coverage) || 0;
+      const alignmentCoverage = Number(result?.coverage) || 0;
       const confidence = Number(result?.meanConfidence) || 0;
+      // WhisperX confidence is conservative for Hebrew and especially chanting.
+      // Normalize 0.70 as excellent while still requiring broad word coverage.
+      const quality = alignmentCoverage * Math.min(1, confidence / 0.7);
 
-      if (!monotonic || coverage < 0.72 || rawTimings.length < 3) {
-        setForcedAlignmentState({ status: 'error', coverage, confidence });
+      if (!monotonic || alignmentCoverage < 0.72 || confidence < 0.18 || rawTimings.length < 3) {
+        setForcedAlignmentState({ status: 'error', coverage: quality, confidence });
         toast({
           title: "היישור לא עבר בדיקת איכות",
-          description: `כיסוי ${Math.round(coverage * 100)}% — התזמון הקיים נשמר ללא שינוי`,
+          description: `איכות ${Math.round(quality * 100)}% — התזמון הקיים נשמר ללא שינוי`,
           variant: "destructive",
         });
         return;
       }
 
       const words = referenceText.split(/\s+/).filter(Boolean);
-      const alignedTimings = alignEditedToWhisper(words, rawTimings);
+      const alignedTimings = fitTimingsToDuration(
+        alignEditedToWhisper(words, rawTimings),
+        Number(result?.audioDuration) || 0,
+      );
       wordTimingsRef.current = alignedTimings;
       wordTimingsRevisionRef.current += 1;
       setWordTimings(alignedTimings);
       setSyncEnabled(true);
       setForcedAlignmentState({
-        status: coverage >= 0.9 ? 'aligned' : 'partial',
-        coverage,
+        status: quality >= 0.72 ? 'aligned' : 'partial',
+        coverage: quality,
         confidence,
       });
       try {
@@ -1273,7 +1279,7 @@ const TextEditor = () => {
       }
       toast({
         title: "הטקסט יושר לאודיו",
-        description: `${Math.round(coverage * 100)}% כיסוי • ${alignedTimings.length} מילים`,
+        description: `${Math.round(quality * 100)}% איכות • ${alignedTimings.length} מילים`,
       });
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -1828,9 +1834,9 @@ const TextEditor = () => {
                           ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
                           : 'border-amber-500/40 text-amber-700 dark:text-amber-300'
                     }`}
-                    title="אחוז המילים שקיבלו התאמה אקוסטית ישירה"
+                    title="מדד איכות משולב של כיסוי וביטחון אקוסטי"
                   >
-                    {Math.round(forcedAlignmentState.coverage * 100)}% מיושר
+                    {Math.round(forcedAlignmentState.coverage * 100)}% איכות
                   </span>
                 )}
                 <Button

@@ -3290,7 +3290,17 @@ def _bootstrap_alignment_timings(audio_path, text, language, model_id, duration)
                     "start": float(word.start),
                     "end": float(word.end),
                 })
-    return _map_reference_to_acoustic_timings(text, acoustic_timings, duration)
+    reference_keys = [_alignment_word_key(word) for word in text.split() if word]
+    acoustic_keys = [_alignment_word_key(item["word"]) for item in acoustic_timings]
+    matched_words = sum(
+        block.size
+        for block in SequenceMatcher(None, reference_keys, acoustic_keys, autojunk=False).get_matching_blocks()
+    )
+    evidence_coverage = matched_words / max(1, len(reference_keys))
+    return (
+        _map_reference_to_acoustic_timings(text, acoustic_timings, duration),
+        evidence_coverage,
+    )
 
 
 @app.route("/align-text", methods=["POST"])
@@ -3325,12 +3335,13 @@ def align_text_to_audio():
         audio = whisperx.load_audio(tmp_path)
         duration = max(0.1, len(audio) / 16000.0)
         alignment_source = "provided-timings"
+        evidence_coverage = 1.0
         if not (
             isinstance(approximate_timings, list)
             and len(approximate_timings) == len(text.split())
         ):
             bootstrap_model_id = previous_model_id or _default_model_for(language)
-            approximate_timings = _bootstrap_alignment_timings(
+            approximate_timings, evidence_coverage = _bootstrap_alignment_timings(
                 tmp_path, text, language, bootstrap_model_id, duration
             )
             alignment_source = "local-whisper-bootstrap"
@@ -3384,9 +3395,11 @@ def align_text_to_audio():
             "inputWordCount": input_word_count,
             "alignedWordCount": len(word_timings),
             "coverage": round(coverage, 4),
+            "evidenceCoverage": round(evidence_coverage, 4),
             "meanConfidence": round(mean_score, 4),
             "monotonic": monotonic,
             "language": language,
+            "audioDuration": round(duration, 3),
             "method": "whisperx-forced-alignment",
             "alignmentSource": alignment_source,
             "processingTime": round(time.time() - started, 2),
