@@ -26,6 +26,14 @@ function resolvePersonalModel(m: string): string {
   return m;
 }
 
+// Lovable AI Gateway only accepts explicit versioned ids (no -latest aliases).
+function resolveGatewayModel(m: string): string {
+  if (m === "gemini-flash-latest" || m === "gemini-2.0-flash") return "gemini-2.5-flash";
+  if (m === "gemini-pro-latest" || m === "gemini-1.5-pro") return "gemini-2.5-pro";
+  return m;
+}
+
+
 const buildPrompt = (lang: string) => {
   const langHint = lang === "he"
     ? "השפה היא עברית."
@@ -105,7 +113,7 @@ async function callLovableGemini(params: {
 }) {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
-  const gwModel = `google/${params.model}`;
+  const gwModel = `google/${resolveGatewayModel(params.model)}`;
   // Lovable AI Gateway (OpenRouter-compatible) accepts inline audio for Gemini
   // as an image_url data URL. `input_audio` is OpenAI-only and rejected by google/*.
   const dataUrl = `data:${params.mimeType};base64,${params.audioB64}`;
