@@ -44,6 +44,32 @@ import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Column
 import { uploadToDrive } from "@/components/GoogleDriveBrowser";
 import { DriveFolderPicker } from "@/components/DriveFolderPicker";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
+
+const getAudioComparisonKey = (path?: string | null): string | null => {
+  if (!path) return null;
+  const fileName = decodeURIComponent(path.split('/').pop() || '')
+    .replace(/^\d+_/, '')
+    .trim()
+    .toLocaleLowerCase();
+  return fileName || null;
+};
+
+const joinVersionLabels = (...labels: Array<string | null | undefined>): string | undefined => {
+  const unique = Array.from(new Set(labels.map(label => label?.trim()).filter(Boolean) as string[]));
+  return unique.length ? unique.join(' • ') : undefined;
+};
+
+const formatVersionTime = (value?: string | null): string | undefined => {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return new Intl.DateTimeFormat('he-IL', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+};
 import { supabase } from "@/integrations/supabase/client";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
 import { toast } from "@/hooks/use-toast";
@@ -895,7 +921,7 @@ const TextEditor = () => {
         text: originalText,
         timestamp: currentCloudTranscript?.created_at ? new Date(currentCloudTranscript.created_at) : new Date(0),
         source: 'original',
-        customPrompt: 'תמלול מקורי',
+        customPrompt: joinVersionLabels(currentCloudTranscript?.engine, 'תמלול מקורי'),
       });
     }
 
@@ -921,8 +947,33 @@ const TextEditor = () => {
         text: cv.text,
         timestamp: new Date(cv.created_at),
         source: toKnownSource(cv.source),
-        customPrompt: cv.action_label || cv.engine_label || undefined,
+        customPrompt: joinVersionLabels(cv.engine_label, cv.action_label),
       });
+    }
+
+    // A transcription engine run creates a transcript record of its own. Include
+    // sibling runs made from the same uploaded audio so Gemini/Groq/local results
+    // can be compared without manually converting them into editor versions.
+    const audioKey = getAudioComparisonKey(currentCloudTranscript?.audio_file_path);
+    if (audioKey) {
+      for (const sibling of transcripts) {
+        if (
+          sibling.id === currentCloudTranscript?.id
+          || getAudioComparisonKey(sibling.audio_file_path) !== audioKey
+          || !sibling.text?.trim()
+        ) continue;
+        byId.set(`transcript-${sibling.id}`, {
+          id: `transcript-${sibling.id}`,
+          text: sibling.edited_text?.trim() || sibling.text,
+          timestamp: new Date(sibling.created_at),
+          source: 'original',
+          customPrompt: joinVersionLabels(
+            sibling.engine,
+            'אותו קובץ אודיו',
+            formatVersionTime(sibling.created_at),
+          ),
+        });
+      }
     }
 
     return Array.from(byId.values()).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
