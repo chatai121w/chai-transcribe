@@ -2,10 +2,11 @@ import { Fragment, useState, useMemo, useEffect, type Dispatch, type SetStateAct
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowRightLeft, Copy, ArrowUp, ArrowDown, Layers, Star, Trash2, RotateCcw } from "lucide-react";
+import { ArrowRightLeft, Copy, ArrowUp, ArrowDown, Layers, Star, Trash2, RotateCcw, ListChecks, X } from "lucide-react";
 import { TextVersion } from "@/components/TextEditHistory";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -272,6 +273,8 @@ export const AdvancedDiffView = ({
   };
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(() => readPreferenceSet(favoritesKey));
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => readPreferenceSet(hiddenKey));
+  const [multiSelectOpen, setMultiSelectOpen] = useState(false);
+  const [selectedForRemoval, setSelectedForRemoval] = useState<Set<string>>(new Set());
   const defaultLeftId = useMemo(() => versions.find(v => v.source === 'original')?.id || versions[0]?.id || '', [versions]);
   const defaultRightId = useMemo(() => {
     const nonOriginal = [...versions].reverse().find(v => v.source !== 'original');
@@ -518,6 +521,39 @@ export const AdvancedDiffView = ({
     </>
   );
 
+  const toggleRemovalSelection = (versionId: string, checked: boolean) => {
+    setSelectedForRemoval((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(versionId);
+      else next.delete(versionId);
+      return next;
+    });
+  };
+
+  const hideSelectedVersions = () => {
+    if (!selectedForRemoval.size) return;
+    if (selectableVersions.length - selectedForRemoval.size < 2) {
+      toast({
+        title: "יש להשאיר לפחות שתי גרסאות",
+        description: "כך ניתן להמשיך לבצע השוואה בין שני תמלולים.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setHiddenIds((previous) => {
+      const next = new Set(previous);
+      selectedForRemoval.forEach((id) => next.add(id));
+      try { localStorage.setItem(hiddenKey, JSON.stringify(Array.from(next))); } catch { /* unavailable */ }
+      return next;
+    });
+    toast({
+      title: `${selectedForRemoval.size} גרסאות הוסרו מההשוואה`,
+      description: "התמלולים המקוריים נשארו שמורים וניתן לשחזר אותם.",
+    });
+    setSelectedForRemoval(new Set());
+    setMultiSelectOpen(false);
+  };
+
   return (
     <div className="space-y-4" dir="rtl">
       {/* Controls */}
@@ -554,6 +590,19 @@ export const AdvancedDiffView = ({
               </SelectContent>
             </Select>
             <span className="text-[11px] text-muted-foreground">{selectableVersions.length} גרסאות זמינות לבחירה</span>
+            <Button
+              type="button"
+              variant={multiSelectOpen ? "secondary" : "outline"}
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => {
+                setMultiSelectOpen((open) => !open);
+                setSelectedForRemoval(new Set());
+              }}
+            >
+              {multiSelectOpen ? <X className="h-3.5 w-3.5" /> : <ListChecks className="h-3.5 w-3.5" />}
+              {multiSelectOpen ? "סגור בחירה" : "בחירה מרובה"}
+            </Button>
             {hiddenIds.size > 0 && (
               <Button
                 type="button"
@@ -572,6 +621,54 @@ export const AdvancedDiffView = ({
               </Button>
             )}
           </div>
+          {multiSelectOpen && (
+            <div className="md:col-span-2 rounded-md border bg-muted/20 p-3 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-medium">
+                  נבחרו {selectedForRemoval.size} מתוך {selectableVersions.length}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      const removable = selectableVersions.slice(0, Math.max(0, selectableVersions.length - 2));
+                      setSelectedForRemoval(new Set(removable.map((version) => version.id)));
+                    }}
+                  >
+                    בחר הכול האפשרי
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    className="h-7 gap-1.5 text-xs"
+                    disabled={!selectedForRemoval.size}
+                    onClick={hideSelectedVersions}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    הסר נבחרים
+                  </Button>
+                </div>
+              </div>
+              <div className="grid max-h-48 grid-cols-1 gap-1 overflow-y-auto md:grid-cols-2">
+                {selectableVersions.map((version) => (
+                  <label
+                    key={version.id}
+                    className="flex min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted"
+                  >
+                    <Checkbox
+                      checked={selectedForRemoval.has(version.id)}
+                      onCheckedChange={(checked) => toggleRemovalSelection(version.id, checked === true)}
+                    />
+                    <span className="truncate" title={getLabel(version)}>{getLabel(version)}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="shrink-0 text-xs">בסיס</Badge>
             <Select value={leftId} onValueChange={selectLeftVersion}>
