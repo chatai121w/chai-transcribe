@@ -26,6 +26,14 @@ function resolvePersonalModel(m: string): string {
   return m;
 }
 
+// Lovable AI Gateway only accepts explicit versioned ids (no -latest aliases).
+function resolveGatewayModel(m: string): string {
+  if (m === "gemini-flash-latest" || m === "gemini-2.0-flash") return "gemini-2.5-flash";
+  if (m === "gemini-pro-latest" || m === "gemini-1.5-pro") return "gemini-2.5-pro";
+  return m;
+}
+
+
 const buildPrompt = (lang: string) => {
   const langHint = lang === "he"
     ? "השפה היא עברית."
