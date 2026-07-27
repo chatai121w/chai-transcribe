@@ -164,7 +164,7 @@ export function LearningRegressionPanel({ audioBlob, audioFileName, currentText,
   };
 
   return (
-    <section dir="rtl" className="mb-4 border-y border-border bg-card/60 px-4 py-4">
+    <section dir="rtl" className="rounded-lg border border-border bg-card/60 px-4 py-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="flex items-center gap-2 text-base font-semibold"><FlaskConical className="h-4 w-4 text-primary" />הוכחת למידה על אותו קובץ</h3>

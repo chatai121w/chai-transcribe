@@ -1996,6 +1996,24 @@ const TextEditor = () => {
                   eqWide={playerLayout === 'eq-wide'}
                   eqFloating={isEqFloating}
                   eqPortalTarget={eqPortalTarget}
+                  learningWidget={!shouldUseFastEditor ? (
+                    <>
+                      <LearningRegressionPanel
+                        audioBlob={audioBlob}
+                        audioFileName={audioFileName}
+                        currentText={text}
+                        recordingKey={transcriptId || audioFileName || 'current-transcript'}
+                        onCandidateReady={(candidateText, label) => addVersion(candidateText, 'manual', label)}
+                      />
+                      <AudioLearningQueue
+                        audioBlob={audioBlob}
+                        audioFileName={audioFileName}
+                        candidates={audioLearningCandidates}
+                        onRemove={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
+                        onApproved={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
+                      />
+                    </>
+                  ) : undefined}
                 />
               </div>
               </Suspense>
@@ -2047,26 +2065,6 @@ const TextEditor = () => {
                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setTranscriptSearchIdx(i => (i + 1) % Math.max(1, transcriptMatchCount))} title="הבא (Enter)"><ChevronDown className="w-3.5 h-3.5" /></Button>
                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setTranscriptSearchOpen(false); setTranscriptSearchQuery(""); setTranscriptSearchIdx(0); }} title="סגור (Escape)"><X className="w-3.5 h-3.5" /></Button>
               </div>
-            )}
-
-            {!shouldUseFastEditor && (
-              <>
-                <LearningRegressionPanel
-                  audioBlob={audioBlob}
-                  audioFileName={audioFileName}
-                  currentText={text}
-                  recordingKey={transcriptId || audioFileName || 'current-transcript'}
-                  onCandidateReady={(candidateText, label) => addVersion(candidateText, 'manual', label)}
-                />
-
-                <AudioLearningQueue
-                  audioBlob={audioBlob}
-                  audioFileName={audioFileName}
-                  candidates={audioLearningCandidates}
-                  onRemove={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
-                  onApproved={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
-                />
-              </>
             )}
 
             {/* ── Sync transcript mirror ── */}
