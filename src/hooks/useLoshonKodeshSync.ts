@@ -112,7 +112,6 @@ export function useLoshonKodeshSync(): void {
     if (!user) return;
     const { error } = await supabase
       .from('user_preferences')
-       
       .upsert({
         user_id: user.id,
         lk_rules: bundle,
