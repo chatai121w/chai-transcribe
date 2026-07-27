@@ -2648,17 +2648,17 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
   // ─── Mixer Panel (extracted for split layout) ───────────────
   const mixerPanel = (
-    <div className="space-y-3 rounded-lg border bg-background/40 p-4 group/panel-noise">
-      <div className="flex items-center justify-between">
+    <div className="space-y-2.5 rounded-lg border bg-background/40 p-3 group/panel-noise">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 pb-2">
         <p className="text-sm font-semibold flex items-center gap-1.5">
           <Sparkles className="w-4 h-4 text-primary no-theme-icon" />
           הפחתת רעש חכמה
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 opacity-0 transition-opacity group-hover/panel-noise:opacity-100 focus-visible:opacity-100"
+            className="h-7 w-7"
             onClick={() => setIsNoisePanelCollapsed((v) => !v)}
             title={isNoisePanelCollapsed ? "הרחב פונקציות" : "מזער פונקציות"}
           >
@@ -2668,7 +2668,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           </Button>
           <Label className="text-[11px] text-muted-foreground">השוואת מקור A/B</Label>
           <Switch checked={isBypassEnhancement} onCheckedChange={setIsBypassEnhancement} />
-          <Badge variant="outline" className="text-xs">
+          <Badge variant="outline" className="h-6 text-[11px]">
             {isBypassEnhancement ? 'מקור (Bypass)' : presetId === 'off' ? 'כבוי' : currentPreset.nameHe}
           </Badge>
         </div>
@@ -2681,8 +2681,9 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       {!isNoisePanelCollapsed && (
         <>
 
+      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
       {/* Strength slider */}
-      <div className="space-y-1.5 rounded-lg border bg-muted/20 p-2">
+      <div className="space-y-2 rounded-md border bg-muted/15 p-2.5">
         <div className="flex items-center justify-between">
           <span className="text-xs">איכות מול בטיחות דיבור</span>
           <div className="flex items-center gap-1">
@@ -2715,7 +2716,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       </div>
 
       {/* Output Gain */}
-      <div className="space-y-1.5 rounded-lg border bg-muted/20 p-2">
+      <div className="space-y-2 rounded-md border bg-muted/15 p-2.5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium flex items-center gap-1">
             <Volume2 className="w-3.5 h-3.5 no-theme-icon" />
@@ -2730,26 +2731,27 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           <span>הגברה מקסימלית (300%)</span>
         </div>
       </div>
+      </div>
 
       {/* User preset save */}
-      <div className="space-y-1.5 rounded-lg border bg-muted/20 p-2">
+      <div className="rounded-md border bg-muted/10 p-2">
         <div className="flex items-center gap-1.5">
           <Input
             value={userPresetName}
             onChange={(e) => setUserPresetName(e.target.value)}
             placeholder="שם לפריסט אישי"
-            className="h-7 text-xs"
+            className="h-8 text-xs"
           />
-          <Button size="sm" className="h-7 px-2 text-xs" onClick={saveCurrentAsUserPreset} disabled={!userPresetName.trim()}>
+          <Button size="sm" className="h-8 shrink-0 px-2.5 text-xs" onClick={saveCurrentAsUserPreset} disabled={!userPresetName.trim()}>
             <Save className="w-3 h-3 ml-1 no-theme-icon" />
             שמור
           </Button>
         </div>
         {userPresets.length > 0 && (
-          <div className="space-y-1 max-h-24 overflow-y-auto">
+          <div className="mt-2 flex max-h-20 flex-wrap gap-1 overflow-y-auto">
             {userPresets.map((preset) => (
-              <div key={preset.id} className="flex items-center gap-1">
-                <Button variant="outline" size="sm" className="h-6 px-2 text-[11px] flex-1 justify-start" onClick={() => applyUserPreset(preset)}>
+              <div key={preset.id} className="flex items-center gap-0.5">
+                <Button variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={() => applyUserPreset(preset)}>
                   {preset.name}
                 </Button>
                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeUserPreset(preset.id)} title="מחק פריסט">
@@ -2762,7 +2764,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       </div>
 
       {/* Preset Grid */}
-      <div className="grid grid-cols-4 gap-1.5">
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
         {NOISE_PRESETS.map(p => {
           const Icon = p.icon;
           const isActive = presetId === p.id;
@@ -2770,13 +2772,13 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
             <Tooltip key={p.id}>
               <TooltipTrigger asChild>
                 <button
-                  className={`flex flex-col items-center gap-1 py-2 px-1 rounded-lg border text-xs transition-all
-                    ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-md scale-[1.02]' : 'border-border hover:bg-muted'}
+                  className={`flex h-12 min-w-[6.5rem] flex-1 items-center justify-center gap-1.5 rounded-md border px-2 text-xs transition-all
+                    ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}
                   `}
                   onClick={() => setPresetId(p.id)}
                 >
-                  <Icon className={`w-4 h-4 no-theme-icon ${isActive ? '' : 'text-muted-foreground'}`} />
-                  <span className="font-medium leading-tight">{p.nameHe}</span>
+                  <Icon className={`h-4 w-4 shrink-0 no-theme-icon ${isActive ? '' : 'text-muted-foreground'}`} />
+                  <span className="whitespace-nowrap font-medium leading-tight">{p.nameHe}</span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">{p.description}</TooltipContent>
@@ -2786,13 +2788,13 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         <Tooltip>
           <TooltipTrigger asChild>
             <button
-              className={`flex flex-col items-center gap-1 py-2 px-1 rounded-lg border text-xs transition-all
-                ${isManualMode ? 'bg-primary text-primary-foreground border-primary shadow-md scale-[1.02]' : 'border-border hover:bg-muted'}
+              className={`flex h-12 min-w-[6.5rem] flex-1 items-center justify-center gap-1.5 rounded-md border px-2 text-xs transition-all
+                ${isManualMode ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}
               `}
               onClick={() => setPresetId('manual')}
             >
-              <Settings2 className={`w-4 h-4 no-theme-icon ${isManualMode ? '' : 'text-muted-foreground'}`} />
-              <span className="font-medium leading-tight">ידני</span>
+              <Settings2 className={`h-4 w-4 shrink-0 no-theme-icon ${isManualMode ? '' : 'text-muted-foreground'}`} />
+              <span className="whitespace-nowrap font-medium leading-tight">ידני</span>
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">שליטה ידנית מלאה</TooltipContent>
@@ -2801,7 +2803,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
       {/* Preset active info */}
       {presetId !== 'off' && !isManualMode && (
-        <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-2 flex items-start gap-2">
+        <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
           <Brain className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary no-theme-icon" />
           <div>
             <span className="font-medium">{currentPreset.description}</span>
