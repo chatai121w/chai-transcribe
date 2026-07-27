@@ -15,7 +15,7 @@ export interface AppNotification {
 const MAX_NOTIFICATIONS = 50;
 
 let globalNotifications: AppNotification[] = [];
-let listeners: Set<() => void> = new Set();
+const listeners: Set<() => void> = new Set();
 
 const notify = () => listeners.forEach(fn => fn());
 

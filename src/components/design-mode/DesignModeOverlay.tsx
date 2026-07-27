@@ -203,7 +203,7 @@ export function DesignModeOverlay() {
       x: Math.max(8, Math.min(preferredX, window.innerWidth - W - 8)),
       y: Math.max(8, Math.min(preferredY, window.innerHeight - H - 8)),
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [selectedEl, editorMinimized, clickPoint]);
 
   useEffect(() => {

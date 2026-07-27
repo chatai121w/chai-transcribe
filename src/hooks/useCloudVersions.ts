@@ -119,7 +119,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
     if (!user) return null;
     try {
       const since = new Date(Date.now() - 30_000).toISOString();
-      let q = (supabase
+      const q = (supabase
         .from('ai_usage_events' as any) // eslint-disable-line @typescript-eslint/no-explicit-any
         .select('id, model, feature, created_at')
         .eq('user_id', user.id)

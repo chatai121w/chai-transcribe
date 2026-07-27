@@ -2215,7 +2215,7 @@ const TextEditor = () => {
                 </div>
 
                 {compareVersions.length >= 2 ? (
-                  <LazyErrorBoundary label="השוואה מתקדמת"><AdvancedDiffView 
+                  <LazyErrorBoundary label="השוואה מתקדמת"><AdvancedDiffView
                     versions={compareVersions}
                     fontSize={fontSize}
                     fontFamily={fontFamily}

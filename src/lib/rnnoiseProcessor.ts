@@ -105,7 +105,7 @@ export async function createNoiseSuppressionChain(
       denoiseState.processFrame(frame);
 
       // Mix clean (wet) with original (dry) per-sample using strength
-      let origIdx = (inR - FRAME_SIZE + RING_LEN * 2) % RING_LEN;
+      const origIdx = (inR - FRAME_SIZE + RING_LEN * 2) % RING_LEN;
       for (let j = 0; j < FRAME_SIZE; j++) {
         const clean = frame[j] / 32768.0;
         const orig = origRing[(origIdx + j) % RING_LEN];

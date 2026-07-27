@@ -133,7 +133,7 @@ export function useFeatureFlagsCloudSync(): void {
     const bundle: RemoteFlags = { ...snapshotAllFlags(), [META_TS_KEY]: Date.now() };
     const { error } = await supabase
       .from('user_preferences')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       .upsert({
         user_id: user.id,
         feature_flags: bundle,
