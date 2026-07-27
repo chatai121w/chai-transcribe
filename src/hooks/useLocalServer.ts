@@ -20,6 +20,15 @@ export interface ServerTranscriptionResult {
   stats?: TranscriptionStats;
 }
 
+export interface ModelUpdateInfo {
+  model: string;
+  installed: boolean;
+  local_revision?: string | null;
+  remote_revision?: string | null;
+  update_available: boolean;
+  error?: string;
+}
+
 export interface TranscriptionStats {
   rtf: number;              // Real-Time Factor (processing_time / audio_duration)
   file_size: number;        // bytes
@@ -191,8 +200,9 @@ export const useLocalServer = () => {
         applyConnectedStatus(data as ServerStatus);
         return true;
       }
-    } catch {
-      // Server not running — silent
+    } catch (err) {
+      // Only log real failures (not the per-poll noise) so issues stay visible.
+      debugLog.error('ServerCheck', `health check failed for ${url}`, err instanceof Error ? err.message : String(err));
     }
 
     // Hosted app fallback: ask the local launcher (8764) about whisper status.
@@ -844,6 +854,21 @@ export const useLocalServer = () => {
     await checkConnection(); // Refresh status
   };
 
+  const checkModelUpdates = async (modelIds: string[]): Promise<ModelUpdateInfo[]> => {
+    const res = await fetch(`${getBaseUrl()}/model-updates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getApiHeaders() },
+      body: JSON.stringify({ models: modelIds }),
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(err.error || `Update check failed (${res.status})`);
+    }
+    const data = await res.json();
+    return data.updates || [];
+  };
+
   const shutdownServer = useCallback(async () => {
     try {
       await fetch(`${getBaseUrl()}/shutdown`, { method: 'POST', headers: getApiHeaders(), signal: AbortSignal.timeout(3000) });
@@ -928,6 +953,11 @@ export const useLocalServer = () => {
               setModelLoading(false);
               result = { ready: false };
               onProgress?.(evt.message || 'Error');
+            } else if (evt.status === 'cancelled') {
+              setModelReady(false);
+              setModelLoading(false);
+              result = { ready: false };
+              onProgress?.(evt.message || 'Model loading cancelled');
             }
           }
         }
@@ -946,10 +976,21 @@ export const useLocalServer = () => {
     }
   }, [checkConnection]);
 
-  const cancelPreload = useCallback(() => {
+  const cancelPreload = useCallback(async () => {
+    try {
+      await fetch(`${getBaseUrl()}/cancel-model-load`, {
+        method: 'POST',
+        headers: getApiHeaders(),
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch {
+      // Still abort the local stream if the server disconnected.
+    }
     if (preloadAbortRef.current) {
       preloadAbortRef.current.abort();
     }
+    setModelReady(false);
+    setModelLoading(false);
   }, []);
 
   return {
@@ -972,6 +1013,7 @@ export const useLocalServer = () => {
     clearPartial,
     loadModel,
     downloadModel,
+    checkModelUpdates,
     preloadModelStream,
     cancelPreload,
     checkConnection,

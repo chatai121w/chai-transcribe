@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useCorrectionLearning } from "@/hooks/useCorrectionLearning";
+import { applyDefinitiveRulesToText, matchesHebrewRule } from '@/utils/hebrewRuleEngine';
 
 const CATEGORY_LABELS: Record<string, string> = {
   word: 'מילה',
@@ -38,6 +39,7 @@ export const CorrectionLearningPanel = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showAll, setShowAll] = useState(false);
   const [noteFilter, setNoteFilter] = useState<'all' | 'with-note' | 'without-note'>('all');
+  const [ruleFilter, setRuleFilter] = useState<'learned' | 'fixed' | 'all'>('learned');
 
   const handleExport = () => {
     const json = exportData();
@@ -72,13 +74,21 @@ export const CorrectionLearningPanel = () => {
     toast({ title: "נמחק", description: "כל התיקונים הנלמדים נמחקו" });
   };
 
+  const isHandledByFixedRule = (original: string, corrected: string) =>
+    !!matchesHebrewRule(original, corrected)
+    || applyDefinitiveRulesToText(corrected).fixedText !== corrected;
+
   const filteredCorrections = corrections.filter((c) => {
+    const handledByFixedRule = isHandledByFixedRule(c.original, c.corrected);
+    if (ruleFilter === 'learned' && handledByFixedRule) return false;
+    if (ruleFilter === 'fixed' && !handledByFixedRule) return false;
     if (noteFilter === 'with-note') return !!c.note?.trim();
     if (noteFilter === 'without-note') return !c.note?.trim();
     return true;
   });
 
   const displayCorrections = showAll ? filteredCorrections : filteredCorrections.slice(0, 20);
+  const fixedRuleCount = corrections.filter(c => isHandledByFixedRule(c.original, c.corrected)).length;
 
   return (
     <Card className="bg-[#1a1a2e]/90 border-white/10 text-white">
@@ -157,6 +167,33 @@ export const CorrectionLearningPanel = () => {
 
             <div className="flex flex-wrap gap-1">
               <Button
+                variant={ruleFilter === 'learned' ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-6 text-[11px]"
+                onClick={() => setRuleFilter('learned')}
+              >
+                נלמדים בלבד ({corrections.length - fixedRuleCount})
+              </Button>
+              <Button
+                variant={ruleFilter === 'fixed' ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-6 text-[11px]"
+                onClick={() => setRuleFilter('fixed')}
+              >
+                מטופלים בכלל קבוע ({fixedRuleCount})
+              </Button>
+              <Button
+                variant={ruleFilter === 'all' ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-6 text-[11px]"
+                onClick={() => setRuleFilter('all')}
+              >
+                הכל
+              </Button>
+            </div>
+
+            <div className="flex flex-wrap gap-1">
+              <Button
                 variant={noteFilter === 'all' ? 'secondary' : 'ghost'}
                 size="sm"
                 className="h-6 text-[11px]"
@@ -184,8 +221,11 @@ export const CorrectionLearningPanel = () => {
 
             <ScrollArea className="h-[200px]">
               <div className="space-y-1">
-                {displayCorrections.map((c, i) => (
-                  <div key={`${c.original}-${c.corrected}-${i}`}
+              {displayCorrections.map((c, i) => {
+                const normalizedCorrected = applyDefinitiveRulesToText(c.corrected).fixedText;
+                const handledByFixedRule = isHandledByFixedRule(c.original, c.corrected);
+                return (
+                <div key={`${c.original}-${c.corrected}-${i}`}
                     className="px-2 py-1.5 rounded bg-white/5 hover:bg-white/10 group text-sm space-y-1">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className={`text-[10px] ${CATEGORY_COLORS[c.category] || ''}`}>
@@ -197,12 +237,17 @@ export const CorrectionLearningPanel = () => {
                       </span>
                       <ArrowRight className="w-3 h-3 text-white/30 shrink-0" />
                       <span className="text-green-300/80 truncate max-w-[120px]" dir="rtl"
-                        title={c.corrected}>
-                        {c.corrected || '(ריק)'}
+                        title={normalizedCorrected}>
+                        {normalizedCorrected || '(ריק)'}
                       </span>
                       <span className="text-white/30 text-[10px] mr-auto">
                         ×{c.frequency}
                       </span>
+                      {handledByFixedRule && (
+                        <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-500/30">
+                          מטופל אוטומטית
+                        </Badge>
+                      )}
                       <Progress value={c.confidence * 100} className="w-10 h-1" />
                       <Button variant="ghost" size="sm"
                         className="h-5 w-5 p-0 opacity-0 group-hover:opacity-100 text-red-400"
@@ -213,8 +258,9 @@ export const CorrectionLearningPanel = () => {
                     {c.note && (
                       <p className="text-[11px] text-white/60 pr-1">הסבר: {c.note}</p>
                     )}
-                  </div>
-                ))}
+                </div>
+                );
+              })}
               </div>
             </ScrollArea>
           </div>

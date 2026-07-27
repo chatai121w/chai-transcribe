@@ -13,7 +13,7 @@ import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
 import { useLocalTranscriptionQueue } from "@/hooks/useLocalTranscriptionQueue";
 import { useKeyRotation } from "@/hooks/useKeyRotation";
 import type { CloudProvider } from "@/hooks/useKeyRotation";
-import { applyLearnedCorrections } from "@/utils/correctionLearning";
+import { applyLearnedCorrections, getLearnedHotwords } from "@/utils/correctionLearning";
 import { isPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
 import {
   applyProfileCorrections,
@@ -22,15 +22,16 @@ import {
   getProfileInitialPrompt,
   isProfileLoshonKodesh,
 } from "@/lib/pronunciationProfiles";
-import { getHotwordsString, applyVocabularyCorrections } from "@/utils/customVocabulary";
+import { getHotwordsString, applyVocabularyCorrections, isCustomVocabularyEnabled } from "@/utils/customVocabulary";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
 import { addNotification } from "@/hooks/useNotifications";
 import { isVideoFile, extractAudioFromVideo, VIDEO_NEEDS_EXTRACTION, MAX_VIDEO_SIZE_MB, MAX_AUDIO_SIZE_MB } from "@/lib/videoUtils";
 import { compressAudio, needsCompression, formatFileSize, CLOUD_API_LIMIT } from "@/lib/audioCompression";
 import { db } from "@/lib/localDb";
-import { isLoshonKodeshEnabled } from "@/lib/loshonKodesh";
+import { isLoshonKodeshEnabled, buildLoshonKodeshHotwords } from "@/lib/loshonKodesh";
+import { applyDefinitiveRulesToText, areDefinitiveRulesEnabled } from '@/utils/hebrewRuleEngine';
 
-type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
+type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
 type WordTiming = { word: string; start: number; end: number; probability?: number };
 
@@ -94,17 +95,30 @@ export function useTranscriptionEngines(
   // ── Helpers ─────────────────────────────────────────────────
 
   const saveToHistory = useCallback(async (text: string, engineUsed: string, skipCloud?: boolean, timings?: WordTiming[], audioFile?: File, folder?: string) => {
+    const definitiveResult = areDefinitiveRulesEnabled()
+      ? applyDefinitiveRulesToText(text)
+      : { fixedText: text, hits: [] };
     const personalPronunciationOn = isPersonalPronunciationEnabled();
     const correctionResult = personalPronunciationOn
-      ? applyLearnedCorrections(text, { engine: engineUsed })
-      : { text, appliedCount: 0 };
+      ? applyLearnedCorrections(definitiveResult.fixedText, { engine: engineUsed })
+      : { text: definitiveResult.fixedText, appliedCount: 0, applied: [] };
     const profileResult = personalPronunciationOn
       ? applyProfileCorrections(correctionResult.text)
       : { text: correctionResult.text, appliedCount: 0 };
-    const vocabResult = applyVocabularyCorrections(profileResult.text);
+    const vocabResult = isCustomVocabularyEnabled()
+      ? applyVocabularyCorrections(profileResult.text)
+      : { text: profileResult.text, appliedCount: 0 };
     const finalText = vocabResult.text;
-    if (correctionResult.appliedCount > 0 || vocabResult.appliedCount > 0 || profileResult.appliedCount > 0) {
+    if (definitiveResult.hits.length > 0 || correctionResult.appliedCount > 0 || vocabResult.appliedCount > 0 || profileResult.appliedCount > 0) {
       debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile + ${vocabResult.appliedCount} vocabulary corrections${getActiveProfileId() ? ` (profile: ${getActiveProfileId()})` : ''}`);
+      const totalApplied = definitiveResult.hits.length + correctionResult.appliedCount + profileResult.appliedCount + vocabResult.appliedCount;
+      state.setTranscript(finalText);
+      toast({
+        title: `הלמידה האישית החילה ${totalApplied} תיקונים`,
+        description: correctionResult.applied.length
+          ? correctionResult.applied.slice(0, 3).map(item => `${item.original} → ${item.corrected}`).join(' · ')
+          : 'הטקסט עודכן לפי אוצר המילים האישי',
+      });
     }
 
     if (skipCloud) {
@@ -114,12 +128,13 @@ export function useTranscriptionEngines(
       const updated = [entry, ...history].slice(0, 50);
       localStorage.setItem('transcript_history', JSON.stringify(updated));
       lastSavedTranscriptIdRef.current = null;
-      return;
+      return finalText;
     }
     const saved = await saveTranscript(finalText, engineUsed, undefined, audioFile || currentFileRef.current || undefined, timings || null, folder);
     lastSavedTranscriptIdRef.current = saved?.id || null;
     addNotification({ type: 'success', title: 'תמלול הושלם', description: `מנוע: ${engineUsed} — ${finalText.split(/\s+/).length} מילים` });
-  }, [saveTranscript]);
+    return finalText;
+  }, [saveTranscript, state]);
 
   const saveTextOnlyToCloud = useCallback(async (text: string, engineUsed: string, timings?: WordTiming[]) => {
     const saved = await saveTranscript(text, engineUsed, undefined, undefined, timings || null);
@@ -157,25 +172,27 @@ export function useTranscriptionEngines(
       xhr.onload = () => {
         if (processingInterval) clearInterval(processingInterval);
         onProgress(100);
+        const requestId = xhr.getResponseHeader('x-request-id') || undefined;
         try {
           const json = JSON.parse(xhr.responseText || '{}');
           if (xhr.status >= 200 && xhr.status < 300) {
-            resolve({ data: json });
+            resolve({ data: { ...json, __requestId: requestId } });
           } else if (xhr.status === 429) {
             const retryAfter = parseInt(xhr.getResponseHeader('Retry-After') || '60', 10);
-            resolve({ error: { message: `RATE_LIMIT`, retryAfter } });
+            resolve({ error: { message: 'RATE_LIMIT', retryAfter, status: 429, requestId, body: json } });
           } else {
-            resolve({ error: json || { message: `HTTP ${xhr.status}` } });
+            resolve({ error: { ...(json || {}), status: xhr.status, requestId, body: json } });
           }
         } catch (e) {
-          resolve({ error: { message: 'Invalid JSON response' } });
+          resolve({ error: { message: `HTTP ${xhr.status} — תשובה לא-JSON`, status: xhr.status, requestId, raw: xhr.responseText?.slice(0, 300) } });
         }
       };
 
       xhr.onerror = () => {
         if (processingInterval) clearInterval(processingInterval);
-        resolve({ error: { message: 'Network error' } });
+        resolve({ error: { message: 'Network error', status: 0 } });
       };
+
 
       xhr.send(formData);
     });
@@ -191,12 +208,20 @@ export function useTranscriptionEngines(
     state.setWordTimings(timings);
     const processingTime = extra?.processingTime ?? (Date.now() - transcriptionStartRef.current) / 1000;
 
+    let finalText: string;
     if (extra?.cloudSaveMode === 'skip') {
-      await saveToHistory(text, engineLabel, true, timings);
+      finalText = await saveToHistory(text, engineLabel, true, timings);
     } else if (extra?.cloudSaveMode === 'text-only') {
-      await saveTextOnlyToCloud(text, engineLabel, timings);
+      const definitiveResult = areDefinitiveRulesEnabled() ? applyDefinitiveRulesToText(text) : { fixedText: text };
+      const correctionResult = isPersonalPronunciationEnabled()
+        ? applyLearnedCorrections(definitiveResult.fixedText, { engine: engineLabel })
+        : { text: definitiveResult.fixedText };
+      const profileResult = isPersonalPronunciationEnabled() ? applyProfileCorrections(correctionResult.text) : { text: correctionResult.text };
+      finalText = isCustomVocabularyEnabled() ? applyVocabularyCorrections(profileResult.text).text : profileResult.text;
+      state.setTranscript(finalText);
+      await saveTextOnlyToCloud(finalText, engineLabel, timings);
     } else {
-      await saveToHistory(text, engineLabel, undefined, timings);
+      finalText = await saveToHistory(text, engineLabel, undefined, timings);
     }
 
     addAnalyticsRecord({
@@ -225,23 +250,40 @@ export function useTranscriptionEngines(
     toast({ title: "הצלחה!", description: `התמלול עם ${engineLabel} הושלם בהצלחה - עובר לעריכת טקסט` });
     if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
     setTimeout(() => {
-      navigate('/text-editor', { state: { text, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+      navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
     }, 1000);
   }, [state, saveToHistory, saveTextOnlyToCloud, addAnalyticsRecord, perfMonitor, navigate]);
 
   const handleError = useCallback((engineLabel: string, file: File, error: unknown) => {
-    debugLog.error(engineLabel, 'Transcription failed', error instanceof Error ? error.message : error);
+    const err = (error && typeof error === 'object') ? error as Record<string, unknown> : {};
+    const status = err.status as number | undefined;
+    const requestId = err.requestId as string | undefined;
+    const stage = err.stage as string | undefined;
+    const baseMsg = (err.error as string) || (err.message as string) || (error instanceof Error ? error.message : 'שגיאה לא ידועה');
+    const extraLines: string[] = [];
+    if (status !== undefined) extraLines.push(`סטטוס: ${status}`);
+    if (stage) extraLines.push(`שלב: ${stage}`);
+    if (err.personalStatus) extraLines.push(`Personal: ${err.personalStatus} — ${err.personalError ?? ''}`);
+    if (err.lovableStatus || err.lovableError) extraLines.push(`Lovable: ${err.lovableStatus ?? ''} — ${err.lovableError ?? ''}`);
+    if (requestId) extraLines.push(`Request ID: ${requestId}`);
+    const description = [baseMsg, ...extraLines].filter(Boolean).join('\n');
+    debugLog.error(engineLabel, 'Transcription failed', { status, requestId, stage, error: baseMsg, raw: err });
     addAnalyticsRecord({
       engine: engineLabel, status: 'failed',
       fileName: file.name, fileSize: file.size,
-      errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      errorMessage: description,
     });
     toast({
-      title: `שגיאה בתמלול ${engineLabel}`,
-      description: error instanceof Error ? error.message : "שגיאה לא ידועה",
+      title: `שגיאה בתמלול ${engineLabel}${status ? ` (${status})` : ''}`,
+      description,
       variant: "destructive",
+      duration: 15000,
     });
+    if (requestId) {
+      try { navigator.clipboard?.writeText(requestId); } catch { /* noop */ }
+    }
   }, [addAnalyticsRecord]);
+
 
   // ── Cloud engine helper (OpenAI/Groq — using XHR via supabase edge) ──
 
@@ -280,6 +322,16 @@ export function useTranscriptionEngines(
         form.append('apiKey', key);
         form.append('language', sourceLanguage);
         form.append('targetLanguage', 'he');
+
+        // Bias Groq Whisper toward known vocabulary + learned corrections + Loshon Kodesh terms
+        if (provider === 'groq') {
+          const vocab = isCustomVocabularyEnabled() ? getHotwordsString() : '';
+          const learned = isPersonalPronunciationEnabled() ? getLearnedHotwords(60) : '';
+          const base = [vocab, learned].filter(Boolean).join(', ');
+          const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
+          const hotwords = lkActive ? buildLoshonKodeshHotwords(base) : base;
+          if (hotwords) form.append('hotwords', hotwords);
+        }
 
         debugLog.info(engineLabel, `Uploading via XHR with key #${idx + 1}/${keyPool.length}`);
         const result = await xhrInvoke(functionName, form, (p) => state.setUploadProgress(p));
@@ -467,7 +519,56 @@ export function useTranscriptionEngines(
     }
   }, [state, sourceLanguage, getProviderApiKeyPool, getProviderStartIndex, shouldRotateProviderKey, setProviderActiveKey, getProviderLabel, handleSuccess, handleError, navigate]);
 
+  // ── Gemini (Google GenAI) — personal key first, Lovable AI fallback ──
+
+  const transcribeWithGemini = useCallback(async (file: File, fileAudioUrl?: string) => {
+    state.setIsUploading(true);
+    try {
+      const { getPersonalGeminiKey, getPersonalGeminiModel } = await import('@/lib/personalGemini');
+      const personalKey = getPersonalGeminiKey();
+      const model = (localStorage.getItem('gemini_transcription_model')
+        || getPersonalGeminiModel()
+        || 'gemini-2.5-flash').replace(/^google\//, '');
+      toast({ title: '✨ שולח ל-Gemini...', description: personalKey ? `מפתח אישי · ${model}` : `Lovable AI · ${model}` });
+
+      const form = new FormData();
+      form.append('file', file, file.name);
+      form.append('model', model);
+      form.append('language', sourceLanguage);
+      if (personalKey) form.append('apiKey', personalKey);
+
+      const result = await xhrInvoke('transcribe-gemini', form, (p) => state.setUploadProgress(p));
+      if (result.error) throw result.error;
+      const data = result.data as { text?: string; provider?: "personal" | "lovable"; fallbackReason?: string; usage?: Record<string, unknown> } | null;
+      if (!data?.text) throw new Error('לא התקבל תמלול מ-Gemini');
+      try {
+        const {
+          normalizeGeminiUsage,
+          recordPersonalGeminiUsage,
+          recordLovableGatewayUsage,
+        } = await import('@/lib/personalGemini');
+        const usage = normalizeGeminiUsage(data.usage);
+        if (data.provider === 'personal') {
+          recordPersonalGeminiUsage(model, usage.promptTokens, usage.completionTokens, 'transcription');
+        } else {
+          recordLovableGatewayUsage(model, usage.promptTokens, usage.completionTokens, 'transcription');
+        }
+      } catch { /* noop */ }
+      if (data.fallbackReason === 'personal_exhausted' && personalKey) {
+        toast({ title: 'מפתח Gemini האישי מוצה', description: 'התמלול הושלם דרך Lovable AI' });
+      }
+      await handleSuccess(data.text, [], `Gemini (${model})`, file, fileAudioUrl);
+
+    } catch (error) {
+      handleError('Gemini', file, error);
+      throw error;
+    } finally {
+      state.setIsUploading(false);
+    }
+  }, [state, sourceLanguage, xhrInvoke, handleSuccess, handleError]);
+
   // ── Local (browser ONNX) ──
+
 
   const transcribeLocally = useCallback(async (file: File, fileAudioUrl?: string) => {
     try {
@@ -502,11 +603,15 @@ export function useTranscriptionEngines(
       state.setLastStats(null);
       toast({ title: "מתמלל עם GPU...", description: "מעבד את הקובץ בשרת המקומי עם CUDA — תראה תוצאות בזמן אמת" });
 
-      const vocabHotwords = getHotwordsString();
+      const personalPronunciationOn = isPersonalPronunciationEnabled();
+      const vocabHotwords = isCustomVocabularyEnabled() ? getHotwordsString() : '';
       const userHotwords = preferences.cuda_hotwords || '';
       const profileHotwords = buildProfileHotwords();
-      const mergedHotwords =
-        [userHotwords, vocabHotwords, profileHotwords].filter(Boolean).join(', ') || undefined;
+      const learnedHotwords = personalPronunciationOn ? getLearnedHotwords(100) : '';
+      const baseMerged = [userHotwords, vocabHotwords, profileHotwords, learnedHotwords]
+        .filter(Boolean).join(', ');
+      const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
+      const mergedHotwords = (lkActive ? buildLoshonKodeshHotwords(baseMerged) : baseMerged) || undefined;
       const profilePrompt = getProfileInitialPrompt();
       const cudaOptions: CudaOptions = {
         preset: preferences.cuda_preset || 'balanced',
@@ -517,7 +622,7 @@ export function useTranscriptionEngines(
         vadAggressive: preferences.cuda_vad_aggressive,
         hotwords: mergedHotwords,
         paragraphThreshold: preferences.cuda_paragraph_threshold || undefined,
-        loshonKodesh: isLoshonKodeshEnabled() || isProfileLoshonKodesh(),
+        loshonKodesh: lkActive,
         initialPrompt: profilePrompt || undefined,
       };
 
@@ -667,6 +772,8 @@ export function useTranscriptionEngines(
         await transcribeCloudDiarize('assemblyai', 'transcribe-assemblyai', 'AssemblyAI', fileToTranscribe, url);
       } else if (engine === 'deepgram') {
         await transcribeCloudDiarize('deepgram', 'transcribe-deepgram', 'Deepgram', fileToTranscribe, url);
+      } else if (engine === 'gemini') {
+        await transcribeWithGemini(fileToTranscribe, url);
       } else if (engine === 'local-server') {
         await transcribeWithLocalServer(fileToTranscribe, url);
       } else {
@@ -742,6 +849,7 @@ export function useTranscriptionEngines(
       groq: 'transcribe-groq',
       assemblyai: 'transcribe-assemblyai',
       deepgram: 'transcribe-deepgram',
+      gemini: 'transcribe-gemini',
     };
 
     if (engine === 'local') {

@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { WaveformPlayer, type WaveformPlayerHandle } from "@/components/WaveformPlayer";
 import { TranscriptEditor } from "@/components/TranscriptEditor";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -49,6 +50,12 @@ import {
 import { toast } from "@/hooks/use-toast";
 import { getServerUrl } from "@/lib/serverConfig";
 import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
+import LoshonKodeshRules from "@/pages/LoshonKodeshRules";
+import {
+  applyLoshonKodeshReplacements,
+  buildLoshonKodeshHotwords,
+  getLoshonKodeshPrompt,
+} from "@/lib/loshonKodesh";
 
 const SERVER = getServerUrl();
 
@@ -96,6 +103,11 @@ async function apiFetch(path: string, opts: RequestInit = {}) {
   return r.json();
 }
 
+function appendCentralLkSettings(form: FormData) {
+  form.append("hotwords", buildLoshonKodeshHotwords());
+  form.append("initial_prompt", getLoshonKodeshPrompt());
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 //  TAB 1 — TRANSCRIBE
 // ════════════════════════════════════════════════════════════════════════════
@@ -128,13 +140,15 @@ function TabTranscribe() {
       fd.append("file", file);
       fd.append("beam_size", String(beamSize));
       fd.append("normalize", normalize ? "1" : "0");
+      appendCentralLkSettings(fd);
       const res = await fetch(`${SERVER}/lk/transcribe`, { method: "POST", body: fd });
       if (!res.ok) throw new Error((await res.json()).error || res.statusText);
       const data: TranscribeResult = await res.json();
-      setResult(data);
+      const finalData = { ...data, text: applyLoshonKodeshReplacements(data.text) };
+      setResult(finalData);
       // Save transcript + audio to cloud in background
       saveTranscript(
-        data.text,
+        finalData.text,
         "לשון הקודש (LK)",
         file.name,
         file,
@@ -992,14 +1006,16 @@ function TabTraining() {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("beam_size", "5");
+      appendCentralLkSettings(fd);
       const res = await fetch(`${SERVER}/lk/transcribe`, { method: "POST", body: fd });
       if (!res.ok) throw new Error((await res.json()).error || res.statusText);
       const data: TranscribeResult = await res.json();
-      setResult(data);
+      const finalData = { ...data, text: applyLoshonKodeshReplacements(data.text) };
+      setResult(finalData);
       setCurrentTime(0);
       // Save transcript + audio to cloud in background
       saveTranscript(
-        data.text,
+        finalData.text,
         "לשון הקודש (LK)",
         file.name,
         file,
@@ -1098,6 +1114,7 @@ function TabTraining() {
         const fd = new FormData();
         fd.append("file", file);
         fd.append("beam_size", "5");
+        appendCentralLkSettings(fd);
         try {
           const res = await fetch(`${SERVER}/lk/transcribe`, { method: "POST", body: fd });
           const data = await res.json();
@@ -1969,6 +1986,12 @@ function TabBenchmark() {
 // ════════════════════════════════════════════════════════════════════════════
 
 export default function LashoKodesh() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab") || "transcribe";
+  const activeTab = requestedTab === "dictionary" || requestedTab === "rules"
+    ? "settings"
+    : (["transcribe", "settings", "training", "benchmark"].includes(requestedTab) ? requestedTab : "transcribe");
+
   return (
     <div className="w-full py-6 px-4 md:px-8 space-y-6">
       {/* Header */}
@@ -1983,19 +2006,15 @@ export default function LashoKodesh() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="transcribe" dir="rtl">
-        <TabsList className="grid w-full grid-cols-5">
+      <Tabs value={activeTab} onValueChange={(tab) => setSearchParams({ tab })} dir="rtl">
+        <TabsList className="grid h-auto w-full grid-cols-2 md:grid-cols-4">
           <TabsTrigger value="transcribe" className="gap-2">
             <Mic className="w-4 h-4" />
             תמלול
           </TabsTrigger>
-          <TabsTrigger value="dictionary" className="gap-2">
-            <BookOpen className="w-4 h-4" />
-            מילון
-          </TabsTrigger>
-          <TabsTrigger value="rules" className="gap-2">
+          <TabsTrigger value="settings" className="gap-2">
             <Settings2 className="w-4 h-4" />
-            חוקי דקדוק
+            כללים ומילונים
           </TabsTrigger>
           <TabsTrigger value="training" className="gap-2">
             <GraduationCap className="w-4 h-4" />
@@ -2010,11 +2029,8 @@ export default function LashoKodesh() {
         <TabsContent value="transcribe" className="mt-6">
           <TabTranscribe />
         </TabsContent>
-        <TabsContent value="dictionary" className="mt-6">
-          <TabDictionary />
-        </TabsContent>
-        <TabsContent value="rules" className="mt-6">
-          <TabRules />
+        <TabsContent value="settings" className="mt-6">
+          <LoshonKodeshRules embedded />
         </TabsContent>
         <TabsContent value="training" className="mt-6">
           <TabTraining />

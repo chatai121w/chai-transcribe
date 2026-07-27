@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo, forwardRef, useImperativeHandle } from "react";
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { Layouts } from "react-grid-layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -25,20 +25,19 @@ import {
   GripVertical, LayoutGrid, RotateCw,
 } from "lucide-react";
 import {
-  loadStudioLayouts,
-  saveStudioLayouts,
-  sanitizeStudioLayouts,
-  resetStudioLayouts,
   isStudioEditModeEnabled,
   setStudioEditModeEnabled,
 } from "@/lib/studioLayout";
 import { usePlayerShortcuts } from "@/hooks/usePlayerShortcuts";
+import { findActiveWordIndex } from "@/lib/whisperAlignment";
 
 export interface WordTiming {
   word: string;
   start: number;
   end: number;
   probability?: number;
+  correctionOriginal?: string;
+  correctedAt?: number;
 }
 
 // ─── Visual Knob Component ─────────────────────────────────────
@@ -300,6 +299,7 @@ interface SyncAudioPlayerProps {
   eqPortalTarget?: HTMLDivElement | null;
   onPlayStateChange?: (playing: boolean) => void;
   speakerSegments?: SpeakerSegmentForWaveform[];
+  learningWidget?: ReactNode;
 }
 
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -403,6 +403,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   eqPortalTarget,
   onPlayStateChange,
   speakerSegments,
+  learningWidget,
 }, ref) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -501,11 +502,13 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   }, [isEqPanelOpen]);
 
   // ─── Draggable widget grid (Studio layout) ──────────────────
-  const [studioLayouts, setStudioLayouts] = useState<Layouts>(() => loadStudioLayouts());
   const [layoutEditMode, setLayoutEditMode] = useState<boolean>(() => isStudioEditModeEnabled());
   const [featuresPopoverOpen, setFeaturesPopoverOpen] = useState(false);
 
-  // ── Widget visibility (player / studio) ───────────────────────────────
+  type StudioWidgetId = 'player' | 'studio' | 'learning';
+  const DEFAULT_WIDGET_ORDER: StudioWidgetId[] = ['player', 'studio', 'learning'];
+
+  // ── Widget visibility ─────────────────────────────────────────────────
   const [hiddenWidgets, setHiddenWidgets] = useState<Set<string>>(() => {
     try {
       const s = localStorage.getItem('studio_hidden_widgets_v1');
@@ -521,41 +524,64 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     });
   };
 
-  // ── Widget order in RGL (player / studio) — swap via ↑↓ ─────────────
-  const [widgetOrder, setWidgetOrder] = useState<['player', 'studio'] | ['studio', 'player']>(() => {
+  // ── Widget order — persisted and migrated from the old two-widget setting ──
+  const [widgetOrder, setWidgetOrder] = useState<StudioWidgetId[]>(() => {
     try {
-      const s = localStorage.getItem('studio_widget_order_v1');
-      return s === 'studio-first' ? ['studio', 'player'] : ['player', 'studio'];
-    } catch { return ['player', 'studio']; }
+      const saved = localStorage.getItem('studio_widget_order_v2');
+      if (saved) {
+        const parsed = JSON.parse(saved) as StudioWidgetId[];
+        const valid = parsed.filter((id): id is StudioWidgetId => DEFAULT_WIDGET_ORDER.includes(id));
+        if (valid.length) return [...valid, ...DEFAULT_WIDGET_ORDER.filter((id) => !valid.includes(id))];
+      }
+      const legacy = localStorage.getItem('studio_widget_order_v1');
+      return legacy === 'studio-first'
+        ? ['studio', 'player', 'learning']
+        : DEFAULT_WIDGET_ORDER;
+    } catch { return DEFAULT_WIDGET_ORDER; }
   });
-  const swapWidgetOrder = () => {
-    setWidgetOrder(prev => {
-      const next: ['player', 'studio'] | ['studio', 'player'] =
-        prev[0] === 'player' ? ['studio', 'player'] : ['player', 'studio'];
-      localStorage.setItem('studio_widget_order_v1', next[0] === 'studio' ? 'studio-first' : 'player-first');
-      // Recompute studioLayouts y positions
-      setStudioLayouts(current => {
-        const updated: Layouts = {};
-        for (const [bp, items] of Object.entries(current)) {
-          const first = items.find(i => i.i === next[0]);
-          const second = items.find(i => i.i === next[1]);
-          if (!first || !second) { updated[bp] = items; continue; }
-          const firstH = first.h;
-          const secondH = second.h;
-          updated[bp] = [
-            { ...first,  y: 0 },
-            { ...second, y: firstH + 1 },
-          ];
-          updated[bp] = updated[bp].map((it, idx) => idx === 0
-            ? { ...it, h: firstH }
-            : { ...it, h: secondH }
-          );
-        }
-        saveStudioLayouts(updated);
-        return updated;
-      });
-      return next;
-    });
+  const persistWidgetOrder = (next: StudioWidgetId[]) => {
+    setWidgetOrder(next);
+    localStorage.setItem('studio_widget_order_v2', JSON.stringify(next));
+  };
+  const moveWidget = (id: StudioWidgetId, direction: -1 | 1) => {
+    const from = widgetOrder.indexOf(id);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= widgetOrder.length) return;
+    const next = [...widgetOrder];
+    next.splice(from, 1);
+    next.splice(to, 0, id);
+    persistWidgetOrder(next);
+  };
+  const widgetDragRef = useRef<StudioWidgetId | null>(null);
+  const [widgetDragOver, setWidgetDragOver] = useState<StudioWidgetId | null>(null);
+  const handleWidgetDragStart = (event: React.DragEvent, id: StudioWidgetId) => {
+    widgetDragRef.current = id;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', id);
+  };
+  const handleWidgetDragOver = (event: React.DragEvent, id: StudioWidgetId) => {
+    if (!widgetDragRef.current || widgetDragRef.current === id) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setWidgetDragOver(id);
+  };
+  const handleWidgetDrop = (event: React.DragEvent, targetId: StudioWidgetId) => {
+    event.preventDefault();
+    const sourceId = widgetDragRef.current;
+    if (sourceId && sourceId !== targetId) {
+      const next = [...widgetOrder];
+      const sourceIndex = next.indexOf(sourceId);
+      const targetIndex = next.indexOf(targetId);
+      next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, sourceId);
+      persistWidgetOrder(next);
+    }
+    widgetDragRef.current = null;
+    setWidgetDragOver(null);
+  };
+  const handleWidgetDragEnd = () => {
+    widgetDragRef.current = null;
+    setWidgetDragOver(null);
   };
 
   // ── Feature order (drag-and-drop in popover) ──────────────────────────
@@ -594,116 +620,13 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   };
   const handleFeatureDragEnd = () => { setFeatureDragOver(null); featureDragRef.current = null; };
 
-  // Auto-size widgets to content — not persisted to localStorage
-  const [autoHeights, setAutoHeights] = useState<Record<string, number>>({});
   const playerBodyRef = useRef<HTMLDivElement>(null);
   const studioBodyRef = useRef<HTMLDivElement>(null);
-
-  // RGL formula: item height = h * (rowHeight + marginY) - marginY
-  // rowHeight=32, marginY=6 → itemHeight = 38h - 6 → h = ceil((itemHeight+6)/38)
-  const RGL_ROW = 32;
-  const RGL_MARGIN_Y = 6;
-  const STUDIO_ITEM_GAP = 1;
-
-  const updateAutoHeightFor = useCallback((key: string, element: HTMLDivElement | null) => {
-    if (!element) return;
-    const contentH = element.scrollHeight;
-    // add widget-body padding (16+18=34) + small buffer (10)
-    const newH = Math.max(6, Math.ceil((contentH + 44 + RGL_MARGIN_Y) / (RGL_ROW + RGL_MARGIN_Y)));
-    setAutoHeights(prev => prev[key] === newH ? prev : { ...prev, [key]: newH });
-  }, []);
-
-  useEffect(() => {
-    const entries: Array<{ key: string; ref: React.RefObject<HTMLDivElement> }> = [
-      { key: 'player', ref: playerBodyRef },
-      { key: 'studio', ref: studioBodyRef },
-    ];
-    const resizeObservers: ResizeObserver[] = [];
-    const mutationObservers: MutationObserver[] = [];
-    const rafIds = new Set<number>();
-
-    const scheduleUpdate = (key: string, ref: React.RefObject<HTMLDivElement>) => {
-      const rafId = requestAnimationFrame(() => {
-        rafIds.delete(rafId);
-        updateAutoHeightFor(key, ref.current);
-      });
-      rafIds.add(rafId);
-    };
-
-    const updateAll = () => {
-      for (const { key, ref } of entries) scheduleUpdate(key, ref);
-    };
-
-    for (const { key, ref } of entries) {
-      if (!ref.current) continue;
-
-      const update = () => scheduleUpdate(key, ref);
-      const obs = new ResizeObserver(update);
-      obs.observe(ref.current);
-
-      // Observe the main content node as well; parent card keeps a fixed RGL height.
-      const contentNode = ref.current.children.item(1);
-      if (contentNode instanceof HTMLElement) {
-        obs.observe(contentNode);
-      }
-
-      const mut = new MutationObserver(update);
-      mut.observe(ref.current, { childList: true, subtree: true });
-
-      update();
-      resizeObservers.push(obs);
-      mutationObservers.push(mut);
-    }
-
-    window.addEventListener('resize', updateAll);
-    return () => {
-      window.removeEventListener('resize', updateAll);
-      resizeObservers.forEach(o => o.disconnect());
-      mutationObservers.forEach(o => o.disconnect());
-      rafIds.forEach(id => cancelAnimationFrame(id));
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [updateAutoHeightFor]);
-
-  // Merge auto heights into layouts for display (not persisted)
-  // Also hides widgets that are toggled off
-  const effectiveLayouts = useMemo(() => {
-    const result: Layouts = {};
-    for (const [bp, items] of Object.entries(studioLayouts)) {
-      const withAutoHeights = items
-        .filter(item => !hiddenWidgets.has(item.i))
-        .map(item =>
-          autoHeights[item.i] !== undefined
-            ? { ...item, h: autoHeights[item.i] }
-            : item
-        );
-
-      // Keep widgets packed vertically when content-driven heights shrink.
-      const ordered = [...withAutoHeights].sort((a, b) => (a.y - b.y) || (a.x - b.x));
-      let nextY = 0;
-      result[bp] = ordered.map((item) => {
-        const compacted = { ...item, y: nextY };
-        nextY += item.h + STUDIO_ITEM_GAP;
-        return compacted;
-      });
-    }
-    return result;
-  }, [studioLayouts, autoHeights, hiddenWidgets]);
-
-  const handleStudioLayoutChange = useCallback((_current: any, all: Layouts) => {
-    const fitted = sanitizeStudioLayouts(all);
-    setStudioLayouts(fitted);
-    saveStudioLayouts(fitted);
-  }, []);
   const handleResetStudioLayout = useCallback(() => {
-    const fresh = resetStudioLayouts();
-    setStudioLayouts(fresh);
+    persistWidgetOrder(DEFAULT_WIDGET_ORDER);
+    setHiddenWidgets(new Set());
+    localStorage.removeItem('studio_hidden_widgets_v1');
   }, []);
-  const handleAutoArrangeStudioLayout = useCallback(() => {
-    const arranged = sanitizeStudioLayouts(studioLayouts);
-    setStudioLayouts(arranged);
-    saveStudioLayouts(arranged);
-  }, [studioLayouts]);
   useEffect(() => {
     setStudioEditModeEnabled(layoutEditMode);
   }, [layoutEditMode]);
@@ -965,10 +888,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   // Current word index for sync
   const currentWordIndex = useMemo(() => {
     if (!isSyncEnabled || !wordTimings.length) return -1;
-    for (let i = wordTimings.length - 1; i >= 0; i--) {
-      if (currentTime >= wordTimings[i].start) return i;
-    }
-    return -1;
+    return findActiveWordIndex(wordTimings, currentTime);
   }, [currentTime, wordTimings, isSyncEnabled]);
 
   useEffect(() => {
@@ -2226,6 +2146,29 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     onTimeUpdate?.(t);
   }, [onTimeUpdate, focusEnabled, focusLoop, canEnableFocusLoop, focusEnd, focusStart, externalTime]);
 
+  // Native `timeupdate` may fire only a few times per second. Publish a bounded
+  // 20 Hz clock while playing so short words update promptly without driving
+  // the editor at animation-frame frequency.
+  useEffect(() => {
+    if (!isPlaying) return;
+    let frame = 0;
+    let lastPublishedAt = 0;
+    const tick = (now: number) => {
+      const audio = audioRef.current;
+      if (!audio || audio.paused || audio.ended) return;
+      if (now - lastPublishedAt >= 50) {
+        const time = audio.currentTime;
+        lastPublishedAt = now;
+        setCurrentTime(time);
+        lastEmittedTimeRef.current = time;
+        onTimeUpdate?.(time);
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [isPlaying, onTimeUpdate]);
+
   const handleLoadedMetadata = useCallback(() => {
     if (!audioRef.current) return;
     const d = audioRef.current.duration;
@@ -2598,17 +2541,17 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
   // ─── Mixer Panel (extracted for split layout) ───────────────
   const mixerPanel = (
-    <div className="space-y-3 rounded-lg border bg-background/40 p-4 group/panel-noise">
-      <div className="flex items-center justify-between">
+    <div className="space-y-2.5 rounded-lg border bg-background/40 p-3 group/panel-noise">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 pb-2">
         <p className="text-sm font-semibold flex items-center gap-1.5">
           <Sparkles className="w-4 h-4 text-primary no-theme-icon" />
           הפחתת רעש חכמה
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 opacity-0 transition-opacity group-hover/panel-noise:opacity-100 focus-visible:opacity-100"
+            className="h-7 w-7"
             onClick={() => setIsNoisePanelCollapsed((v) => !v)}
             title={isNoisePanelCollapsed ? "הרחב פונקציות" : "מזער פונקציות"}
           >
@@ -2618,7 +2561,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           </Button>
           <Label className="text-[11px] text-muted-foreground">השוואת מקור A/B</Label>
           <Switch checked={isBypassEnhancement} onCheckedChange={setIsBypassEnhancement} />
-          <Badge variant="outline" className="text-xs">
+          <Badge variant="outline" className="h-6 text-[11px]">
             {isBypassEnhancement ? 'מקור (Bypass)' : presetId === 'off' ? 'כבוי' : currentPreset.nameHe}
           </Badge>
         </div>
@@ -2631,8 +2574,9 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       {!isNoisePanelCollapsed && (
         <>
 
+      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
       {/* Strength slider */}
-      <div className="space-y-1.5 rounded-lg border bg-muted/20 p-2">
+      <div className="space-y-2 rounded-md border bg-muted/15 p-2.5">
         <div className="flex items-center justify-between">
           <span className="text-xs">איכות מול בטיחות דיבור</span>
           <div className="flex items-center gap-1">
@@ -2665,7 +2609,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       </div>
 
       {/* Output Gain */}
-      <div className="space-y-1.5 rounded-lg border bg-muted/20 p-2">
+      <div className="space-y-2 rounded-md border bg-muted/15 p-2.5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium flex items-center gap-1">
             <Volume2 className="w-3.5 h-3.5 no-theme-icon" />
@@ -2680,26 +2624,27 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           <span>הגברה מקסימלית (300%)</span>
         </div>
       </div>
+      </div>
 
       {/* User preset save */}
-      <div className="space-y-1.5 rounded-lg border bg-muted/20 p-2">
+      <div className="rounded-md border bg-muted/10 p-2">
         <div className="flex items-center gap-1.5">
           <Input
             value={userPresetName}
             onChange={(e) => setUserPresetName(e.target.value)}
             placeholder="שם לפריסט אישי"
-            className="h-7 text-xs"
+            className="h-8 text-xs"
           />
-          <Button size="sm" className="h-7 px-2 text-xs" onClick={saveCurrentAsUserPreset} disabled={!userPresetName.trim()}>
+          <Button size="sm" className="h-8 shrink-0 px-2.5 text-xs" onClick={saveCurrentAsUserPreset} disabled={!userPresetName.trim()}>
             <Save className="w-3 h-3 ml-1 no-theme-icon" />
             שמור
           </Button>
         </div>
         {userPresets.length > 0 && (
-          <div className="space-y-1 max-h-24 overflow-y-auto">
+          <div className="mt-2 flex max-h-20 flex-wrap gap-1 overflow-y-auto">
             {userPresets.map((preset) => (
-              <div key={preset.id} className="flex items-center gap-1">
-                <Button variant="outline" size="sm" className="h-6 px-2 text-[11px] flex-1 justify-start" onClick={() => applyUserPreset(preset)}>
+              <div key={preset.id} className="flex items-center gap-0.5">
+                <Button variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={() => applyUserPreset(preset)}>
                   {preset.name}
                 </Button>
                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeUserPreset(preset.id)} title="מחק פריסט">
@@ -2712,7 +2657,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       </div>
 
       {/* Preset Grid */}
-      <div className="grid grid-cols-4 gap-1.5">
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
         {NOISE_PRESETS.map(p => {
           const Icon = p.icon;
           const isActive = presetId === p.id;
@@ -2720,13 +2665,13 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
             <Tooltip key={p.id}>
               <TooltipTrigger asChild>
                 <button
-                  className={`flex flex-col items-center gap-1 py-2 px-1 rounded-lg border text-xs transition-all
-                    ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-md scale-[1.02]' : 'border-border hover:bg-muted'}
+                  className={`flex h-12 min-w-[6.5rem] flex-1 items-center justify-center gap-1.5 rounded-md border px-2 text-xs transition-all
+                    ${isActive ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}
                   `}
                   onClick={() => setPresetId(p.id)}
                 >
-                  <Icon className={`w-4 h-4 no-theme-icon ${isActive ? '' : 'text-muted-foreground'}`} />
-                  <span className="font-medium leading-tight">{p.nameHe}</span>
+                  <Icon className={`h-4 w-4 shrink-0 no-theme-icon ${isActive ? '' : 'text-muted-foreground'}`} />
+                  <span className="whitespace-nowrap font-medium leading-tight">{p.nameHe}</span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">{p.description}</TooltipContent>
@@ -2736,13 +2681,13 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         <Tooltip>
           <TooltipTrigger asChild>
             <button
-              className={`flex flex-col items-center gap-1 py-2 px-1 rounded-lg border text-xs transition-all
-                ${isManualMode ? 'bg-primary text-primary-foreground border-primary shadow-md scale-[1.02]' : 'border-border hover:bg-muted'}
+              className={`flex h-12 min-w-[6.5rem] flex-1 items-center justify-center gap-1.5 rounded-md border px-2 text-xs transition-all
+                ${isManualMode ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'border-border hover:bg-muted'}
               `}
               onClick={() => setPresetId('manual')}
             >
-              <Settings2 className={`w-4 h-4 no-theme-icon ${isManualMode ? '' : 'text-muted-foreground'}`} />
-              <span className="font-medium leading-tight">ידני</span>
+              <Settings2 className={`h-4 w-4 shrink-0 no-theme-icon ${isManualMode ? '' : 'text-muted-foreground'}`} />
+              <span className="whitespace-nowrap font-medium leading-tight">ידני</span>
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">שליטה ידנית מלאה</TooltipContent>
@@ -2751,7 +2696,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
       {/* Preset active info */}
       {presetId !== 'off' && !isManualMode && (
-        <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-2 flex items-start gap-2">
+        <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
           <Brain className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary no-theme-icon" />
           <div>
             <span className="font-medium">{currentPreset.description}</span>
@@ -2780,6 +2725,8 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           onLoadedMetadata={handleLoadedMetadata}
           onDurationChange={handleDurationChange}
           onEnded={handleEnded}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
           preload="auto"
           crossOrigin="anonymous"
         />
@@ -2793,15 +2740,12 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                 <button className="w-0 h-0 p-0 border-0 opacity-0 overflow-hidden" tabIndex={-1} aria-hidden="true" />
               </PopoverTrigger>
               <PopoverContent className="w-72 p-3" align="start" dir="rtl">
-                {/* ── Grid layout edit controls ── */}
+                {/* ── Layout edit controls ── */}
                 <div className="flex items-center justify-between gap-2 mb-3 pb-2 border-b border-border/40">
-                  <p className="text-xs font-semibold text-muted-foreground">עריכת פריסת גריד</p>
+                  <p className="text-xs font-semibold text-muted-foreground">עריכת פריסת ווידג'טים</p>
                   <div className="flex items-center gap-1">
                     <Button variant={layoutEditMode ? 'default' : 'ghost'} size="icon" className="h-6 w-6" onClick={() => setLayoutEditMode((v) => !v)} title={layoutEditMode ? 'נעל פריסה' : 'ערוך פריסה'}>
                       <LayoutGrid className="w-3 h-3 no-theme-icon" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleAutoArrangeStudioLayout} title="סידור אוטומטי">
-                      <Sparkles className="w-3 h-3 no-theme-icon" />
                     </Button>
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleResetStudioLayout} title="אפס פריסה">
                       <RotateCw className="w-3 h-3 no-theme-icon" />
@@ -2814,24 +2758,26 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                   {([
                     { id: 'player', label: 'נגן אודיו', icon: <Waves className="w-3.5 h-3.5 text-primary no-theme-icon shrink-0" /> },
                     { id: 'studio', label: 'אקולייזר / EQ', icon: <SlidersHorizontal className="w-3.5 h-3.5 text-primary no-theme-icon shrink-0" /> },
+                    { id: 'learning', label: 'הוכחת למידה', icon: <Brain className="w-3.5 h-3.5 text-primary no-theme-icon shrink-0" /> },
                   ] as const).map(({ id, label, icon }) => {
-                    const isFirst = widgetOrder[0] === id;
+                    const position = widgetOrder.indexOf(id);
                     return (
                       <div key={id} className="flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-muted/50">
-                        {/* Position indicator + swap button */}
                         <div className="flex flex-col items-center gap-0.5 shrink-0">
                           <button
-                            className={`p-0.5 rounded transition-colors ${isFirst ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
-                            onClick={swapWidgetOrder}
-                            title={isFirst ? 'ראשון בגריד' : 'הצב ראשון'}
+                            className="p-0.5 rounded text-muted-foreground hover:text-primary disabled:opacity-25"
+                            onClick={() => moveWidget(id, -1)}
+                            disabled={position === 0}
+                            title="העבר למעלה"
                           >
                             <ChevronUp className="w-3 h-3" />
                           </button>
-                          <span className="text-[9px] font-mono text-muted-foreground/60 leading-none">{isFirst ? '1' : '2'}</span>
+                          <span className="text-[9px] font-mono text-muted-foreground/60 leading-none">{position + 1}</span>
                           <button
-                            className={`p-0.5 rounded transition-colors ${!isFirst ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
-                            onClick={swapWidgetOrder}
-                            title={!isFirst ? 'שני בגריד' : 'הצב שני'}
+                            className="p-0.5 rounded text-muted-foreground hover:text-primary disabled:opacity-25"
+                            onClick={() => moveWidget(id, 1)}
+                            disabled={position === widgetOrder.length - 1}
+                            title="העבר למטה"
                           >
                             <ChevronDown className="w-3 h-3" />
                           </button>
@@ -2981,8 +2927,21 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         <div className={`studio-grid flex flex-col gap-4 ${layoutEditMode ? 'is-editing' : ''}`} dir="rtl">
           {/* ═══ WIDGET 1: Player ═══ */}
           {!hiddenWidgets.has('player') && (
-          <div className="studio-widget-body" ref={playerBodyRef} dir="rtl" style={{ order: widgetOrder.indexOf('player') }}>
-            <div className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <div
+            className={`studio-widget-body transition-colors ${widgetDragOver === 'player' ? 'ring-2 ring-primary/50 bg-primary/5' : ''}`}
+            ref={playerBodyRef}
+            dir="rtl"
+            style={{ order: widgetOrder.indexOf('player') }}
+            onDragOver={(event) => handleWidgetDragOver(event, 'player')}
+            onDrop={(event) => handleWidgetDrop(event, 'player')}
+          >
+            <div
+              className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground cursor-grab active:cursor-grabbing select-none"
+              draggable
+              onDragStart={(event) => handleWidgetDragStart(event, 'player')}
+              onDragEnd={handleWidgetDragEnd}
+              title="גרור לשינוי מיקום הווידג'ט"
+            >
               <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
               <span>נגן סינכרוני</span>
             </div>
@@ -3164,7 +3123,8 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
               </div>
             )}
 
-            {/* ─── Time Slider ── */}
+            {/* ─── Compact transport deck ── */}
+            <div className="rounded-lg border bg-card/70 shadow-sm p-2.5 space-y-2">
             {!seekBarCollapsed ? (
               <div
                 className="relative"
@@ -3186,10 +3146,10 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                     <TooltipContent side="bottom">מזער פס סינכרון</TooltipContent>
                   </Tooltip>
                 )}
-                <div className="flex items-center gap-3" dir="ltr">
-                  <span className="text-xs text-muted-foreground font-mono min-w-[40px] text-center">{formatTime(effectiveDuration)}</span>
+                <div className="flex items-center gap-2" dir="ltr">
+                  <span className="text-[11px] text-muted-foreground font-mono min-w-[42px] text-center">{formatTime(effectiveDuration)}</span>
                   <Slider value={[currentTime]} max={effectiveDuration || 1} step={0.1} onValueChange={handleSliderSeek} className="flex-1" dir="rtl" />
-                  <span className="text-xs text-muted-foreground font-mono min-w-[40px] text-center">{formatTime(currentTime)}</span>
+                  <span className="text-[11px] text-muted-foreground font-mono min-w-[42px] text-center">{formatTime(currentTime)}</span>
                 </div>
               </div>
             ) : (
@@ -3217,8 +3177,8 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
               </div>
             )}
 
-            {/* ─── Main Controls ── */}
-            <div className="flex items-center justify-center gap-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-0.5">
               <Tooltip><TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={restart}><RotateCcw className="w-4 h-4 no-theme-icon" /></Button>
               </TooltipTrigger><TooltipContent>התחל מההתחלה</TooltipContent></Tooltip>
@@ -3252,6 +3212,31 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                   {speed.toFixed(2).replace(/\.00$/, '')}x
                 </Button>
               </TooltipTrigger><TooltipContent>מהירות ניגון (לחץ לפתיחת סליידר)</TooltipContent></Tooltip>
+              </div>
+
+              <div className="flex items-center gap-1 rounded-md bg-muted/40 px-1.5 py-0.5 min-w-0">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={toggleMute}
+                  title={isMuted ? "בטל השתקה" : "השתק"}
+                >
+                  <VolumeIcon className="w-3.5 h-3.5 no-theme-icon" />
+                </Button>
+                <Slider
+                  value={[isMuted ? 0 : volume]}
+                  max={1}
+                  step={0.01}
+                  onValueChange={handleVolumeChange}
+                  className="w-20 sm:w-28"
+                  aria-label="עוצמת קול"
+                />
+                <span className="text-[10px] text-muted-foreground tabular-nums w-8 text-center">
+                  {Math.round((isMuted ? 0 : volume) * 100)}%
+                </span>
+              </div>
+            </div>
             </div>
 
             {/* ─── Speed Control ── */}
@@ -3278,7 +3263,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
             {/* ─── Focus Segment (A-B) ── */}
             {!compact && (
-              <div className="space-y-2 rounded-lg border bg-muted/20 p-3 group/panel-focus">
+              <div className="space-y-2 rounded-lg border bg-muted/15 p-2.5 group/panel-focus">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Label className="text-xs font-medium">התמקדות בקטע (A-B)</Label>
@@ -3375,26 +3360,27 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
               </div>
             )}
 
-            {/* ─── Volume ── */}
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={toggleMute}>
-                <VolumeIcon className="w-3.5 h-3.5 no-theme-icon" />
-              </Button>
-              <Slider value={[isMuted ? 0 : volume]} max={1} step={0.01} onValueChange={handleVolumeChange} className="flex-1 min-w-[160px]" />
-              <span className="text-xs text-muted-foreground tabular-nums w-10 text-center">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
-            </div>
-
-            <p className="text-[10px] text-muted-foreground text-center opacity-60">
-              ⌨️ Space=נגן/עצור · Ctrl+←→=±5s · Shift+←→=מילה · M=השתק · Alt+S=מהירות
-            </p>
           </div>
           </div>
           )}
 
           {/* ═══ WIDGET 2: Studio (Mixer & Processing) ═══ */}
           {!hiddenWidgets.has('studio') && (
-          <div className="studio-widget-body" ref={studioBodyRef} dir="rtl" style={{ order: widgetOrder.indexOf('studio') }}>
-            <div className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <div
+            className={`studio-widget-body transition-colors ${widgetDragOver === 'studio' ? 'ring-2 ring-primary/50 bg-primary/5' : ''}`}
+            ref={studioBodyRef}
+            dir="rtl"
+            style={{ order: widgetOrder.indexOf('studio') }}
+            onDragOver={(event) => handleWidgetDragOver(event, 'studio')}
+            onDrop={(event) => handleWidgetDrop(event, 'studio')}
+          >
+            <div
+              className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground cursor-grab active:cursor-grabbing select-none"
+              draggable
+              onDragStart={(event) => handleWidgetDragStart(event, 'studio')}
+              onDragEnd={handleWidgetDragEnd}
+              title="גרור לשינוי מיקום הווידג'ט"
+            >
               <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
               <span>סטודיו (מיקסר ועיבוד)</span>
             </div>
@@ -4667,6 +4653,29 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
             return eqFloating && eqPortalTarget ? createPortal(eqEl, eqPortalTarget) : eqEl;
           })()}
           </div>
+          )}
+
+          {/* ═══ WIDGET 3: Learning proof ═══ */}
+          {learningWidget && !hiddenWidgets.has('learning') && (
+            <div
+              className={`studio-widget-body transition-colors ${widgetDragOver === 'learning' ? 'ring-2 ring-primary/50 bg-primary/5' : ''}`}
+              dir="rtl"
+              style={{ order: widgetOrder.indexOf('learning') }}
+              onDragOver={(event) => handleWidgetDragOver(event, 'learning')}
+              onDrop={(event) => handleWidgetDrop(event, 'learning')}
+            >
+              <div
+                className="studio-widget-handle flex items-center gap-2 text-xs font-medium text-muted-foreground cursor-grab active:cursor-grabbing select-none"
+                draggable
+                onDragStart={(event) => handleWidgetDragStart(event, 'learning')}
+                onDragEnd={handleWidgetDragEnd}
+                title="גרור לשינוי מיקום הווידג'ט"
+              >
+                <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
+                <span>הוכחת למידה</span>
+              </div>
+              {learningWidget}
+            </div>
           )}
         </div>
 

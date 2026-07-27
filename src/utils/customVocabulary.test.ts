@@ -12,6 +12,8 @@ import {
   exportVocabulary,
   importVocabulary,
   applyVocabularyCorrections,
+  isCustomVocabularyEnabled,
+  setCustomVocabularyEnabled,
 } from './customVocabulary';
 
 // Mock localStorage
@@ -122,6 +124,19 @@ describe('getHotwordsString', () => {
 
   it('returns empty string when no terms', () => {
     expect(getHotwordsString()).toBe('');
+  });
+});
+
+describe('vocabulary toggle', () => {
+  it('is enabled by default', () => {
+    expect(isCustomVocabularyEnabled()).toBe(true);
+  });
+
+  it('persists an explicit disabled state', () => {
+    setCustomVocabularyEnabled(false);
+    expect(isCustomVocabularyEnabled()).toBe(false);
+    setCustomVocabularyEnabled(true);
+    expect(isCustomVocabularyEnabled()).toBe(true);
   });
 });
 

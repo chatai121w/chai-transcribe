@@ -17,6 +17,72 @@ export interface WordTiming {
   word: string;
   start: number;
   end: number;
+  probability?: number;
+  correctionOriginal?: string;
+  correctedAt?: number;
+}
+
+/**
+ * Fit an aligned timeline to the real media boundaries without changing word order.
+ * Forced aligners often stop at the final voiced frame, which can leave the
+ * transcript visibly behind a player that has reached the media boundary.
+ */
+export function fitTimingsToDuration(
+  timings: WordTiming[],
+  duration: number,
+): WordTiming[] {
+  if (!timings.length || !Number.isFinite(duration) || duration <= 0) return timings;
+
+  const firstStart = Math.max(0, timings[0].start);
+  const lastEnd = timings.at(-1)?.end ?? 0;
+  if (!Number.isFinite(lastEnd) || lastEnd <= firstStart) return timings;
+
+  const scale = Math.max(0.001, duration - firstStart) / (lastEnd - firstStart);
+  return timings.map((timing, index) => {
+    const start = Math.min(duration, Math.max(0, firstStart + (timing.start - firstStart) * scale));
+    const scaledEnd = firstStart + (timing.end - firstStart) * scale;
+    const end = index === timings.length - 1
+      ? duration
+      : Math.min(duration, Math.max(start, scaledEnd));
+    return {
+      ...timing,
+      start: parseFloat(start.toFixed(3)),
+      end: parseFloat(end.toFixed(3)),
+    };
+  });
+}
+
+/**
+ * Find the word that is actually audible at `time`.
+ * Timings are sorted, so this stays fast even for long transcripts and
+ * returns no word during a real silence instead of holding the previous one.
+ */
+export function findActiveWordIndex(
+  timings: Array<Pick<WordTiming, 'start' | 'end'>>,
+  time: number,
+  toleranceSeconds = 0.04,
+): number {
+  if (!timings.length || !Number.isFinite(time)) return -1;
+
+  let low = 0;
+  let high = timings.length - 1;
+  let candidate = -1;
+  while (low <= high) {
+    const middle = (low + high) >>> 1;
+    if (timings[middle].start <= time + toleranceSeconds) {
+      candidate = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  if (candidate < 0) return -1;
+  const timing = timings[candidate];
+  const end = Number.isFinite(timing.end) && timing.end >= timing.start
+    ? timing.end
+    : timings[candidate + 1]?.start ?? timing.start;
+  return time <= end + toleranceSeconds ? candidate : -1;
 }
 
 // ── Hebrew normalization ─────────────────────────────────────────────────────

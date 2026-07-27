@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>ערכת נושא: skils-light-gray - Preview</title>
+<style>
+  :root {
+    --background: hsl(220 14% 95%);
+    --foreground: hsl(222 35% 15%);
+    --card: hsl(220 18% 97%);
+    --card-foreground: hsl(222 35% 15%);
+    --popover: hsl(220 18% 97%);
+    --popover-foreground: hsl(222 35% 15%);
+    --primary: hsl(222 28% 22%);
+    --primary-foreground: hsl(210 20% 97%);
+    --secondary: hsl(220 28% 90%);
+    --secondary-foreground: hsl(222 35% 15%);
+    --muted: hsl(220 16% 91%);
+    --muted-foreground: hsl(220 14% 38%);
+    --accent: hsl(215 18% 50%);
+    --accent-foreground: hsl(222 28% 22%);
+    --destructive: hsl(0 70% 50%);
+    --destructive-foreground: hsl(210 20% 97%);
+    --border: hsl(220 24% 74%);
+    --input: hsl(220 22% 84%);
+    --ring: hsl(215 18% 50%);
+    --radius: 0.75rem;
+    --sidebar-background: hsl(220 18% 97%);
+    --sidebar-foreground: hsl(222 35% 15%);
+    --sidebar-primary: hsl(222 28% 22%);
+    --sidebar-primary-foreground: hsl(210 20% 97%);
+    --sidebar-accent: hsl(220 28% 92%);
+    --sidebar-accent-foreground: hsl(222 35% 15%);
+    --sidebar-border: hsl(220 24% 74%);
+    --sidebar-ring: hsl(215 18% 50%);
+  }
+  .dark {
+    --background: hsl(222 28% 8%);
+    --foreground: hsl(220 16% 94%);
+    --card: hsl(222 26% 12%);
+    --card-foreground: hsl(220 16% 94%);
+    --popover: hsl(222 26% 12%);
+    --popover-foreground: hsl(220 16% 94%);
+    --primary: hsl(218 36% 34%);
+    --primary-foreground: hsl(220 20% 96%);
+    --secondary: hsl(222 20% 16%);
+    --secondary-foreground: hsl(220 16% 94%);
+    --muted: hsl(222 18% 14%);
+    --muted-foreground: hsl(220 14% 68%);
+    --accent: hsl(215 24% 44%);
+    --accent-foreground: hsl(220 20% 96%);
+    --destructive: hsl(0 70% 50%);
+    --destructive-foreground: hsl(220 20% 96%);
+    --border: hsl(222 18% 24%);
+    --input: hsl(222 18% 20%);
+    --ring: hsl(215 24% 44%);
+    --sidebar-background: hsl(222 26% 11%);
+    --sidebar-foreground: hsl(220 16% 94%);
+    --sidebar-primary: hsl(218 36% 34%);
+    --sidebar-primary-foreground: hsl(220 20% 96%);
+    --sidebar-accent: hsl(222 18% 18%);
+    --sidebar-accent-foreground: hsl(220 16% 94%);
+    --sidebar-border: hsl(222 18% 24%);
+    --sidebar-ring: hsl(215 24% 44%);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--background); color:var(--foreground); font-family:'Assistant',system-ui,sans-serif; font-size:14px; padding:32px; line-height:1.5; }
+  h1 { font-size:26px; font-weight:700; margin-bottom:8px; }
+  h2 { font-size:18px; font-weight:600; margin:32px 0 12px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+  #toggle { position:fixed; top:16px; left:16px; background:var(--primary); color:var(--primary-foreground); border:none; border-radius:var(--radius); padding:8px 16px; cursor:pointer; font-size:13px; font-weight:600; }
+  .swatch-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; }
+  .swatch { border-radius:var(--radius); overflow:hidden; border:1px solid var(--border); background:var(--card); }
+  .swatch-color { height:56px; width:100%; }
+  .swatch-label { padding:8px 10px; font-size:12px; }
+  .swatch-name { font-weight:600; }
+  .swatch-hex { color:var(--muted-foreground); font-size:11px; }
+  .btn { padding:8px 18px; border-radius:var(--radius); border:none; font-size:14px; font-weight:600; cursor:default; }
+  .btn-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+  .demo-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:20px; max-width:340px; box-shadow:0 1px 3px 0 rgb(0 0 0/0.06); }
+  .form-input { background:var(--input); color:var(--foreground); border:1px solid var(--border); border-radius:var(--radius); padding:8px 12px; font-size:14px; outline:none; width:100%; font-family:inherit; }
+</style>
+</head>
+<body>
+<button id="toggle" onclick="document.body.classList.toggle('dark')">מצב כהה / בהיר</button>
+<h1>ערכת נושא: skils-light-gray</h1>
+<p style="color:var(--muted-foreground);margin-top:4px;">ערכת אפור-בהיר מינימלית ומקצועית עם קונטרסט מאוזן ונוכחות נקיה.</p>
+
+<h2>Semantic Colors</h2>
+<div class="swatch-grid">
+  <div class="swatch"><div class="swatch-color" style="background:hsl(220 14% 95%)"></div><div class="swatch-label"><div class="swatch-name">background</div><div class="swatch-hex">220 14% 95% - #f0f2f4</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(222 35% 15%)"></div><div class="swatch-label"><div class="swatch-name">foreground</div><div class="swatch-hex">222 35% 15% - #192134</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(220 18% 97%)"></div><div class="swatch-label"><div class="swatch-name">card</div><div class="swatch-hex">220 18% 97% - #f6f7f9</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(222 28% 22%)"></div><div class="swatch-label"><div class="swatch-name">primary</div><div class="swatch-hex">222 28% 22% - #283248</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(210 20% 97%)"></div><div class="swatch-label"><div class="swatch-name">primary-foreground</div><div class="swatch-hex">210 20% 97% - #f6f7f9</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(220 28% 90%)"></div><div class="swatch-label"><div class="swatch-name">secondary</div><div class="swatch-hex">220 28% 90% - #dee3ed</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(220 16% 91%)"></div><div class="swatch-label"><div class="swatch-name">muted</div><div class="swatch-hex">220 16% 91% - #e4e7ec</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(220 14% 38%)"></div><div class="swatch-label"><div class="swatch-name">muted-foreground</div><div class="swatch-hex">220 14% 38% - #535c6e</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 18% 50%)"></div><div class="swatch-label"><div class="swatch-name">accent</div><div class="swatch-hex">215 18% 50% - #697c96</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(222 28% 22%)"></div><div class="swatch-label"><div class="swatch-name">accent-foreground</div><div class="swatch-hex">222 28% 22% - #283248</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(0 70% 50%)"></div><div class="swatch-label"><div class="swatch-name">destructive</div><div class="swatch-hex">0 70% 50% - #d92626</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(220 24% 74%)"></div><div class="swatch-label"><div class="swatch-name">border</div><div class="swatch-hex">220 24% 74% - #adb7cd</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(220 22% 84%)"></div><div class="swatch-label"><div class="swatch-name">input</div><div class="swatch-hex">220 22% 84% - #cdd3df</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 18% 50%)"></div><div class="swatch-label"><div class="swatch-name">ring</div><div class="swatch-hex">215 18% 50% - #697c96</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(220 18% 97%)"></div><div class="swatch-label"><div class="swatch-name">sidebar-background</div><div class="swatch-hex">220 18% 97% - #f6f7f9</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(222 35% 15%)"></div><div class="swatch-label"><div class="swatch-name">sidebar-foreground</div><div class="swatch-hex">222 35% 15% - #192134</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(222 28% 22%)"></div><div class="swatch-label"><div class="swatch-name">sidebar-primary</div><div class="swatch-hex">222 28% 22% - #283248</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(210 20% 97%)"></div><div class="swatch-label"><div class="swatch-name">sidebar-primary-foreground</div><div class="swatch-hex">210 20% 97% - #f6f7f9</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(220 28% 92%)"></div><div class="swatch-label"><div class="swatch-name">sidebar-accent</div><div class="swatch-hex">220 28% 92% - #e5e9f0</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(222 35% 15%)"></div><div class="swatch-label"><div class="swatch-name">sidebar-accent-foreground</div><div class="swatch-hex">222 35% 15% - #192134</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(220 24% 74%)"></div><div class="swatch-label"><div class="swatch-name">sidebar-border</div><div class="swatch-hex">220 24% 74% - #adb7cd</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background:hsl(215 18% 50%)"></div><div class="swatch-label"><div class="swatch-name">sidebar-ring</div><div class="swatch-hex">215 18% 50% - #697c96</div></div></div>
+</div>
+
+<h2>Buttons</h2>
+<div class="btn-row">
+  <button class="btn" style="background:var(--primary);color:var(--primary-foreground)">Primary</button>
+  <button class="btn" style="background:var(--secondary);color:var(--secondary-foreground)">Secondary</button>
+  <button class="btn" style="background:var(--accent);color:#fff">Accent</button>
+  <button class="btn" style="background:var(--destructive);color:var(--destructive-foreground)">Destructive</button>
+  <button class="btn" style="background:var(--muted);color:var(--muted-foreground)">Muted</button>
+</div>
+
+<h2>Card Example</h2>
+<div class="demo-card">
+  <div style="font-size:16px;font-weight:700;margin-bottom:6px">כותרת כרטיסייה</div>
+  <div style="font-size:13px;color:var(--muted-foreground);margin-bottom:16px">טקסט תיאור משני - muted-foreground.</div>
+  <div style="display:flex;gap:8px">
+    <button class="btn" style="background:var(--primary);color:var(--primary-foreground);font-size:13px;padding:6px 14px">אישור</button>
+    <button class="btn" style="background:var(--secondary);color:var(--secondary-foreground);font-size:13px;padding:6px 14px">ביטול</button>
+  </div>
+</div>
+
+<h2>Form Input</h2>
+<input class="form-input" type="text" placeholder="שדה לדוגמה..." style="max-width:320px">
+
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700&display=swap" rel="stylesheet">
+</body>
+</html>

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   extractCorrections,
   learnFromCorrections,
@@ -11,6 +11,7 @@ import {
   importCorrections,
   type CorrectionEntry,
   type CorrectionStats,
+  CORRECTIONS_CHANGED_EVENT,
 } from '@/utils/correctionLearning';
 
 export function useCorrectionLearning() {
@@ -21,6 +22,20 @@ export function useCorrectionLearning() {
     setStats(getCorrectionStats());
     setCorrections(getAllCorrections());
   }, []);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'transcription_corrections' || event.key === 'transcription_corrections_stats') {
+        refresh();
+      }
+    };
+    window.addEventListener(CORRECTIONS_CHANGED_EVENT, refresh);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener(CORRECTIONS_CHANGED_EVENT, refresh);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [refresh]);
 
   /** Learn from a user edit: compare original transcription to user-edited version */
   const learn = useCallback((originalText: string, editedText: string, engine?: string) => {

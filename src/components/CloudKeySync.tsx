@@ -30,6 +30,26 @@ const CloudKeySync = () => {
           if (data.claude_key) await setEncryptedKey('claude_api_key', data.claude_key);
           if (data.assemblyai_key) await setEncryptedKey('assemblyai_api_key', data.assemblyai_key);
           if (data.deepgram_key) await setEncryptedKey('deepgram_api_key', data.deepgram_key);
+          // Personal Gemini key (plaintext in localStorage for direct browser calls).
+          // Fallback: if the dedicated gemini_key isn't set, reuse google_key —
+          // Google AI Studio issues the same key format for both, and users often
+          // fill only one of the two fields in Settings.
+          const geminiKey =
+            (data as unknown as { gemini_key?: string | null }).gemini_key ||
+            data.google_key ||
+            '';
+          if (geminiKey) {
+            localStorage.setItem('gemini_api_key', geminiKey);
+            // Default ON: if user has a key but never toggled it, enable personal route.
+            if (localStorage.getItem('use_personal_gemini') === null) {
+              localStorage.setItem('use_personal_gemini', '1');
+            }
+            // Clear any stale cooldown so status flips back to green on next check.
+            const until = parseInt(localStorage.getItem('personal_gemini_exhausted_until') || '0', 10);
+            if (until && Date.now() > until) {
+              localStorage.removeItem('personal_gemini_exhausted_until');
+            }
+          }
 
           // Additional keys
           if (data.huggingface_key) await setEncryptedKey('huggingface_api_key', data.huggingface_key);

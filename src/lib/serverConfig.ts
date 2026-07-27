@@ -21,6 +21,15 @@ export function normalizeServerUrl(raw: string | null | undefined): string {
 
   if (!v) return getDefaultUrl();
 
+  // Guard against garbage values accidentally saved into the server-URL field
+  // (e.g. an email address synced from the cloud key store). A valid value must
+  // be an absolute http(s) URL or a same-origin path starting with '/'.
+  // Anything else (no scheme, no leading slash) → fall back to the default.
+  const isValidShape = /^https?:\/\//i.test(v) || v.startsWith('/');
+  if (!isValidShape) {
+    return getDefaultUrl();
+  }
+
   if (typeof window !== 'undefined') {
     const isLocalPage = ['localhost', '127.0.0.1'].includes(window.location.hostname);
     const isLegacy3000 = v.includes('localhost:3000') || v.includes('127.0.0.1:3000');

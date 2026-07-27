@@ -44,6 +44,7 @@ export interface CorrectionStats {
 // ─── Storage Keys ───
 const CORRECTIONS_KEY = 'transcription_corrections';
 const CORRECTIONS_STATS_KEY = 'transcription_corrections_stats';
+export const CORRECTIONS_CHANGED_EVENT = 'transcription-corrections-changed';
 
 // ─── Helpers ───
 
@@ -61,6 +62,7 @@ function saveCorrections(corrections: CorrectionEntry[]): void {
     .sort((a, b) => (b.confidence * b.frequency) - (a.confidence * a.frequency))
     .slice(0, 2000);
   localStorage.setItem(CORRECTIONS_KEY, JSON.stringify(sorted));
+  window.dispatchEvent(new CustomEvent(CORRECTIONS_CHANGED_EVENT));
 }
 
 /**
@@ -240,10 +242,6 @@ function diffWords(
 /**
  * Learn from corrections: merge new corrections into the stored dictionary.
  * Increases frequency and confidence for repeated corrections.
- *
- * Side effect: for each correction that looks like an Ashkenazi→standard
- * Hebrew pattern, also push a suggestion onto the Loshon Kodesh queue
- * (the user can accept it in the LK rules page with one click).
  */
 export function learnFromCorrections(newCorrections: CorrectionEntry[]): void {
   if (newCorrections.length === 0) return;
@@ -275,17 +273,31 @@ export function learnFromCorrections(newCorrections: CorrectionEntry[]): void {
         lastUsed: now,
       });
     }
-
-    // ── Auto-feed Loshon Kodesh suggestion queue ──
-    // Lazy require to avoid circular deps at module load.
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-      const lk = require('@/lib/loshonKodesh');
-      lk.addLkSuggestion?.(nc.original, nc.corrected, { source: 'correction-learning' });
-    } catch { /* ignore — lib may not be available in non-browser tests */ }
   }
 
   saveCorrections(existing);
+}
+
+/**
+ * User-configurable global confidence threshold for auto-applying learned
+ * corrections. Persisted in localStorage so it follows the user across pages.
+ */
+const CORRECTION_THRESHOLD_KEY = 'correction_confidence_threshold';
+export const DEFAULT_CORRECTION_THRESHOLD = 0.6;
+
+export function getCorrectionThreshold(): number {
+  try {
+    const raw = localStorage.getItem(CORRECTION_THRESHOLD_KEY);
+    if (raw == null) return DEFAULT_CORRECTION_THRESHOLD;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return DEFAULT_CORRECTION_THRESHOLD;
+    return Math.min(1, Math.max(0, n));
+  } catch { return DEFAULT_CORRECTION_THRESHOLD; }
+}
+
+export function setCorrectionThreshold(value: number): void {
+  const clamped = Math.min(1, Math.max(0, value));
+  try { localStorage.setItem(CORRECTION_THRESHOLD_KEY, String(clamped)); } catch { /* ignore */ }
 }
 
 /**
@@ -302,9 +314,10 @@ export function applyLearnedCorrections(
 ): { text: string; appliedCount: number; applied: Array<{ original: string; corrected: string }> } {
   const {
     engine,
-    confidenceThreshold = 0.6,
+    confidenceThreshold = getCorrectionThreshold(),
     maxCorrections = 50,
   } = options || {};
+
 
   const corrections = loadCorrections();
 
@@ -378,6 +391,28 @@ export function getAllCorrections(): CorrectionEntry[] {
 }
 
 /**
+ * Get top learned corrections as a hotwords string,
+ * to bias ASR engines toward known correct forms before transcription.
+ * Returns the corrected (target) terms, ranked by confidence * frequency.
+ */
+export function getLearnedHotwords(limit = 100, minConfidence = 0.6): string {
+  const corrections = loadCorrections();
+  const seen = new Set<string>();
+  const ranked = corrections
+    .filter(c => (c.category === 'word' || c.category === 'phrase') && c.confidence >= minConfidence)
+    .sort((a, b) => (b.confidence * b.frequency) - (a.confidence * a.frequency));
+  const out: string[] = [];
+  for (const c of ranked) {
+    const term = (c.corrected || '').trim();
+    if (!term || seen.has(term)) continue;
+    seen.add(term);
+    out.push(term);
+    if (out.length >= limit) break;
+  }
+  return out.join(', ');
+}
+
+/**
  * Delete a specific correction
  */
 export function deleteCorrection(original: string, corrected: string): void {
@@ -393,6 +428,7 @@ export function deleteCorrection(original: string, corrected: string): void {
 export function clearAllCorrections(): void {
   localStorage.removeItem(CORRECTIONS_KEY);
   localStorage.removeItem(CORRECTIONS_STATS_KEY);
+  window.dispatchEvent(new CustomEvent(CORRECTIONS_CHANGED_EVENT));
 }
 
 /**

@@ -19,6 +19,13 @@ param(
 
 $ErrorActionPreference = "Continue"
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "port-utils.ps1")
+
+$requestedVitePort = $VitePort
+$VitePort = Resolve-AvailablePort -PreferredPort $requestedVitePort
+if ($VitePort -ne $requestedVitePort) {
+    Write-Host "[Port] $requestedVitePort is occupied; using $VitePort for the app." -ForegroundColor Yellow
+}
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -117,6 +124,6 @@ Start-Process "http://localhost:$VitePort"
 Write-Host "Press Ctrl+C to stop Vite (CUDA server stays running)" -ForegroundColor Gray
 Write-Host ""
 
-npm run dev -- --port $VitePort
+npm run dev:vite -- --host 127.0.0.1 --port $VitePort --strictPort
 
 Pop-Location

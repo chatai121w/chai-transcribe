@@ -33,6 +33,9 @@ test_*.wav
 # Build/install logs
 build_log*.txt
 install_log.txt
+download-log.txt
+model-download-log.txt
+verify-log.txt
 _status.txt
 __pycache__/
 remote-urls.txt

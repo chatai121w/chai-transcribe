@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, createContext, useContext, Re
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { db, isDbAvailable } from '@/lib/localDb';
-import { getLocalPreferences, savePreferencesLocally, syncPreferencesDown } from '@/lib/syncEngine';
+import { getLocalPreferences, pushDirtyPreferences, savePreferencesLocally } from '@/lib/syncEngine';
 import { debugLog } from '@/lib/debugLogger';
 
 export interface UserPreferences {
@@ -23,7 +23,6 @@ export interface UserPreferences {
   folder_sort_asc: boolean;
   player_layout: string;       // 'split' | 'stacked' | 'full'
   tab_settings_json: string;   // JSON string of { visible, order }
-  text_editor_view_json: string; // JSON string of TextEditor view state ({ isPlayerFloating, isEqFloating, ... })
   default_ai_model: string;    // preferred AI editing model
   // CUDA / transcription settings
   cuda_preset: string;         // 'fast' | 'balanced' | 'accurate'
@@ -62,7 +61,6 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   folder_sort_asc: false,
   player_layout: 'split',
   tab_settings_json: '',
-  text_editor_view_json: '',
   default_ai_model: '',
   cuda_preset: 'balanced',
   cuda_fast_mode: true,
@@ -74,7 +72,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   cuda_paragraph_threshold: 0,
   cuda_preload_mode: 'preload',
   cuda_cloud_save: 'immediate',
-  personal_pronunciation_enabled: true,
+  personal_pronunciation_enabled: false,
   loshon_kodesh_enabled: false,
   active_pronunciation_profile: '',
   diarize_enabled: false,
@@ -88,6 +86,8 @@ const useCloudPreferencesImpl = () => {
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   const [isLoaded, setIsLoaded] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const saveRevisionRef = useRef(0);
 
   // Load preferences: local DB → localStorage → cloud
   useEffect(() => {
@@ -192,6 +192,15 @@ const useCloudPreferencesImpl = () => {
         .maybeSingle();
 
       if (data) {
+        const localUpdatedAt = localPrefs?.updated_at ? new Date(localPrefs.updated_at).getTime() : 0;
+        const cloudRowUpdatedAt = data.updated_at ? new Date(data.updated_at).getTime() : 0;
+        if (localPrefs?._dirty && localUpdatedAt >= cloudRowUpdatedAt) {
+          // A reload may happen before the debounced cloud write. Keep and retry
+          // the newer local snapshot instead of replacing it with stale cloud data.
+          void pushDirtyPreferences(user.id);
+          setIsLoaded(true);
+          return;
+        }
         // ── Conflict resolution: prefer local theme if it changed AFTER cloud's updated_at
         const localThemeMtime = Number(localStorage.getItem('app_theme_updated_at') || 0);
         const cloudUpdatedAt = data.updated_at ? new Date(data.updated_at).getTime() : 0;
@@ -228,9 +237,6 @@ const useCloudPreferencesImpl = () => {
           tab_settings_json: typeof (data as any).tab_settings_json === 'string'
             ? (data as any).tab_settings_json
             : JSON.stringify((data as any).tab_settings_json ?? ''),
-          text_editor_view_json: typeof (data as any).text_editor_view_json === 'string'
-            ? (data as any).text_editor_view_json
-            : JSON.stringify((data as any).text_editor_view_json ?? {}),
           default_ai_model: (data as any).default_ai_model ?? DEFAULT_PREFERENCES.default_ai_model,
           cuda_preset: (data as any).cuda_preset ?? DEFAULT_PREFERENCES.cuda_preset,
           cuda_fast_mode: (data as any).cuda_fast_mode ?? DEFAULT_PREFERENCES.cuda_fast_mode,
@@ -287,20 +293,6 @@ const useCloudPreferencesImpl = () => {
           enabled: loaded.personal_pronunciation_enabled,
           source: 'cloud',
         });
-        // ── Re-apply feature_flags JSONB (the /features toggle page is authoritative) ──
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const ff = ((data as any).feature_flags ?? null) as Record<string, unknown> | null;
-          if (ff && typeof ff === 'object') {
-            for (const [k, v] of Object.entries(ff)) {
-              if (k.startsWith('__')) continue;
-              if (typeof v !== 'boolean') continue;
-              localStorage.setItem(k, v ? '1' : '0');
-              localStorage.setItem(`${k}__updated_at`, String(Date.now()));
-              window.dispatchEvent(new CustomEvent('featureFlagChange', { detail: { key: k, value: v, silent: true } }));
-            }
-          }
-        } catch { /* */ }
         window.dispatchEvent(new CustomEvent('cloud-prefs-loaded'));
 
         // If local theme is newer than cloud's stored theme, immediately push it back
@@ -360,8 +352,19 @@ const useCloudPreferencesImpl = () => {
           const cloudTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
           const localTime = Number(localStorage.getItem('app_theme_updated_at') || 0);
           const localPersonalTime = Number(localStorage.getItem('personal_pronunciation_updated_at') || 0);
+          const localPreferencesTime = Number(localStorage.getItem('user_preferences_updated_at') || 0);
           // Ignore echoes of our own writes
-          if (localTime >= cloudTime && localPersonalTime >= cloudTime) return;
+          if (localPreferencesTime >= cloudTime) return;
+          const remoteLayout = {
+            editor_columns: row.editor_columns ?? DEFAULT_PREFERENCES.editor_columns,
+            player_layout: row.player_layout ?? DEFAULT_PREFERENCES.player_layout,
+            tab_settings_json: typeof row.tab_settings_json === 'string'
+              ? row.tab_settings_json
+              : JSON.stringify(row.tab_settings_json ?? ''),
+          };
+          localStorage.setItem('editor_columns', String(remoteLayout.editor_columns));
+          localStorage.setItem('user_preferences_updated_at', String(cloudTime));
+          setPreferences(prev => ({ ...prev, ...remoteLayout }));
           if (row.theme && row.theme !== localStorage.getItem('app_theme_id')) {
             localStorage.setItem('app_theme_id', row.theme);
             localStorage.setItem('app_theme_updated_at', String(cloudTime));
@@ -402,19 +405,6 @@ const useCloudPreferencesImpl = () => {
             localStorage.setItem('diarize_enabled', row.diarize_enabled ? '1' : '0');
             setPreferences(prev => ({ ...prev, diarize_enabled: row.diarize_enabled }));
           }
-          // Re-apply feature_flags JSONB last (authoritative for /features toggles)
-          try {
-            const ff = row.feature_flags as Record<string, unknown> | null;
-            if (ff && typeof ff === 'object') {
-              for (const [k, v] of Object.entries(ff)) {
-                if (k.startsWith('__')) continue;
-                if (typeof v !== 'boolean') continue;
-                localStorage.setItem(k, v ? '1' : '0');
-                localStorage.setItem(`${k}__updated_at`, String(Date.now()));
-                window.dispatchEvent(new CustomEvent('featureFlagChange', { detail: { key: k, value: v, silent: true } }));
-              }
-            }
-          } catch { /* */ }
         }
       )
       .subscribe();
@@ -426,8 +416,10 @@ const useCloudPreferencesImpl = () => {
 
   // Save to cloud (debounced by default; some critical keys go immediate)
   const saveToCloud = useCallback((updated: UserPreferences, opts?: { immediate?: boolean }) => {
+    const revision = ++saveRevisionRef.current;
     // Always save to localStorage for quick access
     localStorage.setItem('user_preferences', JSON.stringify(updated));
+    localStorage.setItem('user_preferences_updated_at', String(Date.now()));
 
     // Mirror individual localStorage keys for backward compat
     localStorage.setItem('transcript_engine', updated.engine);
@@ -482,8 +474,6 @@ const useCloudPreferencesImpl = () => {
       try { customThemesParsed = JSON.parse(updated.custom_themes); } catch {}
       let tabSettingsParsed: unknown = null;
       try { if (updated.tab_settings_json) tabSettingsParsed = JSON.parse(updated.tab_settings_json); } catch {}
-      let textEditorViewParsed: unknown = {};
-      try { if (updated.text_editor_view_json) textEditorViewParsed = JSON.parse(updated.text_editor_view_json); } catch {}
 
       const { data: row, error } = await supabase
         .from('user_preferences')
@@ -505,7 +495,6 @@ const useCloudPreferencesImpl = () => {
           folder_sort_asc: updated.folder_sort_asc,
           player_layout: updated.player_layout,
           tab_settings_json: tabSettingsParsed,
-          text_editor_view_json: textEditorViewParsed,
           default_ai_model: updated.default_ai_model || null,
           cuda_preset: updated.cuda_preset,
           cuda_fast_mode: updated.cuda_fast_mode,
@@ -557,6 +546,13 @@ const useCloudPreferencesImpl = () => {
         }
       } else {
         const serverTime = row?.updated_at ? new Date(row.updated_at).getTime() : Date.now();
+        if (revision === saveRevisionRef.current) {
+          await db.preferences.update('current', {
+            _dirty: false,
+            updated_at: new Date(serverTime).toISOString(),
+          });
+        }
+        localStorage.setItem('user_preferences_updated_at', String(serverTime));
         // Align local timestamp with server-trigger updated_at so it always wins on reload
         localStorage.setItem('personal_pronunciation_updated_at', String(serverTime));
         debugLog.info('CloudPreferences', 'Upsert OK', {
@@ -567,10 +563,15 @@ const useCloudPreferencesImpl = () => {
     };
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    const enqueueSave = () => {
+      saveQueueRef.current = saveQueueRef.current
+        .catch(() => undefined)
+        .then(doUpsert);
+    };
     if (opts?.immediate) {
-      void doUpsert();
+      enqueueSave();
     } else {
-      saveTimerRef.current = setTimeout(doUpsert, 500);
+      saveTimerRef.current = setTimeout(enqueueSave, 500);
     }
   }, [user]);
 
@@ -580,6 +581,9 @@ const useCloudPreferencesImpl = () => {
     'active_pronunciation_profile',
     'diarize_enabled',
     'pronunciation_layout_mode',
+    'editor_columns',
+    'player_layout',
+    'tab_settings_json',
   ];
 
   const updatePreference = useCallback(<K extends keyof UserPreferences>(

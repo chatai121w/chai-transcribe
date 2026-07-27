@@ -113,14 +113,53 @@ def check_ollama():
 
 
 def check_vite():
-    """Check if Vite dev server is responding."""
+    """Check that our Vite app, rather than an unrelated site, is responding."""
     import urllib.request
     try:
         req = urllib.request.Request(f"http://localhost:{VITE_PORT}/", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:
-            return True
+            body = resp.read(256_000).decode("utf-8", errors="ignore")
+            return "Smart Hebrew Transcriber" in body or "smart-hebrew-transcriber" in body
     except Exception:
         return False
+
+
+def find_available_port(preferred: int, attempts: int = 100) -> int:
+    """Return a port available on both IPv4 and IPv6 localhost."""
+    import socket
+    for port in range(preferred, preferred + attempts):
+        occupied = False
+        for address in ("127.0.0.1", "::1"):
+            try:
+                with socket.create_connection((address, port), timeout=0.15):
+                    occupied = True
+                    break
+            except OSError:
+                pass
+        if occupied:
+            continue
+
+        sockets = []
+        try:
+            for family, address in (
+                (socket.AF_INET, "127.0.0.1"),
+                (socket.AF_INET6, "::1"),
+            ):
+                sock = socket.socket(family, socket.SOCK_STREAM)
+                sockets.append(sock)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                if family == socket.AF_INET6:
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                sock.bind((address, port))
+            return port
+        except OSError:
+            continue
+        finally:
+            for sock in sockets:
+                sock.close()
+    raise RuntimeError(
+        f"No available local port found from {preferred} through {preferred + attempts - 1}"
+    )
 
 
 def start_ollama():
@@ -201,15 +240,18 @@ def stop_whisper():
 
 def start_vite():
     """Start Vite dev server."""
-    global vite_process
+    global vite_process, VITE_PORT
     if check_vite():
         return True, "already running"
     npx = shutil.which("npx")
     if not npx:
         return False, "npx not found"
     try:
+        selected_port = find_available_port(VITE_PORT)
+        if selected_port != VITE_PORT:
+            VITE_PORT = selected_port
         vite_process = subprocess.Popen(
-            [npx, "vite", "--port", str(VITE_PORT)],
+            [npx, "vite", "--host", "127.0.0.1", "--port", str(VITE_PORT), "--strictPort"],
             cwd=str(PROJECT_ROOT),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
@@ -226,16 +268,8 @@ def stop_vite():
         vite_process.terminate()
         vite_process = None
         return True, "terminated"
-    # Fallback: kill node on vite port
-    try:
-        result = subprocess.run(
-            ["powershell", "-Command", f"Get-NetTCPConnection -LocalPort {VITE_PORT} -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}"],
-            capture_output=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-        )
-        return True, "port cleared"
-    except Exception:
-        return False, "no process"
+    # Never terminate an arbitrary process merely because it owns the port.
+    return False, "no launcher-owned Vite process"
 
 
 def _download_cloudflared() -> bool:

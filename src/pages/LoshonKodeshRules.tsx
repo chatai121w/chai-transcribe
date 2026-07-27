@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,163 +6,239 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ScrollText, Plus, Trash2, RotateCcw, Save, Download, Upload, Sparkles, Users, Brain, Check, X, Cloud } from "lucide-react";
+import { ScrollText, Plus, Trash2, RotateCcw, Save, Download, Upload, Sparkles, Loader2, BookOpen, Settings2, Wand2 } from "lucide-react";
+import { AIUsageBadge } from "@/components/AIUsageBadge";
 import { toast } from "@/hooks/use-toast";
 import {
-  DEFAULT_LOSHON_KODESH_PROMPT,
-  DEFAULT_LOSHON_KODESH_HOTWORDS,
-  DEFAULT_LOSHON_KODESH_REPLACEMENTS,
-  DEFAULT_LOSHON_KODESH_NAMES,
-  getLoshonKodeshPrompt,
-  setLoshonKodeshPrompt,
-  getLoshonKodeshHotwordsList,
-  setLoshonKodeshHotwordsList,
-  getLoshonKodeshReplacements,
-  setLoshonKodeshReplacements,
-  getLoshonKodeshNames,
-  setLoshonKodeshNames,
-  getLoshonKodeshProfileId,
-  setLoshonKodeshProfileId,
-  getLkAiPolishSettings,
-  setLkAiPolishSettings,
-  getLkSuggestions,
-  acceptLkSuggestion,
-  dismissLkSuggestion,
-  isLoshonKodeshEnabled,
-  setLoshonKodeshEnabled,
-  isLoshonKodeshPostProcessEnabled,
-  setLoshonKodeshPostProcessEnabled,
-  applyLoshonKodeshReplacements,
-  subscribeLoshonKodeshRules,
-  LK_PROFILE_LABELS,
-  type LkReplacement,
-  type LkNameEntry,
-  type LkProfileId,
-  type LkAiPolishSettings,
-  type LkSuggestion,
+  DEFAULT_LOSHON_KODESH_PROMPT, DEFAULT_LOSHON_KODESH_HOTWORDS, DEFAULT_LOSHON_KODESH_REPLACEMENTS,
+  DEFAULT_DICTIONARIES, DEFAULT_CATEGORY_ENABLED, DEFAULT_LK_AI_PROMPT, DEFAULT_LK_AI_MODEL,
+  LK_CATEGORY_LABELS,
+  getLoshonKodeshPrompt, setLoshonKodeshPrompt,
+  getLoshonKodeshHotwordsList, setLoshonKodeshHotwordsList,
+  getLoshonKodeshReplacements, setLoshonKodeshReplacements,
+  getCategoryEnabled, setCategoryEnabled,
+  getDictionaries, setDictionaries,
+  isLoshonKodeshEnabled, setLoshonKodeshEnabled,
+  isLoshonKodeshPostProcessEnabled, setLoshonKodeshPostProcessEnabled,
+  isLkAiEnabled, setLkAiEnabled, isLkAiAuto, setLkAiAuto,
+  getLkAiPrompt, setLkAiPrompt, getLkAiModel, setLkAiModel,
+  applyLoshonKodeshReplacements, applyLkAiFix,
+  type LkReplacement, type LkDictionary, type LkCategory,
 } from "@/lib/loshonKodesh";
 
-export default function LoshonKodeshRules() {
+const AI_MODELS = [
+  { value: 'google/gemini-2.5-flash',      label: 'Gemini 2.5 Flash (מהיר וזול, מומלץ)' },
+  { value: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite (הכי זול)' },
+  { value: 'google/gemini-2.5-pro',        label: 'Gemini 2.5 Pro (איכות מקסימלית)' },
+  { value: 'google/gemini-3-flash-preview',label: 'Gemini 3 Flash (preview)' },
+  { value: 'openai/gpt-5-mini',            label: 'GPT-5 Mini' },
+  { value: 'openai/gpt-5',                 label: 'GPT-5 (יקר ואיכותי)' },
+];
+
+const CATEGORY_OPTIONS: LkCategory[] = ['holam', 'tsere', 'kamatz', 'tav_rafa', 'names', 'terms', 'general'];
+
+/** Simple inline diff highlight: marks changed words. */
+function renderDiff(before: string, after: string) {
+  if (before === after) return <span>{after}</span>;
+  const bw = before.split(/(\s+)/);
+  const aw = after.split(/(\s+)/);
+  // Word-level naive diff: equal length? mark per-index; else show full after only.
+  if (bw.length === aw.length) {
+    return (
+      <>
+        {aw.map((w, i) =>
+          w !== bw[i]
+            ? <mark key={i} className="bg-primary/20 text-primary-foreground/90 rounded px-0.5">{w}</mark>
+            : <span key={i}>{w}</span>
+        )}
+      </>
+    );
+  }
+  return <span>{after}</span>;
+}
+
+interface LoshonKodeshRulesProps {
+  /** When provided, the test lab pre-fills with this text (and updates when it changes). */
+  embeddedText?: string;
+  /** Which tab to open by default. */
+  defaultTab?: 'rules' | 'dicts' | 'ai' | 'test';
+  /** Skip the outer page container — render inline inside another page. */
+  embedded?: boolean;
+}
+
+export default function LoshonKodeshRules({ embeddedText, defaultTab = 'rules', embedded = false }: LoshonKodeshRulesProps = {}) {
+  // Master toggles
   const [enabled, setEnabled] = useState(false);
   const [postProcess, setPostProcess] = useState(true);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiAuto, setAiAuto] = useState(false);
+
+  // Layer 1 — rules
   const [prompt, setPrompt] = useState("");
   const [hotwords, setHotwords] = useState<string[]>([]);
   const [newHotword, setNewHotword] = useState("");
   const [replacements, setReplacements] = useState<LkReplacement[]>([]);
   const [newFrom, setNewFrom] = useState("");
   const [newTo, setNewTo] = useState("");
-  const [names, setNames] = useState<LkNameEntry[]>([]);
-  const [newNameFrom, setNewNameFrom] = useState("");
-  const [newNameTo, setNewNameTo] = useState("");
-  const [profileId, setProfileId] = useState<LkProfileId>('custom');
-  const [aiPolish, setAiPolish] = useState<LkAiPolishSettings>(getLkAiPolishSettings());
-  const [suggestions, setSuggestions] = useState<LkSuggestion[]>([]);
-  const [testInput, setTestInput] = useState("היום למדנו תוירה קוידשה ומוישה רבינו אוימר שאבס.");
+  const [newCategory, setNewCategory] = useState<LkCategory>('general');
+  const [categories, setCategories] = useState<Record<LkCategory, boolean>>({ ...DEFAULT_CATEGORY_ENABLED });
 
-  const refreshAll = () => {
+  // Dictionaries
+  const [dicts, setDicts] = useState<LkDictionary[]>([]);
+  const [activeDictId, setActiveDictId] = useState<string>("");
+  const [newDictHot, setNewDictHot] = useState("");
+
+  // AI
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiModel, setAiModel] = useState(DEFAULT_LK_AI_MODEL);
+
+  // Test lab — seed from embeddedText if provided
+  const [testInput, setTestInput] = useState(
+    embeddedText && embeddedText.trim()
+      ? embeddedText
+      : "היום למדנו תוירה קוידשה ומוישע רבינו אוימר שאבעס."
+  );
+  const [testAiOut, setTestAiOut] = useState<string>("");
+  const [testAiLoading, setTestAiLoading] = useState(false);
+
+  // Update test input when embeddedText changes (e.g. user pushed new text from editor)
+  useEffect(() => {
+    if (embeddedText && embeddedText.trim()) {
+      setTestInput(embeddedText);
+      setTestAiOut("");
+    }
+  }, [embeddedText]);
+
+  useEffect(() => {
     setEnabled(isLoshonKodeshEnabled());
     setPostProcess(isLoshonKodeshPostProcessEnabled());
+    setAiEnabled(isLkAiEnabled());
+    setAiAuto(isLkAiAuto());
     setPrompt(getLoshonKodeshPrompt());
     setHotwords(getLoshonKodeshHotwordsList());
     setReplacements(getLoshonKodeshReplacements());
-    setNames(getLoshonKodeshNames());
-    setProfileId(getLoshonKodeshProfileId());
-    setAiPolish(getLkAiPolishSettings());
-    setSuggestions(getLkSuggestions());
-  };
-
-  useEffect(() => {
-    refreshAll();
-    return subscribeLoshonKodeshRules(refreshAll);
+    setCategories(getCategoryEnabled());
+    const d = getDictionaries();
+    setDicts(d);
+    setActiveDictId(d[0]?.id || "");
+    setAiPrompt(getLkAiPrompt());
+    setAiModel(getLkAiModel());
   }, []);
 
-  const savePrompt = () => {
-    setLoshonKodeshPrompt(prompt);
-    toast({ title: "נשמר", description: "הפרומפט עודכן" });
-  };
+  // ── Prompt ─────────────────────────
+  const savePrompt = () => { setLoshonKodeshPrompt(prompt); toast({ title: "נשמר" }); };
+  const resetPrompt = () => { setPrompt(DEFAULT_LOSHON_KODESH_PROMPT); setLoshonKodeshPrompt(DEFAULT_LOSHON_KODESH_PROMPT); toast({ title: "אופס" }); };
 
-  const resetPrompt = () => {
-    setPrompt(DEFAULT_LOSHON_KODESH_PROMPT);
-    setLoshonKodeshPrompt(DEFAULT_LOSHON_KODESH_PROMPT);
-    toast({ title: "אופס לברירת מחדל" });
-  };
-
+  // ── Hotwords ───────────────────────
   const addHotword = () => {
     const v = newHotword.trim();
-    if (!v) return;
-    if (hotwords.includes(v)) { toast({ title: "כבר קיים" }); return; }
+    if (!v || hotwords.includes(v)) return;
     const next = [...hotwords, v];
-    setHotwords(next);
-    setLoshonKodeshHotwordsList(next);
-    setNewHotword("");
+    setHotwords(next); setLoshonKodeshHotwordsList(next); setNewHotword("");
   };
-
   const removeHotword = (w: string) => {
     const next = hotwords.filter(x => x !== w);
-    setHotwords(next);
-    setLoshonKodeshHotwordsList(next);
+    setHotwords(next); setLoshonKodeshHotwordsList(next);
   };
-
   const resetHotwords = () => {
-    setHotwords(DEFAULT_LOSHON_KODESH_HOTWORDS);
-    setLoshonKodeshHotwordsList(DEFAULT_LOSHON_KODESH_HOTWORDS);
-    toast({ title: "אופס לברירת מחדל" });
+    setHotwords(DEFAULT_LOSHON_KODESH_HOTWORDS); setLoshonKodeshHotwordsList(DEFAULT_LOSHON_KODESH_HOTWORDS);
   };
 
+  // ── Replacements ───────────────────
   const addReplacement = () => {
-    const f = newFrom.trim();
-    const t = newTo.trim();
+    const f = newFrom.trim(), t = newTo.trim();
     if (!f || !t) { toast({ title: "מלא את שני השדות" }); return; }
-    const next: LkReplacement[] = [...replacements, { from: f, to: t, wholeWord: true }];
-    setReplacements(next);
-    setLoshonKodeshReplacements(next);
+    const next: LkReplacement[] = [...replacements, { from: f, to: t, wholeWord: true, category: newCategory }];
+    setReplacements(next); setLoshonKodeshReplacements(next);
     setNewFrom(""); setNewTo("");
   };
-
   const updateReplacement = (i: number, patch: Partial<LkReplacement>) => {
     const next = replacements.map((r, idx) => idx === i ? { ...r, ...patch } : r);
-    setReplacements(next);
-    setLoshonKodeshReplacements(next);
+    setReplacements(next); setLoshonKodeshReplacements(next);
   };
-
   const removeReplacement = (i: number) => {
     const next = replacements.filter((_, idx) => idx !== i);
-    setReplacements(next);
-    setLoshonKodeshReplacements(next);
+    setReplacements(next); setLoshonKodeshReplacements(next);
   };
-
   const resetReplacements = () => {
-    setReplacements(DEFAULT_LOSHON_KODESH_REPLACEMENTS);
-    setLoshonKodeshReplacements(DEFAULT_LOSHON_KODESH_REPLACEMENTS);
-    toast({ title: "אופס לברירת מחדל" });
+    setReplacements(DEFAULT_LOSHON_KODESH_REPLACEMENTS); setLoshonKodeshReplacements(DEFAULT_LOSHON_KODESH_REPLACEMENTS);
   };
 
+  // ── Categories ─────────────────────
+  const toggleCategory = (cat: LkCategory, v: boolean) => {
+    const next = { ...categories, [cat]: v };
+    setCategories(next); setCategoryEnabled(next);
+  };
+
+  // ── Dictionaries ───────────────────
+  const persistDicts = (next: LkDictionary[]) => { setDicts(next); setDictionaries(next); };
+  const activeDict = dicts.find(d => d.id === activeDictId);
+
+  const toggleDict = (id: string, v: boolean) => persistDicts(dicts.map(d => d.id === id ? { ...d, enabled: v } : d));
+  const addDict = () => {
+    const id = `custom-${Date.now()}`;
+    const next: LkDictionary = { id, name: 'מילון חדש', enabled: true, hotwords: [], replacements: [] };
+    persistDicts([...dicts, next]); setActiveDictId(id);
+  };
+  const renameDict = (id: string, name: string) => persistDicts(dicts.map(d => d.id === id ? { ...d, name } : d));
+  const deleteDict = (id: string) => {
+    const next = dicts.filter(d => d.id !== id);
+    persistDicts(next);
+    if (activeDictId === id) setActiveDictId(next[0]?.id || "");
+  };
+  const addDictHotword = () => {
+    const v = newDictHot.trim();
+    if (!v || !activeDict || activeDict.hotwords.includes(v)) return;
+    persistDicts(dicts.map(d => d.id === activeDict.id ? { ...d, hotwords: [...d.hotwords, v] } : d));
+    setNewDictHot("");
+  };
+  const removeDictHotword = (w: string) => {
+    if (!activeDict) return;
+    persistDicts(dicts.map(d => d.id === activeDict.id ? { ...d, hotwords: d.hotwords.filter(x => x !== w) } : d));
+  };
+  const resetDicts = () => persistDicts(DEFAULT_DICTIONARIES);
+
+  // ── AI ─────────────────────────────
+  const saveAiPrompt = () => { setLkAiPrompt(aiPrompt); toast({ title: "פרומפט AI נשמר" }); };
+  const resetAiPrompt = () => { setAiPrompt(DEFAULT_LK_AI_PROMPT); setLkAiPrompt(DEFAULT_LK_AI_PROMPT); };
+  const onAiModelChange = (m: string) => { setAiModel(m); setLkAiModel(m); };
+
+  // ── Import/Export ──────────────────
   const exportAll = () => {
     const data = {
       prompt: getLoshonKodeshPrompt(),
       hotwords: getLoshonKodeshHotwordsList(),
       replacements: getLoshonKodeshReplacements(),
+      categories: getCategoryEnabled(),
+      dictionaries: getDictionaries(),
+      ai: { prompt: getLkAiPrompt(), model: getLkAiModel(), enabled: isLkAiEnabled(), auto: isLkAiAuto() },
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `loshon-kodesh-rules-${Date.now()}.json`;
-    a.click();
+    a.href = url; a.download = `loshon-kodesh-rules-${Date.now()}.json`; a.click();
     URL.revokeObjectURL(url);
   };
-
   const importAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const data = JSON.parse(String(reader.result));
-        if (typeof data.prompt === "string") { setPrompt(data.prompt); setLoshonKodeshPrompt(data.prompt); }
-        if (Array.isArray(data.hotwords)) { setHotwords(data.hotwords); setLoshonKodeshHotwordsList(data.hotwords); }
-        if (Array.isArray(data.replacements)) { setReplacements(data.replacements); setLoshonKodeshReplacements(data.replacements); }
+        const d = JSON.parse(String(reader.result));
+        if (typeof d.prompt === "string") { setPrompt(d.prompt); setLoshonKodeshPrompt(d.prompt); }
+        if (Array.isArray(d.hotwords)) { setHotwords(d.hotwords); setLoshonKodeshHotwordsList(d.hotwords); }
+        if (Array.isArray(d.replacements)) { setReplacements(d.replacements); setLoshonKodeshReplacements(d.replacements); }
+        if (d.categories && typeof d.categories === 'object') { setCategories({ ...DEFAULT_CATEGORY_ENABLED, ...d.categories }); setCategoryEnabled({ ...DEFAULT_CATEGORY_ENABLED, ...d.categories }); }
+        if (Array.isArray(d.dictionaries)) { persistDicts(d.dictionaries); }
+        if (d.ai) {
+          if (typeof d.ai.prompt === 'string') { setAiPrompt(d.ai.prompt); setLkAiPrompt(d.ai.prompt); }
+          if (typeof d.ai.model === 'string') { setAiModel(d.ai.model); setLkAiModel(d.ai.model); }
+          if (typeof d.ai.enabled === 'boolean') { setAiEnabled(d.ai.enabled); setLkAiEnabled(d.ai.enabled); }
+          if (typeof d.ai.auto === 'boolean') { setAiAuto(d.ai.auto); setLkAiAuto(d.ai.auto); }
+        }
         toast({ title: "יובא בהצלחה" });
       } catch {
         toast({ title: "שגיאה בייבוא", variant: "destructive" });
@@ -172,10 +248,21 @@ export default function LoshonKodeshRules() {
     e.target.value = "";
   };
 
-  const previewOut = applyLoshonKodeshReplacements(testInput);
+  // ── Test lab ───────────────────────
+  const layer1Out = useMemo(() => applyLoshonKodeshReplacements(testInput), [testInput, replacements, dicts, categories, postProcess]);
+  const runAiTest = async () => {
+    setTestAiLoading(true); setTestAiOut("");
+    try {
+      const out = await applyLkAiFix(layer1Out);
+      setTestAiOut(out);
+    } catch (e) {
+      toast({ title: "שגיאת AI", description: e instanceof Error ? e.message : 'לא ידוע', variant: "destructive" });
+    } finally { setTestAiLoading(false); }
+  };
 
   return (
-    <div dir="rtl" className="container max-w-4xl mx-auto p-4 md:p-6 space-y-4">
+    <div dir="rtl" className={embedded ? "w-full space-y-4" : "container max-w-5xl mx-auto p-4 md:p-6 space-y-4"}>
+      {/* Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <ScrollText className="w-6 h-6 text-primary" />
@@ -192,246 +279,272 @@ export default function LoshonKodeshRules() {
         </div>
       </div>
 
-      {/* Master toggles */}
+      {/* Master toggles — always visible */}
       <Card className="p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="font-medium">מצב לשון הקודש פעיל</div>
-            <div className="text-xs text-muted-foreground">מזריק את הפרומפט וההוטוורדס לכל תמלול חדש</div>
+            <div className="text-xs text-muted-foreground">מזריק פרומפט והוטוורדס לכל תמלול חדש</div>
           </div>
           <Switch checked={enabled} onCheckedChange={(v) => { setEnabled(v); setLoshonKodeshEnabled(v); }} />
         </div>
         <div className="flex items-center justify-between gap-3 border-t pt-3">
           <div>
-            <div className="font-medium">החלף מילים בתמלול אחרי הסיום</div>
-            <div className="text-xs text-muted-foreground">פוסט־פרוססינג: תוירה→תורה, קוידש→קודש וכו'</div>
+            <div className="font-medium">החלפות אחרי התמלול (שכבה 1)</div>
+            <div className="text-xs text-muted-foreground">תוירה→תורה, קוידש→קודש וכו'</div>
           </div>
           <Switch checked={postProcess} onCheckedChange={(v) => { setPostProcess(v); setLoshonKodeshPostProcessEnabled(v); }} />
         </div>
-      </Card>
-
-      {/* Cloud sync indicator + Profile selector */}
-      <Card className="p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Cloud className="w-4 h-4 text-primary" />
+        <div className="flex items-center justify-between gap-3 border-t pt-3">
+          <div>
+            <div className="font-medium flex items-center gap-1"><Wand2 className="w-4 h-4 text-primary" />תיקון AI (שכבה 2)</div>
+            <div className="text-xs text-muted-foreground">כפתור "תקן עם AI" בעורך הטקסט</div>
+          </div>
+          <Switch checked={aiEnabled} onCheckedChange={(v) => { setAiEnabled(v); setLkAiEnabled(v); }} />
+        </div>
+        {aiEnabled && (
+          <div className="flex items-center justify-between gap-3 border-t pt-3">
             <div>
-              <div className="font-medium">פרופיל / ערכת כללים</div>
-              <div className="text-xs text-muted-foreground">בחירת ערכה דורסת את הפרומפט/הוטוורדס/שמות/החלפות. הכל מסתנכרן לענן.</div>
+              <div className="font-medium">הפעלת AI אוטומטית בסוף תמלול</div>
+              <div className="text-xs text-muted-foreground">ירוץ ברקע אחרי שכבה 1 (עולה קרדיטים)</div>
             </div>
-          </div>
-          <Select value={profileId} onValueChange={(v) => {
-            const next = v as LkProfileId;
-            setProfileId(next);
-            setLoshonKodeshProfileId(next);
-            refreshAll();
-            toast({ title: next === 'custom' ? 'מותאם אישית' : `נטענה ערכה: ${LK_PROFILE_LABELS[next]}` });
-          }}>
-            <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {(Object.keys(LK_PROFILE_LABELS) as LkProfileId[]).map(id => (
-                <SelectItem key={id} value={id}>{LK_PROFILE_LABELS[id]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </Card>
-
-      {/* Pending auto-learned suggestions */}
-      {suggestions.length > 0 && (
-        <Card className="p-4 space-y-3 border-primary/40">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-primary" />
-            <Label className="font-semibold">הצעות שזוהו אוטומטית ({suggestions.length})</Label>
-          </div>
-          <p className="text-xs text-muted-foreground">תיקונים שביצעת בעורך — אישור יוסיף אותם לרשימה הקבועה.</p>
-          <div className="space-y-1 max-h-64 overflow-y-auto">
-            {suggestions.map((s) => (
-              <div key={`${s.from}=>${s.to}`} className="grid grid-cols-[1fr,auto,1fr,auto,auto,auto] gap-2 items-center bg-muted/30 rounded p-2 text-sm">
-                <span dir="rtl" className="truncate">{s.from}</span>
-                <span className="text-muted-foreground">←</span>
-                <span dir="rtl" className="truncate font-medium">{s.to}</span>
-                <Badge variant="outline" className="text-xs">{s.kind === 'name' ? 'שם' : 'מילה'}</Badge>
-                <Button size="icon" variant="ghost" onClick={() => { acceptLkSuggestion(s); refreshAll(); }}>
-                  <Check className="w-4 h-4 text-primary" />
-                </Button>
-                <Button size="icon" variant="ghost" onClick={() => { dismissLkSuggestion(s.from, s.to); refreshAll(); }}>
-                  <X className="w-4 h-4 text-destructive" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {/* Names dictionary */}
-      <Card className="p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Users className="w-4 h-4 text-primary" />
-            <Label className="font-semibold">שמות פרטיים ({names.length})</Label>
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => { setNames(DEFAULT_LOSHON_KODESH_NAMES); setLoshonKodeshNames(DEFAULT_LOSHON_KODESH_NAMES); toast({ title: 'אופס לברירת מחדל' }); }}>
-            <RotateCcw className="w-4 h-4 ml-1" />ברירת מחדל
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">מילון נפרד לשמות (מויישע→משה, יענקל→יעקב). רץ ראשון, לפני ההחלפות הכלליות.</p>
-        <div className="grid grid-cols-1 md:grid-cols-[1fr,1fr,auto] gap-2 items-center">
-          <Input value={newNameFrom} onChange={(e) => setNewNameFrom(e.target.value)} placeholder="הגייה (מויישע)" dir="rtl" />
-          <Input value={newNameTo} onChange={(e) => setNewNameTo(e.target.value)} placeholder="שם תקני (משה)" dir="rtl" />
-          <Button onClick={() => {
-            const f = newNameFrom.trim(); const t = newNameTo.trim();
-            if (!f || !t) { toast({ title: 'מלא את שני השדות' }); return; }
-            const next = [...names, { from: f, to: t }];
-            setNames(next); setLoshonKodeshNames(next);
-            setNewNameFrom(''); setNewNameTo('');
-          }}><Plus className="w-4 h-4 ml-1" />הוסף</Button>
-        </div>
-        <div className="space-y-1 max-h-72 overflow-y-auto">
-          {names.map((n, i) => (
-            <div key={i} className="grid grid-cols-[1fr,1fr,auto] gap-2 items-center bg-muted/20 rounded p-2">
-              <Input value={n.from} onChange={(e) => { const next = names.map((x, idx) => idx === i ? { ...x, from: e.target.value } : x); setNames(next); setLoshonKodeshNames(next); }} dir="rtl" className="h-8" />
-              <Input value={n.to} onChange={(e) => { const next = names.map((x, idx) => idx === i ? { ...x, to: e.target.value } : x); setNames(next); setLoshonKodeshNames(next); }} dir="rtl" className="h-8" />
-              <Button variant="ghost" size="icon" onClick={() => { const next = names.filter((_, idx) => idx !== i); setNames(next); setLoshonKodeshNames(next); }}>
-                <Trash2 className="w-4 h-4 text-destructive" />
-              </Button>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* AI Polish settings */}
-      <Card className="p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Brain className="w-4 h-4 text-primary" />
-            <div>
-              <div className="font-medium">שלב AI סופי</div>
-              <div className="text-xs text-muted-foreground">מריץ מודל AI על הטקסט הסופי לתיקון הגייה אשכנזית שנשארה. רץ רק כשמצב לשון הקודש פעיל.</div>
-            </div>
-          </div>
-          <Switch checked={aiPolish.enabled} onCheckedChange={(v) => { const next = { ...aiPolish, enabled: v }; setAiPolish(next); setLkAiPolishSettings(next); }} />
-        </div>
-        {aiPolish.enabled && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3 border-t">
-            <div>
-              <Label className="text-xs">מנוע</Label>
-              <Select value={aiPolish.engine} onValueChange={(v) => { const next = { ...aiPolish, engine: v as LkAiPolishSettings['engine'] }; setAiPolish(next); setLkAiPolishSettings(next); }}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="gemini">Gemini (ענן)</SelectItem>
-                  <SelectItem value="ollama">Ollama (מקומי)</SelectItem>
-                  <SelectItem value="off">כבוי</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs">מודל</Label>
-              <Input value={aiPolish.model} onChange={(e) => { const next = { ...aiPolish, model: e.target.value }; setAiPolish(next); setLkAiPolishSettings(next); }} placeholder={aiPolish.engine === 'ollama' ? 'llama3' : 'gemini-2.5-flash'} dir="ltr" />
-            </div>
-            <div className="md:col-span-2">
-              <Label className="text-xs">פרומפט מותאם (אופציונלי)</Label>
-              <Textarea value={aiPolish.customPrompt || ''} onChange={(e) => { const next = { ...aiPolish, customPrompt: e.target.value }; setAiPolish(next); setLkAiPolishSettings(next); }} placeholder="ריק = פרומפט ברירת מחדל" dir="rtl" className="min-h-[80px] text-sm" />
-            </div>
+            <Switch checked={aiAuto} onCheckedChange={(v) => { setAiAuto(v); setLkAiAuto(v); }} />
           </div>
         )}
       </Card>
 
-      {/* Prompt */}
-      <Card className="p-4 space-y-2">
-        <div className="flex items-center justify-between">
-          <Label className="font-semibold">פרומפט ראשוני ל-Whisper</Label>
-          <div className="flex gap-2">
-            <Button variant="ghost" size="sm" onClick={resetPrompt}><RotateCcw className="w-4 h-4 ml-1" />ברירת מחדל</Button>
-            <Button size="sm" onClick={savePrompt}><Save className="w-4 h-4 ml-1" />שמור</Button>
-          </div>
-        </div>
-        <Textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          className="min-h-[140px] text-sm font-mono"
-          dir="rtl"
-        />
-        <p className="text-xs text-muted-foreground">עד ~224 טוקנים. תאר את ההקשר ותן דוגמאות לכתיב התקני שתרצה לראות.</p>
-      </Card>
+      {/* Tabs */}
+      <Tabs defaultValue={defaultTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="rules"><Settings2 className="w-4 h-4 ml-1" />כללים</TabsTrigger>
+          <TabsTrigger value="dicts"><BookOpen className="w-4 h-4 ml-1" />מילונים</TabsTrigger>
+          <TabsTrigger value="ai"><Wand2 className="w-4 h-4 ml-1" />AI</TabsTrigger>
+          <TabsTrigger value="test"><Sparkles className="w-4 h-4 ml-1" />בדיקה</TabsTrigger>
+        </TabsList>
 
-      {/* Hotwords */}
-      <Card className="p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <Label className="font-semibold">הוטוורדס ({hotwords.length})</Label>
-          <Button variant="ghost" size="sm" onClick={resetHotwords}><RotateCcw className="w-4 h-4 ml-1" />ברירת מחדל</Button>
-        </div>
-        <div className="flex gap-2">
-          <Input
-            value={newHotword}
-            onChange={(e) => setNewHotword(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") addHotword(); }}
-            placeholder="הוסף מילה או ביטוי"
-            dir="rtl"
-          />
-          <Button onClick={addHotword}><Plus className="w-4 h-4" /></Button>
-        </div>
-        <div className="flex flex-wrap gap-1.5 max-h-72 overflow-y-auto p-2 bg-muted/30 rounded-md">
-          {hotwords.map(w => (
-            <Badge key={w} variant="secondary" className="gap-1 pr-1">
-              {w}
-              <button onClick={() => removeHotword(w)} className="hover:text-destructive">
-                <Trash2 className="w-3 h-3" />
-              </button>
-            </Badge>
-          ))}
-          {hotwords.length === 0 && <span className="text-xs text-muted-foreground">אין הוטוורדס</span>}
-        </div>
-      </Card>
-
-      {/* Replacements */}
-      <Card className="p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <Label className="font-semibold">החלפות פונטיות → תקני</Label>
-            <p className="text-xs text-muted-foreground">חולם, צירה, ת' רפה וכו'. רצים אחרי כל תמלול.</p>
-          </div>
-          <Button variant="ghost" size="sm" onClick={resetReplacements}><RotateCcw className="w-4 h-4 ml-1" />ברירת מחדל</Button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-[1fr,1fr,auto] gap-2 items-center">
-          <Input value={newFrom} onChange={(e) => setNewFrom(e.target.value)} placeholder="פונטי (תוירה)" dir="rtl" />
-          <Input value={newTo} onChange={(e) => setNewTo(e.target.value)} placeholder="תקני (תורה)" dir="rtl" />
-          <Button onClick={addReplacement}><Plus className="w-4 h-4 ml-1" />הוסף</Button>
-        </div>
-
-        <div className="space-y-1 max-h-96 overflow-y-auto">
-          {replacements.map((r, i) => (
-            <div key={i} className="grid grid-cols-[1fr,1fr,auto,auto] gap-2 items-center bg-muted/20 rounded p-2">
-              <Input value={r.from} onChange={(e) => updateReplacement(i, { from: e.target.value })} dir="rtl" className="h-8" />
-              <Input value={r.to} onChange={(e) => updateReplacement(i, { to: e.target.value })} dir="rtl" className="h-8" />
-              <label className="flex items-center gap-1 text-xs">
-                <Switch
-                  checked={r.wholeWord !== false}
-                  onCheckedChange={(v) => updateReplacement(i, { wholeWord: v })}
-                />
-                <span>מילה שלמה</span>
-              </label>
-              <Button variant="ghost" size="icon" onClick={() => removeReplacement(i)}>
-                <Trash2 className="w-4 h-4 text-destructive" />
-              </Button>
+        {/* ── RULES TAB ─────────────────────────── */}
+        <TabsContent value="rules" className="space-y-4">
+          {/* Categories */}
+          <Card className="p-4 space-y-3">
+            <Label className="font-semibold">קטגוריות פעילות</Label>
+            <p className="text-xs text-muted-foreground">כבה קטגוריה כדי לדלג על כל ההחלפות שלה</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {CATEGORY_OPTIONS.map(c => (
+                <div key={c} className="flex items-center justify-between gap-2 bg-muted/30 rounded p-2">
+                  <span className="text-sm">{LK_CATEGORY_LABELS[c]}</span>
+                  <Switch checked={categories[c] !== false} onCheckedChange={(v) => toggleCategory(c, v)} />
+                </div>
+              ))}
             </div>
-          ))}
-          {replacements.length === 0 && <p className="text-xs text-muted-foreground">אין החלפות</p>}
-        </div>
-      </Card>
+          </Card>
 
-      {/* Live preview */}
-      <Card className="p-4 space-y-2">
-        <Label className="font-semibold flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-primary" />בדיקה חיה
-        </Label>
-        <Textarea value={testInput} onChange={(e) => setTestInput(e.target.value)} dir="rtl" className="min-h-[80px]" />
-        <div className="bg-muted/50 rounded p-3 text-sm" dir="rtl">
-          <div className="text-xs text-muted-foreground mb-1">תוצאה אחרי החלפות:</div>
-          {previewOut}
-        </div>
-      </Card>
+          {/* Prompt */}
+          <Card className="p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="font-semibold">פרומפט ראשוני ל-Whisper</Label>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={resetPrompt}><RotateCcw className="w-4 h-4 ml-1" />ברירת מחדל</Button>
+                <Button size="sm" onClick={savePrompt}><Save className="w-4 h-4 ml-1" />שמור</Button>
+              </div>
+            </div>
+            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} className="min-h-[140px] text-sm font-mono" dir="rtl" />
+            <p className="text-xs text-muted-foreground">עד ~224 טוקנים. תאר את ההקשר ותן דוגמאות לכתיב התקני שתרצה לראות.</p>
+          </Card>
+
+          {/* Hotwords */}
+          <Card className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="font-semibold">הוטוורדס בסיסיים ({hotwords.length})</Label>
+              <Button variant="ghost" size="sm" onClick={resetHotwords}><RotateCcw className="w-4 h-4 ml-1" />ברירת מחדל</Button>
+            </div>
+            <div className="flex gap-2">
+              <Input value={newHotword} onChange={(e) => setNewHotword(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addHotword(); }} placeholder="הוסף מילה" dir="rtl" />
+              <Button onClick={addHotword}><Plus className="w-4 h-4" /></Button>
+            </div>
+            <div className="flex flex-wrap gap-1.5 max-h-72 overflow-y-auto p-2 bg-muted/30 rounded-md">
+              {hotwords.map(w => (
+                <Badge key={w} variant="secondary" className="gap-1 pr-1">
+                  {w}
+                  <button onClick={() => removeHotword(w)} className="hover:text-destructive"><Trash2 className="w-3 h-3" /></button>
+                </Badge>
+              ))}
+              {hotwords.length === 0 && <span className="text-xs text-muted-foreground">אין הוטוורדס</span>}
+            </div>
+          </Card>
+
+          {/* Replacements */}
+          <Card className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="font-semibold">החלפות פונטיות → תקני</Label>
+                <p className="text-xs text-muted-foreground">רצות אוטומטית אחרי כל תמלול</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={resetReplacements}><RotateCcw className="w-4 h-4 ml-1" />ברירת מחדל</Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-[1fr,1fr,160px,auto] gap-2 items-center">
+              <Input value={newFrom} onChange={(e) => setNewFrom(e.target.value)} placeholder="פונטי (תוירה)" dir="rtl" />
+              <Input value={newTo} onChange={(e) => setNewTo(e.target.value)} placeholder="תקני (תורה)" dir="rtl" />
+              <Select value={newCategory} onValueChange={(v) => setNewCategory(v as LkCategory)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CATEGORY_OPTIONS.map(c => <SelectItem key={c} value={c}>{LK_CATEGORY_LABELS[c]}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button onClick={addReplacement}><Plus className="w-4 h-4" /></Button>
+            </div>
+
+            <div className="space-y-1 max-h-96 overflow-y-auto">
+              {replacements.map((r, i) => (
+                <div key={i} className="grid grid-cols-[1fr,1fr,140px,auto,auto] gap-2 items-center bg-muted/20 rounded p-2">
+                  <Input value={r.from} onChange={(e) => updateReplacement(i, { from: e.target.value })} dir="rtl" className="h-8" />
+                  <Input value={r.to} onChange={(e) => updateReplacement(i, { to: e.target.value })} dir="rtl" className="h-8" />
+                  <Select value={r.category || 'general'} onValueChange={(v) => updateReplacement(i, { category: v as LkCategory })}>
+                    <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CATEGORY_OPTIONS.map(c => <SelectItem key={c} value={c}>{LK_CATEGORY_LABELS[c]}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <label className="flex items-center gap-1 text-xs">
+                    <Switch checked={r.wholeWord !== false} onCheckedChange={(v) => updateReplacement(i, { wholeWord: v })} />
+                    <span>שלמה</span>
+                  </label>
+                  <Button variant="ghost" size="icon" onClick={() => removeReplacement(i)}>
+                    <Trash2 className="w-4 h-4 text-destructive" />
+                  </Button>
+                </div>
+              ))}
+              {replacements.length === 0 && <p className="text-xs text-muted-foreground">אין החלפות</p>}
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* ── DICTIONARIES TAB ──────────────────── */}
+        <TabsContent value="dicts" className="space-y-4">
+          <Card className="p-4 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <Label className="font-semibold">מילונים נושאיים</Label>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={addDict}><Plus className="w-4 h-4 ml-1" />מילון חדש</Button>
+                <Button size="sm" variant="ghost" onClick={resetDicts}><RotateCcw className="w-4 h-4 ml-1" />שחזר</Button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {dicts.map(d => (
+                <div key={d.id} className={`flex items-center gap-2 rounded-md border px-2 py-1 cursor-pointer transition ${activeDictId === d.id ? 'border-primary bg-primary/5' : 'border-border'}`} onClick={() => setActiveDictId(d.id)}>
+                  <Switch checked={d.enabled} onCheckedChange={(v) => toggleDict(d.id, v)} onClick={(e) => e.stopPropagation()} />
+                  <span className="text-sm">{d.name}</span>
+                  <Badge variant="secondary" className="text-xs">{d.hotwords.length}</Badge>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {activeDict && (
+            <Card className="p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-1">
+                  <Input value={activeDict.name} onChange={(e) => renameDict(activeDict.id, e.target.value)} className="max-w-xs" dir="rtl" />
+                  <Switch checked={activeDict.enabled} onCheckedChange={(v) => toggleDict(activeDict.id, v)} />
+                  <span className="text-xs text-muted-foreground">{activeDict.enabled ? 'פעיל' : 'כבוי'}</span>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => deleteDict(activeDict.id)}>
+                  <Trash2 className="w-4 h-4 text-destructive" />
+                </Button>
+              </div>
+
+              <div className="flex gap-2">
+                <Input value={newDictHot} onChange={(e) => setNewDictHot(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addDictHotword(); }} placeholder="הוסף מילה/ביטוי למילון" dir="rtl" />
+                <Button onClick={addDictHotword}><Plus className="w-4 h-4" /></Button>
+              </div>
+              <div className="flex flex-wrap gap-1.5 max-h-80 overflow-y-auto p-2 bg-muted/30 rounded-md">
+                {activeDict.hotwords.map(w => (
+                  <Badge key={w} variant="secondary" className="gap-1 pr-1">
+                    {w}
+                    <button onClick={() => removeDictHotword(w)} className="hover:text-destructive"><Trash2 className="w-3 h-3" /></button>
+                  </Badge>
+                ))}
+                {activeDict.hotwords.length === 0 && <span className="text-xs text-muted-foreground">ריק</span>}
+              </div>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* ── AI TAB ────────────────────────────── */}
+        <TabsContent value="ai" className="space-y-4">
+          <Card className="p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Wand2 className="w-5 h-5 text-primary" />
+              <Label className="font-semibold">שכבת AI — תיקון חכם</Label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              שכבת AI רצה אחרי שכבת הכללים. היא מבינה הקשר תורני, מתקנת פסוקים, ומטפלת במה שהכללים פספסו.
+              ניתן להפעיל ידנית (כפתור בעורך) או אוטומטית (טוגל למעלה). משתמש ב-Lovable AI Gateway.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-[200px,1fr] gap-2 items-center">
+              <Label className="flex items-center gap-1">
+                מודל AI
+                <AIUsageBadge feature="loshon-kodesh" model={aiModel} />
+              </Label>
+              <Select value={aiModel} onValueChange={onAiModelChange}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {AI_MODELS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </Card>
+
+          <Card className="p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="font-semibold">פרומפט מערכת ל-AI</Label>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={resetAiPrompt}><RotateCcw className="w-4 h-4 ml-1" />ברירת מחדל</Button>
+                <Button size="sm" onClick={saveAiPrompt}><Save className="w-4 h-4 ml-1" />שמור</Button>
+              </div>
+            </div>
+            <Textarea value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} className="min-h-[260px] text-sm font-mono" dir="rtl" />
+            <p className="text-xs text-muted-foreground">
+              המערכת תוסיף לפרומפט הזה את אוצר המילים מהמילונים הפעילים אוטומטית.
+            </p>
+          </Card>
+        </TabsContent>
+
+        {/* ── TEST TAB ──────────────────────────── */}
+        <TabsContent value="test" className="space-y-4">
+          <Card className="p-4 space-y-3">
+            <Label className="font-semibold flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-primary" />בדיקה חיה
+            </Label>
+            <Textarea value={testInput} onChange={(e) => setTestInput(e.target.value)} dir="rtl" className="min-h-[80px]" placeholder="הקלד טקסט פונטי לבדיקה..." />
+
+            <div>
+              <div className="text-xs font-semibold text-muted-foreground mb-1">שכבה 1 — אחרי כללים והחלפות:</div>
+              <div className="bg-muted/50 rounded p-3 text-sm leading-relaxed" dir="rtl">
+                {renderDiff(testInput, layer1Out)}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 border-t">
+              <Button onClick={runAiTest} disabled={testAiLoading || !layer1Out.trim()}>
+                {testAiLoading ? <Loader2 className="w-4 h-4 ml-1 animate-spin" /> : <Wand2 className="w-4 h-4 ml-1" />}
+                הרץ שכבה 2 (AI)
+              </Button>
+              <span className="text-xs text-muted-foreground">מומלץ Flash — מהיר וכמעט חינם</span>
+            </div>
+
+            {testAiOut && (
+              <div>
+                <div className="text-xs font-semibold text-muted-foreground mb-1">שכבה 2 — אחרי AI:</div>
+                <div className="bg-primary/5 border border-primary/20 rounded p-3 text-sm leading-relaxed" dir="rtl">
+                  {renderDiff(layer1Out, testAiOut)}
+                </div>
+              </div>
+            )}
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

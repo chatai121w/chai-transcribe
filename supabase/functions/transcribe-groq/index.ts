@@ -44,6 +44,7 @@ serve(async (req) => {
     let fileName = 'audio.webm';
     let language = 'he';
     let modelOverride: string | undefined;
+    let hotwords = '';
 
     if (contentType.includes('multipart/form-data')) {
       const form = await req.formData();
@@ -53,6 +54,8 @@ serve(async (req) => {
       if (typeof lang === 'string' && lang !== 'auto') language = lang;
       const mdl = form.get('model');
       if (typeof mdl === 'string' && mdl.trim()) modelOverride = mdl.trim();
+      const hw = form.get('hotwords');
+      if (typeof hw === 'string') hotwords = hw.trim();
       const file = form.get('file');
       if (file instanceof Blob) {
         fileBlob = file;
@@ -62,11 +65,12 @@ serve(async (req) => {
       }
       if (!fileBlob) throw new Error('file is required in multipart form');
     } else {
-      const { audio, fileName: jsonName, apiKey, language: jsonLang, model: jsonModel } = await req.json();
+      const { audio, fileName: jsonName, apiKey, language: jsonLang, model: jsonModel, hotwords: jsonHotwords } = await req.json();
       if (!audio) throw new Error('No audio data provided');
       GROQ_API_KEY = apiKey || Deno.env.get('GROQ_API_KEY');
       if (jsonLang && jsonLang !== 'auto') language = jsonLang;
       if (typeof jsonModel === 'string' && jsonModel.trim()) modelOverride = jsonModel.trim();
+      if (typeof jsonHotwords === 'string') hotwords = jsonHotwords.trim();
       const binaryAudio = Uint8Array.from(atob(audio), c => c.charCodeAt(0));
       fileBlob = new Blob([binaryAudio], { type: 'application/octet-stream' });
       fileName = jsonName || fileName;
@@ -114,7 +118,18 @@ serve(async (req) => {
           fd.append('timestamp_granularities[]', 'word');
           fd.append('temperature', '0');
           if (language === 'he') {
-            fd.append('prompt', 'תמלול שיחה בעברית. דיבור ברור ומדויק.');
+            // Whisper "prompt" is capped around 224 tokens — keep it short.
+            // We append the user's hotwords (vocabulary + learned corrections + LK terms)
+            // so Groq Whisper biases toward known correct forms.
+            let prompt = 'תמלול שיחה בעברית. דיבור ברור ומדויק.';
+            if (hotwords) {
+              const trimmed = hotwords.length > 800 ? hotwords.slice(0, 800) : hotwords;
+              prompt += ' מונחים: ' + trimmed;
+            }
+            fd.append('prompt', prompt);
+          } else if (hotwords) {
+            const trimmed = hotwords.length > 800 ? hotwords.slice(0, 800) : hotwords;
+            fd.append('prompt', 'Terms: ' + trimmed);
           }
 
           console.log(`Trying model: ${model}, mime: ${mimeType}, size: ${typedBlob.size}`);
@@ -136,16 +151,6 @@ serve(async (req) => {
             }
             if (response.status === 401 || response.status === 403) {
               const err = new Error('AUTH_ERROR');
-              (err as any).noRetry = true;
-              throw err;
-            }
-            if (response.status === 413) {
-              const err = new Error('REQUEST_TOO_LARGE');
-              (err as any).noRetry = true;
-              throw err;
-            }
-            if (response.status === 400) {
-              const err = new Error(`BAD_REQUEST: ${errorText.slice(0, 300)}`);
               (err as any).noRetry = true;
               throw err;
             }
@@ -203,18 +208,6 @@ serve(async (req) => {
     if (msg === 'AUTH_ERROR') {
       return new Response(JSON.stringify({ error: 'מפתח Groq שגוי או חסר.' }), {
         status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-    if (msg === 'REQUEST_TOO_LARGE') {
-      return new Response(JSON.stringify({ error: 'קובץ האודיו גדול מדי ל-Groq. נסה להפעיל חיתוך שתיקות, להעלות קובץ קצר יותר, או להשתמש בקובץ MP3/M4A דחוס.' }), {
-        status: 413,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-    if (msg.startsWith('BAD_REQUEST:')) {
-      return new Response(JSON.stringify({ error: 'Groq דחה את קובץ האודיו או הפורמט שלו.' }), {
-        status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

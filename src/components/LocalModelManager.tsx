@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Download, CheckCircle, Trash2, HardDrive, Star, Zap, Globe2, Cpu, Server, Wifi, WifiOff } from "lucide-react";
+import { Download, CheckCircle, Trash2, HardDrive, Star, Globe2, Server, Wifi, WifiOff, RefreshCw } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { pipeline, env } from '@huggingface/transformers';
 import { useLocalServer } from "@/hooks/useLocalServer";
@@ -120,6 +120,18 @@ const SERVER_MODELS: ModelInfo[] = [
     runtime: 'server',
   },
   {
+    id: "ivrit-ai/whisper-large-v3-ct2",
+    name: "Ivrit.ai Large V3 CT2 🇮🇱🎯",
+    size: "~3GB",
+    description: "גרסת Large V3 המלאה של ivrit.ai — מומלצת כשדיוק בעברית חשוב יותר ממהירות.",
+    downloaded: false,
+    category: 'hebrew',
+    hebrewOptimized: true,
+    speed: 'medium',
+    accuracy: 'excellent',
+    runtime: 'server',
+  },
+  {
     id: "ivrit-ai/whisper-large-v3-turbo",
     name: "Ivrit.ai Turbo V3 🇮🇱",
     size: "~3.2GB",
@@ -201,13 +213,26 @@ export const LocalModelManager = () => {
   const [cacheSize, setCacheSize] = useState<number>(0);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'hebrew' | 'downloaded' | 'server'>('all');
+  const [modelUpdates, setModelUpdates] = useState<Record<string, 'idle' | 'checking' | 'available' | 'current' | 'error'>>({});
 
-  const { isConnected: serverConnected, serverStatus, loadModel: serverLoadModel, downloadModel: serverDownloadModel } = useLocalServer();
+  const {
+    isConnected: serverConnected,
+    serverStatus,
+    downloadModel: serverDownloadModel,
+    checkModelUpdates,
+    startPolling,
+    stopPolling,
+  } = useLocalServer();
 
   useEffect(() => {
     checkDownloadedModels();
     calculateCacheSize();
   }, []);
+
+  useEffect(() => {
+    startPolling(10_000);
+    return () => stopPolling();
+  }, [startPolling, stopPolling]);
 
   // Update server models' downloaded status based on server connection
   useEffect(() => {
@@ -222,6 +247,36 @@ export const LocalModelManager = () => {
       }));
     }
   }, [serverConnected, serverStatus]);
+
+  useEffect(() => {
+    if (!serverConnected || !serverStatus) return;
+    const installed = SERVER_MODELS
+      .filter(model => (serverStatus.downloaded_models || []).includes(model.id))
+      .map(model => model.id);
+    if (!installed.length) return;
+
+    let cancelled = false;
+    setModelUpdates(prev => ({ ...prev, ...Object.fromEntries(installed.map(id => [id, 'checking'])) }));
+    checkModelUpdates(installed)
+      .then(results => {
+        if (cancelled) return;
+        setModelUpdates(prev => ({
+          ...prev,
+          ...Object.fromEntries(results.map(item => [
+            item.model,
+            item.error ? 'error' : item.update_available ? 'available' : 'current',
+          ])),
+        }));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setModelUpdates(prev => ({ ...prev, ...Object.fromEntries(installed.map(id => [id, 'error'])) }));
+        }
+      });
+    return () => { cancelled = true; };
+  // Re-check when the server reports a different installed-model set.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverConnected, serverStatus?.downloaded_models?.join('|')]);
 
   const checkDownloadedModels = () => {
     const downloaded = localStorage.getItem('downloaded_models');
@@ -389,6 +444,26 @@ export const LocalModelManager = () => {
     }
   };
 
+  const handleModelUpdate = async (modelId: string) => {
+    const previous = modelUpdates[modelId] || 'idle';
+    setModelUpdates(prev => ({ ...prev, [modelId]: 'checking' }));
+    try {
+      if (previous === 'available') {
+        await serverDownloadModel(modelId);
+      }
+      const [result] = await checkModelUpdates([modelId]);
+      const next = result?.error ? 'error' : result?.update_available ? 'available' : 'current';
+      setModelUpdates(prev => ({ ...prev, [modelId]: next }));
+      toast({
+        title: previous === 'available' ? 'המודל עודכן' : next === 'available' ? 'יש עדכון למודל' : 'המודל מעודכן',
+        description: next === 'available' ? 'לחץ שוב על סמל העדכון כדי להוריד' : modelId,
+      });
+    } catch (error) {
+      setModelUpdates(prev => ({ ...prev, [modelId]: 'error' }));
+      toast({ title: 'בדיקת העדכון נכשלה', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
+    }
+  };
+
   const handleDelete = async (modelId: string) => {
     try {
       // Remove from downloaded list
@@ -546,6 +621,20 @@ export const LocalModelManager = () => {
                     <h4 className="font-semibold">{model.name}</h4>
                     {model.downloaded && (
                       <CheckCircle className="w-4 h-4 text-green-500" />
+                    )}
+                    {model.runtime === 'server' && model.downloaded && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className={`h-7 w-7 ${modelUpdates[model.id] === 'available' ? 'text-amber-600 bg-amber-500/10' : modelUpdates[model.id] === 'current' ? 'text-green-600' : 'text-muted-foreground'}`}
+                        title={modelUpdates[model.id] === 'available' ? 'יש עדכון — לחץ להורדה' : 'בדוק עדכון ב-Hugging Face'}
+                        aria-label={`בדוק עדכון ל-${model.name}`}
+                        onClick={() => handleModelUpdate(model.id)}
+                        disabled={modelUpdates[model.id] === 'checking' || downloadingModel !== null}
+                      >
+                        <RefreshCw className={`h-4 w-4 ${modelUpdates[model.id] === 'checking' ? 'animate-spin' : ''}`} />
+                      </Button>
                     )}
                     {selectedModel === model.id && (
                       <Badge variant="default" className="text-xs">פעיל</Badge>

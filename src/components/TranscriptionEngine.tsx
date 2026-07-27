@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, memo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
@@ -9,15 +10,20 @@ import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
-import { Globe, Cpu, Zap, Chrome, Mic, Waves, Server, Power, PowerOff, Loader2, CheckCircle2, XCircle, Copy, Rabbit, Turtle, Settings, ChevronDown, Flame, Download, Sparkles, Link2, KeyRound, Cloud, Monitor, Target, AlertTriangle, BrainCircuit } from "lucide-react";
+import { Globe, Cpu, Zap, Chrome, Mic, Waves, Server, Power, PowerOff, Loader2, CheckCircle2, XCircle, Copy, Rabbit, Turtle, Settings, ChevronDown, Flame, Download, Sparkles, Link2, KeyRound, Cloud, Monitor, Target, AlertTriangle, BrainCircuit, Square } from "lucide-react";
 import { useLocalServer } from "@/hooks/useLocalServer";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
 import { getApiKey } from "@/lib/keyCrypto";
 import { ApiKeyUsagePanel } from "@/components/ApiKeyUsagePanel";
+import { GeminiModelSelect, loadGeminiModel } from "@/components/GeminiModelSelect";
+import { GeminiHealthCheck } from "@/components/GeminiHealthCheck";
+import { GeminiBadge } from "@/components/GeminiBadge";
+import { GeminiUsageDialog } from "@/components/GeminiUsageDialog";
 
-type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
+
+type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
 
 interface TranscriptionEngineProps {
@@ -26,6 +32,8 @@ interface TranscriptionEngineProps {
   sourceLanguage: SourceLanguage;
   onSourceLanguageChange: (lang: SourceLanguage) => void;
   groqKeysText?: string;
+  /** Engine that just finished transcription successfully — its card glows bright blue for a few seconds. */
+  completedEngine?: Engine | null;
 }
 
 const getLocalModelLabel = (): string => {
@@ -45,7 +53,8 @@ const hasCustomServerUrl = () => {
   return !url.includes('localhost') && !url.includes('127.0.0.1');
 };
 
-export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, onSourceLanguageChange, groqKeysText = "" }: TranscriptionEngineProps) => {
+export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, onSourceLanguageChange, groqKeysText = "", completedEngine = null }: TranscriptionEngineProps) => {
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { isConnected, serverStatus, checkConnection, startPolling, stopPolling, shutdownServer, warmupServer, preloadModelStream, cancelPreload, modelReady, modelLoading, getBaseUrl } = useLocalServer();
   const { preferences: cloudPrefs, updatePreferences, isLoaded: cloudLoaded } = useCloudPreferences();
@@ -69,7 +78,6 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
     setBeamSize(cloudPrefs.cuda_beam_size);
     setNoConditionPrev(cloudPrefs.cuda_no_condition_prev);
     setVadAggressive(cloudPrefs.cuda_vad_aggressive);
-    setHotwords(cloudPrefs.cuda_hotwords);
     setParagraphThreshold(cloudPrefs.cuda_paragraph_threshold);
     setPreloadMode(cloudPrefs.cuda_preload_mode as 'preload' | 'direct');
     setCloudSaveMode(cloudPrefs.cuda_cloud_save as 'immediate' | 'text-only' | 'skip');
@@ -103,13 +111,21 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
   const [preloadMode, setPreloadMode] = useState<'preload' | 'direct'>(() => (localStorage.getItem('cuda_preload_mode') as 'preload' | 'direct') || 'preload');
   const [preloadMsg, setPreloadMsg] = useState('');
   const [cloudSaveMode, setCloudSaveMode] = useState<'immediate' | 'text-only' | 'skip'>(() => (localStorage.getItem('cuda_cloud_save') as 'immediate' | 'text-only' | 'skip') || 'immediate');
-  const [hotwords, setHotwords] = useState(() => localStorage.getItem('cuda_hotwords') || '');
   const [paragraphThreshold, setParagraphThreshold] = useState(() => parseFloat(localStorage.getItem('cuda_paragraph_threshold') || '0'));
   const [serverUrl, setServerUrl] = useState(() => localStorage.getItem('whisper_server_url') || '');
   const [apiKey, setApiKey] = useState(() => getApiKey('whisper_api_key'));
   const [ollamaUrl, setOllamaUrl] = useState(() => localStorage.getItem('ollama_base_url') || '');
   const [groqUsageOpen, setGroqUsageOpen] = useState(false);
   const [groqMaxUsagePct, setGroqMaxUsagePct] = useState(0);
+  const [geminiModel, setGeminiModel] = useState<string>(() => {
+    try { return `google/${(localStorage.getItem('gemini_transcription_model') || 'gemini-2.5-flash').replace(/^google\//, '')}`; }
+    catch { return 'google/gemini-2.5-flash'; }
+  });
+  const handleGeminiModelChange = useCallback((v: string) => {
+    setGeminiModel(v);
+    try { localStorage.setItem('gemini_transcription_model', v.replace(/^google\//, '')); } catch { /* noop */ }
+    window.dispatchEvent(new Event('gemini-transcription-model-changed'));
+  }, []);
 
   const groqUsageColorClass = groqMaxUsagePct > 80
     ? "text-red-600"
@@ -165,7 +181,9 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
       if (data.ok) {
         toast({
           title: "🚀 השרת מופעל!",
-          description: data.message === 'already running' ? 'השרת כבר רץ, ממתין לחיבור...' : 'השרת עולה, ממתין לחיבור...',
+          description: data.message === 'already running'
+            ? `השרת כבר רץ בפורט ${data.port}, ממתין לחיבור...`
+            : `השרת עולה בפורט ${data.port}, ממתין לחיבור...`,
         });
         startPolling(3000, 120000);
       } else {
@@ -204,19 +222,22 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
       <div className="mb-3">
         <h3 className="text-xs font-medium mb-2 text-right text-muted-foreground tracking-wide flex items-center justify-end gap-1"><Cloud className="w-3 h-3 text-[#0f1e43]" /> מנועים אונליין</h3>
         <RadioGroup value={selected} onValueChange={(value) => onChange(value as Engine)}>
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {([
               { id: 'groq' as Engine, icon: Zap, label: 'Groq', sub: 'whisper-large-v3-turbo' },
               { id: 'openai' as Engine, icon: Globe, label: 'OpenAI', sub: 'whisper-1' },
               { id: 'google' as Engine, icon: Chrome, label: 'Google', sub: 'Speech-to-Text' },
               { id: 'assemblyai' as Engine, icon: Mic, label: 'AssemblyAI', sub: 'Universal' },
               { id: 'deepgram' as Engine, icon: Waves, label: 'Deepgram', sub: 'nova-2' },
+              { id: 'gemini' as Engine, icon: Sparkles, label: 'Gemini', sub: 'Google AI · Audio' },
             ] as const).map(({ id, icon: Icon, label, sub }) => (
               <Label
                 key={id}
                 htmlFor={id}
                 className={`relative flex flex-col items-center justify-center p-2.5 border rounded-xl cursor-pointer transition-all duration-150 hover:border-primary/60 hover:shadow-sm ${
-                  selected === id ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'border-border/50 bg-card'
+                  completedEngine === id
+                    ? 'border-sky-400 bg-sky-400/10 shadow-[0_0_18px_2px_rgba(56,189,248,0.55)] ring-2 ring-sky-400/70 animate-pulse'
+                    : selected === id ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'border-border/50 bg-card'
                 }`}
               >
                 <RadioGroupItem value={id} id={id} className="sr-only" />
@@ -281,14 +302,36 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                     </Popover>
                   )
                 )}
+                {id === 'gemini' && <GeminiUsageDialog />}
                 <Icon className="w-5 h-5 mb-1.5 text-primary/80" />
-                <span className="font-medium text-xs leading-tight">{label}</span>
+                <span className="font-medium text-xs leading-tight flex items-center gap-1">
+                  {label}
+                  {id === 'gemini' && <GeminiBadge size={11} />}
+                </span>
                 <span className="text-[9px] text-muted-foreground mt-0.5 leading-tight">{sub}</span>
+                {id === 'gemini' && selected === 'gemini' && (
+                  <div
+                    className="mt-2 w-full"
+                    onClick={(e) => e.preventDefault()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <GeminiModelSelect
+                      value={geminiModel}
+                      onChange={handleGeminiModelChange}
+                      compact
+                      className="w-full h-7 text-[10px]"
+                    />
+                    <GeminiHealthCheck model={geminiModel} />
+                  </div>
+                )}
               </Label>
             ))}
           </div>
         </RadioGroup>
       </div>
+
+
+
 
       <div>
         <h3 className="text-xs font-medium mb-2 text-right text-muted-foreground tracking-wide flex items-center justify-end gap-1"><Monitor className="w-3 h-3 text-[#0f1e43]" /> מנועים מקומיים</h3>
@@ -297,7 +340,9 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
             <Label 
               htmlFor="local-server" 
               className={`flex flex-col items-center justify-center p-2.5 border rounded-xl cursor-pointer transition-all duration-150 hover:border-primary/60 hover:shadow-sm relative ${
-                selected === 'local-server' ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'border-border/50 bg-card'
+                completedEngine === 'local-server'
+                  ? 'border-sky-400 bg-sky-400/10 shadow-[0_0_18px_2px_rgba(56,189,248,0.55)] ring-2 ring-sky-400/70 animate-pulse'
+                  : selected === 'local-server' ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'border-border/50 bg-card'
               }`}
             >
               <RadioGroupItem value="local-server" id="local-server" className="sr-only" />
@@ -321,7 +366,9 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
             <Label 
               htmlFor="local" 
               className={`flex flex-col items-center justify-center p-2.5 border rounded-xl cursor-pointer transition-all duration-150 hover:border-primary/60 hover:shadow-sm ${
-                selected === 'local' ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'border-border/50 bg-card'
+                completedEngine === 'local'
+                  ? 'border-sky-400 bg-sky-400/10 shadow-[0_0_18px_2px_rgba(56,189,248,0.55)] ring-2 ring-sky-400/70 animate-pulse'
+                  : selected === 'local' ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'border-border/50 bg-card'
               }`}
             >
               <RadioGroupItem value="local" id="local" className="sr-only" />
@@ -442,7 +489,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                     // 2. Fallback: just check if server is already running
                     const ok = await checkConnection();
                     if (ok) {
-                      toast({ title: '🟢 מחובר!', description: 'שרת CUDA זוהה ב־localhost:3000' });
+                      toast({ title: '🟢 מחובר!', description: 'שרת CUDA זוהה בפורט המקומי שנבחר אוטומטית' });
                       startPolling(10000);
                     } else {
                       toast({
@@ -530,7 +577,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
           )}
           {!isConnected && !isRemoteAccess && isNonLocalHost && (
             <div className="text-[11px] text-muted-foreground space-y-1.5 border-t pt-2">
-              <p className="font-medium flex items-center gap-1"><Monitor className="w-3.5 h-3.5 text-[#0f1e43] flex-shrink-0" /> עובד מול השרת המקומי (localhost:3000)</p>
+              <p className="font-medium flex items-center gap-1"><Monitor className="w-3.5 h-3.5 text-[#0f1e43] flex-shrink-0" /> עובד מול פורט מקומי שנבחר אוטומטית</p>
               <p className="text-muted-foreground">
                 לחץ "הפעל שרת" — האפליקציה תנסה להפעיל את השרת דרך ה-tray (פורט 8764).
                 אם ה-tray לא פועל, הפעל ידנית:
@@ -617,9 +664,29 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
             </Button>
           )}
           {modelLoading && preloadMsg && (
-            <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
-              <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
-              <span className="truncate">{preloadMsg}</span>
+            <div className="flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
+              <div className="flex min-w-0 items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                <span className="truncate">{preloadMsg}</span>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 shrink-0 gap-1 border-destructive/40 px-2 text-xs text-destructive hover:bg-destructive/10"
+                onClick={async (event) => {
+                  event.preventDefault();
+                  setPreloadMsg('מבטל טעינה...');
+                  setPreloadMode('direct');
+                  updatePreferences({ cuda_preload_mode: 'direct' });
+                  await cancelPreload();
+                  setPreloadMsg('');
+                  toast({ title: 'טעינת המודל נעצרת', description: 'הזיכרון ישוחרר מיד כששלב הטעינה הנוכחי יסתיים' });
+                }}
+              >
+                <Square className="h-3 w-3" />
+                עצור
+              </Button>
             </div>
           )}
         </div>
@@ -737,17 +804,13 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                 />
               </div>
 
-              {/* Hotwords */}
+              {/* Vocabulary management */}
               <div className="space-y-1 border-t pt-2">
-                <Label className="text-xs font-medium text-right block">מילון מותאם אישית (Hotwords)</Label>
-                <textarea
-                  className="w-full h-16 text-xs rounded-md border bg-background px-3 py-2 text-right resize-none"
-                  dir="rtl"
-                  placeholder="הכנס מילים מופרדות בפסיקים: שלום, ירושלים, כנסת..."
-                  value={hotwords}
-                  onChange={(e) => { setHotwords(e.target.value); updatePreferences({ cuda_hotwords: e.target.value }); }}
-                />
-                <p className="text-[10px] text-muted-foreground text-right">מילים שחוזרות בהקלטה — משפר דיוק זיהוי שמות, מונחים מקצועיים</p>
+                <Label className="text-xs font-medium text-right block">מילון ולמידה אישית</Label>
+                <Button type="button" variant="outline" size="sm" className="w-full" onClick={() => navigate('/personal-learning?tab=vocabulary')}>
+                  נהל אוצר מילים ו-Hotwords
+                </Button>
+                <p className="text-[10px] text-muted-foreground text-right">המונחים מנוהלים במסך המרכזי ומשותפים לכל מנועי התמלול.</p>
               </div>
 
               {/* Auto Paragraph Detection */}

@@ -20,15 +20,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain } from "lucide-react";
+import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor, MoreHorizontal } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import type { WordTiming } from "./SyncAudioPlayer";
 import { useTextMarking } from "@/hooks/useTextMarking";
 import { addDictionaryReplacement, addIgnoredWord } from "@/utils/hebrewGrammarDictionary";
+import { learnFromCorrections, type CorrectionEntry } from "@/utils/correctionLearning";
 import { WordContextMenu } from "@/components/WordContextMenu";
-import { alignEditedToWhisper } from "@/lib/whisperAlignment";
+import { alignEditedToWhisper, findActiveWordIndex } from "@/lib/whisperAlignment";
 import { getWordHighlightStyle, isWordApproved } from "@/lib/personalPronunciationModel";
+import { RichTextEditor } from "@/components/RichTextEditor";
+import { RichTextEditorMirror } from "@/components/RichTextEditorMirror";
+import { TextMarkingOverlay } from "@/components/TextMarkingOverlay";
+import { getTrustedWordSuggestion } from '@/lib/trustedWordSuggestion';
 
 interface SyncMirrorLayoutProps {
   wordTimings: WordTiming[];
@@ -37,6 +43,7 @@ interface SyncMirrorLayoutProps {
   onTextChange: (text: string) => void;
   onWordReplace: (wordIndex: number, replacement: string) => void;
   onWordClick: (time: number) => void;
+  correctionStorageKey?: string;
   fontSize?: number;
   fontFamily?: string;
   lineHeight?: number;
@@ -54,6 +61,13 @@ interface SyncMirrorLayoutProps {
     mode: 'quick' | 'advanced';
     note?: string;
   }) => Promise<boolean | void> | boolean | void;
+  /** When true, the LEFT column renders the full text editor (TextMarkingOverlay + RichTextEditor)
+   *  instead of the per-word click/right-click view. */
+  enableRichEdit?: boolean;
+  /** Fired when RichTextEditor auto-corrects a word (for logging/learning). */
+  onWordCorrected?: (original: string, corrected: string) => void;
+  /** Optional column style passed to RichTextEditor. */
+  richColumnStyle?: React.CSSProperties;
 }
 
 function normalizeWord(w: string) {
@@ -71,6 +85,54 @@ const FONT_FAMILIES = [
   { value: "system-ui",        label: "מערכת" },
 ];
 
+type FontMetrics = {
+  weight: number;
+  size: number;
+  family: string;
+  wordSpacing: number;
+  letterSpacing: number;
+};
+
+/**
+ * Break a flat list of word-timings into visual lines using canvas measureText,
+ * so several columns can render IDENTICAL line breaks. Single source of truth
+ * shared by every line-measuring memo below (current text, locked snapshot,
+ * frozen compare snapshot) — previously this canvas logic was copy-pasted 3×.
+ */
+function measureLineBreaks(timings: WordTiming[], width: number, font: FontMetrics): WordTiming[][] {
+  if (!timings.length) return [];
+  const effectiveWidth = width > 0 ? width : 400;
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return [timings];
+  ctx.font = `${font.weight} ${font.size}px ${font.family}`;
+  const spaceW = ctx.measureText(" ").width + 1 + font.wordSpacing;
+  const result: WordTiming[][] = [];
+  let line: WordTiming[] = [];
+  let w = 0;
+  for (const wt of timings) {
+    const ww = ctx.measureText(wt.word).width + spaceW + wt.word.length * font.letterSpacing;
+    if (w + ww > effectiveWidth && line.length > 0) {
+      result.push(line);
+      line = [wt];
+      w = ww;
+    } else {
+      line.push(wt);
+      w += ww;
+    }
+  }
+  if (line.length) result.push(line);
+  return result;
+}
+
+/**
+ * Convert plain text into synthetic word-timings (one slot per word). Used for
+ * snapshots/baselines that carry no real audio timings of their own.
+ */
+function textToTimings(text: string): WordTiming[] {
+  return text.trim().split(/\s+/).filter(Boolean).map((word, i) => ({ word, start: i, end: i + 1 }));
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 export const SyncMirrorLayout = ({
   wordTimings,
@@ -79,6 +141,7 @@ export const SyncMirrorLayout = ({
   onTextChange,
   onWordReplace,
   onWordClick,
+  correctionStorageKey = 'current-transcript',
   fontSize = 18,
   fontFamily = "Assistant",
   lineHeight = 1.6,
@@ -91,9 +154,55 @@ export const SyncMirrorLayout = ({
   learningProfiles = [],
   learningEnabled = true,
   onSaveLearning,
+  enableRichEdit = false,
+  onWordCorrected,
+  richColumnStyle,
 }: SyncMirrorLayoutProps) => {
+  type ManualCorrectionMarker = {
+    wordIndex: number;
+    original: string;
+    corrected: string;
+    correctedAt: number;
+  };
+  const correctionMarkersKey = `manual_correction_markers_v1:${correctionStorageKey}`;
+  const [manualCorrectionMarkers, setManualCorrectionMarkers] = useState<ManualCorrectionMarker[]>([]);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(correctionMarkersKey) || '[]');
+      setManualCorrectionMarkers(Array.isArray(saved) ? saved : []);
+    } catch { setManualCorrectionMarkers([]); }
+  }, [correctionMarkersKey]);
+
+  const rememberManualCorrection = useCallback((marker: ManualCorrectionMarker) => {
+    setManualCorrectionMarkers((current) => {
+      const next = [...current.filter((item) => item.wordIndex !== marker.wordIndex), marker]
+        .sort((a, b) => a.wordIndex - b.wordIndex);
+      try { localStorage.setItem(correctionMarkersKey, JSON.stringify(next)); } catch { /* quota/unavailable */ }
+      return next;
+    });
+  }, [correctionMarkersKey]);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const leftRichRef = useRef<HTMLDivElement>(null);
+  const leftRowsRef = useRef<HTMLDivElement>(null);
+  const [isMarkingActive, setIsMarkingActive] = useState(false);
+  const [rightTopOffset, setRightTopOffset] = useState(0);
+  // "Precise row alignment" — when true (default), left column renders via the
+  // SAME canvas-measured `lines` as the right column, guaranteeing row-for-row
+  // horizontal alignment at any viewport. When false, falls back to free-form
+  // contentEditable rich editing (line breaks differ between columns).
+  const [preciseAlign, setPreciseAlign] = useState<boolean>(() => {
+    try { return localStorage.getItem('sync_mirror_precise_align') !== '0'; } catch { return true; }
+  });
+  const togglePreciseAlign = () => {
+    setPreciseAlign(v => {
+      const next = !v;
+      try { localStorage.setItem('sync_mirror_precise_align', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
+  const effectiveRichEdit = enableRichEdit && !preciseAlign;
 
   const [colWidth, setColWidth] = useState(0);
   const [fullEditMode, setFullEditMode] = useState(false);
@@ -119,6 +228,135 @@ export const SyncMirrorLayout = ({
   const [localLetterSpacing, setLocalLetterSpacing] = useState(0); // px extra
   const [localFontWeight, setLocalFontWeight] = useState<number>(400);
   const [localTextColor, setLocalTextColor] = useState<string>("");
+
+  // ── Pane control: which side is the "active" one (drives icon tint) and lock state ──
+  const [activePane, setActivePaneState] = useState<'right' | 'left'>(() => {
+    try { return (localStorage.getItem('sync_mirror_active_pane') as 'right' | 'left') || 'left'; } catch { return 'left'; }
+  });
+  const [lockedPane, setLockedPaneState] = useState<'right' | 'left' | null>(() => {
+    try {
+      const v = localStorage.getItem('sync_mirror_locked_pane');
+      return v === 'right' || v === 'left' ? v : null;
+    } catch { return null; }
+  });
+  const setActivePane = useCallback((p: 'right' | 'left') => {
+    setActivePaneState(p);
+    try { localStorage.setItem('sync_mirror_active_pane', p); } catch {}
+  }, []);
+  const toggleLock = useCallback((p: 'right' | 'left') => {
+    setLockedPaneState(prev => {
+      const next = prev === p ? null : p;
+      try {
+        if (next) localStorage.setItem('sync_mirror_locked_pane', next);
+        else localStorage.removeItem('sync_mirror_locked_pane');
+      } catch {}
+      toast({ title: next ? `צד ${p === 'right' ? 'ימין' : 'שמאל'} ננעל` : 'הנעילה בוטלה' });
+      return next;
+    });
+  }, []);
+  // Guarded onTextChange — blocks edits originating from a locked pane.
+  const handleTextChangeFromPane = useCallback((side: 'right' | 'left', next: string) => {
+    if (lockedPane === side) {
+      toast({ title: 'הצד הזה נעול', description: 'שחרר את הנעילה כדי לערוך' });
+      return;
+    }
+    onTextChange(next);
+  }, [lockedPane, onTextChange]);
+  const navyClass = 'text-[#0a1d3f] dark:text-blue-300';
+
+  // ── Mirrored-padded alignment mode ─────────────────────────────────────────
+  // When ON and a side is locked: edits in the editable side keep both columns
+  // line-aligned 1:1 by injecting phantom (empty) rows into whichever side is
+  // shorter at that point in the diff. Lines that differ from the locked
+  // snapshot get a blue dot in the gutter.
+  type AlignmentMode = 'free' | 'mirrored-padded';
+  const [alignmentMode, setAlignmentMode] = useState<AlignmentMode>(() => {
+    try { return (localStorage.getItem('sync_mirror_alignment_mode') as AlignmentMode) || 'free'; } catch { return 'free'; }
+  });
+  const toggleAlignmentMode = useCallback(() => {
+    setAlignmentMode(prev => {
+      const next: AlignmentMode = prev === 'mirrored-padded' ? 'free' : 'mirrored-padded';
+      try { localStorage.setItem('sync_mirror_alignment_mode', next); } catch {}
+      toast({ title: next === 'mirrored-padded' ? 'יישור 1:1 הופעל' : 'יישור 1:1 כובה' });
+      return next;
+    });
+  }, []);
+
+  // Column width split between the two columns.
+  // `manualSplit` = percentage of the RIGHT column (15–85). null = auto.
+  // Auto: in mirrored-padded mode with a lock, source side ~40% / editor ~60%;
+  // otherwise 50/50. The user can drag a divider to override and the choice
+  // is persisted in localStorage.
+  const SPLIT_KEY = 'sync_mirror_col_split_v1';
+  const [manualSplit, setManualSplit] = useState<number | null>(() => {
+    try {
+      const v = localStorage.getItem(SPLIT_KEY);
+      const n = v ? parseFloat(v) : NaN;
+      return Number.isFinite(n) && n >= 15 && n <= 85 ? n : null;
+    } catch { return null; }
+  });
+  useEffect(() => {
+    try {
+      if (manualSplit == null) localStorage.removeItem(SPLIT_KEY);
+      else localStorage.setItem(SPLIT_KEY, String(manualSplit));
+    } catch {}
+  }, [manualSplit]);
+  const autoRightPct = useMemo(() => {
+    if (alignmentMode !== 'mirrored-padded' || !lockedPane) return 50;
+    return lockedPane === 'right' ? 40 : 60;
+  }, [alignmentMode, lockedPane]);
+  const rightPct = manualSplit ?? autoRightPct;
+  const leftPct = 100 - rightPct;
+
+  // Refs to each column's content area so we can measure the NARROW column's
+  // real text width and use it as the wrapping basis for `lines`. This way
+  // both columns render the same line breaks aligned to the source's width,
+  // and the wider (editor) column has trailing whitespace per line for inline
+  // word additions without pushing rows down.
+  const rightColRef = useRef<HTMLDivElement>(null);
+  const leftColRef = useRef<HTMLDivElement>(null);
+
+  // Snapshot of the locked side's text taken at the moment of locking.
+  const [lockedSnapshotText, setLockedSnapshotText] = useState<string>('');
+  // Re-snapshot whenever the lock turns on
+  const prevLockedRef = useRef<'right' | 'left' | null>(null);
+  useEffect(() => {
+    if (lockedPane && prevLockedRef.current !== lockedPane) {
+      setLockedSnapshotText(text);
+    } else if (!lockedPane) {
+      setLockedSnapshotText('');
+    }
+    prevLockedRef.current = lockedPane;
+    // intentionally do NOT depend on `text` — we only snapshot on lock change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedPane]);
+
+  // Measure the left column's real first-text surface so the right column starts
+  // on the same pixel line even when the left side has marking/edit toolbars.
+  useEffect(() => {
+    if (!enableRichEdit || fullEditMode) { setRightTopOffset(0); return; }
+    const wrapper = leftRichRef.current;
+    const scroller = scrollRef.current;
+    if (!wrapper || !scroller) return;
+    let raf = 0;
+    const measure = () => {
+      const editable = wrapper.querySelector('[contenteditable="true"]') as HTMLElement | null;
+      const firstPreciseLine = leftRowsRef.current?.querySelector<HTMLElement>('[data-line="0"]') ?? null;
+      const target = effectiveRichEdit ? editable : firstPreciseLine;
+      const anchor = target ?? wrapper;
+      const diff = Math.max(0, Math.round(anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop));
+      setRightTopOffset(diff);
+    };
+    const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
+    schedule();
+    const ro = new ResizeObserver(schedule);
+    ro.observe(wrapper);
+    ro.observe(scroller);
+    window.addEventListener('resize', schedule);
+    const t = window.setInterval(schedule, 800); // catch async toolbar/spell changes
+    return () => { ro.disconnect(); window.removeEventListener('resize', schedule); window.clearInterval(t); cancelAnimationFrame(raf); };
+  }, [enableRichEdit, effectiveRichEdit, fullEditMode, isMarkingActive, localFontSize, localFontFamily, localLineHeight, preciseAlign]);
+
 
   // ── User timing anchors ────────────────────────────────────────────────────
   // Map: edited word index → pinned {start, end} timing
@@ -148,7 +386,7 @@ export const SyncMirrorLayout = ({
   const displayTimings = useMemo((): WordTiming[] => {
     const words = text.trim().split(/\s+/).filter(Boolean);
     if (!words.length) return [];
-    if (!wordTimings.length) return words.map((word, i) => ({ word, start: i, end: i + 1 }));
+    if (!wordTimings.length) return textToTimings(text);
 
     // Convert userAnchors Map → UserAnchor[] for the alignment function
     const anchorsArr = Array.from(userAnchors.entries()).map(([editedIdx, { start, end }]) => ({
@@ -180,58 +418,110 @@ export const SyncMirrorLayout = ({
     return alignEditedToWhisper(words, wordTimings, anchorsArr.length ? anchorsArr : undefined);
   }, [text, wordTimings, alignMode, userAnchors]);
 
-  // ── ResizeObserver: watch container width → column width ───────────────────
+  // ── ResizeObserver: track the NARROWER column's actual content width and
+  // use it as the wrapping basis for `lines`. This keeps both columns visually
+  // aligned at the source-column width; the wider editor column simply has
+  // trailing whitespace per line for inline edits without pushing rows down.
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      // Two equal flex columns, each with 16px horizontal padding
-      setColWidth(Math.floor(entry.contentRect.width / 2) - 32);
-    });
-    ro.observe(el);
+    const rEl = rightColRef.current;
+    const lEl = leftColRef.current;
+    if (!rEl && !lEl) return;
+    const compute = () => {
+      const rW = rEl?.clientWidth ?? 0;
+      const lW = lEl?.clientWidth ?? 0;
+      // Prefer the locked side as the source-of-truth wrapping width.
+      // Without a lock, use the smaller of the two so neither side overflows.
+      let basis = 0;
+      if (lockedPane === 'right' && rW) basis = rW;
+      else if (lockedPane === 'left' && lW) basis = lW;
+      else if (rW && lW) basis = Math.min(rW, lW);
+      else basis = rW || lW;
+      // Subtract ~32px for the column's px-4 horizontal padding.
+      setColWidth(Math.max(120, Math.floor(basis) - 32));
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    if (rEl) ro.observe(rEl);
+    if (lEl) ro.observe(lEl);
     return () => ro.disconnect();
-  }, []);
+  }, [lockedPane, rightPct]);
+
 
   // ── Canvas-measured line breaks ─────────────────────────────────────────────
-  const lines = useMemo((): WordTiming[][] => {
-    if (!displayTimings.length) return [];
+  const fontMetrics = useMemo<FontMetrics>(() => ({
+    weight: localFontWeight,
+    size: localFontSize,
+    family: localFontFamily,
+    wordSpacing: localWordSpacing,
+    letterSpacing: localLetterSpacing,
+  }), [localFontWeight, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing]);
 
-    // Fallback width estimate before ResizeObserver fires
-    const effectiveWidth = colWidth > 0 ? colWidth : 400;
+  const lines = useMemo(
+    () => measureLineBreaks(displayTimings, colWidth, fontMetrics),
+    [displayTimings, colWidth, fontMetrics],
+  );
 
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return [displayTimings];
-    ctx.font = `${localFontWeight} ${localFontSize}px ${localFontFamily}`;
-    const spaceW = ctx.measureText(" ").width + 1 + localWordSpacing;
+  // ── Snapshot lines (the locked side's frozen view) ──────────────────────────
+  const snapshotLines = useMemo<WordTiming[][]>(() => {
+    if (!lockedSnapshotText.trim()) return [];
+    return measureLineBreaks(textToTimings(lockedSnapshotText), colWidth, fontMetrics);
+  }, [lockedSnapshotText, colWidth, fontMetrics]);
 
-    const result: WordTiming[][] = [];
-    let line: WordTiming[] = [];
-    let w = 0;
-
-    for (const wt of displayTimings) {
-      // letter spacing adds (word.length * letterSpacing) to each word's width
-      const ww = ctx.measureText(wt.word).width + spaceW + wt.word.length * localLetterSpacing;
-      if (w + ww > effectiveWidth && line.length > 0) {
-        result.push(line);
-        line = [wt];
-        w = ww;
-      } else {
-        line.push(wt);
-        w += ww;
+  // ── Padded alignment via line-level LCS ────────────────────────────────────
+  // Returns two arrays of identical length where each slot is either a real
+  // line (WordTiming[]) or null (= phantom/empty row). `edited` marks rows
+  // that differ from the snapshot — those get the blue dot in the gutter.
+  type PaddedRow = { line: WordTiming[] | null; edited: boolean };
+  const paddedAlignment = useMemo((): { current: PaddedRow[]; snapshot: PaddedRow[] } | null => {
+    if (alignmentMode !== 'mirrored-padded' || !lockedPane || !snapshotLines.length || !lines.length) {
+      return null;
+    }
+    const keyOf = (l: WordTiming[]) => l.map(w => w.word).join(' ').trim();
+    const A = snapshotLines.map(keyOf); // snapshot
+    const B = lines.map(keyOf);          // current
+    // LCS DP
+    const n = A.length, m = B.length;
+    const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = 1; i <= n; i++) {
+      for (let j = 1; j <= m; j++) {
+        dp[i][j] = A[i - 1] === B[j - 1]
+          ? dp[i - 1][j - 1] + 1
+          : Math.max(dp[i - 1][j], dp[i][j - 1]);
       }
     }
-    if (line.length) result.push(line);
-    return result;
-  }, [displayTimings, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
+    const ops: Array<{ t: 'eq' | 'del' | 'ins'; a?: number; b?: number }> = [];
+    let i = n, j = m;
+    while (i > 0 && j > 0) {
+      if (A[i - 1] === B[j - 1]) { ops.push({ t: 'eq', a: i - 1, b: j - 1 }); i--; j--; }
+      else if (dp[i - 1][j] >= dp[i][j - 1]) { ops.push({ t: 'del', a: i - 1 }); i--; }
+      else { ops.push({ t: 'ins', b: j - 1 }); j--; }
+    }
+    while (i > 0) { ops.push({ t: 'del', a: i - 1 }); i--; }
+    while (j > 0) { ops.push({ t: 'ins', b: j - 1 }); j--; }
+    ops.reverse();
+    const snapOut: PaddedRow[] = [];
+    const curOut: PaddedRow[] = [];
+    for (const op of ops) {
+      if (op.t === 'eq') {
+        snapOut.push({ line: snapshotLines[op.a!], edited: false });
+        curOut.push({ line: lines[op.b!], edited: false });
+      } else if (op.t === 'del') {
+        // line exists only in snapshot → phantom in current
+        snapOut.push({ line: snapshotLines[op.a!], edited: true });
+        curOut.push({ line: null, edited: true });
+      } else {
+        // line exists only in current (new/edited) → phantom in snapshot
+        snapOut.push({ line: null, edited: true });
+        curOut.push({ line: lines[op.b!], edited: true });
+      }
+    }
+    return { current: curOut, snapshot: snapOut };
+  }, [alignmentMode, lockedPane, snapshotLines, lines]);
 
   // ── Active word index (timing sync) ────────────────────────────────────────
   const activeIdx = useMemo(() => {
     if (!syncEnabled || !displayTimings.length) return -1;
-    for (let i = displayTimings.length - 1; i >= 0; i--) {
-      if (currentTime >= displayTimings[i].start) return i;
-    }
-    return -1;
+    return findActiveWordIndex(displayTimings, currentTime);
   }, [displayTimings, currentTime, syncEnabled]);
 
   // ── Active line index ───────────────────────────────────────────────────────
@@ -284,13 +574,54 @@ export const SyncMirrorLayout = ({
       } else {
         const fixed = next.trim();
         if (fixed && fixed !== displayTimings[globalIdx]?.word) {
+          const original = normalizeWord(displayTimings[globalIdx]?.word ?? "");
+          rememberManualCorrection({
+            wordIndex: globalIdx,
+            original: displayTimings[globalIdx]?.word ?? original,
+            corrected: fixed,
+            correctedAt: Date.now(),
+          });
           onWordReplace(globalIdx, fixed);
-          const clean = normalizeWord(displayTimings[globalIdx]?.word ?? "");
-          if (clean) addDictionaryReplacement(clean, fixed);
+          if (original) {
+            addDictionaryReplacement(original, fixed);
+            const now = Date.now();
+            const learnedEntries: CorrectionEntry[] = [{
+              original,
+              corrected: fixed,
+              frequency: 1,
+              engine: "context-menu",
+              category: fixed.includes(" ") ? "phrase" : "word",
+              confidence: 0.75,
+              lastUsed: now,
+              createdAt: now,
+              note: "תיקון ידני בלחיצה ימנית",
+            }];
+
+            const contextStart = Math.max(0, globalIdx - 2);
+            const contextEnd = Math.min(displayTimings.length, globalIdx + 3);
+            const contextWords = displayTimings.slice(contextStart, contextEnd).map((item) => item.word);
+            if (contextWords.length >= 3) {
+              const localIndex = globalIdx - contextStart;
+              const correctedContext = [...contextWords];
+              correctedContext[localIndex] = fixed;
+              learnedEntries.push({
+                original: contextWords.join(" "),
+                corrected: correctedContext.join(" "),
+                frequency: 1,
+                engine: "context-menu-context",
+                category: "phrase",
+                confidence: 0.7,
+                lastUsed: now,
+                createdAt: now,
+                note: "תיקון ידני עם שתי מילים של הקשר מכל צד",
+              });
+            }
+            learnFromCorrections(learnedEntries);
+          }
         }
       }
     },
-    [displayTimings, onWordReplace],
+    [displayTimings, onWordReplace, rememberManualCorrection],
   );
 
   // ── Per-column word-highlight toggle + style ──────────────────────────────
@@ -329,31 +660,63 @@ export const SyncMirrorLayout = ({
   }, [displayTimings]);
 
   // Lines for the frozen (right) panel in compare mode
-  const frozenLines = useMemo((): WordTiming[][] => {
+  const frozenLines = useMemo<WordTiming[][]>(() => {
     if (!compareMode || !frozenTimings.length) return [];
-    const effectiveWidth = colWidth > 0 ? colWidth : 400;
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return [frozenTimings];
-    ctx.font = `${localFontWeight} ${localFontSize}px ${localFontFamily}`;
-    const spaceW = ctx.measureText(" ").width + 1 + localWordSpacing;
-    const result: WordTiming[][] = [];
-    let line: WordTiming[] = [];
-    let w = 0;
-    for (const wt of frozenTimings) {
-      const ww = ctx.measureText(wt.word).width + spaceW + wt.word.length * localLetterSpacing;
-      if (w + ww > effectiveWidth && line.length > 0) {
-        result.push(line);
-        line = [wt];
-        w = ww;
-      } else {
-        line.push(wt);
-        w += ww;
-      }
+    return measureLineBreaks(frozenTimings, colWidth, fontMetrics);
+  }, [compareMode, frozenTimings, colWidth, fontMetrics]);
+
+  // ── Baseline (original) snapshot — set once on first non-empty mount, persisted ──
+  const BASELINE_KEY = 'sync_mirror_baseline_v1';
+  const baselineInitRef = useRef(false);
+  const [baselineText, setBaselineText] = useState<string>(() => {
+    try { return localStorage.getItem(BASELINE_KEY) || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    if (baselineInitRef.current) return;
+    if (!text || !text.trim()) return;
+    baselineInitRef.current = true;
+    if (!baselineText) {
+      try { localStorage.setItem(BASELINE_KEY, text); } catch {}
+      setBaselineText(text);
     }
-    if (line.length) result.push(line);
-    return result;
-  }, [compareMode, frozenTimings, colWidth, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing, localFontWeight]);
+  }, [text, baselineText]);
+
+  const hasBaseline = !!baselineText && baselineText.trim().length > 0;
+  const isModifiedFromBaseline = hasBaseline && baselineText.trim() !== text.trim();
+
+  const restoreToBaseline = useCallback(() => {
+    if (!hasBaseline) return;
+    if (!confirm('להחזיר את הטקסט לגרסת הבסיס? כל השינויים מאז יאבדו.')) return;
+    onTextChange(baselineText);
+    toast({ title: 'הוחזר לגרסת בסיס', description: 'הטקסט שוחזר למצב המקורי שנשמר.' });
+  }, [hasBaseline, baselineText, onTextChange]);
+
+  const setNewBaseline = useCallback(() => {
+    if (!text || !text.trim()) return;
+    try { localStorage.setItem(BASELINE_KEY, text); } catch {}
+    setBaselineText(text);
+    toast({ title: 'בסיס חדש נקבע', description: 'הטקסט הנוכחי הוגדר כגרסת הבסיס.' });
+  }, [text]);
+
+  const compareToBaseline = useCallback(() => {
+    if (!hasBaseline) return;
+    // Snapshot the baseline as the frozen panel and enter compare mode
+    setFrozenTimings(textToTimings(baselineText));
+    setCompareMode(true);
+    toast({ title: 'משווה לגרסת בסיס', description: 'הצד הימני מציג כעת את גרסת הבסיס.' });
+  }, [hasBaseline, baselineText]);
+
+  // Wrap onSaveReplace with a unified local+cloud toast
+  const handleSaveLocalAndCloud = useCallback(() => {
+    if (!onSaveReplace) return;
+    try {
+      onSaveReplace();
+      toast({ title: 'נשמר ✓', description: 'מקומי + ענן יחד.' });
+    } catch (e) {
+      toast({ title: 'השמירה נכשלה', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
+    }
+  }, [onSaveReplace]);
+
 
   // ── Full-text editing overlay ───────────────────────────────────────────────
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -385,6 +748,18 @@ export const SyncMirrorLayout = ({
   };
 
   // ── Shared text style ───────────────────────────────────────────────────────
+  // Shared horizontal alignment — controlled here so BOTH columns (left RichTextEditor
+  // and right renderLine column) get the same alignment. When set to 'justify', each
+  // visual line stretches to fill the column width on both sides, so matching lines
+  // line up at the same vertical height.
+  const [sharedTextAlign, setSharedTextAlign] = useState<'right' | 'left' | 'center' | 'justify'>(() => {
+    if (typeof window === 'undefined') return 'right';
+    return (localStorage.getItem('sync.mirror.textAlign') as 'right' | 'left' | 'center' | 'justify') || 'right';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('sync.mirror.textAlign', sharedTextAlign); } catch {}
+  }, [sharedTextAlign]);
+
   const textStyle: React.CSSProperties = {
     fontFamily: localFontFamily,
     fontSize: `${localFontSize}px`,
@@ -392,6 +767,7 @@ export const SyncMirrorLayout = ({
     wordSpacing: `${localWordSpacing}px`,
     letterSpacing: `${localLetterSpacing}px`,
     fontWeight: localFontWeight,
+    textAlign: sharedTextAlign,
     ...(localTextColor ? { color: localTextColor } : {}),
   };
 
@@ -500,9 +876,13 @@ export const SyncMirrorLayout = ({
           const highlightStyle = side === "left" ? getWordHighlightStyle(wt.word) : undefined;
           const wordHasIssue = hasIssue && !wordApproved;
           const { localIssueMap, resultMap } = marking;
+          const localSuggestions = side === "left" && wordHasIssue
+            ? (localIssueMap.get(globalIdx) ?? [])
+            : [];
+          const trustedSuggestion = getTrustedWordSuggestion(localSuggestions);
           const suggestions = side === "left" && wordHasIssue
             ? [
-                ...(localIssueMap.get(globalIdx) ?? []).map((s) => s.text),
+                ...localSuggestions.map((s) => s.text),
                 ...(resultMap.get(globalIdx)?.suggestion ? [resultMap.get(globalIdx)!.suggestion!] : []),
               ]
             : [];
@@ -510,6 +890,14 @@ export const SyncMirrorLayout = ({
           const wordHighlightOn = side === "right" ? rightWordHighlightOn : leftWordHighlightOn;
           const isActiveVisible = isActive && wordHighlightOn;
           const isAnchor = userAnchors.has(globalIdx);
+          const manualCorrection = manualCorrectionMarkers.find((marker) => {
+            const correctedWords = marker.corrected.split(/\s+/).filter(Boolean);
+            const offset = globalIdx - marker.wordIndex;
+            return offset >= 0 && offset < correctedWords.length && correctedWords[offset] === wt.word;
+          });
+          const correctionOriginal = manualCorrection?.original || wt.correctionOriginal;
+          const correctionResult = manualCorrection?.corrected || wt.word;
+          const wasManuallyCorrected = Boolean(correctionOriginal && correctionOriginal !== correctionResult);
 
           const wordSpan = (
             <span
@@ -530,9 +918,31 @@ export const SyncMirrorLayout = ({
                 !isActive && isSearchActive && "bg-yellow-400 dark:bg-yellow-600 rounded-sm",
                 !isActive && isSearchMatch && "bg-yellow-200 dark:bg-yellow-800 rounded-sm",
                 !isActive && wordHasIssue && "underline decoration-red-500 decoration-wavy underline-offset-2",
+                wasManuallyCorrected && "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-400/70 dark:bg-emerald-950/60 dark:text-emerald-100",
+                trustedSuggestion && !wasManuallyCorrected && "bg-red-100 text-red-900 ring-1 ring-red-400/80 hover:bg-red-200 dark:bg-red-950/60 dark:text-red-100",
               )}
-              onClick={() => onWordClick(wt.start)}
-              title={isAnchor ? `⚓ עוגן (${wt.start.toFixed(2)}s) — קליק לקפיצה` : `קליק לקפיצה (${wt.start.toFixed(1)}s)`}
+              onClick={(event) => {
+                if (trustedSuggestion && !wasManuallyCorrected) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  applyWordReplace(globalIdx, trustedSuggestion.text);
+                  toast({
+                    title: 'התיקון אושר ונשמר',
+                    description: trustedSuggestion.text === '__DELETE__'
+                      ? `${wt.word} ← מחיקה`
+                      : `${wt.word} ← ${trustedSuggestion.text}`,
+                  });
+                  return;
+                }
+                onWordClick(wt.start);
+              }}
+              title={wasManuallyCorrected
+                ? `תוקן ידנית: ${correctionOriginal} ← ${correctionResult}`
+                : trustedSuggestion
+                  ? `לחץ לתיקון: ${wt.word} ← ${trustedSuggestion.text === '__DELETE__' ? 'מחיקה' : trustedSuggestion.text} | ${trustedSuggestion.reason}`
+                : isAnchor
+                  ? `⚓ עוגן (${wt.start.toFixed(2)}s) — קליק לקפיצה`
+                  : `קליק לקפיצה (${wt.start.toFixed(1)}s)`}
             >
               {isAnchor && <span className="text-amber-500 text-[8px] me-[1px] select-none">⚓</span>}
               {wt.word}
@@ -541,22 +951,56 @@ export const SyncMirrorLayout = ({
 
           return (
             <React.Fragment key={globalIdx}>
-              {side === "left" ? (
-                <WordContextMenu
-                  word={wt.word}
-                  suggestions={suggestions}
-                  onReplace={(next) => { applyWordReplace(globalIdx, next); setDictionaryVersion((v) => v + 1); }}
-                  onApproveAsCorrect={() => setDictionaryVersion((v) => v + 1)}
-                  isAnchor={isAnchor}
-                  onToggleAnchor={() => toggleUserAnchor(globalIdx, { start: wt.start, end: wt.end })}
-                >
-                  {wordSpan}
-                </WordContextMenu>
-              ) : wordSpan}
+              <WordContextMenu
+                word={wt.word}
+                suggestions={suggestions}
+                onReplace={(next) => { applyWordReplace(globalIdx, next); setDictionaryVersion((v) => v + 1); }}
+                onApproveAsCorrect={() => setDictionaryVersion((v) => v + 1)}
+                isAnchor={isAnchor}
+                onToggleAnchor={() => toggleUserAnchor(globalIdx, { start: wt.start, end: wt.end })}
+              >
+                {wordSpan}
+              </WordContextMenu>
               {' '}
             </React.Fragment>
           );
         })}
+      </div>
+    );
+  };
+
+  // Render a padded row (real line or phantom) with an edit-marker dot in the gutter.
+  const renderPaddedRow = (
+    row: { line: WordTiming[] | null; edited: boolean },
+    rowIdx: number,
+    side: 'left' | 'right',
+    sourceLines: WordTiming[][],
+    realLineIdx: number, // index in sourceLines that this row corresponds to, or -1 for phantom
+  ) => {
+    const isPhantom = row.line === null;
+    const offset = realLineIdx >= 0
+      ? sourceLines.slice(0, realLineIdx).reduce((a, l) => a + l.length, 0)
+      : 0;
+    const dot = row.edited ? (
+      <span
+        aria-hidden
+        className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-[#0a1d3f] dark:bg-blue-300"
+        style={side === 'left' ? { left: -10 } : { right: -10 }}
+        title="שורה שנערכה"
+      />
+    ) : null;
+    if (isPhantom) {
+      return (
+        <div key={`p-${rowIdx}`} className="relative" style={{ minHeight: '1.4em' }}>
+          {dot}
+          <div className="min-h-[1.4em] py-[1px]" />
+        </div>
+      );
+    }
+    return (
+      <div key={`r-${rowIdx}`} className="relative">
+        {dot}
+        {renderLine(row.line!, offset, realLineIdx, side)}
       </div>
     );
   };
@@ -710,9 +1154,9 @@ export const SyncMirrorLayout = ({
 
       {/* ── Regular word-view (hidden in full-edit mode) ── */}
       {!fullEditMode && <>
-      <div className="flex items-center border-b bg-muted/10 sticky top-0 z-10 shrink-0" dir="rtl">
-        {/* Right column label */}
-        <div className="flex-1 flex items-center gap-1.5 px-3 py-2 border-s border-border/40">
+      <div className={cn("grid grid-cols-2 items-stretch border-b bg-muted/10 sticky top-0 z-10 shrink-0 [&_svg]:text-[#0a1d3f] dark:[&_svg]:text-blue-300")} dir="rtl">
+        {/* Visual mid-divider between right-half and left-half intent */}
+        <div className="min-w-0 flex items-center gap-1.5 px-3 py-2 border-s border-border/40">
           <AlignRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <span className={cn("text-xs font-semibold", compareMode ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
             {compareMode ? "גרסה קפואה להשוואה" : "תמלול מסונכרן"}
@@ -853,7 +1297,7 @@ export const SyncMirrorLayout = ({
         </div>
 
         {/* Left column label + controls */}
-        <div className="flex-1 flex items-center gap-1.5 px-3 py-2">
+        <div className="min-w-0 flex flex-wrap items-center gap-1.5 px-3 py-2">
           <Edit3 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <button
             onClick={toggleCompareMode}
@@ -865,7 +1309,7 @@ export const SyncMirrorLayout = ({
           >
             {compareMode ? "לא מסונכרנת" : "עריכה מסונכרנת"}
           </button>
-          <div className="ms-auto flex items-center gap-1.5">
+          <div className="ms-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
             {/* Left column sync toggle */}
             <button
               onClick={() => setLeftWordHighlightOn(v => !v)}
@@ -882,61 +1326,56 @@ export const SyncMirrorLayout = ({
                 size="sm"
                 variant="default"
                 className="h-6 text-[10px] px-2 gap-0.5"
-                onClick={onSaveReplace}
-                title="דורס ושומר את המקור"
+                onClick={handleSaveLocalAndCloud}
+                title="שמור — מקומי + ענן יחד"
               >
                 <Save className="w-2.5 h-2.5" />
                 שמור
               </Button>
             )}
-            {onDuplicateSave && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-[10px] px-2 gap-0.5"
-                onClick={() => { setDupName(""); setDupDialogOpen(true); }}
-                title="שכפל ושמור עם שם חדש"
-              >
-                <Copy className="w-2.5 h-2.5" />
-                שכפל ושמור
-              </Button>
-            )}
-            {onSaveLearning && (
-              <div className="inline-flex items-center">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-6 text-[10px] px-2 gap-0.5 rounded-e-none"
-                  onClick={() => openLearningPicker('quick')}
-                  disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}
-                  title="שמור ללמידה עם בחירת פרופיל"
-                >
-                  <Brain className="w-2.5 h-2.5" />
-                  שמור ללמידה
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[10px]" title="פעולות נוספות">
+                  <MoreHorizontal className="h-3 w-3" />
+                  פעולות
                 </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 rounded-s-none border-s-0 px-1"
-                      disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}
-                      title="אפשרויות שמירה ללמידה"
-                    >
-                      <ChevronDown className="w-2.5 h-2.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="text-xs">
-                    <DropdownMenuItem onClick={() => openLearningPicker('quick')}>
-                      שמירה מהירה ללמידה
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 text-xs">
+                <DropdownMenuItem onClick={restoreToBaseline} disabled={!isModifiedFromBaseline}>
+                  <History className="me-2 h-3.5 w-3.5" /> החזר לגרסת בסיס
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={compareMode ? toggleCompareMode : compareToBaseline} disabled={!hasBaseline}>
+                  <GitCompare className="me-2 h-3.5 w-3.5" /> {compareMode ? 'סיים השוואה' : 'השווה לגרסת בסיס'}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={setNewBaseline}>
+                  <Bookmark className="me-2 h-3.5 w-3.5" /> קבע כגרסת בסיס
+                </DropdownMenuItem>
+                {onDuplicateSave && (
+                  <DropdownMenuItem onClick={() => { setDupName(""); setDupDialogOpen(true); }}>
+                    <Copy className="me-2 h-3.5 w-3.5" /> שכפל ושמור
+                  </DropdownMenuItem>
+                )}
+                {onSaveLearning && (
+                  <>
+                    <DropdownMenuItem onClick={() => openLearningPicker('quick')} disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}>
+                      <Brain className="me-2 h-3.5 w-3.5" /> שמור ללמידה
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => openLearningPicker('advanced')}>
-                      שמירה מתקדמת (עם הערה)
+                    <DropdownMenuItem onClick={() => openLearningPicker('advanced')} disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}>
+                      <Brain className="me-2 h-3.5 w-3.5" /> למידה עם הערה
                     </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            )}
+                  </>
+                )}
+                {enableRichEdit && (
+                  <DropdownMenuItem onClick={togglePreciseAlign}>
+                    <Rows3 className="me-2 h-3.5 w-3.5" /> {preciseAlign ? 'עבור לעריכה חופשית' : 'הפעל יישור מדויק'}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={toggleAlignmentMode}>
+                  <AlignJustify className="me-2 h-3.5 w-3.5" /> {alignmentMode === 'mirrored-padded' ? 'כבה יישור 1:1' : 'הפעל יישור 1:1'}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             {/* Typography popover */}
             <Popover>
               <PopoverTrigger asChild>
@@ -1190,31 +1629,215 @@ export const SyncMirrorLayout = ({
         </div>
       </div>
 
+      {/* Shared marking toolbar — lifted ABOVE both columns so each side starts at the same height */}
+      {enableRichEdit && (
+        <div className="px-3 pt-2 pb-1 border-b border-border/30 bg-background/40" dir="rtl">
+          <TextMarkingOverlay
+            text={text}
+            onTextChange={onTextChange}
+            fontSize={localFontSize}
+            fontFamily={localFontFamily}
+            lineHeight={localLineHeight}
+            toolbarOnly={!isMarkingActive}
+            onActiveChange={setIsMarkingActive}
+          />
+        </div>
+      )}
+
       {/* Shared scroll container — two equal flex columns (no individual headers) */}
       <div
         ref={scrollRef}
         className="flex flex-1 min-h-0 overflow-y-auto"
       >
-        {/* ── RIGHT column: תמלול מסונכרן (read-only) ── */}
-        <div className="flex-1 min-w-0 flex flex-col border-s border-border/40">
-          {/* word rows */}
-          <div className="p-4" style={textStyle}>
-            {(compareMode ? frozenLines : lines).map((line, li) => {
+        {/* ── RIGHT column — full mirror, fully editable (unless locked) ── */}
+        <div
+          ref={rightColRef}
+          className={cn(
+            "min-w-0 flex flex-col border-s border-border/40 relative transition-opacity",
+            lockedPane === 'right' && "opacity-90 bg-muted/30",
+          )}
+          style={{ flex: `0 0 ${rightPct}%` }}
+        >
+
+          {/* Per-column control strip: active selector + lock */}
+          <div className="flex items-center gap-1 px-2 py-1 border-b border-border/30 bg-background/60" dir="rtl">
+            <button
+              type="button"
+              onClick={() => setActivePane('right')}
+              className={cn("h-6 px-1.5 rounded text-[10px] flex items-center gap-1 transition-colors",
+                activePane === 'right' ? `${navyClass} bg-blue-50 dark:bg-blue-950/40 font-semibold` : "text-muted-foreground hover:bg-muted")}
+              title="הפוך את הצד הימני לפעיל (משפיע על צבע האייקונים בסרגל)"
+            >
+              {activePane === 'right' ? <CircleDot className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
+              ימין פעיל
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleLock('right')}
+              className={cn("h-6 px-1.5 rounded text-[10px] flex items-center gap-1 transition-colors",
+                lockedPane === 'right' ? "text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 font-semibold" : "text-muted-foreground hover:bg-muted")}
+              title={lockedPane === 'right' ? "שחרר נעילה — הצד הימני יחזור להיות עריך" : "נעל את הצד הימני — לא יקבל שינויים"}
+            >
+              {lockedPane === 'right' ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+              {lockedPane === 'right' ? 'נעול' : 'פתוח'}
+            </button>
+          </div>
+          {/* Mirror toolbar — visually identical strip to the left RichTextEditor toolbar.
+              Keeps both columns aligned at the same vertical offset so matching rows
+              line up at the same height. Only alignment buttons are interactive
+              (broadcasting via sharedTextAlign). */}
+          {effectiveRichEdit && !paddedAlignment && (
+            <div className="flex flex-col gap-2 p-3" dir="rtl" style={{ pointerEvents: 'auto' }}>
+              <div style={{ ...textStyle, ...(localTextColor ? { color: localTextColor } : {}), ...richColumnStyle }}>
+                <RichTextEditorMirror textAlign={sharedTextAlign} onTextAlignChange={setSharedTextAlign} />
+              </div>
+            </div>
+          )}
+          {/* word rows — when rich-edit is on, pad-top dynamically to align with editor's first line */}
+          <div
+            className="px-4 pb-4"
+            style={{
+              ...textStyle,
+              paddingTop: 16,
+            }}
+          >
+            {paddedAlignment && !compareMode ? (() => {
+              const rows = lockedPane === 'right' ? paddedAlignment.snapshot : paddedAlignment.current;
+              const src = lockedPane === 'right' ? snapshotLines : lines;
+              let srcIdx = -1;
+              return rows.map((row, ri) => {
+                if (row.line) srcIdx++;
+                return renderPaddedRow(row, ri, 'left', src, row.line ? srcIdx : -1);
+              });
+            })() : (compareMode ? frozenLines : lines).map((line, li) => {
               const sourceLines = compareMode ? frozenLines : lines;
               const offset = sourceLines.slice(0, li).reduce((a, l) => a + l.length, 0);
-              return renderLine(line, offset, li, "right");
+              // Render right column with FULL "left"-side rendering so it mirrors 1:1
+              // (word context menu, marking, suggestions). Edits are still gated by the lock above.
+              return renderLine(line, offset, li, "left");
             })}
           </div>
         </div>
 
+        {/* ── Draggable column divider — drag to resize, double-click to reset to auto ── */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          title="גרור לשינוי רוחב העמודות · קליק כפול לאיפוס לאוטומטי"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            const container = scrollRef.current;
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+            const onMove = (ev: PointerEvent) => {
+              const rightWidth = rect.right - ev.clientX;
+              let pct = (rightWidth / rect.width) * 100;
+              pct = Math.max(15, Math.min(85, pct));
+              setManualSplit(pct);
+            };
+            const onUp = () => {
+              window.removeEventListener('pointermove', onMove);
+              window.removeEventListener('pointerup', onUp);
+              document.body.style.userSelect = '';
+              document.body.style.cursor = '';
+            };
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'col-resize';
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
+          }}
+          onDoubleClick={() => setManualSplit(null)}
+          className="group/divider relative shrink-0 w-1.5 cursor-col-resize bg-border/40 hover:bg-primary/50 transition-colors"
+        >
+          <div className="absolute inset-y-0 -left-1 -right-1" />
+          <div className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 h-8 w-1 rounded-full bg-foreground/20 group-hover/divider:bg-primary/80 transition-colors" />
+        </div>
+
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
-        <div className="flex-1 min-w-0 flex flex-col">
-          {/* word rows */}
-          <div className="p-4" style={textStyle}>
-            {lines.map((line, li) => {
-              const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
-              return renderLine(line, offset, li, "left");
-            })}
+        <div
+          ref={leftColRef}
+          className={cn(
+            "min-w-0 flex flex-col relative transition-opacity",
+            lockedPane === 'left' && "opacity-90 bg-muted/30",
+          )}
+          style={{ flex: `0 0 ${leftPct}%` }}
+        >
+
+          {/* Per-column control strip: active selector + lock */}
+          <div className="flex items-center gap-1 px-2 py-1 border-b border-border/30 bg-background/60" dir="rtl">
+            <button
+              type="button"
+              onClick={() => setActivePane('left')}
+              className={cn("h-6 px-1.5 rounded text-[10px] flex items-center gap-1 transition-colors",
+                activePane === 'left' ? `${navyClass} bg-blue-50 dark:bg-blue-950/40 font-semibold` : "text-muted-foreground hover:bg-muted")}
+              title="הפוך את הצד השמאלי לפעיל (משפיע על צבע האייקונים בסרגל)"
+            >
+              {activePane === 'left' ? <CircleDot className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
+              שמאל פעיל
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleLock('left')}
+              className={cn("h-6 px-1.5 rounded text-[10px] flex items-center gap-1 transition-colors",
+                lockedPane === 'left' ? "text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 font-semibold" : "text-muted-foreground hover:bg-muted")}
+              title={lockedPane === 'left' ? "שחרר נעילה — הצד השמאלי יחזור להיות עריך" : "נעל את הצד השמאלי — לא יקבל שינויים"}
+            >
+              {lockedPane === 'left' ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+              {lockedPane === 'left' ? 'נעול' : 'פתוח'}
+            </button>
+          </div>
+          <div style={{ pointerEvents: lockedPane === 'left' ? 'none' : undefined }} className="flex-1 min-h-0 flex flex-col">
+          {effectiveRichEdit && !paddedAlignment ? (
+            <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
+              {/* Marking toolbar has been lifted above both columns (see top of layout). */}
+              {/* RichTextEditor — full editing surface */}
+              {!isMarkingActive && (
+                <div
+                  style={{
+                    ...textStyle,
+                    ...(localTextColor ? { color: localTextColor } : {}),
+                    ...richColumnStyle,
+                  }}
+                >
+                  <RichTextEditor
+                    text={text}
+                    onChange={(v) => handleTextChangeFromPane('left', v)}
+                    columnStyle={richColumnStyle}
+                    onSaveReplaceOriginal={onSaveReplace}
+                    onDuplicateSave={onDuplicateSave ? () => onDuplicateSave('') : undefined}
+                    onWordCorrected={onWordCorrected}
+                    textAlign={sharedTextAlign}
+                    onTextAlignChange={setSharedTextAlign}
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Precise-alignment view: identical line breaks as the right column.
+               Editing happens through right-click WordContextMenu (and the
+               marking toolbar above when enableRichEdit is on). */
+            <div className="flex flex-col" ref={leftRichRef}>
+              {/* Marking toolbar lifted above both columns. */}
+
+              {!isMarkingActive && (
+                <div ref={leftRowsRef} className="p-4" style={textStyle}>
+                  {paddedAlignment && !compareMode ? (() => {
+                    const rows = lockedPane === 'left' ? paddedAlignment.snapshot : paddedAlignment.current;
+                    const src = lockedPane === 'left' ? snapshotLines : lines;
+                    let srcIdx = -1;
+                    return rows.map((row, ri) => {
+                      if (row.line) srcIdx++;
+                      return renderPaddedRow(row, ri, 'left', src, row.line ? srcIdx : -1);
+                    });
+                  })() : lines.map((line, li) => {
+                    const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
+                    return renderLine(line, offset, li, "left");
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           </div>
         </div>
       </div>

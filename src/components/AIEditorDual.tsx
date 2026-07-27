@@ -1,4 +1,5 @@
 import { useState, useMemo, memo, useEffect, useRef } from "react";
+import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,13 +13,13 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Wand2, Loader2, Sparkles, MessageSquare, BookOpen, FileText,
   Languages, Users, List, Heading, Maximize2, Minimize2, ChevronUp, ChevronDown,
   CheckCheck, Volume2, AlignJustify, Quote, Cpu, Save, Gauge, Trophy,
   Eye, EyeOff, GitCompareArrows, Download, PlayCircle, StopCircle, RotateCcw, Trash2,
   Pencil, Plus, LayoutGrid, LayoutList, Rows3, RotateCw, ShieldCheck, Star, Settings, GripVertical, Filter, ArrowUpDown, Plug,
-  Columns2, Columns3, Columns4, Repeat,
   type LucideIcon
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
@@ -46,6 +47,7 @@ import {
 } from "@/lib/hebrewGuard";
 import { useCustomActions, type CustomAction } from "@/hooks/useCustomActions";
 import type { AIEditJob } from "@/lib/aiEditQueue";
+import type { TextVersion } from "@/components/TextEditHistory";
 import DiffMatchPatch from "diff-match-patch";
 
 interface AIEditorDualProps {
@@ -55,6 +57,12 @@ interface AIEditorDualProps {
   onSaveAndReplaceOriginal?: (text: string, source: string, engineLabel: string, actionLabel: string) => Promise<void> | void;
   onDuplicateAndSave?: (text: string, source: string, engineLabel: string, actionLabel: string) => Promise<void> | void;
   onSyncToPlayer?: (editedText: string) => void;
+  /** Optional: all available versions for the source-picker (cloud + local + AI) */
+  versions?: TextVersion[];
+  /** Optional: original transcript text (shown as "מקורי" tab) */
+  originalText?: string;
+  /** Optional: pre-selected source version id (e.g. when sent from compare view) */
+  initialSourceId?: string;
 }
 
 const CLOUD_MODELS = [
@@ -441,15 +449,136 @@ const TRANSLATE_LANGS = [
   { value: 'גרמנית', label: '🇩🇪 גרמנית' },
 ];
 
-const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSaveAndReplaceOriginal, onDuplicateAndSave, onSyncToPlayer }: AIEditorDualProps) => {
+const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSaveAndReplaceOriginal, onDuplicateAndSave, onSyncToPlayer, versions, originalText, initialSourceId }: AIEditorDualProps) => {
   // Local editable working copy of the source text. User can tweak words inline before/between AI runs;
   // changes flow automatically into the next AI run because all edit code uses `text`.
   const [text, setWorkingText] = useState(propText);
   const [isUserEditedText, setIsUserEditedText] = useState(false);
+  // Snapshot of last loaded source (for isDirty detection in the source-picker)
+  const [loadedSnapshot, setLoadedSnapshot] = useState<string>(propText);
   // Sync from prop when it changes externally — but only if the user hasn't manually edited yet.
   useEffect(() => {
-    if (!isUserEditedText) setWorkingText(propText);
+    if (!isUserEditedText) {
+      setWorkingText(propText);
+      setLoadedSnapshot(propText);
+    }
   }, [propText, isUserEditedText]);
+
+  // ── Source-picker state ──
+  type SourceCategory = 'all' | 'current' | 'original' | 'ai' | 'saved';
+  const [sourceCategory, setSourceCategory] = useState<SourceCategory>('all');
+  const [selectedSourceId, setSelectedSourceId] = useState<string>(initialSourceId || '__current__');
+  const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
+  const [dirtyDialogOpen, setDirtyDialogOpen] = useState(false);
+  const isDirty = text !== loadedSnapshot;
+
+  const versionsList = versions || [];
+
+  // Build the synthetic "current" / "original" entries so they appear alongside saved versions
+  const allSourceVersions = useMemo<TextVersion[]>(() => {
+    const list: TextVersion[] = [];
+    list.push({
+      id: '__current__',
+      text: propText,
+      timestamp: new Date(),
+      source: 'manual',
+      customPrompt: 'הטקסט הנוכחי בעורך',
+    });
+    if (originalText && originalText.trim() && originalText !== propText) {
+      list.push({
+        id: '__original__',
+        text: originalText,
+        timestamp: new Date(0),
+        source: 'original',
+        customPrompt: 'תמלול מקורי',
+      });
+    }
+    for (const v of versionsList) {
+      // Skip duplicates of current/original already pushed
+      if (v.text === propText && list.some(x => x.id === '__current__')) continue;
+      list.push(v);
+    }
+    return list;
+  }, [propText, originalText, versionsList]);
+
+  const filteredByCategory = useMemo(() => {
+    switch (sourceCategory) {
+      case 'current':
+        return allSourceVersions.filter(v => v.id === '__current__');
+      case 'original':
+        return allSourceVersions.filter(v => v.source === 'original');
+      case 'ai':
+        return allSourceVersions.filter(v => v.source.startsWith('ai-'));
+      case 'saved':
+        return allSourceVersions.filter(v => v.source === 'manual' && v.id !== '__current__');
+      default:
+        return allSourceVersions;
+    }
+  }, [allSourceVersions, sourceCategory]);
+
+  // Auto-categorize when initialSourceId arrives from parent (e.g. "send to AI" from compare)
+  useEffect(() => {
+    if (!initialSourceId) return;
+    const v = allSourceVersions.find(x => x.id === initialSourceId);
+    if (!v) return;
+    // Keep "all" by default; only narrow if user is already in a specific category
+    setSelectedSourceId(initialSourceId);
+    // load text (without dirty-check — explicit user action from compare)
+    setWorkingText(v.text);
+    setLoadedSnapshot(v.text);
+    setIsUserEditedText(false);
+  }, [initialSourceId, allSourceVersions]);
+
+  const applySourceLoad = (id: string) => {
+    const v = allSourceVersions.find(x => x.id === id);
+    if (!v) return;
+    setSelectedSourceId(id);
+    setWorkingText(v.text);
+    setLoadedSnapshot(v.text);
+    setIsUserEditedText(false);
+  };
+
+  const requestSourceChange = (id: string) => {
+    if (id === selectedSourceId) return;
+    if (isDirty) {
+      setPendingSourceId(id);
+      setDirtyDialogOpen(true);
+      return;
+    }
+    applySourceLoad(id);
+  };
+
+  const handleDirtyDiscard = () => {
+    setDirtyDialogOpen(false);
+    if (pendingSourceId) applySourceLoad(pendingSourceId);
+    setPendingSourceId(null);
+  };
+  const handleDirtySaveThenLoad = () => {
+    if (onSaveVersion) {
+      onSaveVersion(text, 'manual', 'עורך', 'עריכה ידנית');
+      toast({ title: 'נשמרה גרסה חדשה' });
+    }
+    setDirtyDialogOpen(false);
+    if (pendingSourceId) applySourceLoad(pendingSourceId);
+    setPendingSourceId(null);
+  };
+  const handleDirtyCancel = () => {
+    setDirtyDialogOpen(false);
+    setPendingSourceId(null);
+  };
+
+  const currentSourceVersion = allSourceVersions.find(v => v.id === selectedSourceId);
+  const formatSourceLabel = (v: TextVersion): string => {
+    if (v.id === '__current__') return 'הטקסט הנוכחי בעורך';
+    if (v.id === '__original__') return 'תמלול מקורי';
+    const time = v.timestamp instanceof Date && v.timestamp.getTime() > 0
+      ? new Intl.DateTimeFormat('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(v.timestamp)
+      : '';
+    const tag = v.customPrompt || v.source;
+    const preview = v.text.replace(/\s+/g, ' ').slice(0, 50);
+    return `${tag}${time ? ' · ' + time : ''} — ${preview}${v.text.length > 50 ? '…' : ''}`;
+  };
+
   const [showSourceEditor, setShowSourceEditor] = useState<boolean>(() => {
     try { return localStorage.getItem('ai_editor_show_source') !== 'false'; } catch { return true; }
   });
@@ -1878,6 +2007,93 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
         </div>
       )}
 
+      {/* ── Source-picker (choose which transcript/version to edit) ── */}
+      {(versions || originalText) && (
+        <div className="mb-3 rounded-lg border border-yellow-500/40 bg-yellow-500/5">
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-yellow-500/30 bg-yellow-500/10">
+            <div className="flex items-center gap-2">
+              <GitCompareArrows className="w-3.5 h-3.5 text-yellow-700" />
+              <Label className="text-xs font-semibold">מקור הקלט לעריכה</Label>
+              {isDirty && (
+                <Badge variant="outline" className="text-[9px] h-4 px-1 text-amber-600 border-amber-400">שינויים לא שמורים</Badge>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[10px] px-1.5"
+              onClick={() => currentSourceVersion && applySourceLoad(currentSourceVersion.id)}
+              title="טען מחדש מהמקור"
+              disabled={!currentSourceVersion}
+            >
+              <RotateCw className="w-3 h-3 ml-1" />
+              רענן
+            </Button>
+          </div>
+          <div className="p-2">
+            <div className="flex items-center gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0 shrink-0 relative"
+                    title={`סינון: ${sourceCategory === 'all' ? 'הכל' : sourceCategory === 'current' ? 'נוכחי' : sourceCategory === 'original' ? 'מקורי' : sourceCategory === 'ai' ? 'AI' : 'שמורות'}`}
+                  >
+                    <Filter className="w-3.5 h-3.5" />
+                    {sourceCategory !== 'all' && (
+                      <span className="absolute -top-1 -left-1 w-2 h-2 rounded-full bg-yellow-500" />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent dir="rtl" align="end" className="w-44 p-1">
+                  {([
+                    { v: 'all', label: 'הכל' },
+                    { v: 'current', label: 'נוכחי' },
+                    { v: 'original', label: 'מקורי' },
+                    { v: 'ai', label: 'AI' },
+                    { v: 'saved', label: 'שמורות' },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.v}
+                      type="button"
+                      onClick={() => setSourceCategory(opt.v as SourceCategory)}
+                      className={cn(
+                        'w-full text-right text-xs px-2 py-1.5 rounded hover:bg-muted',
+                        sourceCategory === opt.v && 'bg-yellow-500/15 font-semibold text-yellow-800'
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+              <Select
+                value={filteredByCategory.some(v => v.id === selectedSourceId) ? selectedSourceId : ''}
+                onValueChange={requestSourceChange}
+                disabled={filteredByCategory.length === 0}
+              >
+                <SelectTrigger className="text-xs h-8 flex-1" dir="rtl">
+                  <SelectValue placeholder={filteredByCategory.length === 0 ? 'אין גרסאות בקטגוריה זו' : 'בחר גרסה...'} />
+                </SelectTrigger>
+                <SelectContent dir="rtl">
+                  {filteredByCategory.map(v => (
+                    <SelectItem key={v.id} value={v.id} className="text-xs">
+                      {formatSourceLabel(v)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {currentSourceVersion && (
+                <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                  {currentSourceVersion.text.split(/\s+/).filter(Boolean).length.toLocaleString()} מילים
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Editable source-text preview ── */}
       <div className="mb-4 rounded-lg border bg-background/60">
         <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b bg-muted/30">
@@ -1895,7 +2111,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
                 variant="ghost"
                 size="sm"
                 className="h-6 text-[10px] px-1.5 text-muted-foreground hover:text-primary"
-                onClick={() => { setWorkingText(propText); setIsUserEditedText(false); toast({ title: 'שוחזר למקור' }); }}
+                onClick={() => { setWorkingText(propText); setLoadedSnapshot(propText); setIsUserEditedText(false); toast({ title: 'שוחזר למקור' }); }}
                 title="שחזר את הטקסט המקורי"
               >
                 <RotateCcw className="w-3 h-3 ml-1" />
@@ -1923,6 +2139,25 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
           />
         )}
       </div>
+
+      {/* ── Dirty-source-change confirmation dialog ── */}
+      <Dialog open={dirtyDialogOpen} onOpenChange={(o) => { if (!o) handleDirtyCancel(); }}>
+        <DialogContent dir="rtl" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>שינויים לא שמורים</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            ערכת את הטקסט מאז הטעינה האחרונה. מה לעשות לפני החלפת המקור?
+          </p>
+          <div className="flex flex-wrap justify-end gap-2 mt-3">
+            <Button variant="ghost" size="sm" onClick={handleDirtyCancel}>בטל</Button>
+            <Button variant="outline" size="sm" onClick={handleDirtyDiscard}>השלך והחלף</Button>
+            <Button size="sm" onClick={handleDirtySaveThenLoad} disabled={!onSaveVersion}>
+              שמור כגרסה חדשה והחלף
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Quick Save Actions (always visible near top) */}
       {(onSaveAndReplaceOriginal || onDuplicateAndSave || onSaveVersion) && (
@@ -2120,30 +2355,6 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
               onClick={() => customActions.setViewMode('masonry')}
               title="תצוגת אבנים"
             ><AlignJustify className="w-3.5 h-3.5" /></Button>
-            <Button
-              variant={customActions.viewMode === 'columns2' ? 'default' : 'ghost'}
-              size="sm" className="h-7 w-7 p-0"
-              onClick={() => customActions.setViewMode('columns2')}
-              title="2 עמודות (רוחב מלא)"
-            ><Columns2 className="w-3.5 h-3.5" /></Button>
-            <Button
-              variant={customActions.viewMode === 'columns3' ? 'default' : 'ghost'}
-              size="sm" className="h-7 w-7 p-0"
-              onClick={() => customActions.setViewMode('columns3')}
-              title="3 עמודות (רוחב מלא)"
-            ><Columns3 className="w-3.5 h-3.5" /></Button>
-            <Button
-              variant={customActions.viewMode === 'columns4' ? 'default' : 'ghost'}
-              size="sm" className="h-7 w-7 p-0"
-              onClick={() => customActions.setViewMode('columns4')}
-              title="4 עמודות (רוחב מלא)"
-            ><Columns4 className="w-3.5 h-3.5" /></Button>
-            <Button
-              variant="ghost"
-              size="sm" className="h-7 w-7 p-0"
-              onClick={() => customActions.cycleViewMode()}
-              title="החלף תצוגה"
-            ><Repeat className="w-3.5 h-3.5" /></Button>
           </div>
           <div className="flex items-center gap-1">
             <Button
@@ -2176,9 +2387,6 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
               customActions.viewMode === 'grid' ? 'flex flex-wrap gap-1.5' :
               customActions.viewMode === 'list' ? 'flex flex-col gap-1' :
               customActions.viewMode === 'masonry' ? 'columns-2 md:columns-3 xl:columns-4 gap-2 space-y-2' :
-              customActions.viewMode === 'columns2' ? 'grid grid-cols-2 gap-1.5' :
-              customActions.viewMode === 'columns3' ? 'grid grid-cols-2 md:grid-cols-3 gap-1.5' :
-              customActions.viewMode === 'columns4' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5' :
               'flex flex-wrap gap-0.5'
             }>
               {group.actions.map(action => {
@@ -2186,11 +2394,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
                 if (action.id === 'translate' || action.id === 'tone') return null;
                 const IconComp = getIconComponent(action.icon);
                 return (
-                  <div key={action.id} className={
-                    customActions.viewMode === 'masonry' ? 'group relative mb-2 break-inside-avoid' :
-                    (customActions.viewMode === 'columns2' || customActions.viewMode === 'columns3' || customActions.viewMode === 'columns4') ? 'group relative flex w-full' :
-                    'group relative inline-flex'
-                  }>
+                  <div key={action.id} className={customActions.viewMode === 'masonry' ? 'group relative mb-2 break-inside-avoid' : 'group relative inline-flex'}>
                     {customActions.viewMode === 'list' ? (
                       <div className="flex items-center gap-2 w-full">
                         <Button
@@ -2251,7 +2455,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
                           variant={lastAction === action.id ? "default" : "secondary"}
                           size="sm"
                           disabled={isLoading || noText}
-                          className={`text-xs ${(customActions.viewMode === 'columns2' || customActions.viewMode === 'columns3' || customActions.viewMode === 'columns4') ? 'w-full justify-start' : ''}`}
+                          className="text-xs"
                           onClick={() => selectAction(action.id as EditAction)}
                         >
                           <IconComp className="w-3 h-3 ml-1" />
@@ -2275,9 +2479,6 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
           <div className={
             customActions.viewMode === 'grid' ? 'flex flex-wrap gap-1.5' :
             customActions.viewMode === 'list' ? 'flex flex-col gap-1' :
-            customActions.viewMode === 'columns2' ? 'grid grid-cols-2 gap-1.5' :
-            customActions.viewMode === 'columns3' ? 'grid grid-cols-2 md:grid-cols-3 gap-1.5' :
-            customActions.viewMode === 'columns4' ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5' :
             'flex flex-wrap gap-0.5'
           }>
             {/* Translate with language picker */}

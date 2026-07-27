@@ -9,11 +9,14 @@ import { debugLog } from "@/lib/debugLogger";
 import type { TextVersion } from "@/components/TextEditHistory";
 import type { WordTiming, SyncAudioPlayerRef } from "@/components/SyncAudioPlayer";
 import { TextStyleControl } from "@/components/TextStyleControl";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Pencil, Check as CheckIcon, Eraser } from "lucide-react";
 
 // Lazy-loaded heavy components
 const SyncAudioPlayer = lazy(() => import("@/components/SyncAudioPlayer").then(m => ({ default: m.SyncAudioPlayer })));
 const AIEditorDual = lazy(() => import("@/components/AIEditorDual").then(m => ({ default: m.AIEditorDual })));
-const TextComparisonMulti = lazy(() => import("@/components/TextComparisonMulti").then(m => ({ default: m.TextComparisonMulti })));
+
 const EditingTemplates = lazy(() => import("@/components/EditingTemplates").then(m => ({ default: m.EditingTemplates })));
 const AdvancedDiffView = lazy(() => import("@/components/AdvancedDiffView").then(m => ({ default: m.AdvancedDiffView })));
 // TextStyleControl is in the header (always rendered) — must be eager to avoid triggering outer Suspense
@@ -21,11 +24,11 @@ const TextEditHistory = lazy(() => import("@/components/TextEditHistory").then(m
 const PromptLibrary = lazy(() => import("@/components/PromptLibrary").then(m => ({ default: m.PromptLibrary })));
 const EditPipeline = lazy(() => import("@/components/EditPipeline").then(m => ({ default: m.EditPipeline })));
 const OllamaManager = lazy(() => import("@/components/OllamaManager").then(m => ({ default: m.OllamaManager })));
-const CorrectionLearningPanel = lazy(() => import("@/components/CorrectionLearningPanel").then(m => ({ default: m.CorrectionLearningPanel })));
 const SyncEditableView = lazy(() => import("@/components/SyncEditableView").then(m => ({ default: m.SyncEditableView })));
 const SyncTranscriptView = lazy(() => import("@/components/SyncTranscriptView").then(m => ({ default: m.SyncTranscriptView })));
 const SyncMirrorLayout = lazy(() => import("@/components/SyncMirrorLayout").then(m => ({ default: m.SyncMirrorLayout })));
-const VocabularyPanel = lazy(() => import("@/components/VocabularyPanel").then(m => ({ default: m.VocabularyPanel })));
+const LearningRegressionPanel = lazy(() => import("@/components/LearningRegressionPanel").then(m => ({ default: m.LearningRegressionPanel })));
+const AudioLearningQueue = lazy(() => import("@/components/AudioLearningQueue").then(m => ({ default: m.AudioLearningQueue })));
 const DictionaryValidator = lazy(() => import("@/components/DictionaryValidator").then(m => ({ default: m.DictionaryValidator })));
 const TextMarkingOverlay = lazy(() => import("@/components/TextMarkingOverlay").then(m => ({ default: m.TextMarkingOverlay })));
 const AutoSummaryCard = lazy(() => import("@/components/AutoSummaryCard").then(m => ({ default: m.AutoSummaryCard })));
@@ -35,11 +38,38 @@ const AnalyticsDashboard = lazy(() => import("@/components/AnalyticsDashboard").
 const SpeakerDiarization = lazy(() => import("@/components/SpeakerDiarization").then(m => ({ default: m.SpeakerDiarization })));
 const FloatingPlayerPortal = lazy(() => import("@/components/FloatingPlayerPortal").then(m => ({ default: m.FloatingPlayerPortal })));
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })));
-import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type } from "lucide-react";
+const LoshonKodeshRules = lazy(() => import("@/pages/LoshonKodeshRules"));
+const AIVersionsGrid = lazy(() => import("@/components/AIVersionsGrid").then(m => ({ default: m.AIVersionsGrid })));
+import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle, Link, AudioWaveform } from "lucide-react";
 import { uploadToDrive } from "@/components/GoogleDriveBrowser";
 import { DriveFolderPicker } from "@/components/DriveFolderPicker";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
-import { TextExportMenu } from "@/components/TextExportMenu";
+
+const getAudioComparisonKey = (path?: string | null): string | null => {
+  if (!path) return null;
+  const fileName = decodeURIComponent(path.split('/').pop() || '')
+    .replace(/^\d+_/, '')
+    .trim()
+    .toLocaleLowerCase();
+  return fileName || null;
+};
+
+const joinVersionLabels = (...labels: Array<string | null | undefined>): string | undefined => {
+  const unique = Array.from(new Set(labels.map(label => label?.trim()).filter(Boolean) as string[]));
+  return unique.length ? unique.join(' • ') : undefined;
+};
+
+const formatVersionTime = (value?: string | null): string | undefined => {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return new Intl.DateTimeFormat('he-IL', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+};
 import { supabase } from "@/integrations/supabase/client";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
 import { toast } from "@/hooks/use-toast";
@@ -58,9 +88,106 @@ import {
   getProfile,
   listProfiles,
 } from "@/lib/pronunciationProfiles";
+import { alignEditedToWhisper, findActiveWordIndex, fitTimingsToDuration } from "@/lib/whisperAlignment";
 import { LazyErrorBoundary } from "@/components/LazyErrorBoundary";
 import { CollapsibleWidget } from "@/components/ui/CollapsibleWidget";
+import {
+  readAudioLearningCandidates,
+  writeAudioLearningCandidates,
+  getAudioLearningOperation,
+  type AudioLearningCandidate,
+} from "@/lib/audioLearning";
 import "@/styles/mobile-pages.css";
+
+// Inline editor for the transcript's title — shown at the top of the AI tab.
+function TranscriptTitleEditor({
+  transcriptId,
+  transcripts,
+  updateTranscript,
+}: {
+  transcriptId: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  transcripts: any[];
+  updateTranscript: (id: string, updates: { title?: string }) => Promise<unknown>;
+}) {
+  const current = transcriptId ? transcripts.find((t) => t.id === transcriptId) : null;
+  const remoteTitle = (current?.title as string | undefined) || "";
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(remoteTitle);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!editing) setValue(remoteTitle);
+  }, [remoteTitle, editing]);
+
+  if (!transcriptId) {
+    return (
+      <div className="rounded-lg border border-dashed bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
+        שמור את התמלול בענן כדי לערוך את שמו
+      </div>
+    );
+  }
+
+  const save = async () => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === remoteTitle) {
+      setEditing(false);
+      setValue(remoteTitle);
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateTranscript(transcriptId, { title: trimmed });
+      toast({ title: "שם התמלול עודכן ✅" });
+      setEditing(false);
+    } catch (e) {
+      toast({
+        title: "שגיאה בעדכון השם",
+        description: e instanceof Error ? e.message : "נסה שוב",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
+      <span className="text-xs text-muted-foreground shrink-0">שם התמלול:</span>
+      {editing ? (
+        <>
+          <Input
+            autoFocus
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save();
+              if (e.key === "Escape") {
+                setEditing(false);
+                setValue(remoteTitle);
+              }
+            }}
+            className="h-8 flex-1"
+            disabled={saving}
+          />
+          <Button size="sm" variant="default" onClick={save} disabled={saving}>
+            <CheckIcon className="h-4 w-4 me-1" /> שמור
+          </Button>
+        </>
+      ) : (
+        <>
+          <span className="flex-1 truncate text-sm font-medium" title={remoteTitle}>
+            {remoteTitle || "ללא שם"}
+          </span>
+          <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+            <Pencil className="h-4 w-4 me-1" /> ערוך
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
 
 const sourceLabels: Record<string, string> = {
   original: 'תמלול מקורי',
@@ -115,39 +242,77 @@ const TextEditor = () => {
   const location = useLocation();
   const { value: text, setValue: setText, undo: undoText, redo: redoText, canUndo, canRedo } = useUndoRedo("");
   const [versions, setVersions] = useState<TextVersion[]>([]);
+  const latestTextRef = useRef("");
+  const latestVersionsRef = useRef<TextVersion[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState<string>();
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioFileName, setAudioFileName] = useState<string>("");
   const [wordTimings, setWordTimings] = useState<WordTiming[]>([]);
+  const wordTimingsRef = useRef<WordTiming[]>([]);
+  const wordTimingsRevisionRef = useRef(0);
+  const [audioLearningCandidates, setAudioLearningCandidates] = useState<AudioLearningCandidate[]>([]);
+
+  useEffect(() => {
+    wordTimingsRef.current = wordTimings;
+  }, [wordTimings]);
   const [playerTime, setPlayerTime] = useState(0);
   const lastWordIdxRef = useRef(-2); // -2 = uninitialised
   const playerTimeRef = useRef(0);
+  const lastPlayerRenderAtRef = useRef(-1);
   const transcriptIdRef = useRef<string | null>(null);
   const manualVersionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { updateTranscript, getAudioUrl } = useCloudTranscripts();
+  const { updateTranscript, getAudioUrl, saveTranscript, transcripts } = useCloudTranscripts();
   const [syncEnabled, setSyncEnabled] = useState(true);
+  const [forcedAlignmentState, setForcedAlignmentState] = useState<{
+    status: 'idle' | 'aligning' | 'aligned' | 'partial' | 'error';
+    coverage?: number;
+    confidence?: number;
+  }>({ status: 'idle' });
+  const alignmentAbortRef = useRef<AbortController | null>(null);
   const [transcriptId, setTranscriptId] = useState<string | null>(null);
   const { versions: cloudVersions, isLoading: cloudVersionsLoading, saveVersion: saveCloudVersion } = useCloudVersions(transcriptId);
   const ollama = useOllama();
   const { learn: learnCorrections, applyCorrections } = useCorrectionLearning();
   const originalTextRef = useRef<string>("");
+  // Baseline used for correction-learning. Resets to the latest AI/version output
+  // so that learning captures only the user's manual edits *on top of* the AI text,
+  // not the AI's stylistic changes (punctuation, paragraph splits, rewording).
+  const learningBaselineRef = useRef<string>("");
   const ownedAudioUrlRef = useRef<string | null>(null);
+  const audioLearningStorageKey = useMemo(
+    () => `audio_learning_candidates_v1:${transcriptId || audioFileName || 'current-transcript'}`,
+    [transcriptId, audioFileName],
+  );
+
+  useEffect(() => {
+    setAudioLearningCandidates(readAudioLearningCandidates(audioLearningStorageKey));
+  }, [audioLearningStorageKey]);
+
+  const updateAudioLearningCandidates = useCallback(
+    (updater: (current: AudioLearningCandidate[]) => AudioLearningCandidate[]) => {
+      setAudioLearningCandidates((current) => {
+        const next = updater(current);
+        writeAudioLearningCandidates(audioLearningStorageKey, next);
+        return next;
+      });
+    },
+    [audioLearningStorageKey],
+  );
 
   // Tab settings (visibility + order)
   const ALL_TABS: TabConfig[] = [
-    { id: "player", label: "נגן", emoji: "🎧", group: "primary" },
-    { id: "edit", label: "עריכת טקסט", group: "primary" },
+    { id: "player", label: "עורך טקסט", emoji: "🎧", group: "primary" },
+    { id: "loshon", label: "לשון הקודש", emoji: "🕮", group: "primary" },
     { id: "speakers", label: "זיהוי דוברים", group: "primary" },
     { id: "templates", label: "תבניות", group: "primary" },
     { id: "ai", label: "עריכה עם AI", group: "primary" },
     { id: "pipeline", label: "צינור עיבוד", group: "primary" },
     { id: "prompts", label: "ספריית פרומפטים", group: "primary" },
     { id: "ollama", label: "Ollama", group: "secondary" },
-    { id: "learning", label: "למידה", group: "secondary" },
-    { id: "vocab", label: "מילון", group: "secondary" },
+    { id: "vocab", label: "בדיקת איות", group: "secondary" },
     { id: "summary", label: "סיכום", group: "secondary" },
-    { id: "ab", label: "A/B", group: "secondary" },
+    
     { id: "analytics", label: "אנליטיקה", group: "secondary" },
     { id: "compare", label: "השוואה", group: "secondary" },
     { id: "history", label: "היסטוריה", group: "secondary" },
@@ -162,19 +327,31 @@ const TextEditor = () => {
   const tabOrder = tabSettings.order;
 
   // Load tab settings from cloud when preferences are available
-  const cloudTabSettingsLoaded = useRef(false);
   useEffect(() => {
-    if (cloudTabSettingsLoaded.current) return;
     if (!preferences.tab_settings_json) return;
     try {
       const parsed = JSON.parse(preferences.tab_settings_json);
       if (parsed?.visible && parsed?.order) {
-        cloudTabSettingsLoaded.current = true;
-        setTabSettings(parsed);
-        saveTabSettings(parsed.visible, parsed.order);
+        const defaults = getDefaultTabConfig();
+        const validIds = new Set(defaults.order);
+        const visible = parsed.visible.filter((id: string) => validIds.has(id));
+        const order = parsed.order.filter((id: string) => validIds.has(id));
+        for (const id of defaults.order) {
+          if (!order.includes(id)) order.push(id);
+          if (!parsed.order.includes(id) && !visible.includes(id)) visible.push(id);
+        }
+        const migrated = { visible, order };
+        setTabSettings(current => {
+          if (JSON.stringify(current) === JSON.stringify(migrated)) return current;
+          saveTabSettings(visible, order);
+          return migrated;
+        });
+        if (JSON.stringify(migrated) !== JSON.stringify(parsed)) {
+          updatePreference('tab_settings_json', JSON.stringify(migrated));
+        }
       }
     } catch {}
-  }, [preferences.tab_settings_json]);
+  }, [preferences.tab_settings_json, updatePreference]);
 
   // One-time migration: add new tabs from code, remove stale tabs from settings
   const hasMigrated = useRef(false);
@@ -224,20 +401,11 @@ const TextEditor = () => {
   // Player layout (cloud-synced)
   const playerLayout = (preferences.player_layout || 'split') as 'split' | 'stacked' | 'full' | 'wide' | 'eq-wide';
   const setPlayerLayout = useCallback((v: 'split' | 'stacked' | 'full' | 'wide' | 'eq-wide') => updatePreference('player_layout', v), [updatePreference]);
-  // Player/EQ floating state — cloud-synced via text_editor_view_json
-  const editorView = useMemo(() => {
-    try { return JSON.parse(preferences.text_editor_view_json || '{}') as { isPlayerFloating?: boolean; isEqFloating?: boolean }; }
-    catch { return {}; }
-  }, [preferences.text_editor_view_json]);
-  const isPlayerFloating = !!editorView.isPlayerFloating;
-  const isEqFloating = !!editorView.isEqFloating;
-  const updateEditorView = useCallback((patch: { isPlayerFloating?: boolean; isEqFloating?: boolean }) => {
-    const next = { ...editorView, ...patch };
-    updatePreference('text_editor_view_json', JSON.stringify(next));
-  }, [editorView, updatePreference]);
-  const togglePlayerFloating = useCallback(() => updateEditorView({ isPlayerFloating: !isPlayerFloating }), [isPlayerFloating, updateEditorView]);
+  const [isPlayerFloating, setIsPlayerFloating] = useState(false);
+  const togglePlayerFloating = useCallback(() => setIsPlayerFloating(p => !p), []);
   const [isMarkingActive, setIsMarkingActive] = useState(false);
-  const toggleEqFloating = useCallback(() => updateEditorView({ isEqFloating: !isEqFloating }), [isEqFloating, updateEditorView]);
+  const [isEqFloating, setIsEqFloating] = useState(false);
+  const toggleEqFloating = useCallback(() => setIsEqFloating(p => !p), []);
   const [eqPortalTarget, setEqPortalTarget] = useState<HTMLDivElement | null>(null);
 
   // Search in transcript
@@ -248,6 +416,34 @@ const TextEditor = () => {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const playerRef = useRef<SyncAudioPlayerRef>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  // Loshon Kodesh embedded tab
+  const [activeTab, setActiveTab] = useState<string>("player");
+  // Migrate removed workflow tabs to their surviving focused tools.
+  useEffect(() => {
+    if (activeTab === "edit") setActiveTab("player");
+    if (activeTab === "learning") setActiveTab("vocab");
+  }, [activeTab]);
+
+  // AI Polish opt-in — saves Lovable credits when off. Persists in localStorage.
+  const [aiPolishEnabled, setAiPolishEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem('ai_polish_enabled') !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('ai_polish_enabled', aiPolishEnabled ? '1' : '0'); } catch {}
+  }, [aiPolishEnabled]);
+  const [comparePreselect, setComparePreselect] = useState<{ leftId: string; rightId: string } | null>(null);
+  const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
+  const sendTextToLoshonKodesh = useCallback((opts?: { jump?: boolean }) => {
+    const t = (text || "").trim();
+    if (!t) {
+      toast({ title: "אין טקסט לשליחה", description: "כתוב או טען תמלול תחילה", variant: "destructive" });
+      return;
+    }
+    setLkEmbeddedText(t);
+    toast({ title: "הטקסט נשלח ללשון הקודש", description: "פתח את הטאב כדי לבדוק ולהמיר" });
+    if (opts?.jump) setActiveTab("loshon");
+  }, [text]);
 
   const setColumns = (v: number) => updatePreference('editor_columns', v);
   const cycleColumnView = () => {
@@ -260,6 +456,13 @@ const TextEditor = () => {
     columnGap: '2rem',
     columnRule: '1px solid hsl(var(--border))',
   } : {};
+  const textWordCount = useMemo(() => {
+    const trimmed = text.trim();
+    return trimmed ? trimmed.split(/\s+/).length : 0;
+  }, [text]);
+  const isLargeEditorSession = text.length > 18_000 || textWordCount > 2_500 || wordTimings.length > 2_500;
+  const [forceFullSyncView, setForceFullSyncView] = useState(false);
+  const shouldUseFastEditor = isLargeEditorSession && !forceFullSyncView;
 
   // Recover audio from Dexie IndexedDB (last saved blob)
   const tryRecoverAudioFromDexie = useCallback(async () => {
@@ -299,11 +502,11 @@ const TextEditor = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.key === 'F') {
         e.preventDefault();
-        togglePlayerFloating();
+        setIsPlayerFloating(p => !p);
       }
       if (e.ctrlKey && e.shiftKey && e.key === 'E') {
         e.preventDefault();
-        toggleEqFloating();
+        setIsEqFloating(p => !p);
       }
       if (e.ctrlKey && !e.shiftKey && e.key === 'f') {
         e.preventDefault();
@@ -331,10 +534,14 @@ const TextEditor = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
 
-    // Preload SyncAudioPlayer chunk in background so tab opens instantly
-    import("@/components/SyncAudioPlayer").catch(() => {});
+    // Preload SyncAudioPlayer after first paint. Immediate preloading competes
+    // with the editor's first render on long Groq transcripts and can freeze UI.
+    const preloadTimer = window.setTimeout(() => {
+      import("@/components/SyncAudioPlayer").catch(() => {});
+    }, 1200);
 
     return () => {
+      window.clearTimeout(preloadTimer);
       window.removeEventListener('keydown', handleKeyDown);
       if (ownedAudioUrlRef.current) {
         URL.revokeObjectURL(ownedAudioUrlRef.current);
@@ -378,32 +585,47 @@ const TextEditor = () => {
   useEffect(() => {
     // Get text from navigation state or localStorage
     const stateText = location.state?.text;
+    const stateTranscriptId = location.state?.transcriptId as string | undefined;
+    const savedTranscriptId = localStorage.getItem('current_transcript_id');
+    const savedText = localStorage.getItem('current_editing_text');
+    const savedVersions = localStorage.getItem('text_versions');
     if (stateText) {
-      setText(stateText);
+      // Browser refresh preserves router state. For the same transcript, resume
+      // the newer local edit instead of re-importing the original state text.
+      const resumeLocalEdit = Boolean(stateTranscriptId && savedTranscriptId === stateTranscriptId && savedText);
+      const editorText = resumeLocalEdit ? savedText! : stateText;
+      setText(editorText);
       originalTextRef.current = stateText;
+      learningBaselineRef.current = editorText;
       const initialVersion: TextVersion = {
         id: crypto.randomUUID(),
         text: stateText,
         timestamp: new Date(),
         source: 'original'
       };
-      setVersions([initialVersion]);
-      setSelectedVersionId(initialVersion.id);
-      // Save to localStorage for persistence
-      localStorage.setItem('current_editing_text', stateText);
-      localStorage.setItem('text_versions', JSON.stringify([initialVersion]));
+      let restoredVersions: TextVersion[] = [];
+      if (resumeLocalEdit && savedVersions) {
+        try {
+          restoredVersions = JSON.parse(savedVersions).map((version: TextVersion) => ({
+            ...version,
+            timestamp: new Date(version.timestamp),
+          }));
+        } catch { /* fall back to the original version */ }
+      }
+      const initialVersions = restoredVersions.length ? restoredVersions : [initialVersion];
+      setVersions(initialVersions);
+      setSelectedVersionId(initialVersions[initialVersions.length - 1].id);
+      localStorage.setItem('current_editing_text', editorText);
+      localStorage.setItem('text_versions', JSON.stringify(initialVersions));
       // Save initial version to cloud
-      if (location.state?.transcriptId) {
+      if (stateTranscriptId && !resumeLocalEdit) {
         // Defer to avoid calling saveCloudVersion before hook is ready
         setTimeout(() => {
-          saveCloudVersion(stateText, 'original', null, 'תמלול מקורי');
+          saveCloudVersion(stateText, 'original', null, 'תמלול מקורי', { transcriptId: stateTranscriptId });
         }, 500);
       }
     } else {
       // Try to load from localStorage
-      const savedText = localStorage.getItem('current_editing_text');
-      const savedVersions = localStorage.getItem('text_versions');
-      
       if (savedVersions) {
         try {
           const parsedVersions = JSON.parse(savedVersions).map((v: any) => ({
@@ -421,13 +643,23 @@ const TextEditor = () => {
       if (savedText) {
         setText(savedText);
         if (!originalTextRef.current) originalTextRef.current = savedText;
+        if (!learningBaselineRef.current) learningBaselineRef.current = savedText;
       }
     }
 
-    // Track transcript ID for cloud saves
+    // Track transcript ID for cloud saves — persist it so re-entering the editor restores compare/AI versions.
     if (location.state?.transcriptId) {
       transcriptIdRef.current = location.state.transcriptId;
       setTranscriptId(location.state.transcriptId);
+      try { localStorage.setItem('current_transcript_id', location.state.transcriptId); } catch { /* noop */ }
+    } else {
+      try {
+        const saved = localStorage.getItem('current_transcript_id');
+        if (saved) {
+          transcriptIdRef.current = saved;
+          setTranscriptId(saved);
+        }
+      } catch { /* noop */ }
     }
 
     // Load audio URL from navigation state or resolve from Supabase Storage
@@ -463,32 +695,96 @@ const TextEditor = () => {
 
     // Load word timings from state, or fallback to localStorage, or fetch from cloud
     if (location.state?.wordTimings) {
+      wordTimingsRef.current = location.state.wordTimings;
       setWordTimings(location.state.wordTimings);
     } else if (location.state?.transcriptId) {
       // Try fetching word_timings from cloud
+      const requestedAtRevision = wordTimingsRevisionRef.current;
       supabase
         .from('transcripts')
         .select('word_timings')
         .eq('id', location.state.transcriptId)
         .maybeSingle()
         .then(({ data }) => {
-          if (data?.word_timings && Array.isArray(data.word_timings) && data.word_timings.length > 0) {
-            setWordTimings(data.word_timings as unknown as WordTiming[]);
+          if (data?.word_timings && Array.isArray(data.word_timings) && data.word_timings.length > 0
+              && wordTimingsRevisionRef.current === requestedAtRevision) {
+            const cloudTimings = data.word_timings as unknown as WordTiming[];
+            wordTimingsRef.current = cloudTimings;
+            setWordTimings(cloudTimings);
             debugLog.info('TextEditor', `Loaded ${(data.word_timings as any[]).length} word timings from cloud`);
           }
         });
     } else {
       try {
         const saved = localStorage.getItem('last_word_timings');
-        if (saved) setWordTimings(JSON.parse(saved));
+        if (saved) {
+          const restoredTimings = JSON.parse(saved) as WordTiming[];
+          wordTimingsRef.current = restoredTimings;
+          setWordTimings(restoredTimings);
+        }
       } catch { /* corrupted */ }
     }
 
   }, [location.state, tryRecoverAudioFromDexie, setOwnedAudioFromBlob, getAudioUrl, audioFileName]);
 
+  // Direct entry fallback: when /text-editor opens without navigation state,
+  // restore the latest cloud transcript so compare/history are not empty.
+  useEffect(() => {
+    if (transcriptIdRef.current || transcriptId) return;
+    if (location.state?.text || !transcripts.length) return;
+
+    const latest = [...transcripts].sort(
+      (a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime()
+    )[0];
+    if (!latest?.id || !latest.text?.trim()) return;
+
+    const editorText = latest.edited_text || latest.text;
+    transcriptIdRef.current = latest.id;
+    setTranscriptId(latest.id);
+    originalTextRef.current = latest.text;
+    learningBaselineRef.current = editorText;
+    setText(editorText);
+
+    const initialVersion: TextVersion = {
+      id: 'current-original',
+      text: latest.text,
+      timestamp: new Date(latest.created_at),
+      source: 'original',
+      customPrompt: 'תמלול מקורי',
+    };
+    setVersions(prev => prev.length ? prev : [initialVersion]);
+    setSelectedVersionId(initialVersion.id);
+    try {
+      localStorage.setItem('current_transcript_id', latest.id);
+      localStorage.setItem('current_editing_text', editorText);
+    } catch { /* noop */ }
+  }, [transcripts, transcriptId, location.state, setText]);
+
   // Auto-save text and versions to localStorage + debounce cloud save
   const cloudSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  latestTextRef.current = text;
+  latestVersionsRef.current = versions;
+
+  // A refresh can happen before the debounced save fires. Persist the latest
+  // render synchronously so recent corrections survive reload/navigation.
+  useEffect(() => {
+    const flushLocalEdits = () => {
+      try {
+        localStorage.setItem('current_editing_text', latestTextRef.current);
+        if (latestVersionsRef.current.length > 0) {
+          localStorage.setItem('text_versions', JSON.stringify(latestVersionsRef.current));
+        }
+      } catch { /* storage can be unavailable during teardown */ }
+    };
+    window.addEventListener('pagehide', flushLocalEdits);
+    window.addEventListener('beforeunload', flushLocalEdits);
+    return () => {
+      window.removeEventListener('pagehide', flushLocalEdits);
+      window.removeEventListener('beforeunload', flushLocalEdits);
+    };
+  }, []);
+
   useEffect(() => {
     // Debounce localStorage writes (500ms)
     if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current);
@@ -505,7 +801,10 @@ const TextEditor = () => {
       if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
       cloudSaveTimerRef.current = setTimeout(() => {
         if (transcriptIdRef.current) {
-          updateTranscript(transcriptIdRef.current, { edited_text: text });
+          updateTranscript(transcriptIdRef.current, {
+            edited_text: text,
+            word_timings: wordTimingsRef.current,
+          });
           debugLog.info('TextEditor', 'Auto-saved edited_text to cloud');
         }
       }, 3000);
@@ -515,6 +814,11 @@ const TextEditor = () => {
       if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current);
     };
   }, [text, versions]);
+
+  useEffect(() => {
+    if (!wordTimings.length) return;
+    try { localStorage.setItem('last_word_timings', JSON.stringify(wordTimings)); } catch { /* quota/unavailable */ }
+  }, [wordTimings]);
 
   const addVersion = (newText: string, source: TextVersion['source'], customPrompt?: string) => {
     const newVersion: TextVersion = {
@@ -527,16 +831,53 @@ const TextEditor = () => {
     setVersions(prev => [...prev, newVersion]);
     setSelectedVersionId(newVersion.id);
     setText(newText);
-    // Also save to cloud versions
-    if (transcriptId) {
-      saveCloudVersion(newText, source, customPrompt || null, sourceLabels[source] || source);
-    }
+    // Persist immediately to local + cloud so re-renders never lose AI output.
+    // If no cloud transcript yet, create one first then save the version.
+    (async () => {
+      try {
+        let id = transcriptIdRef.current || transcriptId;
+        if (!id) id = await ensureCloudTranscript();
+        if (id) {
+          await saveCloudVersion(newText, source, customPrompt || null, sourceLabels[source] || source, { transcriptId: id });
+        }
+      } catch (e) {
+        console.error('[addVersion] persist failed', e);
+        toast({ title: 'שמירת גרסה נכשלה', description: 'נשמר מקומית בלבד', variant: 'destructive' });
+      }
+    })();
   };
 
-  const handleSaveVersion = (text: string, source: string, engineLabel: string, actionLabel: string) => {
+  const ensureCloudTranscript = useCallback(async (): Promise<string | null> => {
+    if (transcriptIdRef.current) return transcriptIdRef.current;
+    if (transcriptId) return transcriptId;
+    const baseText = (text || '').trim();
+    if (!baseText) {
+      toast({ title: 'אין טקסט לשמירה', variant: 'destructive' });
+      return null;
+    }
+    const navEngine = (location.state as any)?.engine;
+    const engineName = typeof navEngine === 'string' && navEngine ? navEngine : 'manual';
+    try {
+      const created = await saveTranscript(baseText, engineName);
+      if (created?.id) {
+        transcriptIdRef.current = created.id;
+        setTranscriptId(created.id);
+        try { localStorage.setItem('current_transcript_id', created.id); } catch { /* noop */ }
+        toast({ title: 'התמלול נשמר בענן ☁️' });
+        return created.id;
+      }
+    } catch (e: any) {
+      toast({ title: 'שמירה לענן נכשלה', description: e?.message, variant: 'destructive' });
+    }
+    return null;
+  }, [transcriptId, text, saveTranscript, location.state]);
+
+  const handleSaveVersion = async (text: string, source: string, engineLabel: string, actionLabel: string) => {
     // Save version to cloud WITHOUT replacing the main text
-    if (transcriptId) {
-      saveCloudVersion(text, source, engineLabel, actionLabel);
+    let id = transcriptId;
+    if (!id) id = await ensureCloudTranscript();
+    if (id) {
+      saveCloudVersion(text, source, engineLabel, actionLabel, { transcriptId: id });
       toast({ title: 'גרסה נשמרה בענן ☁️', description: `${engineLabel} — ${actionLabel}` });
     } else {
       toast({ title: 'לא ניתן לשמור', description: 'יש צורך בתמלול שמור בענן', variant: 'destructive' });
@@ -562,9 +903,38 @@ const TextEditor = () => {
   );
   const [drivePickerOpen, setDrivePickerOpen] = useState(false);
   const [showCompareAi, setShowCompareAi] = useState(false);
+  const [compareSubTab, setCompareSubTab] = useState("versions");
+  const [aiPreselectSourceId, setAiPreselectSourceId] = useState<string | undefined>(undefined);
 
   const compareVersions = useMemo<TextVersion[]>(() => {
     const byId = new Map<string, TextVersion>();
+
+    const currentTranscriptId = transcriptIdRef.current || transcriptId;
+    const currentCloudTranscript = currentTranscriptId
+      ? transcripts.find(t => t.id === currentTranscriptId)
+      : undefined;
+
+    const originalText = currentCloudTranscript?.text || originalTextRef.current || text;
+    if (originalText?.trim()) {
+      byId.set('current-original', {
+        id: 'current-original',
+        text: originalText,
+        timestamp: currentCloudTranscript?.created_at ? new Date(currentCloudTranscript.created_at) : new Date(0),
+        source: 'original',
+        customPrompt: joinVersionLabels(currentCloudTranscript?.engine, 'תמלול מקורי'),
+      });
+    }
+
+    const editedText = currentCloudTranscript?.edited_text || text;
+    if (editedText?.trim() && editedText !== originalText) {
+      byId.set('current-edited', {
+        id: 'current-edited',
+        text: editedText,
+        timestamp: currentCloudTranscript?.updated_at ? new Date(currentCloudTranscript.updated_at) : new Date(),
+        source: 'manual',
+        customPrompt: 'הטקסט הנוכחי בעורך',
+      });
+    }
 
     for (const v of versions) {
       byId.set(v.id, v);
@@ -577,12 +947,86 @@ const TextEditor = () => {
         text: cv.text,
         timestamp: new Date(cv.created_at),
         source: toKnownSource(cv.source),
-        customPrompt: cv.action_label || cv.engine_label || undefined,
+        customPrompt: joinVersionLabels(cv.engine_label, cv.action_label),
       });
     }
 
-    return Array.from(byId.values()).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-  }, [versions, cloudVersions]);
+    // A transcription engine run creates a transcript record of its own. Include
+    // sibling runs made from the same uploaded audio so Gemini/Groq/local results
+    // can be compared without manually converting them into editor versions.
+    const audioKey = getAudioComparisonKey(currentCloudTranscript?.audio_file_path);
+    if (audioKey) {
+      for (const sibling of transcripts) {
+        if (
+          sibling.id === currentCloudTranscript?.id
+          || getAudioComparisonKey(sibling.audio_file_path) !== audioKey
+          || !sibling.text?.trim()
+        ) continue;
+        byId.set(`transcript-${sibling.id}`, {
+          id: `transcript-${sibling.id}`,
+          text: sibling.edited_text?.trim() || sibling.text,
+          timestamp: new Date(sibling.created_at),
+          source: 'original',
+          customPrompt: joinVersionLabels(
+            sibling.engine,
+            'אותו קובץ אודיו',
+            formatVersionTime(sibling.created_at),
+          ),
+        });
+      }
+    }
+
+    const sorted = Array.from(byId.values()).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    const uniqueByText = new Map<string, TextVersion>();
+    const duplicateCounts = new Map<string, number>();
+    for (const version of sorted) {
+      const signature = version.text.normalize("NFKC").replace(/\s+/g, " ").trim();
+      if (!uniqueByText.has(signature)) {
+        uniqueByText.set(signature, { ...version });
+        duplicateCounts.set(signature, 1);
+        continue;
+      }
+      duplicateCounts.set(signature, (duplicateCounts.get(signature) || 1) + 1);
+    }
+    return Array.from(uniqueByText.entries()).map(([signature, version]) => {
+      const count = duplicateCounts.get(signature) || 1;
+      return count === 1
+        ? version
+        : {
+            ...version,
+            customPrompt: joinVersionLabels(version.customPrompt, `${count} הרצות עם טקסט זהה`),
+          };
+    });
+  }, [versions, cloudVersions, transcripts, transcriptId, text]);
+
+  const sendVersionToCompare = useCallback((versionId: string) => {
+    const original = compareVersions.find(v => v.source === 'original') || compareVersions[0];
+    const target = compareVersions.find(v => v.id === versionId);
+    if (!original || !target) {
+      toast({ title: 'אין מספיק גרסאות להשוואה', variant: 'destructive' });
+      return;
+    }
+    setComparePreselect({ leftId: original.id, rightId: target.id });
+    setCompareSubTab("versions");
+    setActiveTab('compare');
+    toast({ title: 'נשלח להשוואה' });
+  }, [compareVersions]);
+
+  const sendVersionToAiEditor = useCallback((versionId: string) => {
+    const target = compareVersions.find(v => v.id === versionId);
+    if (!target) {
+      toast({ title: 'גרסה לא נמצאה', variant: 'destructive' });
+      return;
+    }
+    setAiPreselectSourceId(versionId);
+    // If we're inside the compare tab, open the inline AI editor; otherwise jump to AI tab
+    if (activeTab === 'compare') {
+      setShowCompareAi(true);
+    } else {
+      setActiveTab('ai');
+    }
+    toast({ title: 'נשלח לעריכת AI' });
+  }, [compareVersions, activeTab]);
 
   const handleAiQuickAction = async (action: 'fix_errors' | 'split_paragraphs' | 'fix_and_split') => {
     if (!text.trim()) {
@@ -673,8 +1117,13 @@ const TextEditor = () => {
   // first ניקוד click is instant instead of waiting ~5s for a cold start.
   useEffect(() => {
     const ctrl = new AbortController();
-    fetch(`${getServerUrl()}/nikud/warmup`, { method: 'POST', signal: ctrl.signal }).catch(() => {});
-    return () => ctrl.abort();
+    const timer = window.setTimeout(() => {
+      fetch(`${getServerUrl()}/nikud/warmup`, { method: 'POST', signal: ctrl.signal }).catch(() => {});
+    }, 2500);
+    return () => {
+      window.clearTimeout(timer);
+      ctrl.abort();
+    };
   }, []);
 
   const handleEditorChange = useCallback((newText: string) => {
@@ -683,27 +1132,30 @@ const TextEditor = () => {
     if (manualVersionTimerRef.current) clearTimeout(manualVersionTimerRef.current);
     manualVersionTimerRef.current = setTimeout(() => {
       addVersion(newText, 'manual');
-      // Learn from user corrections
-      if (originalTextRef.current && newText !== originalTextRef.current) {
-        learnCorrections(originalTextRef.current, newText, 'manual');
+      // Learn from user corrections — compare against the learning baseline
+      // (latest AI/loaded text), so AI Polish changes don't pollute the dataset.
+      const baseline = learningBaselineRef.current || originalTextRef.current;
+      if (baseline && newText !== baseline) {
+        learnCorrections(baseline, newText, 'manual');
+        // Advance the baseline so the next manual edit only diffs from here.
+        learningBaselineRef.current = newText;
       }
     }, 2000);
   }, [learnCorrections]);
 
-  // Throttle playerTime updates – only re-render when active word index changes.
-  // This prevents hundreds of re-renders per second while audio plays.
+  // Keep interpolated and inserted words accurate while bounding full editor
+  // renders to 20 Hz.
   const handlePlayerTimeUpdate = useCallback((t: number) => {
     playerTimeRef.current = t;
     if (!wordTimings.length) {
       setPlayerTime(t);
       return;
     }
-    let idx = -1;
-    for (let i = wordTimings.length - 1; i >= 0; i--) {
-      if (t >= wordTimings[i].start) { idx = i; break; }
-    }
-    if (idx !== lastWordIdxRef.current) {
+    const idx = findActiveWordIndex(wordTimings, t);
+    const elapsed = Math.abs(t - lastPlayerRenderAtRef.current);
+    if (idx !== lastWordIdxRef.current || elapsed >= 0.05 || t < lastPlayerRenderAtRef.current) {
       lastWordIdxRef.current = idx;
+      lastPlayerRenderAtRef.current = t;
       setPlayerTime(t);
     }
   }, [wordTimings]);
@@ -717,34 +1169,78 @@ const TextEditor = () => {
   const handleSyncedWordReplace = useCallback((wordIndex: number, replacement: string) => {
     const fixed = replacement.trim();
     const isDelete = fixed === "__DELETE__";
+    const visibleWords = latestTextRef.current.trim().split(/\s+/).filter(Boolean);
+    const storedTimings = wordTimingsRef.current;
+    const timingsMatchVisibleText = storedTimings.length === visibleWords.length
+      && storedTimings.every((timing, index) => timing.word === visibleWords[index]);
+    const currentTimings = timingsMatchVisibleText
+      ? storedTimings
+      : storedTimings.length === visibleWords.length
+        ? storedTimings.map((timing, index) => ({ ...timing, word: visibleWords[index] }))
+        : alignEditedToWhisper(visibleWords, storedTimings);
+    if (!currentTimings.length || wordIndex < 0 || wordIndex >= currentTimings.length) return;
+    if (!fixed && !isDelete) return;
 
-    setWordTimings((prev) => {
-      if (!prev.length || wordIndex < 0 || wordIndex >= prev.length) return prev;
-      if (isDelete) {
-        const next = prev.filter((_, i) => i !== wordIndex);
-        setText(next.map((w) => w.word).join(' '));
-        return next;
-      }
-      if (!fixed) return prev;
-      const next = prev.map((w, i) => (i === wordIndex ? { ...w, word: fixed } : w));
-      setText(next.map((w) => w.word).join(' '));
-      return next;
-    });
-  }, []);
+    const correctedAt = Date.now();
+    const originalTiming = currentTimings[wordIndex];
+    const replacementWords = isDelete ? [] : fixed.split(/\s+/).filter(Boolean);
+    const duration = Math.max(0, originalTiming.end - originalTiming.start);
+    const replacementTimings = replacementWords.map((word, replacementIndex) => ({
+      ...originalTiming,
+      word,
+      start: originalTiming.start + (duration * replacementIndex) / replacementWords.length,
+      end: originalTiming.start + (duration * (replacementIndex + 1)) / replacementWords.length,
+      correctionOriginal: originalTiming.correctionOriginal || originalTiming.word,
+      correctedAt,
+    }));
+    const next = [
+      ...currentTimings.slice(0, wordIndex),
+      ...replacementTimings,
+      ...currentTimings.slice(wordIndex + 1),
+    ];
+    const nextText = next.map((w) => w.word).join(' ');
+    wordTimingsRef.current = next;
+    wordTimingsRevisionRef.current += 1;
+    setWordTimings(next);
+    handleEditorChange(nextText);
+    const correctedValue = isDelete ? '' : fixed;
+    if (originalTiming.word !== correctedValue && audioBlob) {
+      const contextStart = Math.max(0, wordIndex - 4);
+      const contextEnd = Math.min(next.length, wordIndex + replacementTimings.length + 4);
+      const context = next.slice(contextStart, contextEnd);
+      const candidate: AudioLearningCandidate = {
+        id: crypto.randomUUID(),
+        recordingKey: transcriptId || audioFileName || 'current-transcript',
+        original: originalTiming.word,
+        corrected: correctedValue,
+        operation: getAudioLearningOperation(originalTiming.word, correctedValue),
+        referenceText: context.map((item) => item.word).join(' '),
+        start: Math.max(0, Math.min(context[0]?.start ?? originalTiming.start, originalTiming.start) - 1),
+        end: Math.max(context[context.length - 1]?.end ?? originalTiming.end, originalTiming.end) + 1,
+        createdAt: new Date().toISOString(),
+      };
+      updateAudioLearningCandidates((current) => [
+        candidate,
+        ...current.filter((item) => !(
+          item.recordingKey === candidate.recordingKey
+          && item.original === candidate.original
+          && item.corrected === candidate.corrected
+          && Math.abs(item.start - candidate.start) < 0.25
+        )),
+      ]);
+    }
+    try {
+      localStorage.setItem('current_editing_text', nextText);
+      localStorage.setItem('last_word_timings', JSON.stringify(next));
+    } catch { /* quota/unavailable */ }
+    addVersion(nextText, 'manual', isDelete ? 'מחיקת מילה' : `תיקון ידני: ${originalTiming.word} → ${fixed}`);
+  }, [audioBlob, audioFileName, handleEditorChange, transcriptId, updateAudioLearningCandidates]);
 
   const buildSyncedTimings = useCallback((editedText: string): WordTiming[] | null => {
     if (!wordTimings.length) return null;
-    const totalDuration = wordTimings[wordTimings.length - 1]?.end || 0;
-    if (totalDuration <= 0) return null;
     const words = editedText.split(/\s+/).filter(Boolean);
     if (words.length === 0) return null;
-
-    const wordDuration = totalDuration / words.length;
-    return words.map((word, i) => ({
-      word,
-      start: i * wordDuration,
-      end: (i + 1) * wordDuration,
-    }));
+    return alignEditedToWhisper(words, wordTimings);
   }, [wordTimings]);
 
   const handleSyncToPlayer = useCallback((editedText: string) => {
@@ -758,6 +1254,118 @@ const TextEditor = () => {
     setText(editedText);
     toast({ title: "מסונכרן לנגן ✅", description: `${newTimings.length} מילים סונכרנו עם האודיו` });
   }, [buildSyncedTimings]);
+
+  const handleForcedAlignment = useCallback(async () => {
+    const referenceText = latestTextRef.current.trim();
+    if (!audioBlob || !referenceText) {
+      toast({
+        title: "לא ניתן לבצע יישור מדויק",
+        description: "נדרשים אודיו וטקסט לפני הפעלת היישור",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    alignmentAbortRef.current?.abort();
+    const controller = new AbortController();
+    alignmentAbortRef.current = controller;
+    setForcedAlignmentState({ status: 'aligning' });
+
+    const approximateTimings = buildSyncedTimings(referenceText) || wordTimingsRef.current;
+    const formData = new FormData();
+    formData.append('file', audioBlob, audioFileName || 'audio.webm');
+    formData.append('text', referenceText);
+    formData.append('language', 'he');
+    if (approximateTimings.length > 0) {
+      formData.append('approximate_timings', JSON.stringify(approximateTimings));
+    }
+
+    try {
+      const response = await fetch(`${getServerUrl()}/align-text`, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || `Alignment failed (${response.status})`);
+
+      if (latestTextRef.current.trim() !== referenceText) {
+        setForcedAlignmentState({ status: 'partial' });
+        toast({
+          title: "הטקסט השתנה בזמן היישור",
+          description: "התוצאה לא הוחלה כדי לא לדרוס את העריכה החדשה",
+        });
+        return;
+      }
+
+      const rawTimings = Array.isArray(result?.wordTimings)
+        ? result.wordTimings.filter((item: WordTiming) =>
+          item
+          && typeof item.word === 'string'
+          && Number.isFinite(item.start)
+          && Number.isFinite(item.end)
+          && item.end >= item.start
+        )
+        : [];
+      const monotonic = rawTimings.every((item: WordTiming, index: number) =>
+        index === 0 || item.start >= rawTimings[index - 1].start
+      );
+      const alignmentCoverage = Number(result?.coverage) || 0;
+      const confidence = Number(result?.meanConfidence) || 0;
+      // WhisperX confidence is conservative for Hebrew and especially chanting.
+      // Normalize 0.70 as excellent while still requiring broad word coverage.
+      const quality = alignmentCoverage * Math.min(1, confidence / 0.7);
+
+      if (!monotonic || alignmentCoverage < 0.72 || confidence < 0.18 || rawTimings.length < 3) {
+        setForcedAlignmentState({ status: 'error', coverage: quality, confidence });
+        toast({
+          title: "היישור לא עבר בדיקת איכות",
+          description: `איכות ${Math.round(quality * 100)}% — התזמון הקיים נשמר ללא שינוי`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const words = referenceText.split(/\s+/).filter(Boolean);
+      const alignedTimings = fitTimingsToDuration(
+        alignEditedToWhisper(words, rawTimings),
+        Number(result?.audioDuration) || 0,
+      );
+      wordTimingsRef.current = alignedTimings;
+      wordTimingsRevisionRef.current += 1;
+      setWordTimings(alignedTimings);
+      setSyncEnabled(true);
+      setForcedAlignmentState({
+        status: quality >= 0.72 ? 'aligned' : 'partial',
+        coverage: quality,
+        confidence,
+      });
+      try {
+        localStorage.setItem('last_word_timings', JSON.stringify(alignedTimings));
+      } catch { /* quota/unavailable */ }
+
+      const id = transcriptIdRef.current;
+      if (id) {
+        await updateTranscript(id, { word_timings: alignedTimings });
+      }
+      toast({
+        title: "הטקסט יושר לאודיו",
+        description: `${Math.round(quality * 100)}% איכות • ${alignedTimings.length} מילים`,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setForcedAlignmentState({ status: 'error' });
+      toast({
+        title: "היישור המדויק נכשל",
+        description: error instanceof Error ? error.message : String(error),
+        variant: "destructive",
+      });
+    } finally {
+      if (alignmentAbortRef.current === controller) alignmentAbortRef.current = null;
+    }
+  }, [audioBlob, audioFileName, buildSyncedTimings, updateTranscript]);
+
+  useEffect(() => () => alignmentAbortRef.current?.abort(), []);
 
   const handleSaveAndReplaceOriginal = useCallback(async (
     editedText: string,
@@ -780,8 +1388,8 @@ const TextEditor = () => {
 
     setText(editedText);
     if (syncedTimings) setWordTimings(syncedTimings);
-    if (transcriptId) {
-      saveCloudVersion(editedText, source, engineLabel, `${actionLabel} • החלפת מקור`);
+    if (id) {
+      saveCloudVersion(editedText, source, engineLabel, `${actionLabel} • החלפת מקור`, { transcriptId: id });
     }
 
     toast({
@@ -840,8 +1448,8 @@ const TextEditor = () => {
       return;
     }
 
-    if (transcriptId) {
-      saveCloudVersion(editedText, source, engineLabel, `${actionLabel} • שכפל ושמור`);
+    if (id) {
+      saveCloudVersion(editedText, source, engineLabel, `${actionLabel} • שכפל ושמור`, { transcriptId: id });
     }
 
     toast({
@@ -933,6 +1541,49 @@ const TextEditor = () => {
     wordTimings,
   ]);
 
+  // Text of the "original" version — used as the baseline reference for the AI editor.
+  const originalVersionText = useMemo(
+    () => compareVersions.find(v => v.source === 'original')?.text || originalTextRef.current,
+    [compareVersions],
+  );
+
+  // The AI dual-editor is rendered in two places (the "ai" tab and inside the
+  // "compare" tab). Both share identical wiring; this builder keeps them in sync.
+  // `withColumns` mirrors the multi-column layout only in the standalone AI tab.
+  const renderAiEditor = (opts: { label: string; withColumns?: boolean }) => (
+    <div
+      style={{
+        fontSize: `${fontSize}px`,
+        fontFamily,
+        color: textColor,
+        lineHeight,
+        ...(opts.withColumns ? columnStyle : {}),
+      }}
+    >
+      <LazyErrorBoundary label={opts.label}>
+        <AIEditorDual
+          text={text}
+          onTextChange={(newText, source, customPrompt) => {
+            setText(newText);
+            addVersion(newText, source as TextVersion['source'], customPrompt);
+            // AI rewrote the text — advance baseline so we only learn from
+            // future manual edits, not the AI's stylistic changes.
+            if (typeof source === 'string' && source.startsWith('ai-')) {
+              learningBaselineRef.current = newText;
+            }
+          }}
+          onSaveVersion={handleSaveVersion}
+          onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
+          onDuplicateAndSave={handleDuplicateAndSave}
+          onSyncToPlayer={handleSyncToPlayer}
+          versions={compareVersions}
+          originalText={originalVersionText}
+          initialSourceId={aiPreselectSourceId}
+        />
+      </LazyErrorBoundary>
+    </div>
+  );
+
   return (
     <Suspense fallback={null}>
     <div className="mobile-optimized-page text-editor-page min-h-screen bg-background p-2 md:p-4" dir="rtl">
@@ -987,7 +1638,6 @@ const TextEditor = () => {
               visibleTabs={visibleTabs}
               tabOrder={tabOrder}
               onVisibilityChange={(v) => {
-                cloudTabSettingsLoaded.current = true; // prevent late cloud overwrite
                 setTabSettings(prev => {
                   const next = { ...prev, visible: v };
                   updatePreference('tab_settings_json', JSON.stringify(next));
@@ -995,7 +1645,6 @@ const TextEditor = () => {
                 });
               }}
               onOrderChange={(o) => {
-                cloudTabSettingsLoaded.current = true; // prevent late cloud overwrite
                 setTabSettings(prev => {
                   const next = { ...prev, order: o };
                   updatePreference('tab_settings_json', JSON.stringify(next));
@@ -1124,20 +1773,74 @@ const TextEditor = () => {
               <Cloud className="w-3.5 h-3.5 text-yellow-600" />
               ייצא ל-Drive
             </Button>
-            <TextExportMenu
-              getText={() => text}
-              filename={audioFileName || 'תמלול'}
-              subject={audioFileName || 'תמלול'}
+            <div className="w-px h-5 bg-border mx-1 hidden sm:block" />
+            <Button
+              variant="outline"
               size="sm"
-              label="ייצוא/שיתוף"
-            />
+              className="h-7 text-xs gap-1 border-yellow-500/50 hover:bg-yellow-500/10"
+              onClick={() => sendTextToLoshonKodesh()}
+              title="שלח את הטקסט לטאב לשון הקודש (השאר אותי כאן)"
+            >
+              <ShoppingBasket className="w-3.5 h-3.5 text-yellow-600" />
+              שלח ללשון הקודש
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1 border-yellow-500/50 hover:bg-yellow-500/10"
+              onClick={() => sendTextToLoshonKodesh({ jump: true })}
+              title="שלח את הטקסט וקפוץ לטאב לשון הקודש"
+            >
+              <ScrollText className="w-3.5 h-3.5 text-yellow-600" />
+              פתח לשון הקודש
+            </Button>
           </div>
         )}
 
+        {/* Title editor — always visible above tabs */}
+        <div className="mb-3 flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <TranscriptTitleEditor
+              transcriptId={transcriptId}
+              transcripts={transcripts}
+              updateTranscript={updateTranscript}
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30 shrink-0"
+            title="נקה הכל — טקסט, אודיו ותזמונים"
+            onClick={async () => {
+              const ok = window.confirm("לנקות את כל התוכן בעורך? פעולה זו תמחק את הטקסט, קובץ האודיו והתזמונים מהזיכרון המקומי. רשומות שכבר נשמרו בענן יישארו.");
+              if (!ok) return;
+              try {
+                setText("");
+                setWordTimings([]);
+                if (audioUrl) { try { URL.revokeObjectURL(audioUrl); } catch { /* noop */ } }
+                setAudioUrl(null);
+                setAudioBlob(null);
+                setAudioFileName("");
+                transcriptIdRef.current = null;
+                setTranscriptId(null);
+                try { await db.audioBlobs.delete('last_audio'); } catch { /* noop */ }
+                try { localStorage.removeItem('current_transcript_id'); } catch { /* noop */ }
+                try { localStorage.removeItem('editor_text'); } catch { /* noop */ }
+                try { localStorage.removeItem('editor_word_timings'); } catch { /* noop */ }
+                toast({ title: "נוקה בהצלחה", description: "הטקסט והאודיו הוסרו מהעורך." });
+              } catch (e) {
+                toast({ title: "שגיאה בניקוי", description: (e as Error).message, variant: "destructive" });
+              }
+            }}
+          >
+            <Eraser className="w-4 h-4" />
+            נקה
+          </Button>
+        </div>
 
 
         {/* Main Content */}
-        <Tabs defaultValue="edit" className="w-full" dir="rtl">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" dir="rtl">
           {/* Primary tabs — core workflow */}
           {(() => {
             const orderedPrimary = tabOrder
@@ -1173,13 +1876,40 @@ const TextEditor = () => {
           })()}
 
           <TabsContent value="player" className="flex flex-col gap-3">
-            <LazyErrorBoundary label="נגן מסונכרן">
+            <LazyErrorBoundary label="עורך טקסט">
 
             {/* ── Toolbar: layout controls ── */}
             <div className="flex items-center justify-between gap-3" dir="rtl">
 
               {/* Left: floating toggles */}
               <div className="flex items-center gap-2">
+                <Button
+                  variant={forcedAlignmentState.status === 'aligned' ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-8 px-3 text-xs gap-1.5"
+                  onClick={handleForcedAlignment}
+                  disabled={!audioBlob || !text.trim() || forcedAlignmentState.status === 'aligning'}
+                  title="יישור כפוי של הטקסט המתוקן לאודיו באמצעות WhisperX"
+                >
+                  {forcedAlignmentState.status === 'aligning'
+                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    : <AudioWaveform className="w-3.5 h-3.5" />}
+                  {forcedAlignmentState.status === 'aligning' ? 'מיישר...' : 'יישור מדויק'}
+                </Button>
+                {forcedAlignmentState.coverage != null && (
+                  <span
+                    className={`text-[10px] rounded border px-2 py-1 ${
+                      forcedAlignmentState.status === 'error'
+                        ? 'border-destructive/40 text-destructive'
+                        : forcedAlignmentState.status === 'aligned'
+                          ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+                          : 'border-amber-500/40 text-amber-700 dark:text-amber-300'
+                    }`}
+                    title="מדד איכות משולב של כיסוי וביטחון אקוסטי"
+                  >
+                    {Math.round(forcedAlignmentState.coverage * 100)}% איכות
+                  </span>
+                )}
                 <Button
                   variant={isPlayerFloating ? 'default' : 'outline'}
                   size="sm"
@@ -1266,6 +1996,24 @@ const TextEditor = () => {
                   eqWide={playerLayout === 'eq-wide'}
                   eqFloating={isEqFloating}
                   eqPortalTarget={eqPortalTarget}
+                  learningWidget={!shouldUseFastEditor ? (
+                    <>
+                      <LearningRegressionPanel
+                        audioBlob={audioBlob}
+                        audioFileName={audioFileName}
+                        currentText={text}
+                        recordingKey={transcriptId || audioFileName || 'current-transcript'}
+                        onCandidateReady={(candidateText, label) => addVersion(candidateText, 'manual', label)}
+                      />
+                      <AudioLearningQueue
+                        audioBlob={audioBlob}
+                        audioFileName={audioFileName}
+                        candidates={audioLearningCandidates}
+                        onRemove={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
+                        onApproved={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
+                      />
+                    </>
+                  ) : undefined}
                 />
               </div>
               </Suspense>
@@ -1320,7 +2068,32 @@ const TextEditor = () => {
             )}
 
             {/* ── Sync transcript mirror ── */}
-            {playerLayout !== 'full' && (
+            {playerLayout !== 'full' && shouldUseFastEditor && (
+              <div className="rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden p-3 space-y-3" dir="rtl">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="text-xs text-muted-foreground">
+                    מצב מהיר פעיל לתמלול גדול · {textWordCount.toLocaleString('he-IL')} מילים
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs gap-1.5"
+                    onClick={() => setForceFullSyncView(true)}
+                  >
+                    <Link className="w-3.5 h-3.5" />
+                    פתח סנכרון מלא
+                  </Button>
+                </div>
+                <Textarea
+                  value={text}
+                  onChange={(event) => handlePlayerEditorChange(event.target.value)}
+                  dir="rtl"
+                  className="min-h-[55vh] resize-y text-base leading-8"
+                  style={{ fontFamily, fontSize: `${fontSize}px`, lineHeight }}
+                />
+              </div>
+            )}
+            {playerLayout !== 'full' && !shouldUseFastEditor && (
               <div className="rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden" style={{ minHeight: '55vh' }}>
                 <SyncMirrorLayout
                   wordTimings={wordTimings}
@@ -1329,63 +2102,39 @@ const TextEditor = () => {
                   onTextChange={handlePlayerEditorChange}
                   onWordReplace={handleSyncedWordReplace}
                   onWordClick={(time) => setPlayerTime(time)}
+                  correctionStorageKey={transcriptId || audioFileName || 'current-transcript'}
                   fontSize={fontSize}
                   fontFamily={fontFamily}
                   syncEnabled={syncEnabled}
                   searchQuery={transcriptSearchOpen ? transcriptSearchQuery : undefined}
                   searchActiveIndex={transcriptSearchIdx}
                   onSearchMatchCount={setTranscriptMatchCount}
-                  onSaveReplace={() => handleSaveAndReplaceOriginal(text, 'manual', 'נגן מסונכרן', 'שמירה מהנגן')}
-                  onDuplicateSave={(newName) => handleDuplicateAndSave(text, 'manual', 'נגן מסונכרן', 'שכפול מהנגן', newName)}
+                  onSaveReplace={() => handleSaveAndReplaceOriginal(text, 'manual', 'עורך טקסט', 'שמירה מהעורך')}
+                  onDuplicateSave={(newName) => handleDuplicateAndSave(text, 'manual', 'עורך טקסט', 'שכפול מהעורך', newName)}
                   learningProfiles={learningProfiles}
                   learningEnabled={true}
                   onSaveLearning={handleSaveLearningToProfile}
-                />
-              </div>
-            )}
-
-            </LazyErrorBoundary>
-          </TabsContent>
-
-          <TabsContent value="edit" className="flex flex-col gap-3">
-            {/* Marking toolbar — always visible, text display only when active */}
-            <LazyErrorBoundary label="סימון ויזואלי">
-              <TextMarkingOverlay
-                text={text}
-                onTextChange={handleEditorChange}
-                fontSize={fontSize}
-                fontFamily={fontFamily}
-                lineHeight={lineHeight}
-                toolbarOnly={!isMarkingActive}
-                onActiveChange={setIsMarkingActive}
-              />
-            </LazyErrorBoundary>
-            {/* Editable text — hidden when marking analysis is shown */}
-            {!isMarkingActive && (
-              <div
-                style={{
-                  fontSize: `${fontSize}px`,
-                  fontFamily: fontFamily,
-                  color: textColor,
-                  lineHeight: lineHeight,
-                }}
-              >
-                <RichTextEditor 
-                  text={text} 
-                  onChange={handleEditorChange}
-                  columnStyle={columnStyle}
-                  transcriptName={audioFileName}
-                  audioBlob={audioBlob}
-                  audioFileName={audioFileName}
-                  onSaveReplaceOriginal={() => handleSaveAndReplaceOriginal(text, 'manual', 'עורך טקסט', 'שמירה מסרגל העורך')}
-                  onDuplicateSave={() => handleDuplicateAndSave(text, 'manual', 'עורך טקסט', 'שכפול מסרגל העורך')}
+                  enableRichEdit
+                  richColumnStyle={columnStyle}
                   onWordCorrected={(original, corrected) => {
                     debugLog.info('TextEditor', `Spell correction: "${original}" → "${corrected}"`);
                   }}
                 />
               </div>
             )}
+
+            </LazyErrorBoundary>
           </TabsContent>
+
+
+          <TabsContent value="loshon" className="flex flex-col gap-3">
+            <LazyErrorBoundary label="לשון הקודש">
+              <Suspense fallback={<div className="flex items-center gap-2 text-sm text-muted-foreground p-4"><Loader2 className="w-4 h-4 animate-spin" />טוען לשון הקודש…</div>}>
+                <LoshonKodeshRules embeddedText={lkEmbeddedText} defaultTab="test" embedded />
+              </Suspense>
+            </LazyErrorBoundary>
+          </TabsContent>
+
 
           <TabsContent value="speakers" className="flex flex-col gap-3">
             <CollapsibleWidget title="זיהוי דוברים" storageKey="te_speakers">
@@ -1407,83 +2156,96 @@ const TextEditor = () => {
           </TabsContent>
 
           <TabsContent value="ai" className="flex flex-col gap-3">
-            <div
-              style={{
-                fontSize: `${fontSize}px`,
-                fontFamily: fontFamily,
-                color: textColor,
-                lineHeight: lineHeight,
-                ...columnStyle,
-              }}
-            >
-              <LazyErrorBoundary label="עורך AI"><AIEditorDual 
-                text={text} 
-                onTextChange={(newText, source, customPrompt) => {
-                  setText(newText);
-                  addVersion(newText, source as TextVersion['source'], customPrompt);
-                }}
-                onSaveVersion={handleSaveVersion}
-                onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
-                onDuplicateAndSave={handleDuplicateAndSave}
-                onSyncToPlayer={handleSyncToPlayer}
-              /></LazyErrorBoundary>
+            <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-primary"
+                  checked={aiPolishEnabled}
+                  onChange={(e) => setAiPolishEnabled(e.target.checked)}
+                />
+                <span className="text-sm font-medium">הפעל עריכת AI (AI Polish)</span>
+              </label>
+              <span className="text-[11px] text-muted-foreground">
+                {aiPolishEnabled
+                  ? "פעיל — קריאות AI צורכות קרדיטים של Lovable"
+                  : "כבוי — חוסך קרדיטים. אפשר להפעיל בכל עת."}
+              </span>
             </div>
+
+            {aiPolishEnabled ? (
+              renderAiEditor({ label: "עורך AI", withColumns: true })
+            ) : (
+              <div className="rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">
+                עריכת AI כבויה. סמן את ה-V למעלה כדי להפעיל אותה ולהשתמש בשיפורי הניסוח, פיסוק והפסקאות.
+              </div>
+            )}
+
+            <LazyErrorBoundary label="גרסאות AI">
+              <AIVersionsGrid
+                transcriptId={transcriptId}
+                audioFilePath={(location.state as any)?.audioFilePath || null}
+                onOpenInEditor={(t) => { setText(t); learningBaselineRef.current = t; }}
+                onCreateCloudTranscript={ensureCloudTranscript}
+                onSendToCompare={sendVersionToCompare}
+              />
+            </LazyErrorBoundary>
           </TabsContent>
 
           <TabsContent value="compare" className="flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
-              <p className="text-xs text-muted-foreground">
-                במסך הזה אפשר גם להשוות בין כל הגרסאות (מקומי + ענן) וגם להריץ עריכת AI ישירות.
-              </p>
-              <Button
-                variant={showCompareAi ? "default" : "outline"}
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => setShowCompareAi((v) => !v)}
-              >
-                {showCompareAi ? "הסתר עריכת AI" : "עריכת AI במסך ההשוואה"}
-              </Button>
-            </div>
+            <Tabs value={compareSubTab} onValueChange={setCompareSubTab} dir="rtl">
+              <TabsList className="grid w-full grid-cols-2 max-w-md">
+                <TabsTrigger value="versions" className="text-xs">גרסאות (Diff)</TabsTrigger>
+                <TabsTrigger value="engines" className="text-xs">מנועי AI (A/B)</TabsTrigger>
+              </TabsList>
 
-            {compareVersions.length >= 2 ? (
-              <LazyErrorBoundary label="השוואה מתקדמת"><AdvancedDiffView 
-                versions={compareVersions}
-                fontSize={fontSize}
-                fontFamily={fontFamily}
-                textColor={textColor}
-                lineHeight={lineHeight}
-                onApplyVersion={(newText) => {
-                  setText(newText);
-                }}
-              /></LazyErrorBoundary>
-            ) : (
-              <div className="text-center py-6 text-muted-foreground text-sm">
-                יש צורך בלפחות שתי גרסאות כדי להשוות
-              </div>
-            )}
+              <TabsContent value="versions" className="flex flex-col gap-3 mt-3">
+                <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">
+                    השוואה בין כל הגרסאות (מקומי + ענן) — וגם אפשרות להריץ עריכת AI ישירות מכאן.
+                  </p>
+                  <Button
+                    variant={showCompareAi ? "default" : "outline"}
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setShowCompareAi((v) => !v)}
+                  >
+                    {showCompareAi ? "הסתר עריכת AI" : "עריכת AI במסך ההשוואה"}
+                  </Button>
+                </div>
 
-            {showCompareAi && (
-              <div
-                style={{
-                  fontSize: `${fontSize}px`,
-                  fontFamily: fontFamily,
-                  color: textColor,
-                  lineHeight: lineHeight,
-                }}
-              >
-                <LazyErrorBoundary label="עורך AI בתוך השוואה"><AIEditorDual
-                  text={text}
-                  onTextChange={(newText, source, customPrompt) => {
-                    setText(newText);
-                    addVersion(newText, source as TextVersion['source'], customPrompt);
-                  }}
-                  onSaveVersion={handleSaveVersion}
-                  onSaveAndReplaceOriginal={handleSaveAndReplaceOriginal}
-                  onDuplicateAndSave={handleDuplicateAndSave}
-                  onSyncToPlayer={handleSyncToPlayer}
-                /></LazyErrorBoundary>
-              </div>
-            )}
+                {compareVersions.length >= 2 ? (
+                  <LazyErrorBoundary label="השוואה מתקדמת"><AdvancedDiffView 
+                    versions={compareVersions}
+                    fontSize={fontSize}
+                    fontFamily={fontFamily}
+                    textColor={textColor}
+                    lineHeight={lineHeight}
+                    preselectedLeftId={comparePreselect?.leftId}
+                    preselectedRightId={comparePreselect?.rightId}
+                    onApplyVersion={(newText) => {
+                      setText(newText);
+                    }}
+                    onSendToAiEditor={sendVersionToAiEditor}
+                    preferenceStorageKey={transcriptIdRef.current || transcriptId || "current"}
+                  /></LazyErrorBoundary>
+                ) : (
+                  <div className="text-center py-6 text-muted-foreground text-sm">
+                    יש צורך בלפחות שתי גרסאות כדי להשוות
+                  </div>
+                )}
+
+                {showCompareAi && aiPolishEnabled && (
+                  renderAiEditor({ label: "עורך AI בתוך השוואה" })
+                )}
+              </TabsContent>
+
+              <TabsContent value="engines" className="flex flex-col gap-3 mt-3">
+                <CollapsibleWidget title="השוואת מנועי AI" storageKey="te_ab_compare">
+                  <LazyErrorBoundary label="השוואת מנועים"><EngineCompare text={text} /></LazyErrorBoundary>
+                </CollapsibleWidget>
+              </TabsContent>
+            </Tabs>
           </TabsContent>
 
           <TabsContent value="pipeline" className="flex flex-col gap-3">
@@ -1516,26 +2278,19 @@ const TextEditor = () => {
             </CollapsibleWidget>
           </TabsContent>
 
-          <TabsContent value="learning" className="flex flex-col gap-3">
-            <CollapsibleWidget title="למידת תיקונים" storageKey="te_learning">
-              <LazyErrorBoundary label="למידת תיקונים"><CorrectionLearningPanel /></LazyErrorBoundary>
-            </CollapsibleWidget>
-          </TabsContent>
           <TabsContent value="vocab" className="flex flex-col gap-3">
-            <CollapsibleWidget title="בדיקת מילון" storageKey="te_dict_validator">
-              <LazyErrorBoundary label="בדיקת מילון">
-                <DictionaryValidator text={text} onApplyFix={(original, fixed) => {
-                  const newText = text.replace(new RegExp(`\\b${original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`), fixed);
-                  if (newText !== text) {
-                    setText(newText);
-                    toast({ title: "תוקן", description: `"${original}" → "${fixed}"` });
-                  }
-                }} />
-              </LazyErrorBoundary>
-            </CollapsibleWidget>
-            <CollapsibleWidget title="אוצר מילים" storageKey="te_vocab">
-              <LazyErrorBoundary label="אוצר מילים"><VocabularyPanel /></LazyErrorBoundary>
-            </CollapsibleWidget>
+            <LazyErrorBoundary label="בדיקת איות ודקדוק">
+              <DictionaryValidator text={text} onApplyFix={(_original, fixed, wordIndex) => {
+                const tokens = text.split(/(\s+)/);
+                let currentWord = -1;
+                const newText = tokens.map((token) => {
+                  if (/^\s+$/.test(token) || !token) return token;
+                  currentWord += 1;
+                  return currentWord === wordIndex ? fixed : token;
+                }).join('');
+                if (newText !== text) handleEditorChange(newText);
+              }} />
+            </LazyErrorBoundary>
           </TabsContent>
 
           <TabsContent value="summary" className="flex flex-col gap-3">
@@ -1547,11 +2302,6 @@ const TextEditor = () => {
             </CollapsibleWidget>
           </TabsContent>
 
-          <TabsContent value="ab" className="flex flex-col gap-3">
-            <CollapsibleWidget title="השוואת מנועים" storageKey="te_ab_compare">
-              <LazyErrorBoundary label="השוואת מנועים"><EngineCompare text={text} /></LazyErrorBoundary>
-            </CollapsibleWidget>
-          </TabsContent>
 
           <TabsContent value="analytics" className="flex flex-col gap-3">
             <CollapsibleWidget title="אנליטיקס" storageKey="te_analytics">
@@ -1561,12 +2311,13 @@ const TextEditor = () => {
           <TabsContent value="history" className="flex flex-col gap-3">
             <CollapsibleWidget title="היסטוריית עריכה" storageKey="te_history">
               <LazyErrorBoundary label="היסטוריית עריכה"><TextEditHistory 
-                versions={versions}
+                versions={compareVersions}
                 onSelectVersion={handleVersionSelect}
                 selectedVersionId={selectedVersionId}
                 cloudVersions={cloudVersions}
                 cloudLoading={cloudVersionsLoading}
                 onRestoreVersion={handleRestoreVersion}
+                onCompareVersion={sendVersionToCompare}
               /></LazyErrorBoundary>
             </CollapsibleWidget>
           </TabsContent>

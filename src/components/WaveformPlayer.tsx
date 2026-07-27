@@ -100,7 +100,10 @@ export const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerPro
       }
 
       if (audioSrc) {
-        ws.load(audioSrc);
+        void ws.load(audioSrc).catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          console.error("Failed to load waveform audio", error);
+        });
       }
     }, [audioSrc]);
 

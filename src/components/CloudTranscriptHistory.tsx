@@ -6,7 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { History, Trash2, FileText, Search, Tag, X, Edit, Cloud, HardDrive, Loader2, Calendar, Filter, FolderOpen, FolderPlus, Folder, Download, Brain } from "lucide-react";
+import { History, Trash2, FileText, Search, Tag, X, Edit, Cloud, HardDrive, Loader2, Calendar, Filter, FolderOpen, FolderPlus, Folder, Download, Brain, LayoutList, Table2, Columns2, Columns3, Grid3X3 } from "lucide-react";
 import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
 import { semanticSearch } from "@/utils/semanticSearch";
 import { useFolderTree } from "@/hooks/useFolderTree";
@@ -37,6 +37,16 @@ const isDuplicatePreview = (title: string, preview: string) => {
   return normPreview === normTitle || normPreview.startsWith(normTitle);
 };
 
+type HistoryView = 'list' | 'table' | 'grid-2' | 'grid-3' | 'grid-4';
+const HISTORY_VIEW_KEY = 'chai-transcript-history-view-v1';
+
+const getInitialHistoryView = (): HistoryView => {
+  const stored = localStorage.getItem(HISTORY_VIEW_KEY);
+  return stored === 'list' || stored === 'table' || stored === 'grid-2' || stored === 'grid-3' || stored === 'grid-4'
+    ? stored
+    : 'list';
+};
+
 export const CloudTranscriptHistory = memo(({
   transcripts,
   isCloud,
@@ -60,6 +70,11 @@ export const CloudTranscriptHistory = memo(({
   const [newFolderName, setNewFolderName] = useState("");
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [assigningFolderId, setAssigningFolderId] = useState<string | null>(null);
+  const [historyView, setHistoryView] = useState<HistoryView>(getInitialHistoryView);
+
+  useEffect(() => {
+    localStorage.setItem(HISTORY_VIEW_KEY, historyView);
+  }, [historyView]);
 
   // Sync folder filter from URL when it changes
   useEffect(() => {
@@ -449,10 +464,44 @@ export const CloudTranscriptHistory = memo(({
     })()
   );
 
+  const renderTableRow = (entry: CloudTranscript) => {
+    const title = entry.title?.trim() || entry.text?.trim().slice(0, 80) || 'ללא כותרת';
+    return (
+      <tr key={entry.id} className="border-b border-border/50 hover:bg-muted/30 cursor-pointer" onClick={() => handleCardClick(entry)}>
+        <td className="p-2 text-sm font-medium max-w-64 truncate" title={title}>{title}</td>
+        <td className="p-2"><Badge variant="outline" className="text-[10px]">{entry.engine}</Badge></td>
+        <td className="p-2 text-xs text-muted-foreground whitespace-nowrap">{formatDate(entry.created_at)}</td>
+        <td className="p-2 text-xs text-muted-foreground max-w-40 truncate">{entry.folder || 'ללא תיקיה'}</td>
+        <td className="p-2" onClick={(event) => event.stopPropagation()}>
+          <div className="flex items-center justify-end gap-1">
+            <Button size="icon" variant="ghost" className="h-7 w-7" title="ערוך" onClick={() => handleCardClick(entry)}><Edit className="h-3.5 w-3.5" /></Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7" title="טען" onClick={() => onSelect(entry.text)}><FileText className="h-3.5 w-3.5" /></Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="מחק" onClick={() => onDelete(entry.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+          </div>
+        </td>
+      </tr>
+    );
+  };
+
+  const viewOptions: Array<{ value: HistoryView; label: string; icon: typeof LayoutList }> = [
+    { value: 'list', label: 'רשימה', icon: LayoutList },
+    { value: 'table', label: 'טבלה', icon: Table2 },
+    { value: 'grid-2', label: 'רשת 2 עמודות', icon: Columns2 },
+    { value: 'grid-3', label: 'רשת 3 עמודות', icon: Columns3 },
+    { value: 'grid-4', label: 'רשת 4 עמודות', icon: Grid3X3 },
+  ];
+
+  const gridClass = {
+    list: 'grid grid-cols-1 gap-3',
+    'grid-2': 'grid grid-cols-1 lg:grid-cols-2 gap-3',
+    'grid-3': 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3',
+    'grid-4': 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3',
+  } as const;
+
   return (
     <Card className="p-6" dir="rtl">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <History className="w-5 h-5 text-primary" />
           <h2 className="text-xl font-semibold text-right">
             היסטוריית תמלולים ({filtered.length}/{transcripts.length})
@@ -467,9 +516,10 @@ export const CloudTranscriptHistory = memo(({
             </Badge>
           )}
         </div>
-        <Button variant="outline" size="sm" onClick={onClearAll}>
-          <Trash2 className="w-4 h-4 ml-2" />
-          נקה הכל
+        <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" onClick={onClearAll} title="נקה את כל ההיסטוריה">
+          <Trash2 className="w-4 h-4" />
+          <span className="hidden sm:inline">נקה הכל</span>
         </Button>
         <Button variant="outline" size="sm" onClick={async () => {
           if (filtered.length === 0) return;
@@ -495,6 +545,7 @@ export const CloudTranscriptHistory = memo(({
           <Download className="w-4 h-4 ml-2" />
           ייצוא ZIP ({filtered.length})
         </Button>
+        </div>
       </div>
 
       {/* Search + Filter toggle */}
@@ -530,6 +581,23 @@ export const CloudTranscriptHistory = memo(({
             </span>
           )}
         </Button>
+        <div className="flex shrink-0 items-center rounded-md border bg-background p-0.5" role="group" aria-label="תצוגת היסטוריה">
+          {viewOptions.map(({ value, label, icon: Icon }) => (
+            <Button
+              key={value}
+              type="button"
+              variant={historyView === value ? 'secondary' : 'ghost'}
+              size="icon"
+              className="h-8 w-8"
+              title={label}
+              aria-label={label}
+              aria-pressed={historyView === value}
+              onClick={() => setHistoryView(value)}
+            >
+              <Icon className="h-4 w-4" />
+            </Button>
+          ))}
+        </div>
       </div>
 
       {/* Filters row */}
@@ -616,10 +684,27 @@ export const CloudTranscriptHistory = memo(({
           )}
 
           {/* Transcript list */}
-          <ScrollArea className="h-[400px] flex-1">
-            <div className="space-y-3">
-              {filtered.map((entry) => renderEntryCard(entry, entry.id))}
-            </div>
+          <ScrollArea className="h-[400px] min-w-0 flex-1">
+            {historyView === 'table' ? (
+              <div className="min-w-[680px] overflow-hidden rounded-md border">
+                <table className="w-full border-collapse text-right">
+                  <thead className="sticky top-0 z-10 bg-muted/95 text-xs text-muted-foreground">
+                    <tr>
+                      <th className="p-2 font-medium">כותרת</th>
+                      <th className="p-2 font-medium">מנוע</th>
+                      <th className="p-2 font-medium">תאריך</th>
+                      <th className="p-2 font-medium">תיקיה</th>
+                      <th className="p-2 font-medium text-left">פעולות</th>
+                    </tr>
+                  </thead>
+                  <tbody>{filtered.map(renderTableRow)}</tbody>
+                </table>
+              </div>
+            ) : (
+              <div className={gridClass[historyView]}>
+                {filtered.map((entry) => renderEntryCard(entry, entry.id))}
+              </div>
+            )}
           </ScrollArea>
         </div>
       )}

@@ -333,6 +333,44 @@ export default function Benchmark() {
         setProgress(((i + 1) / SYSTEMS.length) * 100);
       }
       setCurrentStep(""); setRunning(false);
+
+      // ── Unified trends: one row per system (audio enhancement preset) ──
+      try {
+        const { recordRun } = await import('@/lib/comparisonRuns');
+        const { fingerprintFile } = await import('@/lib/recordingFingerprint');
+        const { getCorrectionStats } = await import('@/utils/correctionLearning');
+        const { getVocabularyStats } = await import('@/utils/customVocabulary');
+        const fp = await fingerprintFile(audioFile);
+        const hotwords_count = getVocabularyStats().totalTerms;
+        const corrections_count = getCorrectionStats().totalCorrections;
+        const baseline = allResults.find(r => r.isBaseline && r.status === 'success') || null;
+        for (const r of allResults) {
+          if (r.status !== 'success') continue;
+          await recordRun({
+            kind: 'audio_enhance',
+            recording_fingerprint: fp,
+            recording_label: audioFile.name,
+            audio_duration_ms: Math.round(dur * 1000),
+            engine: 'local-server',
+            model: r.id,
+            hotwords_count,
+            corrections_count,
+            hypothesis_text: r.text,
+            elapsed_ms: Math.round(r.processingTime * 1000),
+            len_ratio: baseline && baseline.wordCount ? r.wordCount / baseline.wordCount : null,
+            config_snapshot: {
+              preset: r.id,
+              label: r.label,
+              isBaseline: r.isBaseline,
+              avgProbability: r.avgProbability,
+              score: r.score ?? null,
+            },
+          });
+        }
+      } catch (err) {
+        console.warn('[Benchmark] comparison_runs record failed', err);
+      }
+
       toast({ title: "ההשוואה הושלמה!", description: `${allResults.filter(r => r.status === "success").length}/${SYSTEMS.length} מערכות` });
     } catch (err: unknown) {
       setRunning(false);
@@ -877,7 +915,7 @@ export default function Benchmark() {
                       <Star className={`w-3.5 h-3.5 ${learnedWords.has(wordDialog.word) ? "fill-current" : ""}`} />
                       {learnedWords.has(wordDialog.word) ? "נלמד" : "סמן כנלמד"}
                     </Button>
-                    <Button size="sm" variant="outline" className="gap-1" onClick={() => navigate("/lk?tab=training")}>
+                    <Button size="sm" variant="outline" className="gap-1" onClick={() => navigate("/lashon-kodesh?tab=training")}>
                       <ExternalLink className="w-3.5 h-3.5" />שלח לאימון לשון הקודש
                     </Button>
                   </div>

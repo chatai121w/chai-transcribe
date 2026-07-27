@@ -36,7 +36,8 @@ import {
   ScrollText,
   Scissors,
   Palette,
-  Layers,
+  GraduationCap,
+  BookOpen,
 } from "lucide-react";
 import { openQuickCut } from "@/lib/quickCutBus";
 import { cn } from "@/lib/utils";
@@ -69,18 +70,14 @@ const navItems: NavItem[] = [
   { label: "ניקוי קול", icon: Wand2, path: "/audio-clean" },
   { label: "תיקיות", icon: FolderOpen, path: "/folders" },
   { label: "עורך טקסט", icon: FileText, path: "/text-editor" },
-  { label: "בנצ'מארק", icon: BarChart3, path: "/benchmark" },
+  { label: "מילון ולמידה אישית", icon: BookOpen, path: "/personal-learning" },
   { label: "זיהוי דוברים", icon: Users, path: "/diarization" },
-  { label: "השוואת מנועים", icon: GitCompareArrows, path: "/diarization/compare" },
+  { label: "השוואות", icon: GitCompareArrows, path: "/compare" },
   { label: "ממיר ל-MP3", icon: Music, path: "/video-to-mp3" },
   { label: "הרמוניקיה", icon: AudioLines, path: "/harmonika" },
   { label: "התקנת שרת", icon: Server, path: "/setup" },
   { label: "לוח בקרה", icon: Bot, path: "/system-dashboard" },
   { label: "לשון הקודש", icon: ScrollText, path: "/lashon-kodesh" },
-  { label: "כללי לשון הקודש", icon: ScrollText, path: "/loshon-kodesh-rules" },
-  { label: "השוואת תמלולים", icon: GitCompareArrows, path: "/compare-report" },
-  { label: "השוואת A/B", icon: GitCompareArrows, path: "/ab-compare" },
-  { label: "פיצ'רים וטוגלים", icon: Layers, path: "/features" },
   { label: "הגדרות", icon: Settings, path: "/settings" },
 ];
 

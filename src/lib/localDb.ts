@@ -40,6 +40,13 @@ export interface LocalPreferences {
   source_language: string;
   custom_themes: string;
   editor_columns: number;
+  dashboard_view_mode: string;
+  folder_view_mode: string;
+  folder_sort_key: string;
+  folder_sort_asc: boolean;
+  player_layout: string;
+  tab_settings_json: string;
+  default_ai_model: string;
   cuda_preset: string;
   cuda_fast_mode: boolean;
   cuda_compute_type: string;
@@ -51,6 +58,12 @@ export interface LocalPreferences {
   cuda_preload_mode: string;
   cuda_cloud_save: string;
   personal_pronunciation_enabled: boolean;
+  loshon_kodesh_enabled: boolean;
+  active_pronunciation_profile: string;
+  diarize_enabled: boolean;
+  live_chunk_sec: number;
+  live_mic_gain: number;
+  pronunciation_layout_mode: string;
   updated_at: string;
   _dirty?: boolean;
 }
@@ -111,6 +124,9 @@ export interface LocalVersion {
   action_label?: string | null;
   version_number: number;
   created_at: string;
+  ai_usage_event_id?: string | null;
+  folder_id?: string | null;
+  audio_file_path?: string | null;
   _dirty?: boolean;
 }
 

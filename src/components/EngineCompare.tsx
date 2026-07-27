@@ -6,6 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Zap, Trophy, ArrowLeftRight, Clock, Languages } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { editTranscriptCloud } from "@/utils/editTranscriptApi";
+import { GeminiBadge } from "@/components/GeminiBadge";
+import { isGeminiModel } from "@/lib/personalGemini";
+
 
 interface EngineCompareProps {
   text: string;
@@ -22,6 +25,9 @@ const COMPARE_ENGINES = [
 const COMPARE_MODELS = [
   { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
   { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+  { value: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' },
+  { value: 'google/gemini-3-flash-preview', label: 'Gemini 3 Flash (Preview)' },
+  { value: 'google/gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (Preview)' },
   { value: 'openai/gpt-4o', label: 'GPT-4o' },
   { value: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
   { value: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
@@ -108,10 +114,16 @@ export const EngineCompare = memo(({ text }: EngineCompareProps) => {
               </SelectTrigger>
               <SelectContent>
                 {COMPARE_MODELS.map(m => (
-                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                  <SelectItem key={m.value} value={m.value}>
+                    <span className="inline-flex items-center gap-1.5">
+                      {isGeminiModel(m.value) && <GeminiBadge size={11} />}
+                      {m.label}
+                    </span>
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+
           </div>
           <div className="space-y-1">
             <div className="text-xs text-white/50">מודל B</div>
@@ -121,9 +133,15 @@ export const EngineCompare = memo(({ text }: EngineCompareProps) => {
               </SelectTrigger>
               <SelectContent>
                 {COMPARE_MODELS.map(m => (
-                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                  <SelectItem key={m.value} value={m.value}>
+                    <span className="inline-flex items-center gap-1.5">
+                      {isGeminiModel(m.value) && <GeminiBadge size={11} />}
+                      {m.label}
+                    </span>
+                  </SelectItem>
                 ))}
               </SelectContent>
+
             </Select>
           </div>
         </div>

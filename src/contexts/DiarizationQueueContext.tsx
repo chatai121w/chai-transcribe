@@ -363,6 +363,9 @@ export function DiarizationQueueProvider({ children }: { children: React.ReactNo
         const formData = new FormData();
         formData.append("file", file);
         formData.append("min_gap", (config.minGap || 1.5).toString());
+        if ((config.expectedSpeakers || 0) > 0) {
+          formData.append("expected_speakers", String(config.expectedSpeakers));
+        }
         if (mode === 'local') {
           const localHf = config.hfToken?.trim() || '';
           formData.append("diarization_engine", localHf ? "pyannote" : "silence-gap");
@@ -381,11 +384,18 @@ export function DiarizationQueueProvider({ children }: { children: React.ReactNo
           }
         }
         updateJob(jobId, { progress: 20, progressStage: 'מתחיל עיבוד בשרת...' });
-        const resp = await fetch(`${serverUrl}/diarize-stream`, { method: "POST", body: formData, signal: abortController.signal });
-        if (!resp.ok || !resp.body) {
+        const endpoint = mode === 'whisperx' ? '/diarize' : '/diarize-stream';
+        const resp = await fetch(`${serverUrl}${endpoint}`, { method: "POST", body: formData, signal: abortController.signal });
+        if (!resp.ok) {
           const err = await resp.json().catch(() => ({ error: "Server error" }));
           throw new Error(err.error || `HTTP ${resp.status}`);
         }
+
+        if (mode === 'whisperx') {
+          result = await resp.json() as DiarizationResult;
+          updateJob(jobId, { progress: 95, progressStage: `מסיים (${result.diarization_method})...` });
+        } else {
+          if (!resp.body) throw new Error('השרת לא החזיר זרם תוצאות');
 
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
@@ -431,6 +441,7 @@ export function DiarizationQueueProvider({ children }: { children: React.ReactNo
           throw new Error('השרת לא החזיר תוצאה מלאה');
         }
         result = finalResult;
+        }
 
       } else if (mode === 'openai') {
         if (!config.cloudApiKey?.trim()) throw new Error("נדרש מפתח API של OpenAI");

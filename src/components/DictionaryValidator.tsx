@@ -32,15 +32,15 @@ export interface WordValidation {
 
 interface Props {
   text: string;
-  onApplyFix?: (original: string, fixed: string) => void;
+  onApplyFix?: (original: string, fixed: string, wordIndex: number) => void;
 }
 
 const ISSUE_CONFIG = {
-  none: { label: 'תקין', color: 'bg-green-500/20 text-green-300', icon: CheckCircle2 },
-  spelling: { label: 'שגיאת כתיב', color: 'bg-red-500/20 text-red-300', icon: XCircle },
-  grammar: { label: 'שגיאת דקדוק', color: 'bg-orange-500/20 text-orange-300', icon: AlertTriangle },
-  context: { label: 'הקשר שגוי', color: 'bg-yellow-500/20 text-yellow-300', icon: ArrowLeftRight },
-  unknown_word: { label: 'מילה לא ידועה', color: 'bg-purple-500/20 text-purple-300', icon: XCircle },
+  none: { label: 'תקין', color: 'bg-green-500/10 text-green-700 dark:text-green-300', icon: CheckCircle2 },
+  spelling: { label: 'שגיאת כתיב', color: 'bg-red-500/10 text-red-700 dark:text-red-300', icon: XCircle },
+  grammar: { label: 'שגיאת דקדוק', color: 'bg-orange-500/10 text-orange-700 dark:text-orange-300', icon: AlertTriangle },
+  context: { label: 'הקשר שגוי', color: 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-300', icon: ArrowLeftRight },
+  unknown_word: { label: 'מילה לא ידועה', color: 'bg-purple-500/10 text-purple-700 dark:text-purple-300', icon: XCircle },
 };
 
 const BATCH_SIZE = 40; // Words per AI context check batch
@@ -201,14 +201,14 @@ export const DictionaryValidator = ({ text, onApplyFix }: Props) => {
   }, [results]);
 
   return (
-    <Card className="bg-[#1a1a2e]/90 border-white/10 text-white">
+    <Card className="border-border/60 bg-card text-card-foreground shadow-sm">
       <CardHeader className="pb-3">
         <CardTitle className="text-lg flex items-center gap-2">
           <BookOpen className="w-5 h-5 text-emerald-400" />
-          בדיקת מילון עברי
+          בדיקת איות ודקדוק
         </CardTitle>
-        <CardDescription className="text-white/60">
-          בדיקת קיום מילים, דקדוק וצורות, והתאמה להקשר
+        <CardDescription>
+          ניתוח מורפולוגי והקשרי של הטקסט הנוכחי, עם תיקון מדויק ולמידה מהשינוי
         </CardDescription>
       </CardHeader>
 
@@ -217,7 +217,7 @@ export const DictionaryValidator = ({ text, onApplyFix }: Props) => {
         <Button
           onClick={runFullCheck}
           disabled={isChecking || !text.trim()}
-          className="w-full bg-emerald-600 hover:bg-emerald-700"
+          className="w-full sm:w-auto"
         >
           {isChecking ? (
             <>
@@ -236,32 +236,32 @@ export const DictionaryValidator = ({ text, onApplyFix }: Props) => {
         {isChecking && (
           <div className="space-y-1">
             <Progress value={progress} className="h-2" />
-            <p className="text-xs text-white/50 text-center">{progress}%</p>
+            <p className="text-xs text-muted-foreground text-center">{progress}%</p>
           </div>
         )}
 
         {/* Stats */}
         {results.length > 0 && (
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <div className="bg-green-500/10 rounded-lg p-2 text-center">
               <div className="text-lg font-bold text-green-400">{stats.ok}</div>
-              <div className="text-[10px] text-white/50">תקין</div>
+              <div className="text-[10px] text-muted-foreground">תקין</div>
             </div>
             <div className="bg-red-500/10 rounded-lg p-2 text-center">
               <div className="text-lg font-bold text-red-400">{stats.spelling}</div>
-              <div className="text-[10px] text-white/50">כתיב</div>
+              <div className="text-[10px] text-muted-foreground">כתיב</div>
             </div>
             <div className="bg-orange-500/10 rounded-lg p-2 text-center">
               <div className="text-lg font-bold text-orange-400">{stats.grammar}</div>
-              <div className="text-[10px] text-white/50">דקדוק</div>
+              <div className="text-[10px] text-muted-foreground">דקדוק</div>
             </div>
             <div className="bg-yellow-500/10 rounded-lg p-2 text-center">
               <div className="text-lg font-bold text-yellow-400">{stats.context}</div>
-              <div className="text-[10px] text-white/50">הקשר</div>
+              <div className="text-[10px] text-muted-foreground">הקשר</div>
             </div>
             <div className="bg-purple-500/10 rounded-lg p-2 text-center">
               <div className="text-lg font-bold text-purple-400">{stats.unknown}</div>
-              <div className="text-[10px] text-white/50">לא ידוע</div>
+              <div className="text-[10px] text-muted-foreground">לא ידוע</div>
             </div>
           </div>
         )}
@@ -307,19 +307,19 @@ export const DictionaryValidator = ({ text, onApplyFix }: Props) => {
                       }`} />
                       
                       <span className={`font-medium ${
-                        result.issueType === 'none' ? 'text-white/70' : 'text-white'
+                        result.issueType === 'none' ? 'text-muted-foreground' : 'text-foreground'
                       }`}>
                         {result.word}
                       </span>
 
                       {result.lemma && result.lemma !== result.word && (
-                        <span className="text-white/30 text-[10px]">
+                        <span className="text-muted-foreground text-[10px]">
                           ← {result.lemma}
                         </span>
                       )}
 
                       {result.pos && (
-                        <Badge variant="outline" className="text-[9px] bg-white/5 border-white/10 text-white/40">
+                        <Badge variant="outline" className="text-[9px] text-muted-foreground">
                           {result.pos}
                         </Badge>
                       )}
@@ -334,10 +334,10 @@ export const DictionaryValidator = ({ text, onApplyFix }: Props) => {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-6 px-2 text-xs text-emerald-400 hover:text-emerald-300"
+                              className="h-6 px-2 text-xs text-emerald-700 hover:text-emerald-600 dark:text-emerald-300"
                               onClick={() => {
                                 if (onApplyFix && result.suggestion) {
-                                  onApplyFix(result.word, result.suggestion);
+                  onApplyFix(result.word, result.suggestion, result.index);
                                   toast({
                                     title: "תוקן",
                                     description: `"${result.word}" → "${result.suggestion}"`,
@@ -357,7 +357,7 @@ export const DictionaryValidator = ({ text, onApplyFix }: Props) => {
                       {result.reason && !result.suggestion && (
                         <Tooltip>
                           <TooltipTrigger>
-                            <AlertTriangle className="w-3 h-3 text-white/30" />
+                            <AlertTriangle className="w-3 h-3 text-muted-foreground" />
                           </TooltipTrigger>
                           <TooltipContent side="top" className="max-w-xs text-xs" dir="rtl">
                             {result.reason}
@@ -373,7 +373,7 @@ export const DictionaryValidator = ({ text, onApplyFix }: Props) => {
         )}
 
         {results.length === 0 && !isChecking && (
-          <div className="text-center py-6 text-white/40">
+          <div className="text-center py-6 text-muted-foreground">
             <BookOpen className="w-8 h-8 mx-auto mb-2 opacity-50" />
             <p className="text-sm">לחץ "בדוק תמלול" לניתוח המילים</p>
             <p className="text-xs mt-1">שלב 1: קיום מילה • שלב 2: דקדוק • שלב 3: הקשר</p>
@@ -382,13 +382,13 @@ export const DictionaryValidator = ({ text, onApplyFix }: Props) => {
 
         {/* Legend */}
         {results.length > 0 && (
-          <div className="bg-white/5 rounded-lg p-3 space-y-1" dir="rtl">
-            <p className="text-xs font-medium text-white/70 mb-2">מקרא:</p>
+          <div className="bg-muted/40 rounded-md p-3 space-y-1" dir="rtl">
+            <p className="text-xs font-medium text-foreground mb-2">מקרא:</p>
             <div className="grid grid-cols-2 gap-1">
               {Object.entries(ISSUE_CONFIG).map(([key, cfg]) => {
                 const Icon = cfg.icon;
                 return (
-                  <div key={key} className="flex items-center gap-1.5 text-[10px] text-white/50">
+                  <div key={key} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                     <Icon className="w-3 h-3" />
                     <span>{cfg.label}</span>
                   </div>

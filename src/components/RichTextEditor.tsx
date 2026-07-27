@@ -12,12 +12,8 @@ import {
   AlignRight, AlignCenter, AlignLeft, AlignJustify, 
   Palette, List, ListOrdered, Eraser,
   Maximize2, Minimize2, SplitSquareVertical, Eye,
-  Search, X, ChevronDown, SpellCheck, Save, Trash2,
-  Package, GitCompare, ExternalLink, Plus
+  Search, X, ChevronDown, SpellCheck, Save, Trash2
 } from "lucide-react";
-import { Link as RouterLink } from "react-router-dom";
-import { Badge } from "@/components/ui/badge";
-import { abCart, type ABCartItem } from "@/lib/abCompareCart";
 import { toast } from "@/hooks/use-toast";
 import { FloatingFormatToolbar } from "@/components/FloatingFormatToolbar";
 import {
@@ -34,6 +30,7 @@ import {
 import { cn } from "@/lib/utils";
 import { spellCheckText, type SuspectWord, type SpellSuggestion } from "@/utils/hebrewSpellCheck";
 import { learnFromCorrections, type CorrectionEntry } from "@/utils/correctionLearning";
+import { WordContextMenu } from "@/components/WordContextMenu";
 
 interface RichTextEditorProps {
   text: string;
@@ -42,9 +39,12 @@ interface RichTextEditorProps {
   onWordCorrected?: (original: string, corrected: string) => void;
   onSaveReplaceOriginal?: () => Promise<void> | void;
   onDuplicateSave?: () => Promise<void> | void;
-  transcriptName?: string;
-  audioBlob?: Blob | null;
-  audioFileName?: string;
+  /** Controlled horizontal text alignment. When provided together with
+   *  `onTextAlignChange`, the alignment buttons broadcast the change to the
+   *  parent (so a mirror layout can apply the same alignment to BOTH
+   *  columns) instead of running execCommand on the local selection. */
+  textAlign?: 'right' | 'left' | 'center' | 'justify';
+  onTextAlignChange?: (align: 'right' | 'left' | 'center' | 'justify') => void;
 }
 
 const sanitize = (html: string): string => DOMPurify.sanitize(html, {
@@ -70,7 +70,7 @@ const stripHtml = (html: string): string => {
 
 type ViewMode = 'edit' | 'preview' | 'split';
 
-export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrected, onSaveReplaceOriginal, onDuplicateSave, transcriptName, audioBlob, audioFileName }: RichTextEditorProps) => {
+export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrected, onSaveReplaceOriginal, onDuplicateSave, textAlign, onTextAlignChange }: RichTextEditorProps) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const [showFormatBar, setShowFormatBar] = useState(false);
   const [textColor, setTextColor] = useState("#000000");
@@ -93,6 +93,8 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
   } | null>(null);
   const [customCorrection, setCustomCorrection] = useState("");
   const spellCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contextWordRangeRef = useRef<Range | null>(null);
+  const [contextWord, setContextWord] = useState("");
 
   const highlightColors = [
     "#ffff00", "#00ff00", "#00ffff", "#ff00ff", "#ffa500", "#ff0000",
@@ -384,6 +386,73 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
     spellCheckTimerRef.current = setTimeout(runSpellCheck, 500);
   }, [syncContent, onWordCorrected, runSpellCheck]);
 
+  const rememberCorrection = useCallback((originalWord: string, correctedWord: string, engine: string) => {
+    const entry: CorrectionEntry = {
+      original: originalWord,
+      corrected: correctedWord,
+      frequency: 1,
+      engine,
+      category: correctedWord.includes(' ') ? 'phrase' : 'word',
+      confidence: 0.7,
+      lastUsed: Date.now(),
+      createdAt: Date.now(),
+    };
+    learnFromCorrections([entry]);
+    onWordCorrected?.(originalWord, correctedWord);
+  }, [onWordCorrected]);
+
+  const captureContextWord = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const doc = event.currentTarget.ownerDocument;
+    const caret = doc.caretRangeFromPoint?.(event.clientX, event.clientY);
+    const node = caret?.startContainer;
+    if (!caret || !node || node.nodeType !== Node.TEXT_NODE || !event.currentTarget.contains(node)) {
+      contextWordRangeRef.current = null;
+      setContextWord('');
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    const value = node.textContent || '';
+    const isWordChar = (char: string) => /[\u0590-\u05FFa-zA-Z0-9]/.test(char);
+    let start = Math.min(caret.startOffset, value.length);
+    let end = start;
+    if (start === value.length || !isWordChar(value[start] || '')) start--;
+    if (start < 0 || !isWordChar(value[start] || '')) {
+      contextWordRangeRef.current = null;
+      setContextWord('');
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    while (start > 0 && isWordChar(value[start - 1])) start--;
+    end = Math.max(end, start + 1);
+    while (end < value.length && isWordChar(value[end])) end++;
+
+    const range = doc.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    contextWordRangeRef.current = range;
+    setContextWord(range.toString());
+  }, []);
+
+  const handleContextReplace = useCallback((correctedWord: string) => {
+    const range = contextWordRangeRef.current;
+    const originalWord = contextWord;
+    if (!range || !originalWord || !correctedWord.trim() || correctedWord.trim() === originalWord) return;
+
+    const doc = range.startContainer.ownerDocument ?? document;
+    const replacement = doc.createTextNode(correctedWord.trim());
+    range.deleteContents();
+    range.insertNode(replacement);
+    replacement.parentNode?.normalize();
+    contextWordRangeRef.current = null;
+    setContextWord('');
+    syncContent();
+    rememberCorrection(originalWord, correctedWord.trim(), 'context-menu');
+    toast({ title: "התיקון נשמר", description: `"${originalWord}" → "${correctedWord.trim()}"` });
+  }, [contextWord, rememberCorrection, syncContent]);
+
   const handleExportTXT = () => {
     const blob = new Blob([plainText], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -456,55 +525,6 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
     URL.revokeObjectURL(url);
     toast({ title: "ייצוא הצליח", description: "קובץ SRT (כתוביות) הורד" });
   };
-
-  // === הורדת חבילה (ZIP) — תמלול + אודיו ===
-  const handleDownloadBundle = useCallback(async () => {
-    try {
-      const baseName = (transcriptName || audioFileName || 'transcript')
-        .replace(/\.[^.]+$/, '')
-        .replace(/[\\/:*?"<>|]/g, '_')
-        .trim() || 'transcript';
-
-      const JSZip = (await import('jszip')).default;
-      const { saveAs } = await import('file-saver');
-      const zip = new JSZip();
-      const folder = zip.folder(baseName)!;
-
-      folder.file(`${baseName}.txt`, plainText || '');
-
-      if (audioBlob) {
-        const type = audioBlob.type || '';
-        const ext = type.includes('webm') ? 'webm'
-          : type.includes('wav') ? 'wav'
-          : type.includes('mp3') || type.includes('mpeg') ? 'mp3'
-          : type.includes('ogg') ? 'ogg'
-          : type.includes('m4a') || type.includes('mp4') ? 'm4a'
-          : (audioFileName?.split('.').pop() || 'audio');
-        folder.file(`${baseName}.${ext}`, audioBlob);
-      }
-
-      const blob = await zip.generateAsync({ type: 'blob' });
-      saveAs(blob, `${baseName}.zip`);
-      toast({
-        title: "הורדה הצליחה",
-        description: audioBlob ? "תמלול + אודיו נשמרו ב-ZIP" : "תמלול נשמר (אין אודיו זמין)",
-      });
-    } catch (err) {
-      console.error('[Bundle download]', err);
-      toast({ title: "שגיאת הורדה", description: String((err as Error)?.message || err), variant: "destructive" });
-    }
-  }, [transcriptName, audioFileName, audioBlob, plainText]);
-
-  // === סל השוואת A/B ===
-  const [cartItems, setCartItems] = useState<ABCartItem[]>(() => abCart.list());
-  useEffect(() => abCart.subscribe(() => setCartItems(abCart.list())), []);
-
-  const handleAddToCart = useCallback(() => {
-    const label = (transcriptName || audioFileName || `תמלול ${new Date().toLocaleTimeString('he-IL')}`).replace(/\.[^.]+$/, '');
-    abCart.add(label, plainText);
-    toast({ title: "נוסף לסל השוואה", description: label });
-  }, [transcriptName, audioFileName, plainText]);
-
 
   const ToolBtn = ({ icon: Icon, label, onClick, active, disabled }: {
     icon: React.ElementType; label: string; onClick: () => void; active?: boolean; disabled?: boolean;
@@ -678,10 +698,20 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
           <Separator orientation="vertical" className="h-6 mx-1" />
 
           {/* === יישור === */}
-          <ToolBtn icon={AlignRight} label="יישור לימין" onClick={() => execCommand('justifyRight')} />
-          <ToolBtn icon={AlignCenter} label="מרכוז" onClick={() => execCommand('justifyCenter')} />
-          <ToolBtn icon={AlignLeft} label="יישור לשמאל" onClick={() => execCommand('justifyLeft')} />
-          <ToolBtn icon={AlignJustify} label="יישור לשני הצדדים" onClick={() => execCommand('justifyFull')} />
+          {(() => {
+            const handleAlign = (a: 'right' | 'left' | 'center' | 'justify') => {
+              if (onTextAlignChange) onTextAlignChange(a);
+              else execCommand(a === 'right' ? 'justifyRight' : a === 'left' ? 'justifyLeft' : a === 'center' ? 'justifyCenter' : 'justifyFull');
+            };
+            return (
+              <>
+                <ToolBtn icon={AlignRight} label="יישור לימין" active={textAlign === 'right'} onClick={() => handleAlign('right')} />
+                <ToolBtn icon={AlignCenter} label="מרכוז" active={textAlign === 'center'} onClick={() => handleAlign('center')} />
+                <ToolBtn icon={AlignLeft} label="יישור לשמאל" active={textAlign === 'left'} onClick={() => handleAlign('left')} />
+                <ToolBtn icon={AlignJustify} label="יישור לשני הצדדים (שני הצדדים)" active={textAlign === 'justify'} onClick={() => handleAlign('justify')} />
+              </>
+            );
+          })()}
 
           <Separator orientation="vertical" className="h-6 mx-1" />
 
@@ -775,116 +805,6 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
               </div>
             </PopoverContent>
           </Popover>
-
-          {/* הורד הכל (ZIP — תמלול + אודיו) */}
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 w-8 p-0"
-                  onClick={handleDownloadBundle}
-                >
-                  <Package className="w-4 h-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>הורד תיקייה — תמלול + אודיו (ZIP)</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* סל השוואת A/B */}
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" className="h-8 px-2 gap-1 relative" title="סל השוואת A/B">
-                <GitCompare className="w-4 h-4" />
-                {cartItems.length > 0 && (
-                  <Badge variant="secondary" className="h-4 min-w-4 px-1 text-[10px]">
-                    {cartItems.length}
-                  </Badge>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-72 p-2" dir="rtl" align="end">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs font-semibold">סל השוואה ({cartItems.length})</div>
-                  {cartItems.length > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-[11px] text-destructive"
-                      onClick={() => abCart.clear()}
-                    >
-                      רוקן סל
-                    </Button>
-                  )}
-                </div>
-
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="w-full h-8 gap-1 text-xs"
-                  onClick={handleAddToCart}
-                  disabled={!plainText.trim()}
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  הוסף את התמלול הנוכחי
-                </Button>
-
-                {cartItems.length > 0 && (
-                  <div className="max-h-48 overflow-y-auto space-y-1 border-t pt-2">
-                    {cartItems.map((item) => (
-                      <div key={item.id} className="flex items-center gap-1 text-xs bg-muted/40 rounded px-2 py-1">
-                        <span className="flex-1 truncate" title={item.label}>{item.label}</span>
-                        <span className="text-muted-foreground text-[10px]">
-                          {item.text.split(/\s+/).filter(Boolean).length} מ׳
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={() => abCart.remove(item.id)}
-                        >
-                          <X className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <RouterLink to="/ab-compare?fromCart=1" className="block">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full h-8 gap-1 text-xs"
-                    disabled={cartItems.length < 2}
-                  >
-                    <GitCompare className="w-3.5 h-3.5" />
-                    פתח השוואה
-                  </Button>
-                </RouterLink>
-              </div>
-            </PopoverContent>
-          </Popover>
-
-          {/* קישור ישיר לעמוד ההשוואה */}
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <RouterLink to="/ab-compare">
-                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                    <ExternalLink className="w-4 h-4" />
-                  </Button>
-                </RouterLink>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>פתח עמוד השוואת A/B</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
         </div>
 
         {/* === חיפוש === */}
@@ -924,20 +844,29 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
                   onExecCommand={execCommand}
                   onSyncContent={syncContent}
                 />
+                <WordContextMenu
+                  word={contextWord}
+                  onReplace={handleContextReplace}
+                >
                 <div
                   ref={editorRef}
                   contentEditable
                   dir="rtl"
+                  onContextMenuCapture={captureContextWord}
                   className={cn(
-                    "rounded-md border border-input bg-background px-4 py-3 text-right",
+                    "rounded-md border border-input bg-background px-4 py-3",
                     "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                    "overflow-auto prose prose-sm max-w-none",
+                    "overflow-auto max-w-none",
                     isFullscreen ? "min-h-[calc(100vh-200px)]" : "min-h-[500px]"
                   )}
                   style={{
                     fontFamily: 'inherit',
                     fontSize: 'inherit',
-                    lineHeight: '1.8',
+                    lineHeight: 'inherit',
+                    letterSpacing: 'inherit',
+                    wordSpacing: 'inherit',
+                    fontWeight: 'inherit',
+                    textAlign: textAlign ?? 'right',
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
                     ...columnStyle,
@@ -945,6 +874,7 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
                   onInput={syncContent}
                   suppressContentEditableWarning
                 />
+                </WordContextMenu>
               </div>
             </div>
           )}
@@ -958,14 +888,18 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
               <div
                 dir="rtl"
                 className={cn(
-                  "rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-4 py-3 text-right",
-                  "overflow-auto prose prose-sm max-w-none",
+                  "rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-4 py-3",
+                  "overflow-auto max-w-none",
                   isFullscreen ? "min-h-[calc(100vh-200px)]" : "min-h-[500px]"
                 )}
                 style={{
                   fontFamily: 'inherit',
                   fontSize: 'inherit',
-                  lineHeight: '1.8',
+                  lineHeight: 'inherit',
+                  letterSpacing: 'inherit',
+                  wordSpacing: 'inherit',
+                  fontWeight: 'inherit',
+                  textAlign: textAlign ?? 'right',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                   ...columnStyle,

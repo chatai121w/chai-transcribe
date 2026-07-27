@@ -3,9 +3,8 @@
  *
  * Strategy:
  *  1. probeUrl() — try local Flask server first (full yt-dlp), fall back to Cobalt edge function.
- *  2. startJob() — creates a youtube_jobs row, kicks off the chosen backend, returns the job.
- *  3. subscribeToJob() — realtime updates on a specific job row.
- *  4. useYoutubeJobs() — list + realtime feed of the user's jobs (download manager).
+ *  2. useYoutubeJobs() — list + realtime feed of the user's jobs (download manager).
+ * Job execution is owned exclusively by lib/jobs/pipelines/youtubePipeline.
  */
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -153,162 +152,9 @@ export function useYoutubeJobs() {
     return await probeCobalt(url);
   }, []);
 
-  const startJob = useCallback(
-    async (params: {
-      url: string;
-      mode: YtMode;
-      probe: YtProbeResult;
-      audioFormat?: "best" | "mp3" | "wav" | "m4a" | "opus";
-      videoQuality?: string;
-      useExistingCaptions?: boolean;
-      attachSubs?: boolean;
-      burnSubs?: boolean;
-    }): Promise<YoutubeJob> => {
-      if (!user) throw new Error("יש להתחבר");
-      const { data: inserted, error: insertErr } = await supabase
-        .from("youtube_jobs")
-        .insert({
-          user_id: user.id,
-          url: params.url,
-          video_title: params.probe.title,
-          thumbnail_url: params.probe.thumbnail,
-          duration_sec: params.probe.duration ?? null,
-          mode: params.mode,
-          status: "pending",
-          progress_pct: 0,
-          backend: params.probe.backend,
-        })
-        .select("*")
-        .single();
-      if (insertErr || !inserted) throw new Error(insertErr?.message ?? "שגיאה ביצירת job");
-      const job = inserted as unknown as YoutubeJob;
-
-      // Fire off the backend work in the background. Don't await — the realtime
-      // subscription will surface progress as the job advances.
-      void runJobBackend(job, params).catch(async (e) => {
-        await supabase
-          .from("youtube_jobs")
-          .update({ status: "error", error: e instanceof Error ? e.message : String(e), updated_at: new Date().toISOString() })
-          .eq("id", job.id);
-      });
-
-      return job;
-    },
-    [user],
-  );
-
   const deleteJob = useCallback(async (jobId: string) => {
     await supabase.from("youtube_jobs").delete().eq("id", jobId);
   }, []);
 
-  return { jobs, loading, probeUrl, startJob, deleteJob, refetch: fetchJobs };
-}
-
-/** Actually execute the backend work for a job. Lives outside the hook so it can run after navigation. */
-async function runJobBackend(
-  job: YoutubeJob,
-  params: {
-    url: string;
-    mode: YtMode;
-    probe: YtProbeResult;
-    audioFormat?: "best" | "mp3" | "wav" | "m4a" | "opus";
-    videoQuality?: string;
-  },
-) {
-  const update = async (patch: Partial<YoutubeJob>) => {
-    await supabase
-      .from("youtube_jobs")
-      .update({ ...patch, updated_at: new Date().toISOString() } as never)
-      .eq("id", job.id);
-  };
-
-  await update({ status: "downloading", progress_pct: 10 });
-
-  // Cobalt path — request a stream URL and surface it as an output file.
-  if (job.backend === "cobalt") {
-    const wantsAudio = params.mode === "audio" || params.mode === "transcribe" || params.mode === "full";
-    const wantsVideo = params.mode === "video" || params.mode === "full";
-
-    const outputs: YtOutputFile[] = [];
-
-    if (wantsAudio) {
-      const { data, error } = await supabase.functions.invoke("youtube-cobalt", {
-        body: {
-          url: params.url,
-          mode: "audio",
-          audioFormat: params.audioFormat ?? "best",
-        },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.url) outputs.push({ kind: "audio", url: data.url, filename: data.filename ?? "audio" });
-    }
-    if (wantsVideo) {
-      const { data, error } = await supabase.functions.invoke("youtube-cobalt", {
-        body: {
-          url: params.url,
-          mode: "video",
-          videoQuality: params.videoQuality ?? "720",
-        },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.url) outputs.push({ kind: "video", url: data.url, filename: data.filename ?? "video.mp4" });
-    }
-
-    // Transcription via Cobalt path is not wired here yet — the local server is the supported path.
-    // We surface the audio link and mark the job as done so the user can download.
-    if (params.mode === "transcribe" || params.mode === "full") {
-      await update({
-        status: "done",
-        progress_pct: 100,
-        output_files: outputs as never,
-        completed_at: new Date().toISOString(),
-        error:
-          "תמלול דרך הענן (Cobalt) עדיין לא זמין — האודיו ירד וניתן להעלות אותו ידנית למסך התמלול. הפעל את השרת המקומי לתמלול אוטומטי.",
-      });
-      return;
-    }
-
-    await update({
-      status: "done",
-      progress_pct: 100,
-      output_files: outputs as never,
-      completed_at: new Date().toISOString(),
-    });
-    return;
-  }
-
-  // Local Flask path — call /yt/job to kick off, then poll.
-  const serverUrl = ((): string | null => { try { return getServerUrl(); } catch { return null; } })();
-  if (!serverUrl) throw new Error("שרת מקומי לא זמין");
-
-  const startRes = await fetch(`${serverUrl}/yt/job`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      url: params.url,
-      mode: params.mode,
-      audio_format: params.audioFormat ?? "best",
-      video_quality: params.videoQuality ?? "720",
-    }),
-  });
-  if (!startRes.ok) throw new Error(`שרת מקומי החזיר ${startRes.status}`);
-  const { job_id } = await startRes.json();
-
-  // Poll until done
-  while (true) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const sRes = await fetch(`${serverUrl}/yt/status/${job_id}`);
-    if (!sRes.ok) throw new Error(`status fetch failed: ${sRes.status}`);
-    const s = await sRes.json();
-    await update({
-      status: s.status,
-      progress_pct: s.progress_pct ?? 0,
-      output_files: (s.output_files ?? []) as never,
-    });
-    if (s.status === "done") {
-      await update({ completed_at: new Date().toISOString() });
-      return;
-    }
-    if (s.status === "error") throw new Error(s.error ?? "Unknown server error");
-  }
+  return { jobs, loading, probeUrl, deleteJob, refetch: fetchJobs };
 }

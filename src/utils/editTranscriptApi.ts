@@ -1,6 +1,16 @@
 import { supabase } from "@/integrations/supabase/client";
 import { buildHebrewGuardPrefix } from "@/lib/hebrewGuard";
 import { ACTION_PROMPTS, TONE_PROMPTS } from "@/lib/prompts";
+import {
+  isPersonalGeminiEnabled,
+  callPersonalGemini,
+  isPersonalGeminiFallbackEnabled,
+  PersonalGeminiExhaustedError,
+  getPersonalGeminiModel,
+  recordLovableGatewayUsage,
+  isGeminiModel,
+} from "@/lib/personalGemini";
+import { toast } from "sonner";
 
 interface EditTranscriptParams {
   text: string;
@@ -32,13 +42,44 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
     }
   }
 
+  // ── Personal Gemini path: try user's key first, fall back to Lovable on exhaustion ──
+  if (isPersonalGeminiEnabled() && isGeminiModel(model || getPersonalGeminiModel())) {
+    let systemPrompt = '';
+    if (action === 'custom' && customPrompt) systemPrompt = customPrompt;
+    else if (action === 'tone') systemPrompt = TONE_PROMPTS[toneStyle || 'formal'] || TONE_PROMPTS.formal;
+    else systemPrompt = (ACTION_PROMPTS as Record<string, string>)[action] || ACTION_PROMPTS.improve;
+    if (targetLanguage) systemPrompt += `\nהחזר את הטקסט בשפה: ${targetLanguage}`;
+    systemPrompt += '\nהחזר את הטקסט הסופי בלבד, ללא הסברים.';
+    try {
+      return await callPersonalGemini({
+        systemPrompt,
+        userPrompt: text,
+        model: model || getPersonalGeminiModel(),
+        temperature: 0.3,
+        surface: "editing",
+      });
+
+    } catch (e) {
+      if (e instanceof PersonalGeminiExhaustedError && isPersonalGeminiFallbackEnabled()) {
+        try { toast.warning("מפתח Gemini האישי מוצה — עוברים ל-Lovable AI"); } catch { /* noop */ }
+        // fall through to DB proxy / edge function
+      } else {
+        throw e;
+      }
+    }
+  }
+
+
+
+  const routeModel = model || 'gemini-2.5-flash';
+
   // ── Try DB proxy first (latest code, no deployment needed) ──
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.rpc as any)('edit_transcript_proxy', {
       p_text: text,
       p_action: action,
-      p_model: model || 'gemini-2.5-flash',
+      p_model: routeModel,
       p_custom_prompt: customPrompt || null,
       p_tone_style: toneStyle || null,
       p_target_language: targetLanguage || null,
@@ -46,6 +87,10 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
 
     const result = data as { text?: string; error?: string } | null;
     if (!error && result && !result.error && result.text) {
+      // DB proxy routes through the user's stored Google key when present,
+      // otherwise through Lovable's shared credentials. Either way it is NOT
+      // the client-side personal path, so count it under the Lovable route.
+      recordLovableGatewayUsage(routeModel, 0, 0, "editing");
       return result.text;
     }
 
@@ -56,7 +101,7 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
     console.warn('DB proxy exception, trying edge function:', e);
   }
 
-  // ── Fallback: edge function ──
+  // ── Fallback: edge function (Lovable AI Gateway) ──
   const body: Record<string, string> = { text, action };
   if (model) body.model = model;
   if (customPrompt) body.customPrompt = customPrompt;
@@ -66,5 +111,7 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
   const { data, error } = await supabase.functions.invoke('edit-transcript', { body });
   if (error) throw error;
   if (!data?.text) throw new Error('לא התקבלה תשובה מ-AI');
+  const usage = (data?.usage ?? {}) as { prompt_tokens?: number; completion_tokens?: number };
+  recordLovableGatewayUsage(routeModel, usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0, "editing");
   return data.text;
 }

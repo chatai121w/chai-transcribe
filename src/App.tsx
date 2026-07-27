@@ -12,9 +12,6 @@ import { ThemeShortcutListener } from "./components/ThemeShortcutListener";
 import TouchHoverReveal from "./components/TouchHoverReveal";
 import { DiarizationQueueProvider } from "./contexts/DiarizationQueueContext";
 import { CloudPreferencesProvider } from "./hooks/useCloudPreferences";
-import { useLoshonKodeshSync } from "./hooks/useLoshonKodeshSync";
-import { useFeatureFlagsCloudSync } from "./hooks/useFeatureFlagsCloudSync";
-import { useABCompareCartCloudSync } from "./hooks/useABCompareCartCloudSync";
 import { useTheme } from "./hooks/useTheme";
 import { debugLog } from "./lib/debugLogger";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -28,7 +25,7 @@ import {
 } from "./lib/devFloatingButtons";
 
 // Lazy load with logging + auto-reload on stale chunk
-function lazyWithLog(name: string, factory: () => Promise<{ default: React.ComponentType<unknown> }>) {
+function lazyWithLog(name: string, factory: () => Promise<{ default: React.ComponentType<any> }>) {
   return lazy(() => {
     const stop = debugLog.time('LazyLoad', name);
     return factory()
@@ -89,10 +86,10 @@ const MeetingRecorder = lazyWithLog('MeetingRecorder', () => import("./pages/Mee
 const VoiceCommandAdmin = lazyWithLog('VoiceCommandAdmin', () => import("./pages/VoiceCommandAdmin"));
 const SystemDashboard   = lazyWithLog('SystemDashboard',   () => import("./pages/SystemDashboard"));
 const LashoKodesh       = lazyWithLog('LashoKodesh',       () => import("./pages/LashoKodesh"));
-const LoshonKodeshRules = lazyWithLog('LoshonKodeshRules', () => import("./pages/LoshonKodeshRules"));
+const PersonalLearning = lazyWithLog('PersonalLearning', () => import("./pages/PersonalLearning"));
 const CompareReport     = lazyWithLog('CompareReport',     () => import("./pages/CompareReport"));
-const Features          = lazyWithLog('Features',          () => import("./pages/Features"));
-const ABCompare         = lazyWithLog('ABCompare',         () => import("./pages/ABCompare"));
+const ComparisonsHub    = lazyWithLog('ComparisonsHub',    () => import("./pages/ComparisonsHub"));
+const AsrTraining       = lazyWithLog('AsrTraining',       () => import("./pages/AsrTraining"));
 
 // Lazy non-critical UI widgets — defer past first paint
 const SmartConsoleLazy = lazy(() => import("./components/SmartConsole").then(m => ({ default: m.SmartConsole })));
@@ -106,6 +103,7 @@ const DiarizationFloatingStatusLazy = lazy(() => import("./components/Diarizatio
 const JobsCenterLazy = lazy(() => import("./components/jobs/JobsCenter").then(m => ({ default: m.JobsCenter })));
 const ConversionJobsBridgeLazy = lazy(() => import("./components/jobs/ConversionJobsBridge").then(m => ({ default: m.ConversionJobsBridge })));
 const TranscriptionJobsBridgeLazy = lazy(() => import("./components/jobs/TranscriptionJobsBridge").then(m => ({ default: m.TranscriptionJobsBridge })));
+const RegressionWatcherLazy = lazy(() => import("./components/RegressionWatcher"));
 
 
 /** Mounts children only after the browser is idle / a delay — keeps them off the critical path. */
@@ -160,13 +158,6 @@ const PageLoader = ({ label = 'page' }: { label?: string }) => {
   return null;
 };
 
-
-const LoshonKodeshSyncBridge = () => {
-  useLoshonKodeshSync();
-  useFeatureFlagsCloudSync();
-  useABCompareCartCloudSync();
-  return null;
-};
 
 const App = () => {
   // Initialize theme on app load
@@ -247,7 +238,6 @@ const App = () => {
   <ErrorBoundary>
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <LoshonKodeshSyncBridge />
       <CloudPreferencesProvider>
       <DesignModeProvider>
       <TooltipProvider>
@@ -269,6 +259,7 @@ const App = () => {
           <DeferredMount delay={800}><JobsCenterLazy /></DeferredMount>
           <DeferredMount delay={1200}><ConversionJobsBridgeLazy /></DeferredMount>
           <DeferredMount delay={1400}><TranscriptionJobsBridgeLazy /></DeferredMount>
+          <DeferredMount delay={1600}><RegressionWatcherLazy /></DeferredMount>
           
           <AppSidebar />
           <DeferredMount delay={200}><QuickCutDialogLazy /></DeferredMount>
@@ -285,11 +276,13 @@ const App = () => {
                 <Route path="/setup" element={<ProtectedRoute><Setup /></ProtectedRoute>} />
                 <Route path="/text-editor" element={<ProtectedRoute><TextEditor /></ProtectedRoute>} />
                 <Route path="/folders" element={<ProtectedRoute><Folders /></ProtectedRoute>} />
-                <Route path="/benchmark" element={<ProtectedRoute><Benchmark /></ProtectedRoute>} />
+                <Route path="/benchmark" element={<Navigate to="/compare?tab=enhance" replace />} />
                 <Route path="/voice-studio" element={<ProtectedRoute><VoiceStudio /></ProtectedRoute>} />
                 <Route path="/audacity-lab" element={<ProtectedRoute><AudacityLab /></ProtectedRoute>} />
                 <Route path="/diarization" element={<ProtectedRoute><Diarization /></ProtectedRoute>} />
-                <Route path="/diarization/compare" element={<ProtectedRoute><DiarizationCompare /></ProtectedRoute>} />
+                <Route path="/compare" element={<ProtectedRoute><ComparisonsHub /></ProtectedRoute>} />
+                <Route path="/diarization/compare" element={<Navigate to="/compare?tab=diarization" replace />} />
+                <Route path="/compare-report" element={<Navigate to="/compare?tab=transcripts" replace />} />
                 <Route path="/video-to-mp3" element={<ProtectedRoute><VideoToMp3 /></ProtectedRoute>} />
                 <Route path="/audio-clean" element={<ProtectedRoute><AudioCleanLab /></ProtectedRoute>} />
                 <Route path="/harmonika" element={<ProtectedRoute><Harmonika /></ProtectedRoute>} />
@@ -297,10 +290,9 @@ const App = () => {
                 <Route path="/voice-command-admin" element={<ProtectedRoute><VoiceCommandAdmin /></ProtectedRoute>} />
                 <Route path="/system-dashboard" element={<ProtectedRoute><SystemDashboard /></ProtectedRoute>} />
                 <Route path="/lashon-kodesh" element={<ProtectedRoute><LashoKodesh /></ProtectedRoute>} />
-                <Route path="/loshon-kodesh-rules" element={<ProtectedRoute><LoshonKodeshRules /></ProtectedRoute>} />
-                <Route path="/compare-report" element={<ProtectedRoute><CompareReport /></ProtectedRoute>} />
-                <Route path="/features" element={<ProtectedRoute><Features /></ProtectedRoute>} />
-                <Route path="/ab-compare" element={<ProtectedRoute><ABCompare /></ProtectedRoute>} />
+                <Route path="/loshon-kodesh-rules" element={<Navigate to="/lashon-kodesh?tab=settings" replace />} />
+                <Route path="/personal-learning" element={<ProtectedRoute><PersonalLearning /></ProtectedRoute>} />
+                <Route path="/asr-training" element={<Navigate to="/compare?tab=ground-truth" replace />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>

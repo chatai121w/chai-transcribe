@@ -14,24 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
-      ai_editor_custom_actions: {
+      ai_usage_events: {
         Row: {
-          payload: Json
-          updated_at: string
+          completion_tokens: number
+          cost_usd_snapshot: number | null
+          created_at: string
+          duration_ms: number | null
+          feature: string
+          id: string
+          model: string
+          params: Json | null
+          prompt_preview: string | null
+          prompt_tokens: number
+          response_preview: string | null
+          system_prompt: string | null
+          total_tokens: number
           user_id: string
-          view_mode: string | null
         }
         Insert: {
-          payload?: Json
-          updated_at?: string
+          completion_tokens?: number
+          cost_usd_snapshot?: number | null
+          created_at?: string
+          duration_ms?: number | null
+          feature: string
+          id?: string
+          model: string
+          params?: Json | null
+          prompt_preview?: string | null
+          prompt_tokens?: number
+          response_preview?: string | null
+          system_prompt?: string | null
+          total_tokens?: number
           user_id: string
-          view_mode?: string | null
         }
         Update: {
-          payload?: Json
-          updated_at?: string
+          completion_tokens?: number
+          cost_usd_snapshot?: number | null
+          created_at?: string
+          duration_ms?: number | null
+          feature?: string
+          id?: string
+          model?: string
+          params?: Json | null
+          prompt_preview?: string | null
+          prompt_tokens?: number
+          response_preview?: string | null
+          system_prompt?: string | null
+          total_tokens?: number
           user_id?: string
-          view_mode?: string | null
         }
         Relationships: []
       }
@@ -62,6 +92,188 @@ export type Database = {
           seconds?: number
           user_id?: string
           words?: number
+        }
+        Relationships: []
+      }
+      asr_learned_corrections: {
+        Row: {
+          category: string
+          confidence: number
+          corrected: string
+          created_at: string
+          engine: string
+          frequency: number
+          id: string
+          last_used: string
+          note: string | null
+          original: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category?: string
+          confidence?: number
+          corrected: string
+          created_at?: string
+          engine?: string
+          frequency?: number
+          id?: string
+          last_used?: string
+          note?: string | null
+          original: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string
+          confidence?: number
+          corrected?: string
+          created_at?: string
+          engine?: string
+          frequency?: number
+          id?: string
+          last_used?: string
+          note?: string | null
+          original?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      asr_pending_corrections: {
+        Row: {
+          ai_reason: string | null
+          confidence: number
+          correct_text: string
+          created_at: string
+          engine: string | null
+          id: string
+          occurrences: number
+          resolved_at: string | null
+          rule_ids: string[]
+          run_id: string | null
+          status: string
+          user_id: string
+          wrong_text: string
+        }
+        Insert: {
+          ai_reason?: string | null
+          confidence?: number
+          correct_text: string
+          created_at?: string
+          engine?: string | null
+          id?: string
+          occurrences?: number
+          resolved_at?: string | null
+          rule_ids?: string[]
+          run_id?: string | null
+          status?: string
+          user_id: string
+          wrong_text: string
+        }
+        Update: {
+          ai_reason?: string | null
+          confidence?: number
+          correct_text?: string
+          created_at?: string
+          engine?: string | null
+          id?: string
+          occurrences?: number
+          resolved_at?: string | null
+          rule_ids?: string[]
+          run_id?: string | null
+          status?: string
+          user_id?: string
+          wrong_text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asr_pending_corrections_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "asr_training_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      asr_training_runs: {
+        Row: {
+          audio_duration_ms: number | null
+          audio_filename: string | null
+          audio_path: string | null
+          audio_size: number | null
+          cer_a: number | null
+          cer_b: number | null
+          corrections_applied: number
+          created_at: string
+          hyp_a_text: string | null
+          hyp_b_text: string | null
+          id: string
+          learning_mode: string
+          model_a: string | null
+          model_b: string | null
+          notes: string | null
+          ref_text: string
+          source_kind: string
+          source_label: string | null
+          source_ref: string | null
+          term_recall_a: number | null
+          term_recall_b: number | null
+          user_id: string
+          wer_a: number | null
+          wer_b: number | null
+        }
+        Insert: {
+          audio_duration_ms?: number | null
+          audio_filename?: string | null
+          audio_path?: string | null
+          audio_size?: number | null
+          cer_a?: number | null
+          cer_b?: number | null
+          corrections_applied?: number
+          created_at?: string
+          hyp_a_text?: string | null
+          hyp_b_text?: string | null
+          id?: string
+          learning_mode?: string
+          model_a?: string | null
+          model_b?: string | null
+          notes?: string | null
+          ref_text: string
+          source_kind: string
+          source_label?: string | null
+          source_ref?: string | null
+          term_recall_a?: number | null
+          term_recall_b?: number | null
+          user_id: string
+          wer_a?: number | null
+          wer_b?: number | null
+        }
+        Update: {
+          audio_duration_ms?: number | null
+          audio_filename?: string | null
+          audio_path?: string | null
+          audio_size?: number | null
+          cer_a?: number | null
+          cer_b?: number | null
+          corrections_applied?: number
+          created_at?: string
+          hyp_a_text?: string | null
+          hyp_b_text?: string | null
+          id?: string
+          learning_mode?: string
+          model_a?: string | null
+          model_b?: string | null
+          notes?: string | null
+          ref_text?: string
+          source_kind?: string
+          source_label?: string | null
+          source_ref?: string | null
+          term_recall_a?: number | null
+          term_recall_b?: number | null
+          user_id?: string
+          wer_a?: number | null
+          wer_b?: number | null
         }
         Relationships: []
       }
@@ -101,6 +313,84 @@ export type Database = {
           slug?: string
           style?: Json | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      comparison_runs: {
+        Row: {
+          audio_duration_ms: number | null
+          cer: number | null
+          config_snapshot: Json
+          corrections_count: number | null
+          created_at: string
+          elapsed_ms: number | null
+          engine: string | null
+          hotwords_count: number | null
+          hypothesis_text: string | null
+          id: string
+          kind: string
+          len_ratio: number | null
+          model: string | null
+          notes: string | null
+          recording_fingerprint: string
+          recording_label: string | null
+          reference_text: string | null
+          source_run_id: string | null
+          term_recall: number | null
+          updated_at: string
+          user_id: string
+          user_verdict: string | null
+          wer: number | null
+        }
+        Insert: {
+          audio_duration_ms?: number | null
+          cer?: number | null
+          config_snapshot?: Json
+          corrections_count?: number | null
+          created_at?: string
+          elapsed_ms?: number | null
+          engine?: string | null
+          hotwords_count?: number | null
+          hypothesis_text?: string | null
+          id?: string
+          kind: string
+          len_ratio?: number | null
+          model?: string | null
+          notes?: string | null
+          recording_fingerprint: string
+          recording_label?: string | null
+          reference_text?: string | null
+          source_run_id?: string | null
+          term_recall?: number | null
+          updated_at?: string
+          user_id: string
+          user_verdict?: string | null
+          wer?: number | null
+        }
+        Update: {
+          audio_duration_ms?: number | null
+          cer?: number | null
+          config_snapshot?: Json
+          corrections_count?: number | null
+          created_at?: string
+          elapsed_ms?: number | null
+          engine?: string | null
+          hotwords_count?: number | null
+          hypothesis_text?: string | null
+          id?: string
+          kind?: string
+          len_ratio?: number | null
+          model?: string | null
+          notes?: string | null
+          recording_fingerprint?: string
+          recording_label?: string | null
+          reference_text?: string | null
+          source_run_id?: string | null
+          term_recall?: number | null
+          updated_at?: string
+          user_id?: string
+          user_verdict?: string | null
+          wer?: number | null
         }
         Relationships: []
       }
@@ -318,6 +608,108 @@ export type Database = {
           },
         ]
       }
+      lora_training_jobs: {
+        Row: {
+          adapter_path: string | null
+          base_model: string
+          batch_size: number
+          cer_after: number | null
+          cer_before: number | null
+          created_at: string
+          ct2_model_path: string | null
+          current_epoch: number | null
+          current_step: number | null
+          dataset_size: number
+          epochs: number
+          error_message: string | null
+          eval_loss: number | null
+          finished_at: string | null
+          hardware_info: Json | null
+          id: string
+          job_name: string
+          learning_rate: number
+          log_tail: string | null
+          lora_alpha: number
+          lora_dropout: number
+          lora_r: number
+          progress: number
+          started_at: string | null
+          status: string
+          total_steps: number | null
+          train_loss: number | null
+          updated_at: string
+          user_id: string
+          wer_after: number | null
+          wer_before: number | null
+        }
+        Insert: {
+          adapter_path?: string | null
+          base_model: string
+          batch_size?: number
+          cer_after?: number | null
+          cer_before?: number | null
+          created_at?: string
+          ct2_model_path?: string | null
+          current_epoch?: number | null
+          current_step?: number | null
+          dataset_size?: number
+          epochs?: number
+          error_message?: string | null
+          eval_loss?: number | null
+          finished_at?: string | null
+          hardware_info?: Json | null
+          id?: string
+          job_name: string
+          learning_rate?: number
+          log_tail?: string | null
+          lora_alpha?: number
+          lora_dropout?: number
+          lora_r?: number
+          progress?: number
+          started_at?: string | null
+          status?: string
+          total_steps?: number | null
+          train_loss?: number | null
+          updated_at?: string
+          user_id: string
+          wer_after?: number | null
+          wer_before?: number | null
+        }
+        Update: {
+          adapter_path?: string | null
+          base_model?: string
+          batch_size?: number
+          cer_after?: number | null
+          cer_before?: number | null
+          created_at?: string
+          ct2_model_path?: string | null
+          current_epoch?: number | null
+          current_step?: number | null
+          dataset_size?: number
+          epochs?: number
+          error_message?: string | null
+          eval_loss?: number | null
+          finished_at?: string | null
+          hardware_info?: Json | null
+          id?: string
+          job_name?: string
+          learning_rate?: number
+          log_tail?: string | null
+          lora_alpha?: number
+          lora_dropout?: number
+          lora_r?: number
+          progress?: number
+          started_at?: string | null
+          status?: string
+          total_steps?: number | null
+          train_loss?: number | null
+          updated_at?: string
+          user_id?: string
+          wer_after?: number | null
+          wer_before?: number | null
+        }
+        Relationships: []
+      }
       migration_logs: {
         Row: {
           created_at: string
@@ -476,8 +868,11 @@ export type Database = {
       transcript_versions: {
         Row: {
           action_label: string | null
+          ai_usage_event_id: string | null
+          audio_file_path: string | null
           created_at: string
           engine_label: string | null
+          folder_id: string | null
           id: string
           source: string
           text: string
@@ -488,8 +883,11 @@ export type Database = {
         }
         Insert: {
           action_label?: string | null
+          ai_usage_event_id?: string | null
+          audio_file_path?: string | null
           created_at?: string
           engine_label?: string | null
+          folder_id?: string | null
           id?: string
           source?: string
           text: string
@@ -500,8 +898,11 @@ export type Database = {
         }
         Update: {
           action_label?: string | null
+          ai_usage_event_id?: string | null
+          audio_file_path?: string | null
           created_at?: string
           engine_label?: string | null
+          folder_id?: string | null
           id?: string
           source?: string
           text?: string
@@ -511,6 +912,20 @@ export type Database = {
           word_count?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "transcript_versions_ai_usage_event_id_fkey"
+            columns: ["ai_usage_event_id"]
+            isOneToOne: false
+            referencedRelation: "ai_usage_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transcript_versions_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "transcript_versions_transcript_id_fkey"
             columns: ["transcript_id"]
@@ -647,6 +1062,7 @@ export type Database = {
           created_at: string
           deepgram_key: string | null
           deepgram_keys_pool: Json | null
+          gemini_key: string | null
           google_key: string | null
           google_keys_pool: Json | null
           groq_key: string | null
@@ -668,6 +1084,7 @@ export type Database = {
           created_at?: string
           deepgram_key?: string | null
           deepgram_keys_pool?: Json | null
+          gemini_key?: string | null
           google_key?: string | null
           google_keys_pool?: Json | null
           groq_key?: string | null
@@ -689,6 +1106,7 @@ export type Database = {
           created_at?: string
           deepgram_key?: string | null
           deepgram_keys_pool?: Json | null
+          gemini_key?: string | null
           google_key?: string | null
           google_keys_pool?: Json | null
           groq_key?: string | null
@@ -707,7 +1125,6 @@ export type Database = {
       }
       user_preferences: {
         Row: {
-          ab_compare_cart_json: Json | null
           active_pronunciation_profile: string
           compare_settings_json: Json | null
           created_at: string
@@ -724,11 +1141,11 @@ export type Database = {
           custom_themes: Json | null
           dashboard_view_mode: string | null
           default_ai_model: string | null
+          design_overrides: Json | null
           diarize_enabled: boolean
           draft_text: string | null
           editor_columns: number | null
           engine: string | null
-          feature_flags: Json
           folder_sort_asc: boolean | null
           folder_sort_key: string | null
           folder_view_mode: string | null
@@ -738,7 +1155,6 @@ export type Database = {
           line_height: number | null
           live_chunk_sec: number | null
           live_mic_gain: number | null
-          lk_rules: Json | null
           loshon_kodesh_enabled: boolean
           personal_pronunciation_enabled: boolean
           player_layout: string | null
@@ -747,13 +1163,11 @@ export type Database = {
           source_language: string | null
           tab_settings_json: Json | null
           text_color: string | null
-          text_editor_view_json: Json | null
           theme: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
-          ab_compare_cart_json?: Json | null
           active_pronunciation_profile?: string
           compare_settings_json?: Json | null
           created_at?: string
@@ -770,11 +1184,11 @@ export type Database = {
           custom_themes?: Json | null
           dashboard_view_mode?: string | null
           default_ai_model?: string | null
+          design_overrides?: Json | null
           diarize_enabled?: boolean
           draft_text?: string | null
           editor_columns?: number | null
           engine?: string | null
-          feature_flags?: Json
           folder_sort_asc?: boolean | null
           folder_sort_key?: string | null
           folder_view_mode?: string | null
@@ -784,7 +1198,6 @@ export type Database = {
           line_height?: number | null
           live_chunk_sec?: number | null
           live_mic_gain?: number | null
-          lk_rules?: Json | null
           loshon_kodesh_enabled?: boolean
           personal_pronunciation_enabled?: boolean
           player_layout?: string | null
@@ -793,13 +1206,11 @@ export type Database = {
           source_language?: string | null
           tab_settings_json?: Json | null
           text_color?: string | null
-          text_editor_view_json?: Json | null
           theme?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
-          ab_compare_cart_json?: Json | null
           active_pronunciation_profile?: string
           compare_settings_json?: Json | null
           created_at?: string
@@ -816,11 +1227,11 @@ export type Database = {
           custom_themes?: Json | null
           dashboard_view_mode?: string | null
           default_ai_model?: string | null
+          design_overrides?: Json | null
           diarize_enabled?: boolean
           draft_text?: string | null
           editor_columns?: number | null
           engine?: string | null
-          feature_flags?: Json
           folder_sort_asc?: boolean | null
           folder_sort_key?: string | null
           folder_view_mode?: string | null
@@ -830,7 +1241,6 @@ export type Database = {
           line_height?: number | null
           live_chunk_sec?: number | null
           live_mic_gain?: number | null
-          lk_rules?: Json | null
           loshon_kodesh_enabled?: boolean
           personal_pronunciation_enabled?: boolean
           player_layout?: string | null
@@ -839,8 +1249,37 @@ export type Database = {
           source_language?: string | null
           tab_settings_json?: Json | null
           text_color?: string | null
-          text_editor_view_json?: Json | null
           theme?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_prompts: {
+        Row: {
+          category: string
+          created_at: string
+          id: string
+          label: string
+          prompt: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category?: string
+          created_at?: string
+          id?: string
+          label: string
+          prompt: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          id?: string
+          label?: string
+          prompt?: string
           updated_at?: string
           user_id?: string
         }

@@ -16,7 +16,7 @@ import { useBackgroundTask } from "@/hooks/useBackgroundTask";
 import { debugLog } from "@/lib/debugLogger";
 import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
 import { useTranscriptionAnalytics } from "@/hooks/useTranscriptionAnalytics";
-import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Pause, Play, Square, Copy, Check, Keyboard, Activity, Users, Scissors, BrainCircuit } from "lucide-react";
+import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Pause, Play, Square, Copy, Check, Keyboard, Activity, Users, Scissors, BrainCircuit, Youtube, Sparkles } from "lucide-react";
 import { openQuickCut } from "@/lib/quickCutBus";
 import { usePerfMonitor } from "@/hooks/usePerfMonitor";
 import { PerfMonitorPanel } from "@/components/PerfMonitorPanel";
@@ -32,25 +32,23 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
 import { getApiKey, getEncryptedKey } from "@/lib/keyCrypto";
+import { recoverProviderKeysFromCloud } from "@/lib/cloudKeyFallback";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
-import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, buildLoshonKodeshHotwords, applyLoshonKodeshReplacements, runLkAiPolish, getLkAiPolishSettings } from "@/lib/loshonKodesh";
+import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, buildLoshonKodeshHotwords, applyLoshonKodeshReplacements, isLkAiEnabled, isLkAiAuto, applyLkAiFix } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
 import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
 import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSuggestion";
 import { PronunciationProfileSelector } from "@/components/PronunciationProfileSelector";
 import { PronunciationStack } from "@/components/PronunciationStack";
-import { FeatureToggleChip } from "@/components/FeatureToggleChip";
-import { Link } from "react-router-dom";
-import { Layers } from "lucide-react";
-import { applyLearnedCorrections } from "@/utils/correctionLearning";
+import { applyLearnedCorrections, getLearnedHotwords } from "@/utils/correctionLearning";
+import { applyVocabularyCorrections, getHotwordsString, isCustomVocabularyEnabled, setCustomVocabularyEnabled } from "@/utils/customVocabulary";
 import { addRecentFile } from "@/components/RecentFiles";
+import { applyDefinitiveRulesToText, areDefinitiveRulesEnabled } from '@/utils/hebrewRuleEngine';
 
 // Lazy-loaded heavy components
 const LiveTranscriber = lazy(() => import("@/components/LiveTranscriber").then(m => ({ default: m.LiveTranscriber })));
 import type { LiveTranscriptResult } from "@/components/LiveTranscriber";
 const TranscriptEditor = lazy(() => import("@/components/TranscriptEditor").then(m => ({ default: m.TranscriptEditor })));
-import { TranscriptVersionsPanel } from "@/components/TranscriptVersionsPanel";
-import { TextExportMenu } from "@/components/TextExportMenu";
 const CloudTranscriptHistory = lazy(() => import("@/components/CloudTranscriptHistory").then(m => ({ default: m.CloudTranscriptHistory })));
 const TranscriptSummary = lazy(() => import("@/components/TranscriptSummary").then(m => ({ default: m.TranscriptSummary })));
 const ShareTranscript = lazy(() => import("@/components/ShareTranscript").then(m => ({ default: m.ShareTranscript })));
@@ -58,10 +56,33 @@ const TextStyleControl = lazy(() => import("@/components/TextStyleControl").then
 const LocalModelManager = lazy(() => import("@/components/LocalModelManager").then(m => ({ default: m.LocalModelManager })));
 const BackgroundJobsPanel = lazy(() => import("@/components/BackgroundJobsPanel").then(m => ({ default: m.BackgroundJobsPanel })));
 const SpeakerDiarization = lazy(() => import("@/components/SpeakerDiarization").then(m => ({ default: m.SpeakerDiarization })));
-const YouTubeTranscriber = lazy(() => import("@/components/YouTubeTranscriber").then(m => ({ default: m.YouTubeTranscriber })));
 import { WaveformPlayer, type WaveformPlayerHandle } from "@/components/WaveformPlayer";
+import {
+  TranscriptionWidget,
+  TranscriptionWidgetWorkspace,
+  type WidgetDefinition,
+} from "@/components/transcription/TranscriptionWidgetWorkspace";
 
-type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram';
+const TRANSCRIPTION_WIDGETS: WidgetDefinition[] = [
+  { id: "engine", title: "מנוע ושמירה", defaultSpan: "full" },
+  { id: "language", title: "שפה ולמידה", defaultSpan: "full" },
+  { id: "trim", title: "חיתוך אודיו", defaultSpan: "half" },
+  { id: "source", title: "מקור התמלול", defaultSpan: "half" },
+  { id: "recovery", title: "שחזור תמלול", defaultSpan: "full" },
+  { id: "performance", title: "ביצועים", defaultSpan: "full" },
+  { id: "stats", title: "נתוני תמלול", defaultSpan: "full" },
+  { id: "progress", title: "מצב התמלול", defaultSpan: "full" },
+  { id: "live-preview", title: "תצוגה מקדימה", defaultSpan: "full" },
+  { id: "background-jobs", title: "משימות רקע", defaultSpan: "full" },
+  { id: "local-queue", title: "תור תמלולים מקומי", defaultSpan: "full" },
+  { id: "live", title: "תמלול בזמן אמת", defaultSpan: "full" },
+  { id: "models", title: "מודלים מקומיים", defaultSpan: "full" },
+  { id: "history", title: "היסטוריית תמלולים", defaultSpan: "full" },
+  { id: "result", title: "נגן ותוצאת תמלול", defaultSpan: "full" },
+  { id: "diarization", title: "זיהוי דוברים", defaultSpan: "full" },
+];
+
+type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
 type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
 
 const Index = () => {
@@ -92,6 +113,7 @@ const Index = () => {
     updatePreference('loshon_kodesh_enabled', v);
   };
   const [personalModelOn, setPersonalModelOn] = useState<boolean>(() => isPersonalPronunciationEnabled());
+  const [customVocabularyOn, setCustomVocabularyOn] = useState<boolean>(() => isCustomVocabularyEnabled());
 
   useEffect(() => {
     setPersonalModelOn(preferences.personal_pronunciation_enabled);
@@ -112,6 +134,11 @@ const Index = () => {
   const [originalTranscript, setOriginalTranscript] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [completedEngine, setCompletedEngine] = useState<Engine | null>(null);
+  const flashEngineDone = useCallback((eng: Engine) => {
+    setCompletedEngine(eng);
+    window.setTimeout(() => setCompletedEngine((prev) => (prev === eng ? null : prev)), 5000);
+  }, []);
 
   // Audio & word timing state for sync player
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -181,35 +208,9 @@ const Index = () => {
   }, [serverConnected]);
 
   // Helper: set transcript from engine result (also stores original for diff)
-  // Runs the optional post-processing pipeline (names dict, AI fix) based on flags.
-  const postProcessAbortRef = useRef<AbortController | null>(null);
   const setTranscriptFromEngine = useCallback((text: string) => {
     setTranscript(text);
     setOriginalTranscript(text);
-
-    // Fire post-processing async — UI shows raw text immediately, then upgrades.
-    postProcessAbortRef.current?.abort();
-    const ctrl = new AbortController();
-    postProcessAbortRef.current = ctrl;
-    (async () => {
-      try {
-        const { runPostProcessingPipeline } = await import("@/lib/transcriptionPostProcess");
-        const result = await runPostProcessingPipeline(text, { signal: ctrl.signal });
-        if (ctrl.signal.aborted) return;
-        if (result.changed) {
-          setTranscript(result.text);
-          const appliedSteps = result.steps.filter(s => s.applied).map(s => s.name);
-          if (appliedSteps.length > 0) {
-            toast({
-              title: "✨ תיקונים אוטומטיים הוחלו",
-              description: appliedSteps.includes("ai_post_correction") ? "תיקון AI סופי + מילון שמות" : "מילון שמות פרטיים",
-            });
-          }
-        }
-      } catch (err) {
-        debugLog.warn("Index", "Post-process pipeline failed", err);
-      }
-    })();
   }, []);
 
   // Helper to track the start time of each transcription for analytics
@@ -411,25 +412,48 @@ const Index = () => {
   const lastSavedTranscriptIdRef = useRef<string | null>(null);
 
   // Save to cloud history (respects cloud save mode for CUDA engine)
-  const saveToHistory = async (text: string, engineUsed: string, skipCloud?: boolean, timings?: Array<{word: string, start: number, end: number, probability?: number}>, audioFile?: File, folder?: string) => {
+  const saveToHistory = async (text: string, engineUsed: string, skipCloud?: boolean, timings?: Array<{word: string, start: number, end: number, probability?: number}>, audioFile?: File, folder?: string, textOnly = false) => {
+    const definitiveResult = areDefinitiveRulesEnabled()
+      ? applyDefinitiveRulesToText(text)
+      : { fixedText: text, hits: [] };
     // Apply learned corrections to improve transcription
     const personalPronunciationOn = isPersonalPronunciationEnabled();
     const correctionResult = personalPronunciationOn
-      ? applyLearnedCorrections(text, { engine: engineUsed })
-      : { text, appliedCount: 0 };
+      ? applyLearnedCorrections(definitiveResult.fixedText, { engine: engineUsed })
+      : { text: definitiveResult.fixedText, appliedCount: 0, applied: [] };
     const profileResult = personalPronunciationOn
       ? applyProfileCorrections(correctionResult.text)
       : { text: correctionResult.text, appliedCount: 0 };
+    const vocabularyResult = isCustomVocabularyEnabled()
+      ? applyVocabularyCorrections(profileResult.text)
+      : { text: profileResult.text, appliedCount: 0 };
     // Apply Loshon Kodesh phonetic→canonical replacements when LK mode is on
     const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
-    let finalText = lkActive ? applyLoshonKodeshReplacements(profileResult.text) : profileResult.text;
-    // Optional final AI polish (Gemini / Ollama / off) — only when LK active and user enabled it
-    if (lkActive && getLkAiPolishSettings().enabled) {
-      try { finalText = await runLkAiPolish(finalText); }
-      catch (e) { debugLog.warn('Index', 'LK AI polish failed', { msg: (e as Error)?.message }); }
+    let finalText = lkActive ? applyLoshonKodeshReplacements(vocabularyResult.text) : vocabularyResult.text;
+    // Layer 2: optional AI fix when auto-mode is on
+    if (lkActive && isLkAiEnabled() && isLkAiAuto()) {
+      try {
+        const aiFixed = await applyLkAiFix(finalText);
+        if (aiFixed && aiFixed.trim()) {
+          finalText = aiFixed;
+          debugLog.info('Index', 'Applied Loshon Kodesh AI layer');
+        }
+      } catch (e) {
+        debugLog.warn('Index', 'LK AI fix failed, keeping rules-only result', e);
+      }
     }
-    if (correctionResult.appliedCount > 0 || profileResult.appliedCount > 0) {
-      debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile corrections`);
+    const nonLkAppliedCount = definitiveResult.hits.length + correctionResult.appliedCount + profileResult.appliedCount + vocabularyResult.appliedCount;
+    if (finalText !== text) {
+      debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile + ${vocabularyResult.appliedCount} vocabulary corrections`);
+      setTranscript(finalText);
+    }
+    if (nonLkAppliedCount > 0) {
+      toast({
+        title: `הלמידה האישית החילה ${nonLkAppliedCount} תיקונים`,
+        description: correctionResult.applied.length
+          ? correctionResult.applied.slice(0, 3).map(item => `${item.original} → ${item.corrected}`).join(' · ')
+          : 'הטקסט עודכן לפי אוצר המילים האישי',
+      });
     }
     // Record that the active profile was used for this audio file (powers
     // future filename-based profile suggestions).
@@ -444,9 +468,9 @@ const Index = () => {
       const updated = [entry, ...history].slice(0, 50);
       localStorage.setItem('transcript_history', JSON.stringify(updated));
       lastSavedTranscriptIdRef.current = null;
-      return;
+      return finalText;
     }
-    const saved = await saveTranscript(finalText, engineUsed, undefined, audioFile || currentFileRef.current || undefined, timings || null, folder);
+    const saved = await saveTranscript(finalText, engineUsed, undefined, textOnly ? undefined : (audioFile || currentFileRef.current || undefined), timings || null, folder);
     lastSavedTranscriptIdRef.current = saved?.id || null;
     addRecentFile({
       fileName: currentFileRef.current?.name || audioFile?.name || 'הקלטה',
@@ -456,6 +480,7 @@ const Index = () => {
       preview: finalText.slice(0, 120),
     });
     addNotification({ type: 'success', title: 'תמלול הושלם', description: `מנוע: ${engineUsed} — ${finalText.split(/\s+/).length} מילים` });
+    return finalText;
   };
 
   // Save text-only to cloud (deferred mode — upload text without audio file)
@@ -498,25 +523,27 @@ const Index = () => {
       xhr.onload = () => {
         if (processingInterval) clearInterval(processingInterval);
         onProgress(100);
+        const requestId = xhr.getResponseHeader('x-request-id') || undefined;
         try {
           const json = JSON.parse(xhr.responseText || '{}');
           if (xhr.status >= 200 && xhr.status < 300) {
-            resolve({ data: json });
+            resolve({ data: { ...json, __requestId: requestId } });
           } else if (xhr.status === 429) {
             const retryAfter = parseInt(xhr.getResponseHeader('Retry-After') || '60', 10);
-            resolve({ error: { message: `RATE_LIMIT`, retryAfter } });
+            resolve({ error: { message: 'RATE_LIMIT', retryAfter, status: 429, requestId, body: json } });
           } else {
-            resolve({ error: json || { message: `HTTP ${xhr.status}` } });
+            resolve({ error: { ...(json || {}), status: xhr.status, requestId, body: json } });
           }
         } catch (e) {
-          resolve({ error: { message: 'Invalid JSON response' } });
+          resolve({ error: { message: `HTTP ${xhr.status} — תשובה לא-JSON`, status: xhr.status, requestId, raw: xhr.responseText?.slice(0, 300) } });
         }
       };
 
       xhr.onerror = () => {
         if (processingInterval) clearInterval(processingInterval);
-        resolve({ error: { message: 'Network error' } });
+        resolve({ error: { message: 'Network error', status: 0 } });
       };
+
 
       xhr.send(formData);
     });
@@ -578,7 +605,12 @@ const Index = () => {
     if (single && !merged.includes(single)) {
       merged.unshift(single);
     }
-    return Array.from(new Set(merged));
+    const local = Array.from(new Set(merged));
+    if (local.length > 0) return local;
+
+    // Nothing usable locally (fresh session → encrypted blob can't be decrypted,
+    // or CloudKeySync hasn't run yet) — recover straight from the cloud.
+    return await recoverProviderKeysFromCloud(provider);
   };
 
   const shouldRotateProviderKey = (err: any): boolean => {
@@ -666,27 +698,6 @@ const Index = () => {
         }
       };
     } catch { /* ignore duration detection errors */ }
-
-    // Audio quality pre-check (flag-gated). Non-blocking — warnings only.
-    try {
-      const { readFlag } = await import('@/lib/featureFlags');
-      if (!isVideo && readFlag('ff_audio_quality_check')) {
-        const { analyzeAudioFile } = await import('@/lib/audioQualityCheck');
-        analyzeAudioFile(file).then((report) => {
-          if (report.issues.length === 0) {
-            debugLog.info('AudioQuality', `✓ OK | RMS ${report.rmsDb.toFixed(1)} dB | SR ${report.sampleRate} Hz`);
-            return;
-          }
-          for (const issue of report.issues) {
-            toast({
-              title: issue.severity === 'error' ? '⚠️ בעיית אודיו חמורה' : '⚠️ אזהרת איכות אודיו',
-              description: `${issue.message}${issue.suggestion ? ' — ' + issue.suggestion : ''}`,
-              variant: issue.severity === 'error' ? 'destructive' : undefined,
-            });
-          }
-        }).catch(err => debugLog.warn('AudioQuality', 'analysis failed', err));
-      }
-    } catch { /* ignore */ }
 
     // Step 1: If video file and engine requires audio-only → extract audio
     let fileToTranscribe = file;
@@ -830,12 +841,15 @@ const Index = () => {
         await transcribeWithAssemblyAI(fileToTranscribe, url);
       } else if (engine === 'deepgram') {
         await transcribeWithDeepgram(fileToTranscribe, url);
+      } else if (engine === 'gemini') {
+        await transcribeWithGemini(fileToTranscribe, url);
       } else if (engine === 'local-server') {
         await transcribeWithLocalServer(fileToTranscribe, url);
       } else {
         await transcribeLocally(fileToTranscribe, url);
       }
       debugLog.info('bgTask', `✅ bgTask runner finished for ${engine}`);
+      flashEngineDone(engine);
     }).catch((err) => {
       debugLog.error('bgTask', `❌ bgTask rejected: ${err instanceof Error ? err.message : String(err)}`);
     });
@@ -914,7 +928,7 @@ const Index = () => {
         const timings = data.wordTimings || [];
         setTranscriptFromEngine(data.text);
         setWordTimings(timings);
-        await saveToHistory(data.text, 'OpenAI Whisper', undefined, timings);
+        const finalText = await saveToHistory(data.text, 'OpenAI Whisper', undefined, timings);
         addAnalyticsRecord({
           engine: 'OpenAI Whisper', status: 'success',
           fileName: file.name, fileSize: file.size,
@@ -936,7 +950,7 @@ const Index = () => {
         if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
         // Auto-navigate to text editor
         setTimeout(() => {
-          navigate('/text-editor', { state: { text: data.text, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
         }, 1000);
       } else {
         throw new Error('No transcription received');
@@ -1049,7 +1063,7 @@ const Index = () => {
         recordKeyUsage('groq', usedKey, usedSeconds, usedWords);
         setTranscriptFromEngine(data.text);
         setWordTimings(timings);
-        await saveToHistory(data.text, 'Groq Whisper', undefined, timings);
+        const finalText = await saveToHistory(data.text, 'Groq Whisper', undefined, timings);
         addAnalyticsRecord({
           engine: 'Groq Whisper', status: 'success',
           fileName: file.name, fileSize: file.size,
@@ -1070,7 +1084,7 @@ const Index = () => {
         if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
         // Auto-navigate to text editor
         setTimeout(() => {
-          navigate('/text-editor', { state: { text: data.text, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
         }, 1000);
       } else {
         debugLog.error('Groq', 'No text in response data', data);
@@ -1141,19 +1155,15 @@ const Index = () => {
       for (let offset = 0; offset < keyPool.length; offset++) {
         const idx = (safeStartIndex + offset) % keyPool.length;
         debugLog.info('Google', `Calling edge function with key #${idx + 1}/${keyPool.length}`);
-        const { withAutoResume } = await import('@/lib/autoResume');
-        const result = await withAutoResume(
-          () => supabase.functions.invoke('transcribe-google', {
-            body: {
-              audio: base64Audio,
-              fileName: file.name,
-              apiKey: keyPool[idx],
-              language: sourceLanguage,
-              targetLanguage: 'he'
-            }
-          }),
-          { onRetry: (a, e) => debugLog.warn('Google', `auto-resume retry #${a}`, e) },
-        );
+        const result = await supabase.functions.invoke('transcribe-google', {
+          body: {
+            audio: base64Audio,
+            fileName: file.name,
+            apiKey: keyPool[idx],
+            language: sourceLanguage,
+            targetLanguage: 'he'
+          }
+        });
 
         debugLog.info('Google', 'Response received', { hasData: !!result.data, hasError: !!result.error, keyIndex: idx + 1 });
 
@@ -1192,7 +1202,7 @@ const Index = () => {
         const timings = data.wordTimings || [];
         setTranscriptFromEngine(data.text);
         setWordTimings(timings);
-        await saveToHistory(data.text, 'Google Speech-to-Text', undefined, timings);
+        const finalText = await saveToHistory(data.text, 'Google Speech-to-Text', undefined, timings);
         addAnalyticsRecord({
           engine: 'Google Speech-to-Text', status: 'success',
           fileName: file.name, fileSize: file.size,
@@ -1213,7 +1223,7 @@ const Index = () => {
         if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
         // Auto-navigate to text editor
         setTimeout(() => {
-          navigate('/text-editor', { state: { text: data.text, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
         }, 1000);
       } else {
         throw new Error('No transcription received from Google');
@@ -1241,7 +1251,7 @@ const Index = () => {
       const result = await localTranscribe(file);
       setTranscriptFromEngine(result.text);
       setWordTimings(result.wordTimings);
-      await saveToHistory(result.text, 'Local (Browser)', undefined, result.wordTimings);
+      const finalText = await saveToHistory(result.text, 'Local (Browser)', undefined, result.wordTimings);
       addAnalyticsRecord({
         engine: 'Local (Browser)', status: 'success',
         fileName: file.name, fileSize: file.size,
@@ -1262,7 +1272,7 @@ const Index = () => {
       if (result.wordTimings?.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(result.wordTimings));
       // Auto-navigate to text editor
       setTimeout(() => {
-        navigate('/text-editor', { state: { text: result.text, audioUrl: fileAudioUrl, wordTimings: result.wordTimings, transcriptId: lastSavedTranscriptIdRef.current } });
+        navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: result.wordTimings, transcriptId: lastSavedTranscriptIdRef.current } });
       }, 1000);
     } catch (error) {
       debugLog.error('Local', 'Browser transcription failed', error instanceof Error ? error.message : error);
@@ -1331,7 +1341,10 @@ const Index = () => {
       const profileForcesLk = isProfileLoshonKodesh();
       const lkOn = isLoshonKodeshEnabled() || profileForcesLk;
       // When LK is on, merge user-edited LK hotwords + prefer LK prompt
-      const baseHotwords = [preferences.cuda_hotwords || '', profileHotwordsStr].filter(Boolean).join(', ');
+      const vocabularyHotwords = isCustomVocabularyEnabled() ? getHotwordsString() : '';
+      const learnedHotwords = isPersonalPronunciationEnabled() ? getLearnedHotwords(100) : '';
+      const baseHotwords = [preferences.cuda_hotwords || '', vocabularyHotwords, learnedHotwords, profileHotwordsStr]
+        .filter(Boolean).join(', ');
       const mergedCudaHotwords = lkOn
         ? (buildLoshonKodeshHotwords(baseHotwords) || undefined)
         : (baseHotwords || undefined);
@@ -1408,12 +1421,13 @@ const Index = () => {
       // Cloud save mode: 'immediate' (default), 'text-only' (no audio upload), 'skip' (local only)
       const cloudSaveMode = preferences.cuda_cloud_save || 'immediate';
       const engineLabel = `Local CUDA (${result.model || 'server'})`;
+      let finalText: string;
       if (cloudSaveMode === 'skip') {
-        await saveToHistory(result.text, engineLabel, true, timings);  // localStorage only
+        finalText = await saveToHistory(result.text, engineLabel, true, timings);  // localStorage only
       } else if (cloudSaveMode === 'text-only') {
-        await saveTextOnlyToCloud(result.text, engineLabel, timings);  // text to cloud, no audio upload
+        finalText = await saveToHistory(result.text, engineLabel, false, timings, undefined, undefined, true);
       } else {
-        await saveToHistory(result.text, engineLabel, undefined, timings);  // full: text + audio to cloud
+        finalText = await saveToHistory(result.text, engineLabel, undefined, timings);  // full: text + audio to cloud
       }
 
       clearPartial();
@@ -1448,7 +1462,7 @@ const Index = () => {
       });
       if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
       setTimeout(() => {
-        navigate('/text-editor', { state: { text: result.text, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+        navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
       }, 1000);
       if (activeQueueId) {
         await localQueue.updateItemStatus(activeQueueId, 'completed').catch(() => {});
@@ -1550,7 +1564,7 @@ const Index = () => {
         const timings = data.wordTimings || [];
         setTranscriptFromEngine(data.text);
         setWordTimings(timings);
-        await saveToHistory(data.text, 'AssemblyAI', undefined, timings);
+        const finalText = await saveToHistory(data.text, 'AssemblyAI', undefined, timings);
         addAnalyticsRecord({
           engine: 'AssemblyAI', status: 'success',
           fileName: file.name, fileSize: file.size,
@@ -1570,7 +1584,7 @@ const Index = () => {
         });
         if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
         setTimeout(() => {
-          navigate('/text-editor', { state: { text: data.text, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
         }, 1000);
       } else {
         throw new Error('No transcription received');
@@ -1658,7 +1672,7 @@ const Index = () => {
         const timings = data.wordTimings || [];
         setTranscriptFromEngine(data.text);
         setWordTimings(timings);
-        await saveToHistory(data.text, 'Deepgram', undefined, timings);
+        const finalText = await saveToHistory(data.text, 'Deepgram', undefined, timings);
         addAnalyticsRecord({
           engine: 'Deepgram', status: 'success',
           fileName: file.name, fileSize: file.size,
@@ -1678,7 +1692,7 @@ const Index = () => {
         });
         if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
         setTimeout(() => {
-          navigate('/text-editor', { state: { text: data.text, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
         }, 1000);
       } else {
         throw new Error('No transcription received');
@@ -1696,6 +1710,90 @@ const Index = () => {
         variant: "destructive",
       });
       throw error;
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const transcribeWithGemini = async (file: File, fileAudioUrl?: string) => {
+    setIsUploading(true);
+    try {
+      // Personal Gemini key + selected model — client controls both, edge fn falls back to Lovable AI.
+      const { getPersonalGeminiKey, getPersonalGeminiModel } = await import('@/lib/personalGemini');
+      const personalKey = getPersonalGeminiKey();
+      const model = (localStorage.getItem('gemini_transcription_model')
+        || getPersonalGeminiModel()
+        || 'gemini-2.5-flash').replace(/^google\//, '');
+
+      setUploadProgress(0);
+      toast({
+        title: '✨ שולח ל-Gemini...',
+        description: personalKey ? `מפתח אישי · ${model}` : `Lovable AI · ${model}`,
+      });
+
+      const form = new FormData();
+      form.append('file', file, file.name);
+      form.append('model', model);
+      form.append('language', sourceLanguage);
+      if (personalKey) form.append('apiKey', personalKey);
+
+      const result = await xhrInvoke('transcribe-gemini', form, (p) => setUploadProgress(p));
+      if (result.error) throw result.error;
+      const data = result.data as { text?: string; provider?: string; fallbackReason?: string } | null;
+      if (!data?.text) throw new Error('לא התקבל תמלול מ-Gemini');
+
+      if (data.fallbackReason === 'personal_exhausted' && personalKey) {
+        toast({ title: 'מפתח Gemini האישי מוצה', description: 'התמלול הושלם דרך Lovable AI' });
+      }
+
+      const finalText = await saveToHistory(data.text, `Gemini (${model})`, undefined, []);
+      setTranscriptFromEngine(data.text);
+      setWordTimings([]);
+      addAnalyticsRecord({
+        engine: 'Gemini', status: 'success',
+        fileName: file.name, fileSize: file.size,
+        processingTime: (Date.now() - transcriptionStartRef.current) / 1000,
+        charCount: data.text.length, wordCount: data.text.split(/\s+/).length,
+      });
+      perfMonitor.record({
+        engine: 'Gemini', status: 'success',
+        fileName: file.name, fileSize: file.size,
+        audioDuration: 0,
+        processingTime: (Date.now() - transcriptionStartRef.current) / 1000,
+        text: data.text, wordTimings: [],
+      });
+      toast({ title: 'הצלחה!', description: `תמלול Gemini הושלם (${data.provider === 'personal' ? 'מפתח אישי' : 'Lovable AI'})` });
+      setTimeout(() => {
+        navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: [], transcriptId: lastSavedTranscriptIdRef.current } });
+      }, 800);
+    } catch (error) {
+      const err = (error && typeof error === 'object') ? error as Record<string, unknown> : {};
+      const status = err.status as number | undefined;
+      const requestId = err.requestId as string | undefined;
+      const stage = err.stage as string | undefined;
+      const baseMsg = (err.error as string) || (err.message as string) || (error instanceof Error ? error.message : 'שגיאה בתמלול הקובץ');
+      const lines: string[] = [baseMsg];
+      if (status !== undefined) lines.push(`סטטוס: ${status}`);
+      if (stage) lines.push(`שלב: ${stage}`);
+      if (err.personalStatus) lines.push(`Personal: ${err.personalStatus} — ${err.personalError ?? ''}`);
+      if (err.lovableStatus || err.lovableError) lines.push(`Lovable: ${err.lovableStatus ?? ''} — ${err.lovableError ?? ''}`);
+      if (requestId) lines.push(`Request ID: ${requestId} (הועתק)`);
+      const description = lines.filter(Boolean).join('\n');
+      debugLog.error('Gemini', 'Transcription failed', { status, requestId, stage, error: baseMsg, raw: err });
+      addAnalyticsRecord({
+        engine: 'Gemini', status: 'failed',
+        fileName: file.name, fileSize: file.size,
+        errorMessage: description,
+      });
+      toast({
+        title: `שגיאה בתמלול Gemini${status ? ` (${status})` : ''}`,
+        description,
+        variant: 'destructive',
+        duration: 15000,
+      });
+      if (requestId) { try { navigator.clipboard?.writeText(requestId); } catch { /* noop */ } }
+      throw error;
+
     } finally {
       setIsUploading(false);
     }
@@ -1873,13 +1971,9 @@ const Index = () => {
       let lastErr: any = null;
       for (let offset = 0; offset < keyPool.length; offset++) {
         const idx = (safeStartIndex + offset) % keyPool.length;
-        const { withAutoResume } = await import('@/lib/autoResume');
-        const { data, error } = await withAutoResume(
-          () => supabase.functions.invoke('transcribe-google', {
-            body: { audio: base64, fileName: file.name, apiKey: keyPool[idx], language: sourceLanguage, targetLanguage: 'he' }
-          }),
-          { onRetry: (a, e) => debugLog.warn('Google', `auto-resume retry #${a}`, e) },
-        );
+        const { data, error } = await supabase.functions.invoke('transcribe-google', {
+          body: { audio: base64, fileName: file.name, apiKey: keyPool[idx], language: sourceLanguage, targetLanguage: 'he' }
+        });
         if (!error && data?.text) {
           setProviderActiveKey('google', keyPool, idx);
           return data.text;
@@ -1995,7 +2089,7 @@ const Index = () => {
 
         {/* Navigation Tabs */}
         <Tabs defaultValue="transcribe" className="w-full" dir="rtl">
-          <TabsList className="grid w-full grid-cols-2 mb-6">
+          <TabsList className="grid w-full grid-cols-3 mb-6">
             <TabsTrigger value="transcribe">תמלול</TabsTrigger>
             <TabsTrigger 
               value="edit"
@@ -2003,6 +2097,10 @@ const Index = () => {
             >
               <FileEdit className="w-4 h-4 ml-1 text-blue-900" />
               עריכת טקסט
+            </TabsTrigger>
+            <TabsTrigger value="youtube" onClick={() => navigate('/youtube')}>
+              <Youtube className="w-4 h-4 ml-1 text-red-500" />
+              YouTube
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -2022,12 +2120,15 @@ const Index = () => {
           </Card>
         )}
 
+        <TranscriptionWidgetWorkspace definitions={TRANSCRIPTION_WIDGETS}>
+        <TranscriptionWidget id="engine" title="מנוע ושמירה" icon={<Cpu className="h-4 w-4 text-primary" />}>
         <TranscriptionEngine 
           selected={engine} 
           onChange={setEngine}
           sourceLanguage={sourceLanguage}
           onSourceLanguageChange={setSourceLanguage}
           groqKeysText={groqPoolText}
+          completedEngine={completedEngine}
         />
 
         {engine === 'local-server' && (
@@ -2071,7 +2172,9 @@ const Index = () => {
 
           </div>
         )}
+        </TranscriptionWidget>
 
+        <TranscriptionWidget id="language" title="שפה, הגייה ולמידה" icon={<BrainCircuit className="h-4 w-4 text-primary" />}>
         <PronunciationStack
           mode={(preferences.pronunciation_layout_mode as any) || 'rich'}
           onModeChange={(m) => updatePreference('pronunciation_layout_mode', m)}
@@ -2097,11 +2200,21 @@ const Index = () => {
             </div>
           }
           personalModelSlot={
-            <div
-              className="flex items-center justify-between gap-3 rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-sm"
-              dir="rtl"
-            >
-              <label className="flex items-center gap-2 cursor-pointer flex-1">
+            <div className="grid gap-2" dir="rtl">
+              <label className="flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={customVocabularyOn}
+                  onChange={(e) => {
+                    setCustomVocabularyEnabled(e.target.checked);
+                    setCustomVocabularyOn(e.target.checked);
+                  }}
+                  className="rounded"
+                />
+                <span className="font-medium">השתמש באוצר המילים</span>
+                <span className="text-xs text-muted-foreground">— מטה את המנוע למונחים ולווריאנטים שהוספת.</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-sm">
                 <input
                   type="checkbox"
                   checked={personalModelOn}
@@ -2109,75 +2222,22 @@ const Index = () => {
                     setPersonalPronunciationEnabled(e.target.checked);
                     setPersonalModelOn(e.target.checked);
                     updatePreference('personal_pronunciation_enabled', e.target.checked);
-                    debugLog.info('Index', 'Personal pronunciation toggle changed', {
-                      enabled: e.target.checked,
-                      isAuthenticated,
-                    });
+                    debugLog.info('Index', 'Learned corrections toggle changed', { enabled: e.target.checked, isAuthenticated });
                   }}
                   className="rounded border-purple-400"
                 />
-                <span className="font-medium flex items-center gap-1"><BrainCircuit className="w-4 h-4 text-[#0f1e43]" /> מודל הגייה אישי</span>
-                <span className="text-xs text-muted-foreground">
-                  — תוספת למנוע: מחיל תיקונים שלמדתי בעבר ומילים שאימתתי כנכון.
-                </span>
+                <span className="font-medium flex items-center gap-1"><BrainCircuit className="w-4 h-4 text-[#0f1e43]" /> החל תיקונים נלמדים</span>
+                <span className="text-xs text-muted-foreground">— מבצע החלפות שגוי → נכון לאחר התמלול.</span>
               </label>
+              <Button type="button" variant="outline" size="sm" onClick={() => navigate('/personal-learning')}>
+                נהל מילון ולמידה
+              </Button>
             </div>
           }
           profileSelectorSlot={
             <PronunciationProfileSelector onProfileChange={(id) => updatePreference('active_pronunciation_profile', id)} />
           }
         />
-
-        {/* Quick-access feature toggles — affect transcription on upload, recording, and live mode */}
-        <div
-          className="flex items-center justify-between flex-wrap gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2"
-          dir="rtl"
-        >
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-              <Layers className="w-3.5 h-3.5" />
-              תוספות מהירות:
-            </span>
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="flex items-center gap-1 text-xs">
-                <FeatureToggleChip flagKey="ff_ai_post_correction" />
-                תיקון AI סופי
-              </span>
-              <span className="flex items-center gap-1 text-xs">
-                <FeatureToggleChip flagKey="ff_names_dictionary" />
-                שמות פרטיים
-              </span>
-              <span className="flex items-center gap-1 text-xs">
-                <FeatureToggleChip flagKey="ff_smart_chunking" />
-                חיתוך חכם
-              </span>
-              <span className="flex items-center gap-1 text-xs">
-                <FeatureToggleChip flagKey="ff_pre_roll_buffer" />
-                Pre-roll
-              </span>
-              <span className="flex items-center gap-1 text-xs">
-                <FeatureToggleChip flagKey="ff_agc_auto" />
-                AGC אוטומטי
-              </span>
-              <span className="flex items-center gap-1 text-xs">
-                <FeatureToggleChip flagKey="ff_audio_quality_check" />
-                בדיקת איכות
-              </span>
-              <span className="flex items-center gap-1 text-xs">
-                <FeatureToggleChip flagKey="ff_auto_resume" />
-                המשך אוטומטי
-              </span>
-            </div>
-          </div>
-          <Link
-            to="/features"
-            className="text-xs text-primary hover:underline whitespace-nowrap"
-          >
-            כל הפיצ'רים →
-          </Link>
-        </div>
-
-
 
 
         {(engine === 'assemblyai' || engine === 'deepgram') && (
@@ -2194,7 +2254,9 @@ const Index = () => {
             </label>
           </div>
         )}
+        </TranscriptionWidget>
 
+        <TranscriptionWidget id="trim" title="חיתוך אודיו" icon={<Scissors className="h-4 w-4 text-primary" />}>
         <div className="rounded-lg border border-border/60 bg-muted/20 p-3" dir="rtl">
           <div className="flex items-center justify-between gap-3 mb-2">
             <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -2247,8 +2309,10 @@ const Index = () => {
             </div>
           )}
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        </TranscriptionWidget>
+
+        <TranscriptionWidget id="source" title="העלאה או הקלטה" icon={<Mic className="h-4 w-4 text-primary" />}>
+        <div className="grid grid-cols-1 gap-4">
           <FileUploader 
             onFileSelect={handleFileSelect} 
             isLoading={isLoading}
@@ -2276,9 +2340,11 @@ const Index = () => {
             engine={engine}
           />
         </div>
+        </TranscriptionWidget>
 
         {/* Recovered partial transcript banner */}
         {recoveredPartialInfo && !isLoading && transcript && (
+          <TranscriptionWidget id="recovery" title="שחזור תמלול">
           <Card className="p-3 border-amber-500/40 bg-amber-500/5" dir="rtl">
             <input
               ref={resumeFileInputRef}
@@ -2334,19 +2400,23 @@ const Index = () => {
               </div>
             </div>
           </Card>
+          </TranscriptionWidget>
         )}
 
         {/* Performance Monitor Panel */}
         {perfMonitor.enabled && showPerfPanel && (
+          <TranscriptionWidget id="performance" title="ביצועים" icon={<Activity className="h-4 w-4 text-primary" />}>
           <PerfMonitorPanel
             records={perfMonitor.records}
             onClear={perfMonitor.clearRecords}
             onClose={() => setShowPerfPanel(false)}
           />
+          </TranscriptionWidget>
         )}
 
         {/* Transcription stats — shown after CUDA transcription completes */}
         {lastStats && !isLoading && (
+          <TranscriptionWidget id="stats" title="נתוני תמלול">
           <Card className="p-3 border-green-500/30 bg-green-500/5" dir="rtl">
             <div className="flex items-center justify-between">
               <Button
@@ -2368,10 +2438,12 @@ const Index = () => {
               </div>
             </div>
           </Card>
+          </TranscriptionWidget>
         )}
 
         {/* Active transcription progress panel */}
         {isLoading && (
+          <TranscriptionWidget id="progress" title="מצב התמלול">
           <Card className="p-4 border-primary/40 bg-primary/5 shadow-sm" dir="rtl">
             <div className="flex items-center gap-3">
               <div className="flex-1 space-y-2.5 text-right">
@@ -2382,6 +2454,7 @@ const Index = () => {
                     engine === 'google' ? 'text-blue-500 border-blue-500/30' :
                     engine === 'assemblyai' ? 'text-green-500 border-green-500/30' :
                     engine === 'deepgram' ? 'text-purple-500 border-purple-500/30' :
+                    engine === 'gemini' ? 'text-yellow-600 border-yellow-500/40' :
                     engine === 'local-server' ? 'text-purple-500 border-purple-500/30' :
                     engine === 'local' ? 'text-accent border-accent/30' :
                     'text-primary border-primary/30'
@@ -2391,9 +2464,10 @@ const Index = () => {
                     {engine === 'google' && <Chrome className="w-3 h-3" />}
                     {engine === 'assemblyai' && <Mic className="w-3 h-3" />}
                     {engine === 'deepgram' && <Waves className="w-3 h-3" />}
+                    {engine === 'gemini' && <Sparkles className="w-3 h-3" />}
                     {engine === 'local-server' && <Server className="w-3 h-3" />}
                     {engine === 'local' && <Cpu className="w-3 h-3" />}
-                    {engine === 'groq' ? 'Groq' : engine === 'openai' ? 'OpenAI' : engine === 'google' ? 'Google' : engine === 'assemblyai' ? 'AssemblyAI' : engine === 'deepgram' ? 'Deepgram' : engine === 'local-server' ? 'CUDA' : 'ONNX'}
+                    {engine === 'groq' ? 'Groq' : engine === 'openai' ? 'OpenAI' : engine === 'google' ? 'Google' : engine === 'assemblyai' ? 'AssemblyAI' : engine === 'deepgram' ? 'Deepgram' : engine === 'gemini' ? 'Gemini' : engine === 'local-server' ? 'CUDA' : 'ONNX'}
                   </span>
                   <span className="font-medium text-sm">
                     {progress !== undefined && progress > 0
@@ -2473,10 +2547,12 @@ const Index = () => {
               </Button>
             </div>
           </Card>
+          </TranscriptionWidget>
         )}
 
         {/* Live transcript preview during streaming */}
         {isLoading && transcript && (
+          <TranscriptionWidget id="live-preview" title="תצוגה מקדימה חיה">
           <Card className="p-4 border-green-500/30 bg-green-500/5" dir="rtl">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs text-muted-foreground font-mono">
@@ -2491,12 +2567,14 @@ const Index = () => {
               {transcript}
             </div>
           </Card>
+          </TranscriptionWidget>
         )}
 
 
 
         {/* Background Jobs Panel */}
         {isAuthenticated && jobs.length > 0 && (
+          <TranscriptionWidget id="background-jobs" title="משימות רקע">
           <BackgroundJobsPanel
             jobs={jobs}
             onRetry={retryJob}
@@ -2506,10 +2584,12 @@ const Index = () => {
               saveToHistory(text, eng);
             }}
           />
+          </TranscriptionWidget>
         )}
 
         {/* Local CUDA Queue Panel */}
         {localQueue.queue.length > 0 && (
+          <TranscriptionWidget id="local-queue" title="תור תמלולים מקומי" icon={<Server className="h-4 w-4 text-primary" />}>
           <Card className="p-4 space-y-3" dir="rtl">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -2566,9 +2646,11 @@ const Index = () => {
               </div>
             ))}
           </Card>
+          </TranscriptionWidget>
         )}
 
         {/* Live Transcription */}
+        <TranscriptionWidget id="live" title="תמלול בזמן אמת" icon={<Mic className="h-4 w-4 text-primary" />}>
         <LiveTranscriber
           serverConnected={serverConnected}
           onTranscriptComplete={async (result: LiveTranscriptResult) => {
@@ -2591,8 +2673,8 @@ const Index = () => {
               } catch { /* Dexie not available */ }
             }
             const liveAudioUrl = audioBlob ? URL.createObjectURL(audioBlob) : undefined;
-            saveToHistory(text, engineLabel, undefined, wordTimings, audioFile, folder).then(() => {
-              setTimeout(() => navigate('/text-editor', { state: { text, audioUrl: liveAudioUrl, wordTimings, transcriptId: lastSavedTranscriptIdRef.current } }), 1000);
+            saveToHistory(text, engineLabel, undefined, wordTimings, audioFile, folder).then((finalText) => {
+              setTimeout(() => navigate('/text-editor', { state: { text: finalText, audioUrl: liveAudioUrl, wordTimings, transcriptId: lastSavedTranscriptIdRef.current } }), 1000);
             });
             addAnalyticsRecord({
               engine: engineLabel, status: 'success',
@@ -2602,11 +2684,13 @@ const Index = () => {
             toast({ title: "תמלול חי הושלם!", description: audioFile ? "הקלטה + תמלול נשמרו" : undefined });
           }}
         />
+        </TranscriptionWidget>
 
 
 
         {/* Local Model Manager - shown when local engine or local-server selected */}
         {(engine === 'local' || engine === 'local-server') && (
+          <TranscriptionWidget id="models" title="מודלים מקומיים" icon={<Cpu className="h-4 w-4 text-primary" />}>
           <Collapsible>
             <CollapsibleTrigger asChild>
               <Button variant="outline" className="w-full mb-4">
@@ -2618,8 +2702,11 @@ const Index = () => {
               <LocalModelManager />
             </CollapsibleContent>
           </Collapsible>
+          </TranscriptionWidget>
         )}
 
+        {(transcripts.length > 0 || isCloudLoading) && (
+        <TranscriptionWidget id="history" title="היסטוריית תמלולים">
         <CloudTranscriptHistory
           transcripts={transcripts}
           isCloud={isCloud}
@@ -2633,7 +2720,11 @@ const Index = () => {
           onUpdate={(id, updates) => updateTranscript(id, updates)}
           initialFolderFilter={folderFromUrl}
         />
+        </TranscriptionWidget>
+        )}
 
+        {(transcript || audioUrl) && (
+        <TranscriptionWidget id="result" title="נגן ותוצאת תמלול" icon={<FileEdit className="h-4 w-4 text-primary" />}>
         {transcript && (
           <>
             <div className="flex gap-2 items-center justify-end" dir="rtl">
@@ -2655,14 +2746,6 @@ const Index = () => {
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 {copied ? "הועתק!" : "העתק תמלול"}
               </Button>
-              <TextExportMenu
-                getText={() => transcript}
-                filename="תמלול"
-                subject="תמלול"
-                variant="download"
-                size="sm"
-                label="ייצוא / שיתוף"
-              />
               <ShareTranscript transcript={transcript} />
             </div>
             <TranscriptSummary transcript={transcript} />
@@ -2699,36 +2782,16 @@ const Index = () => {
             />
           </div>
         )}
-
-        {transcript && (
-          <TranscriptVersionsPanel
-            transcriptId={lastSavedTranscriptIdRef.current}
-            currentText={transcript}
-            onApplyVersion={(t) => setTranscript(t)}
-          />
-        )}
-
-        {/* YouTube Transcription — available when local server is connected */}
-        {serverConnected && (
-          <YouTubeTranscriber
-            onTranscriptComplete={(text) => {
-              setTranscriptFromEngine(text);
-              saveToHistory(text, 'YouTube (Whisper GPU)').then(() => {
-                setTimeout(() => navigate('/text-editor', { state: { text, transcriptId: lastSavedTranscriptIdRef.current } }), 1000);
-              });
-              addAnalyticsRecord({
-                engine: 'YouTube (Whisper GPU)', status: 'success',
-                charCount: text.length, wordCount: text.split(/\s+/).length,
-              });
-              toast({ title: "תמלול YouTube הושלם!" });
-            }}
-          />
+        </TranscriptionWidget>
         )}
 
         {/* Speaker Diarization — available when local server is connected */}
         {serverConnected && (
+          <TranscriptionWidget id="diarization" title="זיהוי דוברים" icon={<Users className="h-4 w-4 text-primary" />}>
           <SpeakerDiarization />
+          </TranscriptionWidget>
         )}
+        </TranscriptionWidgetWorkspace>
       </div>
     </div>
     <KeyboardShortcutsDialog open={showHelp} onOpenChange={setShowHelp} />

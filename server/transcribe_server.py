@@ -19,7 +19,10 @@ import time
 import threading
 import warnings
 import logging
+import re
+import unicodedata
 import traceback as _tb_module
+from difflib import SequenceMatcher
 from pathlib import Path
 from collections import deque
 from datetime import datetime, timezone
@@ -286,6 +289,43 @@ def _resolve_prompt_and_hotwords(language, user_initial_prompt, user_hotwords, l
         hotwords = None
 
     return prompt, hotwords
+
+
+def _fit_whisper_prompt_budget(model, initial_prompt, hotwords):
+    """Keep combined prompt and hotwords below Whisper's decoder context limit.
+
+    faster-whisper truncates each input independently to half the context. When
+    both are present their combined prompt can still exceed the 448-position
+    decoder limit. Reserve one shared half-context budget for both hints.
+    """
+    if not initial_prompt and not hotwords:
+        return initial_prompt, hotwords
+
+    try:
+        tokenizer = model.hf_tokenizer
+        max_length = int(model.model.max_length)
+        shared_budget = max(32, max_length // 2 - 16)
+        prompt_budget = min(96, shared_budget)
+
+        def trim(value, limit):
+            if not value or limit <= 0:
+                return None
+            token_ids = tokenizer.encode(" " + value.strip()).ids
+            if len(token_ids) <= limit:
+                return value
+            return tokenizer.decode(token_ids[:limit]).strip()
+
+        safe_prompt = trim(initial_prompt, prompt_budget)
+        prompt_tokens = len(tokenizer.encode(" " + safe_prompt).ids) if safe_prompt else 0
+        safe_hotwords = trim(hotwords, shared_budget - prompt_tokens)
+        return safe_prompt, safe_hotwords
+    except Exception as exc:
+        # Conservative fallback for unexpected model wrappers/tokenizers.
+        _log.warning("Could not tokenize Whisper hints; applying character limit: %s", exc)
+        safe_prompt = initial_prompt[:240] if initial_prompt else None
+        remaining = max(0, 520 - len(safe_prompt or ""))
+        safe_hotwords = hotwords[:remaining] if hotwords and remaining else None
+        return safe_prompt, safe_hotwords
 
 
 # Concurrency control — only 1 GPU transcription at a time
@@ -648,6 +688,7 @@ _model_loading_lock = threading.Lock()
 _model_loading: bool = False       # True while a model is being loaded in background
 _model_loading_id: str | None = None  # model being loaded
 _model_loading_progress: str = ''   # current loading phase description
+_model_loading_cancel_requested: bool = False
 
 # Device + GPU name cache
 _cached_device: str | None = None
@@ -675,6 +716,7 @@ MODEL_REGISTRY = {
     # Ivrit.ai Hebrew-optimized models (pre-converted CT2 format on HuggingFace)
     "ivrit-ai/faster-whisper-v2-d4": "ivrit-ai/faster-whisper-v2-d4",
     "ivrit-ai/whisper-large-v3-turbo-ct2": "ivrit-ai/whisper-large-v3-turbo-ct2",
+    "ivrit-ai/whisper-large-v3-ct2": "ivrit-ai/whisper-large-v3-ct2",
     # ivrit-ai/whisper-large-v3-turbo — requires local HF→CT2 conversion (see MODELS_NEEDING_CONVERSION)
     # Yiddish-optimized (ivrit-ai fine-tune) — pre-converted CT2, ready for faster-whisper.
     # Closest available model for Yiddish / לשון-הקודש-style mixed speech.
@@ -861,6 +903,16 @@ def load_model(model_id: str, compute_type_override: str | None = None) -> faste
     actual_path = model_id
     if model_id in MODELS_NEEDING_CONVERSION:
         actual_path = convert_hf_to_ct2(model_id)
+
+    # Resolve an explicitly selected fine-tuned model without overriding other requests.
+    try:
+        from training_routes import resolve_trained_model  # type: ignore
+        _ft = resolve_trained_model(model_id)
+        if _ft:
+            print(f"  Using explicitly selected fine-tuned model: {_ft}")
+            actual_path = _ft
+    except Exception:
+        pass
 
     print(f"\n  Loading model: {model_id} ({device}/{compute_type})...")
     start = time.time()
@@ -1292,14 +1344,15 @@ def transcribe():
         def _run_transcribe(m):
             from faster_whisper import BatchedInferencePipeline
             pipeline = BatchedInferencePipeline(model=m)
+            safe_prompt, safe_hotwords = _fit_whisper_prompt_budget(m, initial_prompt, hotwords)
             return pipeline.transcribe(
                 transcribe_path,
                 language=language if language != "auto" else None,
                 word_timestamps=True,
                 beam_size=beam_size,
                 batch_size=auto_batch_size(),
-                initial_prompt=initial_prompt,
-                hotwords=hotwords,
+                initial_prompt=safe_prompt,
+                hotwords=safe_hotwords,
                 condition_on_previous_text=True,
             )
 
@@ -1434,7 +1487,14 @@ def transcribe_stream():
     start_from = max(0.0, float(request.form.get("start_from", "0")))
 
     # ── Input validation ──
-    if model_id not in MODEL_REGISTRY and not model_id.startswith("ivrit-ai/"):
+    trained_model_path = None
+    if model_id.startswith("lora:"):
+        try:
+            from training_routes import resolve_trained_model  # type: ignore
+            trained_model_path = resolve_trained_model(model_id)
+        except Exception:
+            trained_model_path = None
+    if model_id not in MODEL_REGISTRY and not model_id.startswith("ivrit-ai/") and not trained_model_path:
         return jsonify({"error": f"Unknown model: {model_id}", "available": list(MODEL_REGISTRY.keys())}), 400
 
     _VALID_LANGUAGES = {
@@ -1601,6 +1661,7 @@ def transcribe_stream():
 
             def _do_transcribe(mdl, override_batch=None):
                 bs = override_batch if override_batch is not None else batch_size
+                safe_prompt, safe_hotwords = _fit_whisper_prompt_budget(mdl, hebrew_prompt, hotwords)
                 if fast_mode:
                     from faster_whisper import BatchedInferencePipeline
                     pipeline = BatchedInferencePipeline(model=mdl)
@@ -1611,8 +1672,8 @@ def transcribe_stream():
                         beam_size=beam_size or 1,
                         batch_size=bs,
                         condition_on_previous_text=condition_on_prev,
-                        hotwords=hotwords,
-                        initial_prompt=hebrew_prompt,
+                        hotwords=safe_hotwords,
+                        initial_prompt=safe_prompt,
                     )
                 else:
                     vad_params = dict(
@@ -1628,8 +1689,8 @@ def transcribe_stream():
                         vad_filter=True,
                         vad_parameters=vad_params,
                         condition_on_previous_text=condition_on_prev,
-                        hotwords=hotwords,
-                        initial_prompt=hebrew_prompt,
+                        hotwords=safe_hotwords,
+                        initial_prompt=safe_prompt,
                     )
 
             try:
@@ -1915,6 +1976,7 @@ def transcribe_live():
                     prompt = f"תמלול בעברית. {live_context}" if language == "he" else live_context
             else:
                 prompt = base_prompt or ("תמלול בעברית." if language == "he" else None)
+            safe_prompt, safe_hotwords = _fit_whisper_prompt_budget(m, prompt, resolved_hotwords)
             segments, info = m.transcribe(
                 tmp_path,
                 language=language if language != "auto" else None,
@@ -1926,8 +1988,8 @@ def transcribe_live():
                 temperature=0.0,
                 no_speech_threshold=0.6,
                 suppress_blank=True,
-                initial_prompt=prompt,
-                hotwords=resolved_hotwords,
+                initial_prompt=safe_prompt,
+                hotwords=safe_hotwords,
             )
             # Materialize segments to surface errors (e.g. flash attention)
             # inside this function rather than during lazy iteration.
@@ -2877,14 +2939,14 @@ def load_model_endpoint():
 @app.route("/preload-stream", methods=["POST"])
 def preload_stream():
     """Preload model via SSE — streams loading progress. Non-blocking if model already cached."""
-    global _model_loading, _model_loading_id, _model_loading_progress
+    global _model_loading, _model_loading_id, _model_loading_progress, _model_loading_cancel_requested
     data = request.get_json() or {}
     model_id = data.get("model", _current_model_id or DEFAULT_MODEL)
     resolved = MODEL_REGISTRY.get(model_id, model_id)
     compute_type = data.get("compute_type")
 
     def generate():
-        global _model_loading, _model_loading_id, _model_loading_progress
+        global _model_loading, _model_loading_id, _model_loading_progress, _model_loading_cancel_requested, _current_model_id
         device = get_device()
         ct = compute_type or ("float16" if device == "cuda" else "int8")
         cache_key = f"{resolved}::{ct}"
@@ -2913,6 +2975,7 @@ def preload_stream():
             _model_loading = True
             _model_loading_id = resolved
             _model_loading_progress = 'Initializing...'
+            _model_loading_cancel_requested = False
 
         yield f"data: {json.dumps({'type': 'status', 'status': 'loading', 'model': resolved, 'message': 'Loading model...'})}\n\n"
 
@@ -2931,6 +2994,24 @@ def preload_stream():
             load_model(resolved, compute_type_override=compute_type)
             elapsed = time.time() - start
 
+            if _model_loading_cancel_requested:
+                for cached_id in list(_model_cache.keys()):
+                    if cached_id.startswith(resolved + "::"):
+                        del _model_cache[cached_id]
+                        _model_last_used.pop(cached_id, None)
+                if _current_model_id == resolved:
+                    _current_model_id = None
+                import gc; gc.collect()
+                if get_device() == "cuda":
+                    try:
+                        import torch
+                        torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+                print(f"  [preload] Model load cancelled and released: {resolved}")
+                yield f"data: {json.dumps({'type': 'status', 'status': 'cancelled', 'model': resolved, 'message': 'Model loading cancelled'})}\n\n"
+                return
+
             _refresh_downloaded_models_cache()
             print(f"  [preload] Model {resolved} loaded in {elapsed:.1f}s")
             yield f"data: {json.dumps({'type': 'status', 'status': 'ready', 'model': resolved, 'elapsed': round(elapsed, 1), 'message': f'Model loaded in {elapsed:.1f}s'})}\n\n"
@@ -2944,11 +3025,25 @@ def preload_stream():
                 _model_loading = False
                 _model_loading_id = None
                 _model_loading_progress = ''
+                _model_loading_cancel_requested = False
 
     return Response(generate(), mimetype="text/event-stream", headers={
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
     })
+
+
+@app.route("/cancel-model-load", methods=["POST"])
+def cancel_model_load_endpoint():
+    """Request cancellation of an active model load and release it when the blocking load step returns."""
+    global _model_loading_cancel_requested, _model_loading_progress
+    with _model_loading_lock:
+        if not _model_loading:
+            return jsonify({"status": "idle", "cancelled": False})
+        _model_loading_cancel_requested = True
+        _model_loading_progress = 'Cancelling model load...'
+        model_id = _model_loading_id
+    return jsonify({"status": "cancelling", "cancelled": True, "model": model_id})
 
 
 @app.route("/download-model", methods=["POST"])
@@ -2977,6 +3072,59 @@ def download_model_endpoint():
         return jsonify({"error": str(e)}), 500
 
 
+def _local_hf_revision(model_id: str) -> str | None:
+    """Read the Hugging Face cache's current main revision without downloading."""
+    repo_dir = f"models--{model_id.replace('/', '--')}"
+    roots = [
+        Path.home() / ".cache" / "whisper-models",
+        Path.home() / ".cache" / "huggingface" / "hub",
+    ]
+    for root in roots:
+        ref = root / repo_dir / "refs" / "main"
+        try:
+            if ref.is_file():
+                return ref.read_text(encoding="utf-8").strip() or None
+        except OSError:
+            continue
+    return None
+
+
+@app.route("/model-updates", methods=["POST"])
+def model_updates_endpoint():
+    """Compare installed HF model revisions with the current Hub revisions."""
+    data = request.get_json(silent=True) or {}
+    requested = data.get("models") or []
+    allowed = {value for value in MODEL_REGISTRY.values() if "/" in value}
+    model_ids = [MODEL_REGISTRY.get(item, item) for item in requested]
+    model_ids = list(dict.fromkeys(item for item in model_ids if item in allowed))
+
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi()
+        updates = []
+        for model_id in model_ids:
+            local_revision = _local_hf_revision(model_id)
+            try:
+                remote_revision = api.model_info(model_id, timeout=8).sha
+                updates.append({
+                    "model": model_id,
+                    "installed": local_revision is not None,
+                    "local_revision": local_revision,
+                    "remote_revision": remote_revision,
+                    "update_available": bool(local_revision and remote_revision and local_revision != remote_revision),
+                })
+            except Exception as exc:
+                updates.append({
+                    "model": model_id,
+                    "installed": local_revision is not None,
+                    "update_available": False,
+                    "error": str(exc),
+                })
+        return jsonify({"updates": updates, "checked_at": time.time()})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/unload-models", methods=["POST"])
 def unload_models_endpoint():
     """Unload all models from GPU memory."""
@@ -2988,6 +3136,308 @@ def unload_models_endpoint():
     import gc; gc.collect()
     print(f"  Unloaded {count} models from memory")
     return jsonify({"status": "ok", "unloaded": count})
+
+
+def _load_pyannote_waveform(audio_path):
+    """Decode once with WhisperX/FFmpeg and bypass TorchCodec on Windows."""
+    import whisperx
+    audio = whisperx.load_audio(audio_path)
+    return {"waveform": torch.from_numpy(audio).unsqueeze(0), "sample_rate": 16000}
+
+
+def _alignment_segments(text, approximate_timings, duration, max_segment_seconds=24.0):
+    """Build bounded WhisperX segments without changing the supplied text."""
+    words = [word for word in text.split() if word]
+    if not words:
+        return []
+
+    valid_timings = (
+        isinstance(approximate_timings, list)
+        and len(approximate_timings) == len(words)
+        and all(
+            isinstance(item, dict)
+            and isinstance(item.get("start"), (int, float))
+            and isinstance(item.get("end"), (int, float))
+            for item in approximate_timings
+        )
+    )
+    if not valid_timings:
+        return [{"start": 0.0, "end": round(duration, 3), "text": " ".join(words)}]
+
+    segments = []
+    start_index = 0
+    for index in range(1, len(words) + 1):
+        segment_start = float(approximate_timings[start_index]["start"])
+        segment_end = float(approximate_timings[index - 1]["end"])
+        at_end = index == len(words)
+        next_gap = (
+            float(approximate_timings[index]["start"]) - segment_end
+            if not at_end else 0.0
+        )
+        should_split = (
+            at_end
+            or segment_end - segment_start >= max_segment_seconds
+            or next_gap >= 1.2
+            or index - start_index >= 120
+        )
+        if not should_split:
+            continue
+        segments.append({
+            "start": round(max(0.0, segment_start - 0.6), 3),
+            "end": round(min(duration, max(segment_end + 0.6, segment_start + 0.1)), 3),
+            "text": " ".join(words[start_index:index]),
+        })
+        start_index = index
+    return segments
+
+
+def _alignment_word_key(value):
+    """Normalize Hebrew words for acoustic/reference matching only."""
+    value = unicodedata.normalize("NFKD", str(value or ""))
+    value = "".join(char for char in value if unicodedata.category(char) != "Mn")
+    value = re.sub(r"[^\w\u05d0-\u05ea]", "", value, flags=re.UNICODE)
+    return value.translate(str.maketrans("ךםןףץ", "כמנפצ")).lower()
+
+
+def _map_reference_to_acoustic_timings(text, acoustic_timings, duration):
+    """Transfer acoustic anchors to corrected text and interpolate edited words."""
+    reference_words = [word for word in text.split() if word]
+    usable_acoustic = [
+        item for item in (acoustic_timings or [])
+        if (
+            isinstance(item, dict)
+            and _alignment_word_key(item.get("word"))
+            and isinstance(item.get("start"), (int, float))
+            and isinstance(item.get("end"), (int, float))
+        )
+    ]
+    if not reference_words or not usable_acoustic:
+        return []
+
+    matcher = SequenceMatcher(
+        None,
+        [_alignment_word_key(word) for word in reference_words],
+        [_alignment_word_key(item["word"]) for item in usable_acoustic],
+        autojunk=False,
+    )
+    anchors = {}
+    for block in matcher.get_matching_blocks():
+        for offset in range(block.size):
+            ref_index = block.a + offset
+            source = usable_acoustic[block.b + offset]
+            anchors[ref_index] = (float(source["start"]), float(source["end"]))
+
+    # A few exact anchors are enough to constrain interpolation; for heavily
+    # edited text, duration-based interpolation is still safer than one huge segment.
+    timings = [None] * len(reference_words)
+    for index, (start, end) in anchors.items():
+        timings[index] = {"word": reference_words[index], "start": start, "end": end}
+
+    anchor_indices = sorted(anchors)
+    boundaries = [-1] + anchor_indices + [len(reference_words)]
+    for boundary_index in range(len(boundaries) - 1):
+        left_index = boundaries[boundary_index]
+        right_index = boundaries[boundary_index + 1]
+        missing = right_index - left_index - 1
+        if missing <= 0:
+            continue
+        left_time = timings[left_index]["end"] if left_index >= 0 else 0.0
+        right_time = (
+            timings[right_index]["start"]
+            if right_index < len(reference_words)
+            else duration
+        )
+        span = max(0.05 * missing, right_time - left_time)
+        step = span / missing
+        for offset in range(1, missing + 1):
+            index = left_index + offset
+            start = min(duration, left_time + step * (offset - 1))
+            end = min(duration, max(start + 0.03, left_time + step * offset))
+            timings[index] = {
+                "word": reference_words[index],
+                "start": round(start, 3),
+                "end": round(end, 3),
+            }
+
+    return timings
+
+
+def _bootstrap_alignment_timings(audio_path, text, language, model_id, duration):
+    """Use local Whisper only to locate corrected text before forced alignment."""
+    model = load_model(model_id)
+    transcribe_options = {
+        "language": language if language != "auto" else None,
+        "word_timestamps": True,
+        "beam_size": 1,
+        "vad_filter": True,
+        "condition_on_previous_text": False,
+    }
+    try:
+        segments, _ = model.transcribe(audio_path, **transcribe_options)
+        segments = list(segments)
+    except Exception as exc:
+        if "flash attention" not in str(exc).lower():
+            raise
+        model = _reload_model_without_flash(model_id)
+        segments, _ = model.transcribe(audio_path, **transcribe_options)
+        segments = list(segments)
+    acoustic_timings = []
+    for segment in segments:
+        for word in segment.words or []:
+            if word.word and word.end >= word.start:
+                acoustic_timings.append({
+                    "word": word.word.strip(),
+                    "start": float(word.start),
+                    "end": float(word.end),
+                })
+    reference_keys = [_alignment_word_key(word) for word in text.split() if word]
+    acoustic_keys = [_alignment_word_key(item["word"]) for item in acoustic_timings]
+    matched_words = sum(
+        block.size
+        for block in SequenceMatcher(None, reference_keys, acoustic_keys, autojunk=False).get_matching_blocks()
+    )
+    evidence_coverage = matched_words / max(1, len(reference_keys))
+    return (
+        _map_reference_to_acoustic_timings(text, acoustic_timings, duration),
+        evidence_coverage,
+    )
+
+
+@app.route("/align-text", methods=["POST"])
+def align_text_to_audio():
+    """Force-align corrected text to audio while preserving the text verbatim."""
+    if "file" not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+
+    text = (request.form.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "No reference text provided"}), 400
+
+    language = (request.form.get("language") or "he").strip() or "he"
+    try:
+        approximate_timings = json.loads(request.form.get("approximate_timings") or "null")
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid approximate_timings JSON"}), 400
+
+    audio_file = request.files["file"]
+    suffix = _safe_suffix(audio_file.filename)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        audio_file.save(tmp)
+        tmp_path = tmp.name
+
+    started = time.time()
+    previous_model_id = _current_model_id
+    align_model = None
+    try:
+        import whisperx  # type: ignore
+
+        device = "cuda" if (_has_torch and torch.cuda.is_available()) else "cpu"
+        audio = whisperx.load_audio(tmp_path)
+        duration = max(0.1, len(audio) / 16000.0)
+        alignment_source = "provided-timings"
+        evidence_coverage = 1.0
+        if not (
+            isinstance(approximate_timings, list)
+            and len(approximate_timings) == len(text.split())
+        ):
+            bootstrap_model_id = previous_model_id or _default_model_for(language)
+            approximate_timings, evidence_coverage = _bootstrap_alignment_timings(
+                tmp_path, text, language, bootstrap_model_id, duration
+            )
+            alignment_source = "local-whisper-bootstrap"
+
+        _evict_all_whisper_models()
+        _cleanup_gpu_memory()
+        segments = _alignment_segments(text, approximate_timings, duration)
+        if not segments:
+            return jsonify({"error": "Reference text has no alignable words"}), 400
+
+        align_model, align_meta = whisperx.load_align_model(
+            language_code=language,
+            device=device,
+        )
+        aligned = whisperx.align(
+            segments,
+            align_model,
+            align_meta,
+            tmp_path,
+            device,
+            return_char_alignments=False,
+        )
+
+        word_timings = []
+        for item in aligned.get("word_segments", []) or []:
+            word = str(item.get("word") or "").strip()
+            start = item.get("start")
+            end = item.get("end")
+            if not word or not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+                continue
+            if end < start:
+                continue
+            word_timings.append({
+                "word": word,
+                "start": round(float(start), 3),
+                "end": round(float(end), 3),
+                "probability": round(float(item.get("score", 0.0) or 0.0), 4),
+            })
+
+        monotonic = all(
+            word_timings[index]["start"] >= word_timings[index - 1]["start"]
+            for index in range(1, len(word_timings))
+        )
+        input_word_count = len(text.split())
+        coverage = min(1.0, len(word_timings) / max(1, input_word_count))
+        scores = [item["probability"] for item in word_timings if item["probability"] > 0]
+        mean_score = sum(scores) / len(scores) if scores else 0.0
+
+        return jsonify({
+            "wordTimings": word_timings,
+            "inputWordCount": input_word_count,
+            "alignedWordCount": len(word_timings),
+            "coverage": round(coverage, 4),
+            "evidenceCoverage": round(evidence_coverage, 4),
+            "meanConfidence": round(mean_score, 4),
+            "monotonic": monotonic,
+            "language": language,
+            "audioDuration": round(duration, 3),
+            "method": "whisperx-forced-alignment",
+            "alignmentSource": alignment_source,
+            "processingTime": round(time.time() - started, 2),
+        })
+    except ImportError:
+        return jsonify({
+            "error": "WhisperX is not installed",
+            "install": "pip install whisperx==3.8.6",
+        }), 503
+    except Exception as exc:
+        _log.error(f"Forced alignment failed: {exc}\n{_tb_module.format_exc()}")
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        if align_model is not None:
+            del align_model
+        _cleanup_gpu_memory()
+        if previous_model_id:
+            try:
+                load_model(previous_model_id)
+            except Exception as restore_exc:
+                _log.warning(f"Could not restore Whisper model after alignment: {restore_exc}")
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def _load_pyannote_pipeline(model_id, hf_token):
+    from pyannote.audio import Pipeline as PyannotePipeline
+    try:
+        return PyannotePipeline.from_pretrained(model_id, token=hf_token)
+    except TypeError:
+        return PyannotePipeline.from_pretrained(model_id, use_auth_token=hf_token)
+
+
+def _iter_pyannote_tracks(output):
+    annotation = getattr(output, "speaker_diarization", output)
+    return annotation.itertracks(yield_label=True)
 
 
 @app.route("/diarize-stream", methods=["POST"])
@@ -3005,6 +3455,7 @@ def diarize_stream():
     min_gap = float(request.form.get("min_gap", "1.5"))
     hf_token = request.form.get("hf_token", "")
     diarization_engine = request.form.get("diarization_engine", "auto").strip().lower()
+    expected_speakers = max(0, int(request.form.get("expected_speakers", "0") or 0))
     pyannote_model_id = request.form.get("pyannote_model", "pyannote/speaker-diarization-3.1").strip() or "pyannote/speaker-diarization-3.1"
 
     resolved = MODEL_REGISTRY.get(model_id, model_id)
@@ -3069,13 +3520,12 @@ def diarize_stream():
             if hf_token and diarization_engine in {"auto", "pyannote"}:
                 yield f"data: {json.dumps({'type': 'progress', 'stage': 'מריץ זיהוי דוברים (pyannote)...', 'percent': 65})}\n\n"
                 try:
-                    from pyannote.audio import Pipeline as PyannotePipeline
-                    pipe = PyannotePipeline.from_pretrained(pyannote_model_id, use_auth_token=hf_token)
+                    pipe = _load_pyannote_pipeline(pyannote_model_id, hf_token)
                     if _has_torch and torch.cuda.is_available():
                         pipe.to(torch.device("cuda"))
-                    diarization = pipe(tmp_path)
+                    diarization = pipe(_load_pyannote_waveform(tmp_path), **({"num_speakers": expected_speakers} if expected_speakers else {}))
                     speaker_segments = []
-                    for turn, _, speaker in diarization.itertracks(yield_label=True):
+                    for turn, _, speaker in _iter_pyannote_tracks(diarization):
                         speaker_segments.append({"speaker": speaker, "start": round(turn.start, 3), "end": round(turn.end, 3)})
                     diarization_method = "pyannote"
                 except ImportError:
@@ -3101,7 +3551,7 @@ def diarize_stream():
                     if i > 0:
                         gap = seg["start"] - raw_segments[i - 1]["end"]
                         if gap >= min_gap:
-                            current_speaker = (current_speaker + 1) % 10
+                            current_speaker = (current_speaker + 1) % (expected_speakers or 10)
                     seg["speaker"] = f"SPEAKER_{current_speaker:02d}"
 
             # Normalize labels
@@ -3162,6 +3612,7 @@ def diarize():
     min_gap = float(request.form.get("min_gap", "1.5"))
     hf_token = request.form.get("hf_token", "")
     diarization_engine = request.form.get("diarization_engine", "auto").strip().lower()
+    expected_speakers = max(0, int(request.form.get("expected_speakers", "0") or 0))
     whisperx_model = request.form.get("whisperx_model", "large-v3").strip() or "large-v3"
     pyannote_model_id = request.form.get("pyannote_model", "pyannote/speaker-diarization-3.1").strip() or "pyannote/speaker-diarization-3.1"
 
@@ -3195,6 +3646,12 @@ def diarize():
                 wx_compute_type = "float16" if wx_device == "cuda" else "int8"
                 wx_language = None if language == "auto" else language
 
+                # The regular faster-whisper model is preloaded by the server.
+                # Keeping it in VRAM alongside WhisperX and pyannote can terminate
+                # the process at native CUDA level on laptop GPUs.
+                _evict_all_whisper_models()
+                _cleanup_gpu_memory()
+
                 _log.info(
                     f"Using WhisperX (model={whisperx_model}, device={wx_device}, compute={wx_compute_type}, lang={wx_language or 'auto'})"
                 )
@@ -3221,16 +3678,38 @@ def diarize():
                     return_char_alignments=False,
                 )
 
+                # Transcription and alignment are complete. Their GPU models are
+                # no longer needed while pyannote computes speaker embeddings.
+                del wx_model, align_model
+                _cleanup_gpu_memory()
+
                 diarization_method = "whisperx+silence-gap"
 
                 # Optional neural diarization (pyannote via WhisperX)
                 if hf_token:
                     try:
-                        diarize_pipeline = whisperx.DiarizationPipeline(
-                            use_auth_token=hf_token,
+                        # SpeechBrain registers deprecated optional aliases as LazyModule
+                        # instances. Python 3.13 checkpoint inspection probes every loaded
+                        # module and can accidentally import optional k2_fsa, aborting an
+                        # otherwise valid pyannote pipeline load.
+                        try:
+                            import sys
+                            from speechbrain.utils.importutils import LazyModule
+
+                            for module_name, module in list(sys.modules.items()):
+                                if isinstance(module, LazyModule):
+                                    sys.modules.pop(module_name, None)
+                        except (ImportError, AttributeError):
+                            pass
+
+                        from whisperx.diarize import DiarizationPipeline
+                        diarize_pipeline = DiarizationPipeline(
+                            model_name=pyannote_model_id,
+                            token=hf_token,
                             device=wx_device,
                         )
-                        diarized_segments = diarize_pipeline(tmp_path)
+                        diarization_kwargs = {"num_speakers": expected_speakers} if expected_speakers else {}
+                        diarized_segments = diarize_pipeline(tmp_path, **diarization_kwargs)
                         aligned = whisperx.assign_word_speakers(diarized_segments, aligned)
                         diarization_method = "whisperx+pyannote"
                     except Exception as wx_diar_err:
@@ -3254,15 +3733,38 @@ def diarize():
                             "start": round(float(w.get("start", seg_start) or seg_start), 3),
                             "end": round(float(w.get("end", seg_end) or seg_end), 3),
                             "probability": round(float(w.get("score", w.get("probability", 0.0)) or 0.0), 3),
+                            "speaker": w.get("speaker") or seg.get("speaker"),
                         })
 
-                    raw_segments.append({
-                        "text": text,
-                        "start": seg_start,
-                        "end": seg_end,
-                        "words": words,
-                        "speaker": seg.get("speaker"),
-                    })
+                    # pyannote assigns speakers at word level. A Whisper segment may
+                    # contain a real speaker change, so retaining only seg["speaker"]
+                    # hides that boundary. Split on consecutive word-speaker runs.
+                    speaker_groups = []
+                    for word in words:
+                        word_speaker = word.get("speaker")
+                        if speaker_groups and speaker_groups[-1]["speaker"] == word_speaker:
+                            speaker_groups[-1]["words"].append(word)
+                        else:
+                            speaker_groups.append({"speaker": word_speaker, "words": [word]})
+
+                    if len(speaker_groups) > 1 and any(group["speaker"] for group in speaker_groups):
+                        for group in speaker_groups:
+                            group_words = group["words"]
+                            raw_segments.append({
+                                "text": " ".join(word["word"] for word in group_words),
+                                "start": group_words[0]["start"],
+                                "end": group_words[-1]["end"],
+                                "words": group_words,
+                                "speaker": group["speaker"] or seg.get("speaker"),
+                            })
+                    else:
+                        raw_segments.append({
+                            "text": text,
+                            "start": seg_start,
+                            "end": seg_end,
+                            "words": words,
+                            "speaker": seg.get("speaker"),
+                        })
 
                 # If speaker was not assigned by WhisperX diarization, use silence-gap heuristic.
                 current_speaker = 0
@@ -3272,7 +3774,7 @@ def diarize():
                         if i > 0:
                             gap = seg["start"] - raw_segments[i - 1]["end"]
                             if gap >= min_gap:
-                                current_speaker = (current_speaker + 1) % 10
+                                current_speaker = (current_speaker + 1) % (expected_speakers or 10)
                         seg["speaker"] = f"SPEAKER_{current_speaker:02d}"
 
                 # Normalize speaker labels to sequential Hebrew labels
@@ -3363,17 +3865,13 @@ def diarize():
 
         if hf_token and diarization_engine in {"auto", "pyannote"}:
             try:
-                from pyannote.audio import Pipeline as PyannotePipeline
                 _log.info(f"Using pyannote.audio for speaker diarization (model={pyannote_model_id})")
-                pipe = PyannotePipeline.from_pretrained(
-                    pyannote_model_id,
-                    use_auth_token=hf_token,
-                )
+                pipe = _load_pyannote_pipeline(pyannote_model_id, hf_token)
                 if _has_torch and torch.cuda.is_available():
                     pipe.to(torch.device("cuda"))
-                diarization = pipe(tmp_path)
+                diarization = pipe(_load_pyannote_waveform(tmp_path), **({"num_speakers": expected_speakers} if expected_speakers else {}))
                 speaker_segments = []
-                for turn, _, speaker in diarization.itertracks(yield_label=True):
+                for turn, _, speaker in _iter_pyannote_tracks(diarization):
                     speaker_segments.append({
                         "speaker": speaker,
                         "start": round(turn.start, 3),
@@ -3404,7 +3902,7 @@ def diarize():
                 if i > 0:
                     gap = seg["start"] - raw_segments[i - 1]["end"]
                     if gap >= min_gap:
-                        current_speaker = (current_speaker + 1) % 10
+                        current_speaker = (current_speaker + 1) % (expected_speakers or 10)
                 seg["speaker"] = f"SPEAKER_{current_speaker:02d}"
 
         # Normalize speaker labels to sequential numbers
@@ -3874,7 +4372,20 @@ def main():
     print("    POST /download-model    — Download model to disk only")
     print("    POST /unload-models     — Free GPU memory")
     print("    POST /shutdown          — Gracefully stop the server")
+    print("    POST /training/start    — Start a LoRA fine-tuning job (requires peft, datasets)")
+    print("    GET  /training/jobs     — List training jobs / adapters")
     print()
+
+    # Wire up LoRA fine-tuning endpoints (no-op if module unavailable)
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from training_routes import register_training_routes  # type: ignore
+        register_training_routes(app)
+        print("  🎓 LoRA training routes registered (/training/*)")
+    except Exception as e:
+        print(f"  ⚠️ Training routes not loaded: {e}")
+    print()
+
 
     # Use waitress production server with multi-threading (8 threads)
     # Falls back to Flask dev server if waitress is not installed
@@ -4186,9 +4697,10 @@ def lk_transcribe():
     model_id = request.form.get("model", _current_model_id or _default_model_for("he"))
     resolved = MODEL_REGISTRY.get(model_id, model_id)
     user_hotwords = request.form.get("hotwords", "")
+    user_initial_prompt = request.form.get("initial_prompt", "").strip()
 
     initial_prompt, hotwords = _resolve_prompt_and_hotwords(
-        "he", "", user_hotwords, loshon_kodesh=True
+        "he", user_initial_prompt, user_hotwords, loshon_kodesh=True
     )
 
     suffix = _safe_suffix(audio_file.filename)
@@ -4209,14 +4721,15 @@ def lk_transcribe():
 
         from faster_whisper import BatchedInferencePipeline
         pipeline = BatchedInferencePipeline(model=model)
+        safe_prompt, safe_hotwords = _fit_whisper_prompt_budget(model, initial_prompt, hotwords)
         segments_gen, info = pipeline.transcribe(
             transcribe_path,
             language="he",
             word_timestamps=True,
             beam_size=beam_size,
             batch_size=auto_batch_size(),
-            initial_prompt=initial_prompt,
-            hotwords=hotwords,
+            initial_prompt=safe_prompt,
+            hotwords=safe_hotwords,
             condition_on_previous_text=True,
         )
         segments = list(segments_gen)
