@@ -318,13 +318,30 @@ const TextEditor = () => {
     { id: "history", label: "היסטוריה", group: "secondary" },
   ];
   // Cloud-synced style settings (must be before effects that use preferences)
-  const { preferences, updatePreference } = useCloudPreferences();
+  const { preferences, updatePreference, isLoaded: cloudPreferencesLoaded } = useCloudPreferences();
 
   const [tabSettings, setTabSettings] = useState(() => {
     return loadTabSettings();
   });
   const visibleTabs = tabSettings.visible;
   const tabOrder = tabSettings.order;
+
+  const mergeCloudUiSettings = useCallback((patch: Record<string, unknown>) => {
+    let current: Record<string, unknown> = {};
+    try { current = JSON.parse(preferences.tab_settings_json || '{}'); } catch { /* use defaults */ }
+    updatePreference('tab_settings_json', JSON.stringify({ ...current, ...patch }));
+  }, [preferences.tab_settings_json, updatePreference]);
+
+  const studioLayoutJson = useMemo(() => {
+    try {
+      const parsed = JSON.parse(preferences.tab_settings_json || '{}');
+      return parsed.studioLayout ? JSON.stringify(parsed.studioLayout) : '';
+    } catch { return ''; }
+  }, [preferences.tab_settings_json]);
+
+  const handleStudioLayoutChange = useCallback((value: string) => {
+    try { mergeCloudUiSettings({ studioLayout: JSON.parse(value) }); } catch { /* ignore malformed state */ }
+  }, [mergeCloudUiSettings]);
 
   // Load tab settings from cloud when preferences are available
   useEffect(() => {
@@ -340,7 +357,7 @@ const TextEditor = () => {
           if (!order.includes(id)) order.push(id);
           if (!parsed.order.includes(id) && !visible.includes(id)) visible.push(id);
         }
-        const migrated = { visible, order };
+        const migrated = { ...parsed, visible, order };
         setTabSettings(current => {
           if (JSON.stringify(current) === JSON.stringify(migrated)) return current;
           saveTabSettings(visible, order);
@@ -1645,14 +1662,14 @@ const TextEditor = () => {
               onVisibilityChange={(v) => {
                 setTabSettings(prev => {
                   const next = { ...prev, visible: v };
-                  updatePreference('tab_settings_json', JSON.stringify(next));
+                  mergeCloudUiSettings(next);
                   return next;
                 });
               }}
               onOrderChange={(o) => {
                 setTabSettings(prev => {
                   const next = { ...prev, order: o };
-                  updatePreference('tab_settings_json', JSON.stringify(next));
+                  mergeCloudUiSettings(next);
                   return next;
                 });
               }}
@@ -1984,6 +2001,8 @@ const TextEditor = () => {
                     compact={!isEqFloating}
                     eqFloating={isEqFloating}
                     eqPortalTarget={eqPortalTarget}
+                    studioLayoutJson={studioLayoutJson}
+                    onStudioLayoutChange={cloudPreferencesLoaded ? handleStudioLayoutChange : undefined}
                   />
                 </FloatingPlayerPortal>
               </Suspense>
@@ -2001,6 +2020,8 @@ const TextEditor = () => {
                   eqWide={playerLayout === 'eq-wide'}
                   eqFloating={isEqFloating}
                   eqPortalTarget={eqPortalTarget}
+                  studioLayoutJson={studioLayoutJson}
+                  onStudioLayoutChange={cloudPreferencesLoaded ? handleStudioLayoutChange : undefined}
                   learningWidget={!shouldUseFastEditor ? (
                     <>
                       <LearningRegressionPanel

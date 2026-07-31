@@ -2,7 +2,7 @@
 
 /* Widget card padding */
 .studio-widget-body {
-  padding: 16px 18px 18px;
+  padding: 8px 10px 10px;
 }
 
 /* Mixer / noise panel inner cards */
@@ -47,10 +47,14 @@
 
 /* Space between EQ section children */
 .studio-widget-body .space-y-2 {
-  row-gap: 10px;
+  row-gap: 6px;
 }
 .studio-widget-body .space-y-3 {
-  row-gap: 14px;
+  row-gap: 8px;
+}
+
+.studio-widget-body > .studio-widget-handle {
+  min-height: 24px;
 }
 
 /* ─── Studio draggable widget grid ────────────────────────────────────── */

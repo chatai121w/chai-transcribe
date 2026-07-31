@@ -301,6 +301,21 @@ interface SyncAudioPlayerProps {
   onPlayStateChange?: (playing: boolean) => void;
   speakerSegments?: SpeakerSegmentForWaveform[];
   learningWidget?: ReactNode;
+  studioLayoutJson?: string;
+  onStudioLayoutChange?: (value: string) => void;
+}
+
+interface StudioLayoutPreferences {
+  widgetOrder?: string[];
+  hiddenWidgets?: string[];
+  featureOrder?: string[];
+  layoutEditMode?: boolean;
+  eqPanelOpen?: boolean;
+}
+
+function parseStudioLayout(value?: string): StudioLayoutPreferences {
+  if (!value) return {};
+  try { return JSON.parse(value) as StudioLayoutPreferences; } catch { return {}; }
 }
 
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -405,6 +420,8 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   onPlayStateChange,
   speakerSegments,
   learningWidget,
+  studioLayoutJson,
+  onStudioLayoutChange,
 }, ref) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -495,7 +512,9 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   // Master ON/OFF toggle for the entire mixer/EQ panel.
   // When OFF: only a small "Power" button is shown (panel collapsed entirely).
   // When ON: the panel expands to FULL horizontal width of the page.
+  const initialStudioLayout = useMemo(() => parseStudioLayout(studioLayoutJson), []);
   const [isEqPanelOpen, setIsEqPanelOpen] = useState<boolean>(() => {
+    if (typeof initialStudioLayout.eqPanelOpen === 'boolean') return initialStudioLayout.eqPanelOpen;
     try { return localStorage.getItem('eq_panel_open') !== '0'; } catch { return true; }
   });
   useEffect(() => {
@@ -503,7 +522,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   }, [isEqPanelOpen]);
 
   // ─── Draggable widget grid (Studio layout) ──────────────────
-  const [layoutEditMode, setLayoutEditMode] = useState<boolean>(() => isStudioEditModeEnabled());
+  const [layoutEditMode, setLayoutEditMode] = useState<boolean>(() => initialStudioLayout.layoutEditMode ?? isStudioEditModeEnabled());
   const [featuresPopoverOpen, setFeaturesPopoverOpen] = useState(false);
 
   type StudioWidgetId = 'player' | 'studio' | 'learning';
@@ -511,6 +530,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
   // ── Widget visibility ─────────────────────────────────────────────────
   const [hiddenWidgets, setHiddenWidgets] = useState<Set<string>>(() => {
+    if (Array.isArray(initialStudioLayout.hiddenWidgets)) return new Set(initialStudioLayout.hiddenWidgets);
     try {
       const s = localStorage.getItem('studio_hidden_widgets_v1');
       return s ? new Set(JSON.parse(s)) : new Set();
@@ -527,6 +547,10 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
   // ── Widget order — persisted and migrated from the old two-widget setting ──
   const [widgetOrder, setWidgetOrder] = useState<StudioWidgetId[]>(() => {
+    if (Array.isArray(initialStudioLayout.widgetOrder)) {
+      const valid = initialStudioLayout.widgetOrder.filter((id): id is StudioWidgetId => DEFAULT_WIDGET_ORDER.includes(id as StudioWidgetId));
+      if (valid.length) return [...valid, ...DEFAULT_WIDGET_ORDER.filter((id) => !valid.includes(id))];
+    }
     try {
       const saved = localStorage.getItem('studio_widget_order_v2');
       if (saved) {
@@ -589,6 +613,10 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   const ALL_FEATURE_IDS = ['noise', 'eq', 'doubler', 'waveform', 'focus', 'noise-details', 'mixer-details'] as const;
   type FeatureId = typeof ALL_FEATURE_IDS[number];
   const [featureOrder, setFeatureOrder] = useState<FeatureId[]>(() => {
+    if (Array.isArray(initialStudioLayout.featureOrder)) {
+      const valid = initialStudioLayout.featureOrder.filter((id): id is FeatureId => ALL_FEATURE_IDS.includes(id as FeatureId));
+      if (valid.length === ALL_FEATURE_IDS.length) return valid;
+    }
     try {
       const saved = localStorage.getItem('studio_feature_order_v1');
       if (saved) {
@@ -631,6 +659,37 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   useEffect(() => {
     setStudioEditModeEnabled(layoutEditMode);
   }, [layoutEditMode]);
+
+  const studioLayoutState = useMemo(() => JSON.stringify({
+    widgetOrder,
+    hiddenWidgets: [...hiddenWidgets],
+    featureOrder,
+    layoutEditMode,
+    eqPanelOpen: isEqPanelOpen,
+  }), [featureOrder, hiddenWidgets, isEqPanelOpen, layoutEditMode, widgetOrder]);
+
+  const lastPublishedStudioLayout = useRef(studioLayoutJson || '');
+  useEffect(() => {
+    localStorage.setItem('studio_layout_state_v1', studioLayoutState);
+    if (studioLayoutJson && studioLayoutJson !== lastPublishedStudioLayout.current) return;
+    if (onStudioLayoutChange && studioLayoutState !== lastPublishedStudioLayout.current) {
+      lastPublishedStudioLayout.current = studioLayoutState;
+      onStudioLayoutChange(studioLayoutState);
+    }
+  }, [onStudioLayoutChange, studioLayoutJson, studioLayoutState]);
+
+  useEffect(() => {
+    if (!studioLayoutJson || studioLayoutJson === lastPublishedStudioLayout.current) return;
+    const remote = parseStudioLayout(studioLayoutJson);
+    const remoteOrder = remote.widgetOrder?.filter((id): id is StudioWidgetId => DEFAULT_WIDGET_ORDER.includes(id as StudioWidgetId));
+    const remoteFeatures = remote.featureOrder?.filter((id): id is FeatureId => ALL_FEATURE_IDS.includes(id as FeatureId));
+    if (remoteOrder?.length) setWidgetOrder([...remoteOrder, ...DEFAULT_WIDGET_ORDER.filter((id) => !remoteOrder.includes(id))]);
+    if (remote.hiddenWidgets) setHiddenWidgets(new Set(remote.hiddenWidgets));
+    if (remoteFeatures?.length === ALL_FEATURE_IDS.length) setFeatureOrder(remoteFeatures);
+    if (typeof remote.layoutEditMode === 'boolean') setLayoutEditMode(remote.layoutEditMode);
+    if (typeof remote.eqPanelOpen === 'boolean') setIsEqPanelOpen(remote.eqPanelOpen);
+    lastPublishedStudioLayout.current = studioLayoutJson;
+  }, [studioLayoutJson]);
 
   const [outputGain, setOutputGain] = useState(() => (_p.outputGain as number) ?? 1.0); // 0.0 to 3.0 (multiply)
   const [showEqualizer, setShowEqualizer] = useState(true);
@@ -2538,7 +2597,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   const Wrapper = compact ? 'div' as const : Card;
   const wrapperClass = compact
     ? 'p-3 rounded-xl border bg-gradient-to-l from-primary/5 to-transparent space-y-3'
-    : `p-5 space-y-4 ${isExpanded ? 'fixed inset-4 z-50 overflow-auto' : ''}`;
+    : `p-2.5 space-y-2 ${isExpanded ? 'fixed inset-4 z-50 overflow-auto' : ''}`;
 
   // ─── Mixer Panel (extracted for split layout) ───────────────
   const mixerPanel = (
@@ -2925,7 +2984,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         )}
 
         {/* ─── Widget Stack ─────────────────────────────── */}
-        <div className={`studio-grid flex flex-col gap-4 ${layoutEditMode ? 'is-editing' : ''}`} dir="rtl">
+        <div className={`studio-grid flex flex-col gap-2 ${layoutEditMode ? 'is-editing' : ''}`} dir="rtl">
           {/* ═══ WIDGET 1: Player ═══ */}
           {!hiddenWidgets.has('player') && (
           <div
