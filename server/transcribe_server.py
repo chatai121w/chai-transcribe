@@ -2578,6 +2578,24 @@ _CONVERT_OUTPUT_FORMATS = {
     },
 }
 
+_CONVERT_QUALITY_ARGS = {
+    "mp3": {
+        "recommended": ["-acodec", "libmp3lame", "-ab", "128k", "-ar", "44100", "-ac", "1"],
+        "high": ["-acodec", "libmp3lame", "-ab", "192k", "-ar", "44100", "-ac", "2"],
+        "maximum": ["-acodec", "libmp3lame", "-ab", "320k", "-ar", "48000", "-ac", "2"],
+    },
+    "opus": {
+        "recommended": ["-c:a", "libopus", "-b:a", "48k", "-vbr", "on", "-compression_level", "10", "-application", "voip", "-ar", "48000", "-ac", "1"],
+        "high": ["-c:a", "libopus", "-b:a", "128k", "-vbr", "on", "-compression_level", "10", "-application", "audio", "-ar", "48000", "-ac", "2"],
+        "maximum": ["-c:a", "libopus", "-b:a", "192k", "-vbr", "on", "-compression_level", "10", "-application", "audio", "-ar", "48000", "-ac", "2"],
+    },
+    "aac": {
+        "recommended": ["-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "1"],
+        "high": ["-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2"],
+        "maximum": ["-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-ac", "2"],
+    },
+}
+
 _ENHANCE_PRESET_FILTERS = {
     # Non-AI baseline: cleanup + balanced speech presence
     "clean": "highpass=f=80,lowpass=f=15000,equalizer=f=3200:t=q:w=1.2:g=3,acompressor=threshold=-20dB:ratio=3:attack=8:release=220,loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.95",
@@ -2612,6 +2630,9 @@ def convert_mp3():
     output_cfg = _CONVERT_OUTPUT_FORMATS.get(output_format)
     if not output_cfg:
         return jsonify({"error": f"Unsupported output format: {output_format}"}), 415
+    output_quality = (request.form.get("output_quality") or "high").strip().lower()
+    if output_quality not in {"recommended", "high", "maximum"}:
+        return jsonify({"error": f"Unsupported output quality: {output_quality}"}), 415
 
     # Save uploaded file to temp
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_in:
@@ -2620,11 +2641,11 @@ def convert_mp3():
 
     output_suffix = output_cfg["suffix"]
     output_mimetype = output_cfg["mimetype"]
-    ffmpeg_audio_args = output_cfg["ffmpeg_args"]
+    ffmpeg_audio_args = _CONVERT_QUALITY_ARGS[output_format][output_quality]
     output_path = input_path + output_suffix
     request_id = f"conv-{int(time.time() * 1000) % 1000000:06d}"
     _log.info(
-        f"[{request_id}] convert-mp3 start: in={filename} fmt={output_format} "
+        f"[{request_id}] convert-mp3 start: in={filename} fmt={output_format} quality={output_quality} "
         f"size={os.path.getsize(input_path)} bytes"
     )
     staged_output_id = None

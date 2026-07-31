@@ -14,28 +14,41 @@ import { debugLog } from "./debugLogger";
 
 export type JobStatus = "queued" | "loading" | "converting" | "done" | "error";
 export type OutputFormat = "mp3" | "opus" | "aac";
+export type OutputQuality = "recommended" | "high" | "maximum";
 
 interface OutputFormatConfig {
   ext: string;
   mime: string;
-  ffmpegArgs: string[];
+  ffmpegArgs: Record<OutputQuality, string[]>;
 }
 
 const OUTPUT_FORMAT_CONFIG: Record<OutputFormat, OutputFormatConfig> = {
   mp3: {
     ext: "mp3",
     mime: "audio/mpeg",
-    ffmpegArgs: ["-acodec", "libmp3lame", "-ab", "192k", "-ar", "44100", "-ac", "2"],
+    ffmpegArgs: {
+      recommended: ["-acodec", "libmp3lame", "-ab", "128k", "-ar", "44100", "-ac", "1"],
+      high: ["-acodec", "libmp3lame", "-ab", "192k", "-ar", "44100", "-ac", "2"],
+      maximum: ["-acodec", "libmp3lame", "-ab", "320k", "-ar", "48000", "-ac", "2"],
+    },
   },
   opus: {
     ext: "opus",
     mime: "audio/opus",
-    ffmpegArgs: ["-c:a", "libopus", "-b:a", "128k", "-vbr", "on", "-compression_level", "5", "-application", "audio"],
+    ffmpegArgs: {
+      recommended: ["-c:a", "libopus", "-b:a", "48k", "-vbr", "on", "-compression_level", "5", "-application", "voip", "-ar", "48000", "-ac", "1"],
+      high: ["-c:a", "libopus", "-b:a", "128k", "-vbr", "on", "-compression_level", "5", "-application", "audio", "-ar", "48000", "-ac", "2"],
+      maximum: ["-c:a", "libopus", "-b:a", "192k", "-vbr", "on", "-compression_level", "10", "-application", "audio", "-ar", "48000", "-ac", "2"],
+    },
   },
   aac: {
     ext: "m4a",
     mime: "audio/mp4",
-    ffmpegArgs: ["-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2"],
+    ffmpegArgs: {
+      recommended: ["-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "1"],
+      high: ["-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2"],
+      maximum: ["-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-ac", "2"],
+    },
   },
 };
 
@@ -48,8 +61,8 @@ function getOutputMime(outputFormat: OutputFormat): string {
   return OUTPUT_FORMAT_CONFIG[outputFormat].mime;
 }
 
-function getOutputFfmpegArgs(outputFormat: OutputFormat): string[] {
-  return OUTPUT_FORMAT_CONFIG[outputFormat].ffmpegArgs;
+function getOutputFfmpegArgs(outputFormat: OutputFormat, quality: OutputQuality): string[] {
+  return OUTPUT_FORMAT_CONFIG[outputFormat].ffmpegArgs[quality];
 }
 
 /**
@@ -75,6 +88,7 @@ export interface ConversionJob {
   fileName: string;
   fileSize: number;
   outputFormat: OutputFormat;
+  outputQuality?: OutputQuality;
   file?: File;              // only in-memory, not persisted
   status: JobStatus;
   progress: number;         // 0-100 – real, time-based
@@ -366,7 +380,7 @@ async function runServerConversion(job: ConversionJob): Promise<boolean> {
     job.progress = 0;
     notifyAll(job);
 
-    const blob = await convertOnServer(file, job.outputFormat, (p) => {
+    const blob = await convertOnServer(file, job.outputFormat, job.outputQuality || "high", (p) => {
       job.progress = Math.min(99, p.progress);
       notifyAll(job);
     });
@@ -533,7 +547,7 @@ async function runWasmConversion(job: ConversionJob): Promise<void> {
 
     const exitCode = await ffmpeg.exec([
       "-i", inputName, "-vn",
-      ...getOutputFfmpegArgs(job.outputFormat),
+      ...getOutputFfmpegArgs(job.outputFormat, job.outputQuality || "high"),
       outputName,
     ]);
 
@@ -694,12 +708,13 @@ export function convertToMp3(file: File): ConversionJob {
   return convertAudio(file, "mp3");
 }
 
-export function convertAudio(file: File, outputFormat: OutputFormat = "mp3"): ConversionJob {
+export function convertAudio(file: File, outputFormat: OutputFormat = "mp3", outputQuality: OutputQuality = "high"): ConversionJob {
   const job: ConversionJob = {
     id: `conv_${++idCounter}_${Date.now()}`,
     fileName: file.name,
     fileSize: file.size,
     outputFormat,
+    outputQuality,
     file,
     status: "queued",
     progress: 0,

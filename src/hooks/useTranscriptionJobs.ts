@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
-import { splitFileIntoChunks } from '@/utils/audioChunker';
+import { validateBackgroundTranscriptionFile } from '@/lib/backgroundTranscriptionLimits';
 import { debugLog } from '@/lib/debugLogger';
 
 export interface TranscriptionJob {
@@ -119,7 +119,7 @@ export const useTranscriptionJobs = () => {
     }).catch(err => debugLog.error('Jobs', 'Error triggering processing', err instanceof Error ? err.message : String(err)));
   };
 
-  // Submit a single job (with chunking for large files)
+  // Submit one complete media file. Arbitrary byte ranges are not valid audio chunks.
   const submitJob = useCallback(async (
     file: File, engine: string, language: string
   ): Promise<string | null> => {
@@ -133,9 +133,17 @@ export const useTranscriptionJobs = () => {
       return null;
     }
 
-    try {
-      const chunks = splitFileIntoChunks(file);
+    const validation = validateBackgroundTranscriptionFile(file, engine);
+    if (!validation.valid) {
+      toast({
+        title: "הקובץ גדול מדי למנוע שנבחר",
+        description: validation.message,
+        variant: "destructive",
+      });
+      return null;
+    }
 
+    try {
       const { data: job, error: jobError } = await supabase
         .from('transcription_jobs')
         .insert({
@@ -145,7 +153,7 @@ export const useTranscriptionJobs = () => {
           file_name: file.name,
           language,
           progress: 0,
-          total_chunks: chunks.length,
+          total_chunks: 1,
           completed_chunks: 0,
           partial_result: '',
         })
@@ -154,7 +162,7 @@ export const useTranscriptionJobs = () => {
 
       if (jobError || !job) throw new Error('Failed to create job');
 
-      toast({ title: "מעלה קובץ ברקע...", description: `"${file.name}" - ${chunks.length > 1 ? `${chunks.length} חלקים` : 'חלק אחד'}` });
+      toast({ title: "מעלה קובץ ברקע...", description: `"${file.name}" - קובץ אודיו שלם` });
 
       // Request notification permission (non-blocking) for background job alerts
       if ('Notification' in window && Notification.permission === 'default') {

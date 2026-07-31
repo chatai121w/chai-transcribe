@@ -14,6 +14,7 @@ import {
   removePersistedJob,
   type ConversionJob,
   type OutputFormat,
+  type OutputQuality,
 } from "@/lib/ffmpegConverter";
 
 import {
@@ -135,6 +136,12 @@ const OUTPUT_FORMAT_META: Record<OutputFormat, { label: string; ext: string; mim
     mime: "audio/mp4",
     description: "מעולה למובייל וסטרימינג",
   },
+};
+
+const OUTPUT_QUALITY_META: Record<OutputQuality, { label: string; badge: string; description: string }> = {
+  recommended: { label: "מומלץ לתמלול", badge: "קטן ומהיר", description: "Mono · איכות דיבור מצוינת וקובץ קטן" },
+  high: { label: "איכות גבוהה", badge: "ברירת מחדל", description: "איכות גבוהה ושמירה טובה על המקור" },
+  maximum: { label: "האיכות המרבית", badge: "הכי איכותי", description: "Bitrate מרבי · קובץ גדול יותר" },
 };
 
 function getOutputFileName(fileName: string, outputFormat: OutputFormat): string {
@@ -343,6 +350,10 @@ export default function VideoToMp3() {
     if (saved === "mp3" || saved === "opus" || saved === "aac") return saved;
     return "mp3";
   });
+  const [outputQuality, setOutputQuality] = useState<OutputQuality>(() => {
+    const saved = localStorage.getItem("video_to_audio_output_quality");
+    return saved === "recommended" || saved === "maximum" || saved === "high" ? saved : "high";
+  });
   const [isDragging, setIsDragging] = useState(false);
   const [ffmpegReady, setFfmpegReady] = useState(false);
   const [promptJob, setPromptJob] = useState<ConversionJob | null>(null);
@@ -477,6 +488,10 @@ export default function VideoToMp3() {
   }, [outputFormat]);
 
   useEffect(() => {
+    localStorage.setItem("video_to_audio_output_quality", outputQuality);
+  }, [outputQuality]);
+
+  useEffect(() => {
     preloadFFmpeg()
       .then(() => setFfmpegReady(true))
       .catch(() => {
@@ -578,10 +593,10 @@ export default function VideoToMp3() {
     if (valid.length === 0) return;
 
     const newJobs = valid.map((f) =>
-      mode === "extract" ? extractAudio(f) : convertAudio(f, outputFormat),
+      mode === "extract" ? extractAudio(f) : convertAudio(f, outputFormat, outputQuality),
     );
     setJobs((prev) => [...newJobs, ...prev]);
-  }, [outputFormat]);
+  }, [outputFormat, outputQuality]);
 
 
   const handleRemove = useCallback((id: string) => {
@@ -880,6 +895,37 @@ export default function VideoToMp3() {
               </div>
               <div className="mt-2 text-xs text-muted-foreground">
                 נבחר: <span className="font-medium text-foreground">{OUTPUT_FORMAT_META[outputFormat].label}</span> • סיומת <span className="font-medium text-foreground">.{OUTPUT_FORMAT_META[outputFormat].ext}</span> • {OUTPUT_FORMAT_META[outputFormat].description}
+              </div>
+              <div className="mt-4 border-t pt-4">
+                <div className="mb-2">
+                  <p className="font-medium">איכות ההמרה</p>
+                  <p className="text-xs text-muted-foreground">האיכות משפיעה על גודל הקובץ, לא על משך ההקלטה.</p>
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {(["recommended", "high", "maximum"] as OutputQuality[]).map((quality) => {
+                    const meta = OUTPUT_QUALITY_META[quality];
+                    return (
+                      <button
+                        key={quality}
+                        type="button"
+                        onClick={() => setOutputQuality(quality)}
+                        className={cn(
+                          "min-h-[74px] rounded-md border px-3 py-2 text-right transition-colors",
+                          outputQuality === quality ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted/50",
+                        )}
+                      >
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-sm">{meta.label}</span>
+                          <Badge variant={outputQuality === quality ? "default" : "secondary"} className="text-[10px]">{meta.badge}</Badge>
+                        </span>
+                        <span className="mt-1 block text-xs text-muted-foreground">{meta.description}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  נבחרה <span className="font-medium text-foreground">{OUTPUT_QUALITY_META[outputQuality].label}</span> · {OUTPUT_QUALITY_META[outputQuality].description}
+                </p>
               </div>
             </CardContent>
           </Card>
