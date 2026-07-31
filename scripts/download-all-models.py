@@ -129,7 +129,7 @@ def is_align_cached() -> bool:
 
 def is_pyannote_cached() -> bool:
     hf_cache = Path.home() / ".cache" / "huggingface" / "hub"
-    cache_dir = hf_cache / "models--pyannote--speaker-diarization-3.1"
+    cache_dir = hf_cache / "models--pyannote--speaker-diarization-community-1"
     return cache_dir.exists() and any((cache_dir / "snapshots").glob("*"))
 
 
@@ -187,19 +187,19 @@ def download_whisperx_align(progress: dict):
 
 
 def download_pyannote(hf_token: str, progress: dict):
-    key = "pyannote:diarization-3.1"
+    key = "pyannote:diarization-community-1"
     if key in progress["completed"] and is_pyannote_cached():
         return ("pyannote", True, 0.0, True)
     if is_pyannote_cached():
         mark_completed(progress, key)
         return ("pyannote", True, 0.0, True)
 
-    safe_print("  ⬇ מוריד pyannote/speaker-diarization-3.1...")
+    safe_print("  ⬇ מוריד pyannote/speaker-diarization-community-1...")
     t0 = time.time()
     try:
         from pyannote.audio import Pipeline as PyannotePipeline
         PyannotePipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
+            "pyannote/speaker-diarization-community-1",
             token=hf_token,
         )
         elapsed = time.time() - t0
@@ -225,7 +225,7 @@ def download_whisperx_diarize(hf_token: str, progress: dict):
     t0 = time.time()
     try:
         from whisperx.diarize import DiarizationPipeline as WxDiarize
-        WxDiarize(model_name="pyannote/speaker-diarization-3.1", token=hf_token, device="cpu")
+        WxDiarize(model_name="pyannote/speaker-diarization-community-1", token=hf_token, device="cpu")
         elapsed = time.time() - t0
         mark_completed(progress, key)
         print_ok(f"whisperx diarization — {elapsed:.1f}s")

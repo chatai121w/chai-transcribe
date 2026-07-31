@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { evaluateLearningRegression } from './learningRegression';
 
 describe('evaluateLearningRegression', () => {
+  it('reports final-letter spelling regressions that normalized WER intentionally ignores', () => {
+    const result = evaluateLearningRegression('חוקיך מצוותיך', 'חוקיכ מצוותיכ', 'חוקיך מצוותיך');
+
+    expect(result.baseline.wer).toBe(0);
+    expect(result.baseline.orthographicWer).toBe(1);
+    expect(result.candidate.orthographicWer).toBe(0);
+    expect(result.improved).toBe(2);
+    expect(result.regressions).toBe(0);
+  });
+
   it('separates improvements from regressions', () => {
     const result = evaluateLearningRegression(
       'פדיון מעשר שני הוא מצווה',

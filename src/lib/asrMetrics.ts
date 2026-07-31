@@ -5,7 +5,11 @@
  * BEFORE calling these — identical normalization is required for stable WER.
  */
 
-import { normalizeHebrew, tokenizeHebrew } from './hebrewNormalize';
+import { normalizeHebrew, tokenizeHebrew, type NormalizeOptions } from './hebrewNormalize';
+
+export const ORTHOGRAPHIC_NORMALIZE_OPTIONS: NormalizeOptions = {
+  foldFinals: false,
+};
 
 // ─── Levenshtein (token or char level) ─────────────────────────────────────
 
@@ -41,20 +45,37 @@ function editOps<T>(a: T[], b: T[]): { dist: number; sub: number; ins: number; d
   return { dist: dp[n][m], sub, ins, del };
 }
 
-export function computeWER(ref: string, hyp: string): { wer: number; sub: number; ins: number; del: number; refWords: number } {
-  const r = tokenizeHebrew(ref);
-  const h = tokenizeHebrew(hyp);
+export function computeWER(
+  ref: string,
+  hyp: string,
+  options?: NormalizeOptions,
+): { wer: number; sub: number; ins: number; del: number; refWords: number } {
+  const r = tokenizeHebrew(ref, options);
+  const h = tokenizeHebrew(hyp, options);
   if (r.length === 0) return { wer: h.length > 0 ? 1 : 0, sub: 0, ins: h.length, del: 0, refWords: 0 };
   const { sub, ins, del } = editOps(r, h);
   return { wer: (sub + ins + del) / r.length, sub, ins, del, refWords: r.length };
 }
 
-export function computeCER(ref: string, hyp: string): { cer: number; refChars: number } {
-  const r = Array.from(normalizeHebrew(ref).replace(/\s+/g, ''));
-  const h = Array.from(normalizeHebrew(hyp).replace(/\s+/g, ''));
+export function computeCER(
+  ref: string,
+  hyp: string,
+  options?: NormalizeOptions,
+): { cer: number; refChars: number } {
+  const r = Array.from(normalizeHebrew(ref, options).replace(/\s+/g, ''));
+  const h = Array.from(normalizeHebrew(hyp, options).replace(/\s+/g, ''));
   if (r.length === 0) return { cer: h.length > 0 ? 1 : 0, refChars: 0 };
   const { dist } = editOps(r, h);
   return { cer: dist / r.length, refChars: r.length };
+}
+
+/** Strict Hebrew spelling metrics: final-letter mistakes remain visible. */
+export function computeOrthographicWER(ref: string, hyp: string) {
+  return computeWER(ref, hyp, ORTHOGRAPHIC_NORMALIZE_OPTIONS);
+}
+
+export function computeOrthographicCER(ref: string, hyp: string) {
+  return computeCER(ref, hyp, ORTHOGRAPHIC_NORMALIZE_OPTIONS);
 }
 
 // ─── Term recall (Hebrew target terms) ─────────────────────────────────────
@@ -99,9 +120,9 @@ export function lenRatio(ref: string, hyp: string): number {
 export type DiffOp = { type: 'eq' | 'sub' | 'ins' | 'del'; ref?: string; hyp?: string };
 
 /** Returns aligned word diff between ref and hyp. */
-export function wordDiff(ref: string, hyp: string): DiffOp[] {
-  const a = tokenizeHebrew(ref);
-  const b = tokenizeHebrew(hyp);
+export function wordDiff(ref: string, hyp: string, options?: NormalizeOptions): DiffOp[] {
+  const a = tokenizeHebrew(ref, options);
+  const b = tokenizeHebrew(hyp, options);
   const n = a.length, m = b.length;
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
   for (let i = 0; i <= n; i++) dp[i][0] = i;

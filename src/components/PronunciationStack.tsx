@@ -146,7 +146,7 @@ export function PronunciationStack({
                      [&_>*>*]:!rounded-lg [&_>*>*]:!h-full
                      [&_span.font-medium]:!text-[11px]
                      [&_p.text-xs]:!hidden
-                     [&_.text-\\[10px\\]]:!hidden"
+                     "
         >
           <div className="min-w-0">{loshonKodeshSlot}</div>
           <div className="min-w-0">{personalModelSlot}</div>

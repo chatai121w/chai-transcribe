@@ -34,16 +34,16 @@ import { addNotification } from "@/hooks/useNotifications";
 import { getApiKey, getEncryptedKey } from "@/lib/keyCrypto";
 import { recoverProviderKeysFromCloud } from "@/lib/cloudKeyFallback";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
-import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, buildLoshonKodeshHotwords, applyLoshonKodeshReplacements, isLkAiEnabled, isLkAiAuto, applyLkAiFix } from "@/lib/loshonKodesh";
+import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, isLkAiEnabled, isLkAiAuto, applyLkAiFix } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
-import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
+import { getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
 import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSuggestion";
 import { PronunciationProfileSelector } from "@/components/PronunciationProfileSelector";
 import { PronunciationStack } from "@/components/PronunciationStack";
-import { applyLearnedCorrections, getLearnedHotwords } from "@/utils/correctionLearning";
-import { applyVocabularyCorrections, getHotwordsString, isCustomVocabularyEnabled, setCustomVocabularyEnabled } from "@/utils/customVocabulary";
+import { isCustomVocabularyEnabled, setCustomVocabularyEnabled } from "@/utils/customVocabulary";
 import { addRecentFile } from "@/components/RecentFiles";
-import { applyDefinitiveRulesToText, areDefinitiveRulesEnabled } from '@/utils/hebrewRuleEngine';
+import { applyTranscriptionKnowledge } from '@/lib/transcriptionKnowledge';
+import { buildTranscriptionHotwords } from '@/lib/transcriptionHotwords';
 
 // Lazy-loaded heavy components
 const LiveTranscriber = lazy(() => import("@/components/LiveTranscriber").then(m => ({ default: m.LiveTranscriber })));
@@ -413,23 +413,9 @@ const Index = () => {
 
   // Save to cloud history (respects cloud save mode for CUDA engine)
   const saveToHistory = async (text: string, engineUsed: string, skipCloud?: boolean, timings?: Array<{word: string, start: number, end: number, probability?: number}>, audioFile?: File, folder?: string, textOnly = false) => {
-    const definitiveResult = areDefinitiveRulesEnabled()
-      ? applyDefinitiveRulesToText(text)
-      : { fixedText: text, hits: [] };
-    // Apply learned corrections to improve transcription
-    const personalPronunciationOn = isPersonalPronunciationEnabled();
-    const correctionResult = personalPronunciationOn
-      ? applyLearnedCorrections(definitiveResult.fixedText, { engine: engineUsed })
-      : { text: definitiveResult.fixedText, appliedCount: 0, applied: [] };
-    const profileResult = personalPronunciationOn
-      ? applyProfileCorrections(correctionResult.text)
-      : { text: correctionResult.text, appliedCount: 0 };
-    const vocabularyResult = isCustomVocabularyEnabled()
-      ? applyVocabularyCorrections(profileResult.text)
-      : { text: profileResult.text, appliedCount: 0 };
-    // Apply Loshon Kodesh phonetic→canonical replacements when LK mode is on
+    const knowledge = applyTranscriptionKnowledge(text, engineUsed);
     const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
-    let finalText = lkActive ? applyLoshonKodeshReplacements(vocabularyResult.text) : vocabularyResult.text;
+    let finalText = knowledge.text;
     // Layer 2: optional AI fix when auto-mode is on
     if (lkActive && isLkAiEnabled() && isLkAiAuto()) {
       try {
@@ -442,16 +428,16 @@ const Index = () => {
         debugLog.warn('Index', 'LK AI fix failed, keeping rules-only result', e);
       }
     }
-    const nonLkAppliedCount = definitiveResult.hits.length + correctionResult.appliedCount + profileResult.appliedCount + vocabularyResult.appliedCount;
+    const nonLkAppliedCount = knowledge.deterministicApplied;
     if (finalText !== text) {
-      debugLog.info('Index', `Applied ${correctionResult.appliedCount} learned + ${profileResult.appliedCount} profile + ${vocabularyResult.appliedCount} vocabulary corrections`);
+      debugLog.info('Index', `Applied ${knowledge.counts.learned} learned + ${knowledge.counts.profile} profile + ${knowledge.counts.vocabulary} vocabulary corrections`);
       setTranscript(finalText);
     }
     if (nonLkAppliedCount > 0) {
       toast({
         title: `הלמידה האישית החילה ${nonLkAppliedCount} תיקונים`,
-        description: correctionResult.applied.length
-          ? correctionResult.applied.slice(0, 3).map(item => `${item.original} → ${item.corrected}`).join(' · ')
+        description: knowledge.learnedApplied.length
+          ? knowledge.learnedApplied.slice(0, 3).map(item => `${item.original} → ${item.corrected}`).join(' · ')
           : 'הטקסט עודכן לפי אוצר המילים האישי',
       });
     }
@@ -1336,18 +1322,15 @@ const Index = () => {
       toast({ title: "מתמלל עם GPU...", description: "מעבד את הקובץ בשרת המקומי עם CUDA — תראה תוצאות בזמן אמת" });
 
       // Build CUDA options from cloud preferences
-      const profileHotwordsStr = buildProfileHotwords();
       const profileInitPrompt = getProfileInitialPrompt();
       const profileForcesLk = isProfileLoshonKodesh();
       const lkOn = isLoshonKodeshEnabled() || profileForcesLk;
       // When LK is on, merge user-edited LK hotwords + prefer LK prompt
-      const vocabularyHotwords = isCustomVocabularyEnabled() ? getHotwordsString() : '';
-      const learnedHotwords = isPersonalPronunciationEnabled() ? getLearnedHotwords(100) : '';
-      const baseHotwords = [preferences.cuda_hotwords || '', vocabularyHotwords, learnedHotwords, profileHotwordsStr]
-        .filter(Boolean).join(', ');
-      const mergedCudaHotwords = lkOn
-        ? (buildLoshonKodeshHotwords(baseHotwords) || undefined)
-        : (baseHotwords || undefined);
+      const mergedCudaHotwords = buildTranscriptionHotwords({
+        manual: preferences.cuda_hotwords || '',
+        context: file.name,
+        loshonKodesh: lkOn,
+      });
       const cudaOptions: CudaOptions = {
         preset: preferences.cuda_preset || 'balanced',
         fastMode: preferences.cuda_fast_mode,

@@ -13,6 +13,7 @@ import os
 import sys
 import json
 import hashlib
+from transcript_quality import is_degenerate_transcript, lexical_diversity_score
 import argparse
 import tempfile
 import time
@@ -727,6 +728,7 @@ MODEL_REGISTRY = {
 # Default to ivrit-ai for best Hebrew quality (per Interspeech 2025: Marmor et al.).
 # Override with --model on CLI for non-Hebrew use cases.
 DEFAULT_MODEL = "ivrit-ai/whisper-large-v3-turbo-ct2"
+DEFAULT_PYANNOTE_MODEL = "pyannote/speaker-diarization-community-1"
 
 
 def _default_model_for(language: str = "he") -> str:
@@ -1311,10 +1313,25 @@ def transcribe():
             except Exception as denoise_err:
                 _log.warning(f"  [ai_denoise] Failed, continuing without: {denoise_err}")
 
-        # SHA-256 cache lookup — skip GPU work for repeated files.
-        # Include normalize flag in key: normalized audio sounds different from raw.
+        # Resolve decoding hints before cache lookup. Prompt/hotword changes alter
+        # the decoder output and therefore must be part of the cache identity.
+        user_initial_prompt = request.form.get("initial_prompt", "")
+        user_hotwords = request.form.get("hotwords", "")
+        loshon_kodesh = request.form.get("loshon_kodesh", "0") == "1"
+        initial_prompt, hotwords = _resolve_prompt_and_hotwords(
+            language, user_initial_prompt, user_hotwords, loshon_kodesh
+        )
+
+        # SHA-256 cache lookup — skip GPU work for truly identical requests.
+        # Include every decoding input that can change the resulting text.
         file_hash = _file_sha256(tmp_path)
-        cache_key = f"{file_hash}:{resolved}:{language}:{beam_size}:norm={int(normalize)}"
+        hints_hash = hashlib.sha256(
+            f"{initial_prompt or ''}\0{hotwords or ''}".encode("utf-8")
+        ).hexdigest()[:16]
+        cache_key = (
+            f"{file_hash}:{resolved}:{language}:{beam_size}:norm={int(normalize)}:"
+            f"denoise={int(ai_denoise)}:lk={int(loshon_kodesh)}:hints={hints_hash}"
+        )
         cached = _cache_get(cache_key)
         if cached:
             _log.info(f"  Cache HIT for {audio_file.filename} ({cache_key[:16]}...)")
@@ -1333,18 +1350,10 @@ def transcribe():
         print(f"\n  Transcribing: {audio_file.filename} (model={resolved}, lang={language})")
         start = time.time()
 
-        # Use full prompt resolution (supports hotwords, loshon_kodesh, user prompts)
-        user_initial_prompt = request.form.get("initial_prompt", "")
-        user_hotwords = request.form.get("hotwords", "")
-        loshon_kodesh = request.form.get("loshon_kodesh", "0") == "1"
-        initial_prompt, hotwords = _resolve_prompt_and_hotwords(
-            language, user_initial_prompt, user_hotwords, loshon_kodesh
-        )
-
-        def _run_transcribe(m):
+        def _run_transcribe(m, prompt=initial_prompt, word_hints=hotwords):
             from faster_whisper import BatchedInferencePipeline
             pipeline = BatchedInferencePipeline(model=m)
-            safe_prompt, safe_hotwords = _fit_whisper_prompt_budget(m, initial_prompt, hotwords)
+            safe_prompt, safe_hotwords = _fit_whisper_prompt_budget(m, prompt, word_hints)
             return pipeline.transcribe(
                 transcribe_path,
                 language=language if language != "auto" else None,
@@ -1367,6 +1376,21 @@ def transcribe():
                 segments = list(segments)
             else:
                 raise
+
+        # Prompt/hotword bias can occasionally dominate sung or chanted audio.
+        # Retry without torani bias and keep the healthier transcript instead
+        # of returning a technically successful but repetitive hallucination.
+        biased_text = " ".join(segment.text.strip() for segment in segments)
+        if loshon_kodesh and is_degenerate_transcript(biased_text):
+            neutral_prompt, neutral_hotwords = _resolve_prompt_and_hotwords(language, "", "", False)
+            _log.warning("Degenerate Loshon Kodesh output detected; retrying with neutral decoding hints")
+            neutral_segments, neutral_info = _run_transcribe(model, neutral_prompt, neutral_hotwords)
+            neutral_segments = list(neutral_segments)
+            neutral_text = " ".join(segment.text.strip() for segment in neutral_segments)
+            if lexical_diversity_score(neutral_text) > lexical_diversity_score(biased_text):
+                segments = neutral_segments
+                info = neutral_info
+                _log.info("Neutral retry selected over degenerate biased transcript")
 
         # Collect segments and word timings
         full_text_parts = []
@@ -3457,7 +3481,11 @@ def _load_pyannote_pipeline(model_id, hf_token):
 
 
 def _iter_pyannote_tracks(output):
-    annotation = getattr(output, "speaker_diarization", output)
+    # Community-1 exposes a non-overlapping view designed for reconciling
+    # diarization with ASR timestamps. Older pipelines fall back transparently.
+    annotation = getattr(output, "exclusive_speaker_diarization", None)
+    if annotation is None:
+        annotation = getattr(output, "speaker_diarization", output)
     return annotation.itertracks(yield_label=True)
 
 
@@ -3477,7 +3505,7 @@ def diarize_stream():
     hf_token = request.form.get("hf_token", "")
     diarization_engine = request.form.get("diarization_engine", "auto").strip().lower()
     expected_speakers = max(0, int(request.form.get("expected_speakers", "0") or 0))
-    pyannote_model_id = request.form.get("pyannote_model", "pyannote/speaker-diarization-3.1").strip() or "pyannote/speaker-diarization-3.1"
+    pyannote_model_id = request.form.get("pyannote_model", DEFAULT_PYANNOTE_MODEL).strip() or DEFAULT_PYANNOTE_MODEL
 
     resolved = MODEL_REGISTRY.get(model_id, model_id)
     suffix = _safe_suffix(audio_file.filename)
@@ -3635,7 +3663,7 @@ def diarize():
     diarization_engine = request.form.get("diarization_engine", "auto").strip().lower()
     expected_speakers = max(0, int(request.form.get("expected_speakers", "0") or 0))
     whisperx_model = request.form.get("whisperx_model", "large-v3").strip() or "large-v3"
-    pyannote_model_id = request.form.get("pyannote_model", "pyannote/speaker-diarization-3.1").strip() or "pyannote/speaker-diarization-3.1"
+    pyannote_model_id = request.form.get("pyannote_model", DEFAULT_PYANNOTE_MODEL).strip() or DEFAULT_PYANNOTE_MODEL
 
     allowed_engines = {"auto", "whisperx", "pyannote", "silence-gap"}
     if diarization_engine not in allowed_engines:

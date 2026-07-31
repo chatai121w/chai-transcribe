@@ -9,6 +9,8 @@
  * Falls back to localStorage if IndexedDB unavailable.
  */
 
+import { replaceWholeTextOccurrences } from '@/lib/hebrewTextReplacement';
+
 // ─── Types ───
 
 export interface CorrectionEntry {
@@ -82,13 +84,13 @@ function categorizeCorrection(original: string, corrected: string): CorrectionEn
   const corrNoSpace = corrTrimmed.replace(/\s+/g, '');
   if (origNoSpace === corrNoSpace) return 'spacing';
 
-  // Single word
+  // Single-token substitution
   if (!origTrimmed.includes(' ') && !corrTrimmed.includes(' ')) return 'word';
 
   // Multi-word
   const origWords = origTrimmed.split(/\s+/).length;
   const corrWords = corrTrimmed.split(/\s+/).length;
-  if (origWords <= 3 && corrWords <= 3) return 'word';
+  if (origWords <= 3 && corrWords <= 3) return 'phrase';
 
   // Check if it's a grammar fix (same root words, different form)
   if (origWords === corrWords) return 'grammar';
@@ -343,12 +345,21 @@ export function applyLearnedCorrections(
 
   applicable = applicable.slice(0, maxCorrections);
 
+  // Conflicting historical targets for the same source must never run in
+  // sequence. The sorted first entry is the strongest candidate.
+  const selected = new Map<string, CorrectionEntry>();
+  for (const correction of applicable) {
+    const key = correction.original.trim().replace(/\s+/g, ' ');
+    if (!selected.has(key)) selected.set(key, correction);
+  }
+
   let result = text;
   const applied: Array<{ original: string; corrected: string }> = [];
 
-  for (const c of applicable) {
-    if (result.includes(c.original)) {
-      result = result.split(c.original).join(c.corrected);
+  for (const c of selected.values()) {
+    const replacement = replaceWholeTextOccurrences(result, c.original, c.corrected);
+    if (replacement.count > 0) {
+      result = replacement.text;
       applied.push({ original: c.original, corrected: c.corrected });
     }
   }

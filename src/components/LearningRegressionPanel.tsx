@@ -187,6 +187,8 @@ export function LearningRegressionPanel({ audioBlob, audioFileName, currentText,
           <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
             <Metric label="WER ללא למידה" value={pct(latest.result.baseline.wer)} />
             <Metric label="WER עם למידה" value={pct(latest.result.candidate.wer)} />
+            <Metric label="דיוק כתיב ללא למידה" value={pct(latest.result.baseline.orthographicWer)} />
+            <Metric label="דיוק כתיב עם למידה" value={pct(latest.result.candidate.orthographicWer)} />
             <Metric label="שיפור נטו" value={pct(latest.result.netImprovement)} good={latest.result.netImprovement > 0} bad={latest.result.netImprovement < 0} />
             <Metric label="מילים שהשתפרו" value={String(latest.result.improved)} good={latest.result.improved > 0} />
             <Metric label="רגרסיות" value={String(latest.result.regressions)} bad={latest.result.regressions > 0} />

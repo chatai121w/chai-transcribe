@@ -23,9 +23,8 @@ export interface WordTiming {
 }
 
 /**
- * Fit an aligned timeline to the real media boundaries without changing word order.
- * Forced aligners often stop at the final voiced frame, which can leave the
- * transcript visibly behind a player that has reached the media boundary.
+ * Correct small global clock drift without stretching speech over real silence.
+ * Large gaps at the end are commonly trailing silence and must stay unassigned.
  */
 export function fitTimingsToDuration(
   timings: WordTiming[],
@@ -37,11 +36,18 @@ export function fitTimingsToDuration(
   const lastEnd = timings.at(-1)?.end ?? 0;
   if (!Number.isFinite(lastEnd) || lastEnd <= firstStart) return timings;
 
+  const drift = duration - lastEnd;
+  const maxCorrectableDrift = Math.max(0.35, duration * 0.02);
+  if (drift > maxCorrectableDrift) return timings;
+
   const scale = Math.max(0.001, duration - firstStart) / (lastEnd - firstStart);
+  // A large scale change means the alignment is unreliable, not that every
+  // word should be redistributed over the file.
+  if (Math.abs(scale - 1) > 0.08) return timings;
   return timings.map((timing, index) => {
     const start = Math.min(duration, Math.max(0, firstStart + (timing.start - firstStart) * scale));
     const scaledEnd = firstStart + (timing.end - firstStart) * scale;
-    const end = index === timings.length - 1
+    const end = index === timings.length - 1 && Math.abs(drift) <= maxCorrectableDrift
       ? duration
       : Math.min(duration, Math.max(start, scaledEnd));
     return {

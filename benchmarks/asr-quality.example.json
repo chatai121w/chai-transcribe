@@ -1,0 +1,12 @@
+{
+  "maxAbsoluteRegression": 0,
+  "minOrthographicWerImprovement": 0,
+  "samples": [
+    {
+      "id": "torah-lesson-example",
+      "reference": "רב האי גאון אמר בבא בתרא הלכה למעשה חוקיך מצוותיך",
+      "baseline": "האיגון אמר בברבטרה הלכה למעשה חוקיכ מצוותיכ",
+      "candidate": "רב האי גאון אמר בבא בתרא הלכה למעשה חוקיך מצוותיך"
+    }
+  ]
+}

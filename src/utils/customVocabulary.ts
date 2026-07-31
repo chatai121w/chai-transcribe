@@ -1,3 +1,5 @@
+import { replaceWholeTextOccurrences } from '@/lib/hebrewTextReplacement';
+
 /**
  * Custom Vocabulary System
  * 
@@ -222,11 +224,13 @@ export function applyVocabularyCorrections(text: string): { text: string; applie
   
   for (const entry of vocab) {
     for (const variant of entry.variants) {
-      if (variant && result.includes(variant)) {
-        result = result.split(variant).join(entry.term);
-        applied++;
+      if (variant) {
+        const replacement = replaceWholeTextOccurrences(result, variant, entry.term);
+        if (replacement.count === 0) continue;
+        result = replacement.text;
+        applied += replacement.count;
         // Increment usage count
-        entry.usageCount++;
+        entry.usageCount += replacement.count;
       }
     }
   }

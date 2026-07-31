@@ -24,14 +24,23 @@ describe('word timing synchronization', () => {
     expect(aligned[1].end).toBeLessThanOrEqual(0.9);
   });
 
-  it('makes the final transcript word end with the audio', () => {
+  it('does not stretch speech over a long trailing silence', () => {
     const fitted = fitTimingsToDuration([
       { word: 'אחד', start: 1, end: 2 },
       { word: 'שניים', start: 2.5, end: 4 },
     ], 6);
 
     expect(fitted[0].start).toBe(1);
-    expect(fitted[1].end).toBe(6);
+    expect(fitted[1].end).toBe(4);
+  });
+
+  it('corrects only small media clock drift', () => {
+    const fitted = fitTimingsToDuration([
+      { word: 'אחד', start: 0, end: 4 },
+      { word: 'שניים', start: 4, end: 9.9 },
+    ], 10);
+
+    expect(fitted[1].end).toBe(10);
     expect(fitted[1].start).toBeGreaterThanOrEqual(fitted[0].end);
   });
 

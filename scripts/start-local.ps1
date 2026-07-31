@@ -27,6 +27,26 @@ if ($VitePort -ne $requestedVitePort) {
     Write-Host "[Port] $requestedVitePort is occupied; using $VitePort for the app." -ForegroundColor Yellow
 }
 
+$requestedWhisperPort = $WhisperPort
+$existingWhisperPort = $null
+foreach ($candidate in $requestedWhisperPort..($requestedWhisperPort + 19)) {
+    try {
+        $health = Invoke-RestMethod -Uri "http://localhost:$candidate/health" -TimeoutSec 1
+        if ($health.status -eq "ok") {
+            $existingWhisperPort = $candidate
+            break
+        }
+    } catch {}
+}
+if ($null -ne $existingWhisperPort) {
+    $WhisperPort = $existingWhisperPort
+} else {
+    $WhisperPort = Resolve-AvailablePort -PreferredPort $requestedWhisperPort
+}
+if ($WhisperPort -ne $requestedWhisperPort) {
+    Write-Host "[Port] Whisper port $requestedWhisperPort is unavailable; using $WhisperPort." -ForegroundColor Yellow
+}
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Smart Hebrew Transcriber" -ForegroundColor Cyan

@@ -29,7 +29,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { toast } from '@/hooks/use-toast';
 import { normalizeHebrew } from '@/lib/hebrewNormalize';
 import {
-  computeWER, computeCER, computeTermRecall, lenRatio,
+  computeWER, computeCER, computeOrthographicWER, computeOrthographicCER, computeTermRecall, lenRatio,
   wordDiff, extractCorrectionCandidates, isAmbiguous, type DiffOp,
 } from '@/lib/asrMetrics';
 import { learnFromCorrections, getCorrectionThreshold, setCorrectionThreshold, type CorrectionEntry } from '@/utils/correctionLearning';
@@ -81,7 +81,7 @@ type Engine = 'lovable' | 'local';
 type LearningMode = 'auto' | 'hybrid' | 'manual';
 
 interface RunMetrics {
-  wer: number; cer: number; termRecall: number; lenRatio: number;
+  wer: number; cer: number; orthographicWer: number; orthographicCer: number; termRecall: number; lenRatio: number;
   sub: number; ins: number; del: number; elapsedMs: number;
 }
 
@@ -149,13 +149,16 @@ async function transcribeWithLocal(file: File, serverUrl: string): Promise<{ tex
 function evaluateRun(ref: string, hyp: string, elapsed_ms: number): { metrics: RunMetrics; diff: DiffOp[]; candidates: Array<{wrong:string;correct:string}> } {
   const w = computeWER(ref, hyp);
   const c = computeCER(ref, hyp);
+  const strictW = computeOrthographicWER(ref, hyp);
+  const strictC = computeOrthographicCER(ref, hyp);
   const tr = computeTermRecall(ref, hyp, DEFAULT_TARGET_TERMS);
   const lr = lenRatio(ref, hyp);
   const diff = wordDiff(ref, hyp);
   const candidates = extractCorrectionCandidates(diff);
   return {
     metrics: {
-      wer: w.wer, cer: c.cer, termRecall: tr.recall || 0, lenRatio: lr,
+      wer: w.wer, cer: c.cer, orthographicWer: strictW.wer, orthographicCer: strictC.cer,
+      termRecall: tr.recall || 0, lenRatio: lr,
       sub: w.sub, ins: w.ins, del: w.del, elapsedMs: elapsed_ms,
     },
     diff,
@@ -649,6 +652,8 @@ export default function AsrTraining() {
           config_snapshot: {
             learningMode,
             sourceKind, sourceRef,
+            orthographic_wer: r.metrics.orthographicWer,
+            orthographic_cer: r.metrics.orthographicCer,
             corrections_applied: autoApplied.length,
             pending_queued: queuedPending.length,
           },
@@ -1604,9 +1609,11 @@ export default function AsrTraining() {
                     <Badge>{r.engine === 'lovable' ? 'Lovable AI' : 'שרת מקומי'}</Badge>
                     <span className="text-xs text-muted-foreground">{r.model}</span>
                   </div>
-                  <div className="grid grid-cols-4 gap-2 text-center text-sm">
+                  <div className="grid grid-cols-2 gap-2 text-center text-sm sm:grid-cols-3 lg:grid-cols-6">
                     <Metric label="WER" value={pct(r.metrics.wer)} good={r.metrics.wer < 0.15} />
                     <Metric label="CER" value={pct(r.metrics.cer)} good={r.metrics.cer < 0.10} />
+                    <Metric label="WER איות מחמיר" value={pct(r.metrics.orthographicWer)} good={r.metrics.orthographicWer < 0.15} />
+                    <Metric label="CER איות מחמיר" value={pct(r.metrics.orthographicCer)} good={r.metrics.orthographicCer < 0.10} />
                     <Metric label="מונחים" value={pct(r.metrics.termRecall)} good={r.metrics.termRecall > 0.85} />
                     <Metric label="זמן" value={`${(r.metrics.elapsedMs / 1000).toFixed(1)}s`} />
                   </div>

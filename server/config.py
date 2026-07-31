@@ -22,6 +22,7 @@ MODEL_REGISTRY = {
     "distil-small.en": "Systran/faster-distil-whisper-small.en",
     # Ivrit.ai Hebrew-optimized models (pre-converted CT2 format on HuggingFace)
     "ivrit-ai/faster-whisper-v2-d4": "ivrit-ai/faster-whisper-v2-d4",
+    "ivrit-ai/whisper-large-v3-turbo-ct2": "ivrit-ai/whisper-large-v3-turbo-ct2",
     "ivrit-ai/whisper-large-v3-ct2": "ivrit-ai/whisper-large-v3-ct2",
     # ivrit-ai/whisper-large-v3-turbo — requires local HF→CT2 conversion
     # Yiddish-optimized (ivrit-ai fine-tune) — pre-converted CT2, ready for faster-whisper

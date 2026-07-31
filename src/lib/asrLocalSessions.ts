@@ -21,7 +21,7 @@ export interface LocalSession {
     model: string;
     hyp: string;
     metrics: {
-      wer: number; cer: number; termRecall: number; lenRatio: number;
+      wer: number; cer: number; orthographicWer?: number; orthographicCer?: number; termRecall: number; lenRatio: number;
       sub: number; ins: number; del: number; elapsedMs: number;
     };
     candidates: Array<{ wrong: string; correct: string }>;

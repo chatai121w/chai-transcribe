@@ -1,4 +1,12 @@
-import { computeCER, computeWER, type DiffOp, wordDiff } from './asrMetrics';
+import {
+  computeCER,
+  computeOrthographicCER,
+  computeOrthographicWER,
+  computeWER,
+  ORTHOGRAPHIC_NORMALIZE_OPTIONS,
+  type DiffOp,
+  wordDiff,
+} from './asrMetrics';
 
 export type LearningWordStatus = 'improved' | 'regression' | 'still-wrong' | 'stable-correct';
 
@@ -11,8 +19,8 @@ export interface LearningWordResult {
 }
 
 export interface LearningRegressionResult {
-  baseline: ReturnType<typeof computeWER> & ReturnType<typeof computeCER>;
-  candidate: ReturnType<typeof computeWER> & ReturnType<typeof computeCER>;
+  baseline: ReturnType<typeof computeWER> & ReturnType<typeof computeCER> & { orthographicWer: number; orthographicCer: number };
+  candidate: ReturnType<typeof computeWER> & ReturnType<typeof computeCER> & { orthographicWer: number; orthographicCer: number };
   words: LearningWordResult[];
   improved: number;
   regressions: number;
@@ -43,8 +51,12 @@ export function evaluateLearningRegression(
   const baselineCer = computeCER(groundTruth, baselineText);
   const candidateWer = computeWER(groundTruth, candidateText);
   const candidateCer = computeCER(groundTruth, candidateText);
-  const baselineSlots = referenceSlots(wordDiff(groundTruth, baselineText));
-  const candidateSlots = referenceSlots(wordDiff(groundTruth, candidateText));
+  const baselineOrthographicWer = computeOrthographicWER(groundTruth, baselineText);
+  const baselineOrthographicCer = computeOrthographicCER(groundTruth, baselineText);
+  const candidateOrthographicWer = computeOrthographicWER(groundTruth, candidateText);
+  const candidateOrthographicCer = computeOrthographicCER(groundTruth, candidateText);
+  const baselineSlots = referenceSlots(wordDiff(groundTruth, baselineText, ORTHOGRAPHIC_NORMALIZE_OPTIONS));
+  const candidateSlots = referenceSlots(wordDiff(groundTruth, candidateText, ORTHOGRAPHIC_NORMALIZE_OPTIONS));
   const count = Math.max(baselineSlots.length, candidateSlots.length);
   const words: LearningWordResult[] = [];
 
@@ -77,8 +89,18 @@ export function evaluateLearningRegression(
   const stableCorrect = words.filter((word) => word.status === 'stable-correct').length;
 
   return {
-    baseline: { ...baselineWer, ...baselineCer },
-    candidate: { ...candidateWer, ...candidateCer },
+    baseline: {
+      ...baselineWer,
+      ...baselineCer,
+      orthographicWer: baselineOrthographicWer.wer,
+      orthographicCer: baselineOrthographicCer.cer,
+    },
+    candidate: {
+      ...candidateWer,
+      ...candidateCer,
+      orthographicWer: candidateOrthographicWer.wer,
+      orthographicCer: candidateOrthographicCer.cer,
+    },
     words,
     improved,
     regressions,

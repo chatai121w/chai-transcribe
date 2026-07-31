@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const ciOnlyIgnore = process.env.CI ? [
+const runSmokeSuite = process.env.CI === 'true' || process.env.CI === '1' || process.env.PLAYWRIGHT_SUITE !== 'full';
+
+const smokeIgnore = runSmokeSuite ? [
   '**/_quick-nav.spec.ts',
   '**/check-live-connection.spec.ts',
   '**/cuda-live-*.spec.ts',
@@ -24,8 +26,8 @@ const ciSmokeTests = [
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: process.env.CI ? ciSmokeTests : '**/*.spec.ts',
-  testIgnore: ciOnlyIgnore,
+  testMatch: runSmokeSuite ? ciSmokeTests : '**/*.spec.ts',
+  testIgnore: smokeIgnore,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

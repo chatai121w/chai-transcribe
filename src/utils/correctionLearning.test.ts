@@ -78,6 +78,15 @@ describe('learnFromCorrections + applyLearnedCorrections', () => {
     expect(result.applied).toContainEqual({ original: 'בברא', corrected: 'בבא' });
   });
 
+  it('learns a one-to-many Talmudic phrase correction', () => {
+    const result = extractCorrections('כתוב במסכת בברבטרה כך', 'כתוב במסכת בבא בתרא כך');
+    expect(result).toContainEqual(expect.objectContaining({
+      original: 'בברבטרה',
+      corrected: 'בבא בתרא',
+      category: 'phrase',
+    }));
+  });
+
   it('learns corrections and applies them when confidence is high', () => {
     const corrections = extractCorrections('שלום עלום', 'שלום עולם', 'openai');
     
@@ -98,6 +107,28 @@ describe('learnFromCorrections + applyLearnedCorrections', () => {
     const result = applyLearnedCorrections('שלום עלום שוב', { confidenceThreshold: 0.8 });
     expect(result.appliedCount).toBe(0);
     expect(result.text).toBe('שלום עלום שוב');
+  });
+
+  it('does not replace a learned token inside another Hebrew word', () => {
+    learnFromCorrections([{
+      original: 'ברא', corrected: 'בבא', frequency: 3, engine: 'test', category: 'word',
+      confidence: 0.9, lastUsed: Date.now(), createdAt: Date.now(),
+    }]);
+
+    const result = applyLearnedCorrections('ברא נברא ברא', { confidenceThreshold: 0.6 });
+    expect(result.text).toBe('בבא נברא בבא');
+  });
+
+  it('applies only the strongest target when historical corrections conflict', () => {
+    learnFromCorrections([{
+      original: 'בברא', corrected: 'בבא', frequency: 5, engine: 'test', category: 'word',
+      confidence: 0.9, lastUsed: Date.now(), createdAt: Date.now(),
+    }, {
+      original: 'בברא', corrected: 'ברא', frequency: 1, engine: 'test', category: 'word',
+      confidence: 0.7, lastUsed: Date.now(), createdAt: Date.now(),
+    }]);
+
+    expect(applyLearnedCorrections('מסכת בברא', { confidenceThreshold: 0.6 }).text).toBe('מסכת בבא');
   });
 });
 

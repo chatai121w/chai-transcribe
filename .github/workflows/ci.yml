@@ -23,6 +23,12 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: Hebrew ASR quality and regression gate
+        run: npm run test:quality-gate
+
+      - name: Transcript degeneration guard
+        run: python -m unittest server/test_transcript_quality.py
+
       - name: Vite build
         run: npx vite build
 
