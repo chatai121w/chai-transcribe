@@ -24,7 +24,7 @@ test.describe('דף תמלול - UI בסיסי', () => {
   });
 
   test('טאבים מוצגים - תמלול ועריכה', async ({ page }) => {
-    await expect(page.getByText('תמלול')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'תמלול', exact: true })).toBeVisible();
   });
 });
 

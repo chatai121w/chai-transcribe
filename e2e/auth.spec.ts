@@ -38,8 +38,8 @@ test.describe('התחברות', () => {
     const passwordInput = page.getByPlaceholder(/סיסמ|password/i);
     await emailInput.fill('test@example.com');
     await passwordInput.fill('12');
-    const submitButton = page.getByRole('button', { name: /התחבר|הרשמה|כניסה/i });
-    await submitButton.first().click();
+    const submitButton = page.locator('form button[type="submit"]');
+    await submitButton.click();
     // Should show validation error or toast — or stay on login page
     await page.waitForTimeout(2000);
     // If still on the login page, validation blocked the submission
@@ -56,8 +56,8 @@ test.describe('התחברות', () => {
     const passwordInput = page.getByPlaceholder(/סיסמ|password/i);
     await emailInput.fill('test@example.com');
     await passwordInput.fill('password123');
-    const submitButton = page.getByRole('button', { name: /התחבר|כניסה/i });
-    await submitButton.first().click();
+    const submitButton = page.locator('form button[type="submit"]');
+    await submitButton.click();
     // Inject auth session to simulate what Supabase client would do
     await injectAuthSession(page);
     // Navigate or wait — the app should pick up the session
