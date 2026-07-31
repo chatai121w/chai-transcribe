@@ -90,4 +90,3 @@ test.describe('Live Design Mode', () => {
     await expect(page.locator('input[type="color"]').first()).toBeVisible();
   });
 });
-});
