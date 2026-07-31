@@ -1,13 +1,28 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const ciOnlyIgnore = process.env.CI ? [
+  '**/_quick-nav.spec.ts',
+  '**/check-live-connection.spec.ts',
+  '**/cuda-live-*.spec.ts',
+  '**/health-check-debug.spec.ts',
+  '**/live-transcription.spec.ts',
+  '**/real-transcription.spec.ts',
+  '**/server-lifecycle.spec.ts',
+  '**/server-thorough.spec.ts',
+  '**/studio-layout-recovery-real.spec.ts',
+  '**/transcribe-wav-live.spec.ts',
+] : [];
+
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: ciOnlyIgnore,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: [['html', { open: 'never' }], ['list']],
-  timeout: 180_000,
+  timeout: process.env.CI ? 60_000 : 180_000,
+  globalTimeout: process.env.CI ? 20 * 60_000 : undefined,
 
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8091',
