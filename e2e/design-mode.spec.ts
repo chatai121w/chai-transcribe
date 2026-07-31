@@ -1,4 +1,4 @@
-import { test, expect } from './helpers';
+import { test, expect, injectAuthSession, mockLocalServer, mockSupabase } from './helpers';
 
 /**
  * E2E: Live Design Mode always opens the color editor on element click.
@@ -7,6 +7,9 @@ import { test, expect } from './helpers';
  */
 test.describe('Live Design Mode', () => {
   test.beforeEach(async ({ page }) => {
+    await mockSupabase(page, { authenticated: true });
+    await injectAuthSession(page);
+    await mockLocalServer(page);
     // Pre-seed the editor layout so the panel is NOT minimized from a prior run.
     await page.addInitScript(() => {
       localStorage.setItem(
@@ -52,14 +55,18 @@ test.describe('Live Design Mode', () => {
   }
 
   test('clicking does NOT trigger underlying app navigation', async ({ page }) => {
-    await page.goto('/settings?designMode=1');
+    await page.goto('/?designMode=1');
     await expect(page.getByText('מצב עיצוב חי')).toBeVisible({ timeout: 15_000 });
 
     const startUrl = page.url();
 
-    // Click anything clickable — design mode should swallow it.
-    const anyButton = page.locator('button:visible').first();
-    await anyButton.click({ force: true, noWaitAfter: true }).catch(() => { /* ignore */ });
+    // Use a stable content target; toolbar controls are intentionally handled
+    // by the design-mode UI itself and are not editable page elements.
+    const target = page.locator('h1, h2, [role="heading"]').first();
+    await expect(target).toBeVisible();
+    const box = await target.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
 
     // Editor opens.
     await expect(page.getByText('עריכת אלמנט:')).toBeVisible({ timeout: 5_000 });

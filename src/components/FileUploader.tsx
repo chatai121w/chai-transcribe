@@ -219,6 +219,15 @@ export const FileUploader = ({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (!isAudioOrVideo(file)) {
+        toast({
+          title: "סוג קובץ לא נתמך",
+          description: "יש לבחור קובץ אודיו או וידאו.",
+          variant: "destructive",
+        });
+        e.target.value = '';
+        return;
+      }
       if (file.size > maxFileSizeMB * 1024 * 1024) {
         toast({ title: `הקובץ גדול מדי (${Math.round(file.size / 1024 / 1024)}MB)`, description: `הגבלה: ${maxFileSizeMB}MB`, variant: "destructive" });
         e.target.value = '';
