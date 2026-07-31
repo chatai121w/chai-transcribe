@@ -139,7 +139,36 @@ async function runWithPool<T>(
   throw lastErr || new Error(`All ${pool.length} keys exhausted for ${ctx.provider}`);
 }
 
-const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
+const MB = 1024 * 1024;
+const STORAGE_LIMIT = 50 * MB;
+const ENGINE_UPLOAD_LIMITS: Record<string, number> = {
+  groq: 24 * MB,
+  openai: 24 * MB,
+  google: 9 * MB,
+  deepgram: STORAGE_LIMIT,
+  assemblyai: STORAGE_LIMIT,
+};
+
+function assertWholeFileSupported(engine: string, size: number): void {
+  const maxBytes = Math.min(ENGINE_UPLOAD_LIMITS[engine] ?? STORAGE_LIMIT, STORAGE_LIMIT);
+  if (size <= maxBytes) return;
+  const actualMb = (size / MB).toFixed(1);
+  const limitMb = Math.floor(maxBytes / MB);
+  throw new Error(
+    `Audio is ${actualMb}MB, above the ${limitMb}MB safe limit for ${engine}. ` +
+    'Convert it to transcription-quality Opus, choose Deepgram/AssemblyAI, or use the local CUDA server.'
+  );
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const blockSize = 0x8000;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += blockSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + blockSize));
+  }
+  return btoa(binary);
+}
 
 async function transcribeBlob(
   blob: Blob,
@@ -311,7 +340,7 @@ async function transcribeBlob(
 
     const { result, usedKey } = await runWithPool(pool, { provider: 'google', chunkLabel }, async (apiKey) => {
       const arrayBuffer = await blob.arrayBuffer();
-      const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      const base64Audio = arrayBufferToBase64(arrayBuffer);
       const ext = (safeFileName).split('.').pop()?.toLowerCase() || 'webm';
       const encodingMap: Record<string, { encoding: string; sampleRateHertz: number }> = {
         webm: { encoding: 'WEBM_OPUS', sampleRateHertz: 48000 },
@@ -373,10 +402,12 @@ serve(async (req) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  let activeJobId: string | null = null;
 
   try {
     const { jobId } = await req.json();
     if (!jobId) throw new Error('jobId is required');
+    activeJobId = jobId;
 
     console.log('Processing transcription job:', jobId);
 
@@ -424,8 +455,6 @@ serve(async (req) => {
       .eq('id', jobId);
 
     const engine = job.engine || 'groq';
-    const totalChunks = job.total_chunks || 1;
-    const startChunk = job.completed_chunks || 0;
     let partialResult = job.partial_result || '';
 
     // Per-key usage accumulator for this job (key_fp -> totals)
@@ -439,42 +468,29 @@ serve(async (req) => {
       usageByKey[k].words += Math.max(0, words);
     };
 
-    if (totalChunks <= 1 || fileData.size <= CHUNK_SIZE) {
-      // Single chunk - simple path
-      const r = await transcribeBlob(fileData, engine, job.language || 'he', job.file_name || 'audio.webm', userApiKeys, 'single');
-      partialResult = r.text;
-      recordUsage(r.provider, r.usedKey, estimateSecondsFromBytes(fileData.size), wordCount(r.text));
-    } else {
-      // Multi-chunk processing with resume
-      const actualChunks = Math.ceil(fileData.size / CHUNK_SIZE);
-      
-      for (let i = startChunk; i < actualChunks; i++) {
-        const start = i * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, fileData.size);
-        const chunkBlob = fileData.slice(start, end, fileData.type || 'application/octet-stream');
+    // Byte slicing compressed media produces invalid audio and can silently
+    // lose words. Providers receive one complete, independently decodable file.
+    assertWholeFileSupported(engine, fileData.size);
+    const r = await transcribeBlob(
+      fileData,
+      engine,
+      job.language || 'he',
+      job.file_name || 'audio.webm',
+      userApiKeys,
+      'whole file',
+    );
+    partialResult = r.text;
+    recordUsage(r.provider, r.usedKey, estimateSecondsFromBytes(fileData.size), wordCount(r.text));
 
-        const chunkLabel = `chunk ${i + 1}/${actualChunks}`;
-        console.log(`[${engine}] processing ${chunkLabel} (${chunkBlob.size} bytes)`);
-
-        const r = await transcribeBlob(
-          chunkBlob, engine, job.language || 'he', job.file_name || 'audio.webm', userApiKeys, chunkLabel
-        );
-
-        partialResult += (partialResult ? ' ' : '') + r.text;
-        recordUsage(r.provider, r.usedKey, estimateSecondsFromBytes(chunkBlob.size), wordCount(r.text));
-
-        // Save partial progress
-        const chunkProgress = 50 + Math.round(((i + 1) / actualChunks) * 40);
-        await adminClient.from('transcription_jobs')
-          .update({
-            partial_result: partialResult,
-            completed_chunks: i + 1,
-            progress: chunkProgress,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', jobId);
-      }
-    }
+    await adminClient.from('transcription_jobs')
+      .update({
+        partial_result: partialResult,
+        completed_chunks: 1,
+        total_chunks: 1,
+        progress: 90,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', jobId);
 
     // Persist per-key usage events (one row per key used in this job)
     try {
@@ -500,7 +516,8 @@ serve(async (req) => {
         status: 'completed',
         result_text: partialResult,
         progress: 100,
-        completed_chunks: totalChunks,
+        completed_chunks: 1,
+        total_chunks: 1,
         updated_at: new Date().toISOString(),
       })
       .eq('id', jobId);
@@ -518,11 +535,10 @@ serve(async (req) => {
     const msg = error instanceof Error ? error.message : 'Unknown error';
 
     try {
-      const { jobId } = await req.clone().json().catch(() => ({ jobId: null }));
-      if (jobId) {
+      if (activeJobId) {
         await adminClient.from('transcription_jobs')
           .update({ status: 'failed', error_message: msg, updated_at: new Date().toISOString() })
-          .eq('id', jobId);
+          .eq('id', activeJobId);
       }
     } catch {}
 

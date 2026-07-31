@@ -2,11 +2,16 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Upload, Loader2, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Music, FolderUp, Files, Play, X, CheckCircle, AlertCircle, RotateCcw, Clock, FileAudio, RefreshCw } from "lucide-react";
+import { Upload, Loader2, Zap, Globe, Chrome, Mic, Waves, Server, Cpu, Film, Music, FolderUp, Files, Play, X, CheckCircle, AlertCircle, RotateCcw, Clock, FileAudio, RefreshCw, Library, Search, FolderOpen, Cloud, HardDrive } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { isVideoFile } from "@/lib/videoUtils";
 import { toast } from "@/hooks/use-toast";
 import type { TranscriptionJob } from "@/hooks/useTranscriptionJobs";
+import { useCloudTranscripts, type CloudTranscript } from "@/hooks/useCloudTranscripts";
+import { useFolderTree } from "@/hooks/useFolderTree";
+import { db, isDbAvailable } from "@/lib/localDb";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
@@ -127,6 +132,53 @@ export const FileUploader = ({
   const batchInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [sitePickerOpen, setSitePickerOpen] = useState(false);
+  const [siteSearch, setSiteSearch] = useState('');
+  const [siteFolderId, setSiteFolderId] = useState<string>('all');
+  const [importingSiteId, setImportingSiteId] = useState<string | null>(null);
+  const { transcripts, getAudioUrl } = useCloudTranscripts();
+  const { folders, getPath } = useFolderTree();
+
+  const siteAudioItems = transcripts.filter((item) => Boolean(item.audio_file_path || (item as CloudTranscript & { audio_blob?: Blob }).audio_blob));
+  const filteredSiteAudioItems = siteAudioItems.filter((item) => {
+    if (siteFolderId !== 'all' && (item.folder_id || 'root') !== siteFolderId) return false;
+    const query = siteSearch.trim().toLocaleLowerCase('he');
+    if (!query) return true;
+    const folderLabel = item.folder_id ? getPath(item.folder_id).map(folder => folder.name).join(' / ') : 'ללא תיקייה';
+    return `${item.title} ${folderLabel} ${item.engine}`.toLocaleLowerCase('he').includes(query);
+  });
+
+  const importSiteAudio = async (item: CloudTranscript) => {
+    if (isLoading || importingSiteId) return;
+    setImportingSiteId(item.id);
+    try {
+      let blob = (item as CloudTranscript & { audio_blob?: Blob }).audio_blob;
+      if (!blob && await isDbAvailable()) blob = (await db.transcripts.get(item.id))?.audio_blob;
+      if (!blob && item.audio_file_path) {
+        const url = await getAudioUrl(item.audio_file_path);
+        if (!url) throw new Error('לא ניתן לקבל קישור לקובץ');
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`הורדת הקובץ נכשלה (${response.status})`);
+        blob = await response.blob();
+      }
+      if (!blob) throw new Error('לקובץ שנבחר אין עותק אודיו זמין');
+      if (blob.size > maxFileSizeMB * 1024 * 1024) throw new Error(`הקובץ גדול ממגבלת ${maxFileSizeMB}MB`);
+
+      const pathExtension = item.audio_file_path?.split('.').pop()?.split('?')[0];
+      const mimeExtension = blob.type.split('/')[1]?.split(';')[0];
+      const extension = (pathExtension || mimeExtension || 'wav').replace(/[^a-zA-Z0-9]/g, '') || 'wav';
+      const baseName = (item.title || 'audio').replace(/[\\/:*?"<>|]/g, '_');
+      const file = new File([blob], `${baseName}.${extension}`, { type: blob.type || `audio/${extension}` });
+      setSelectedFile(file);
+      setSitePickerOpen(false);
+      onFileSelect(file);
+      toast({ title: 'הקובץ יובא מהתיקיות', description: item.title || file.name });
+    } catch (error) {
+      toast({ title: 'ייבוא הקובץ נכשל', description: error instanceof Error ? error.message : 'שגיאה לא ידועה', variant: 'destructive' });
+    } finally {
+      setImportingSiteId(null);
+    }
+  };
 
   // Clear selectedFile when transcription ends (success or failure)
   const prevLoadingRef = useRef(isLoading);
@@ -353,6 +405,15 @@ export const FileUploader = ({
           >
             {isLoading ? "מעבד..." : "בחר קובץ"}
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => setSitePickerOpen(true)}
+            disabled={isLoading}
+            title="ייבא אודיו מהקבצים והתיקיות שבאתר"
+          >
+            <Library className="w-4 h-4 ml-1" />
+            מהתיקיות באתר
+          </Button>
 
           {/* Batch buttons (cloud engines + authenticated) */}
           {showBatch && (
@@ -415,6 +476,74 @@ export const FileUploader = ({
             </>
           )}
         </div>
+
+        <Dialog open={sitePickerOpen} onOpenChange={setSitePickerOpen}>
+          <DialogContent className="max-w-3xl max-h-[82vh] overflow-hidden flex flex-col" dir="rtl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FolderOpen className="w-5 h-5 text-primary" />
+                ייבוא קובץ מהתיקיות באתר
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_220px] gap-2">
+              <div className="relative">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input value={siteSearch} onChange={(event) => setSiteSearch(event.target.value)} className="pr-9" placeholder="חיפוש לפי שם, תיקייה או מנוע..." />
+              </div>
+              <select
+                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={siteFolderId}
+                onChange={(event) => setSiteFolderId(event.target.value)}
+                aria-label="סינון לפי תיקייה"
+              >
+                <option value="all">כל התיקיות</option>
+                <option value="root">ללא תיקייה</option>
+                {folders.map(folder => (
+                  <option key={folder.id} value={folder.id}>
+                    {getPath(folder.id).map(part => part.name).join(' / ')}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto rounded-md border divide-y">
+              {filteredSiteAudioItems.map(item => {
+                const folderPath = item.folder_id ? getPath(item.folder_id).map(folder => folder.name).join(' / ') : 'ללא תיקייה';
+                const isLocal = Boolean(item.local_only || (item as CloudTranscript & { audio_blob?: Blob }).audio_blob);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="w-full flex items-center gap-3 px-3 py-3 text-right hover:bg-muted/60 transition-colors disabled:opacity-60"
+                    onClick={() => void importSiteAudio(item)}
+                    disabled={Boolean(importingSiteId)}
+                  >
+                    <span className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                      {importingSiteId === item.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileAudio className="w-4 h-4" />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium truncate">{item.title || 'קובץ אודיו'}</span>
+                      <span className="block text-xs text-muted-foreground truncate">{folderPath} · {item.engine}</span>
+                    </span>
+                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
+                      {isLocal ? <HardDrive className="w-3.5 h-3.5" /> : <Cloud className="w-3.5 h-3.5" />}
+                      {isLocal ? 'מקומי' : 'ענן'}
+                    </span>
+                  </button>
+                );
+              })}
+              {filteredSiteAudioItems.length === 0 && (
+                <div className="py-12 text-center text-sm text-muted-foreground">
+                  לא נמצאו בתיקייה זו קובצי אודיו זמינים לתמלול.
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              מוצגים רק קבצים עם אודיו שמור. קבצים חתוכים, ערוכים ומשופרים עוברים לאותו מסלול תמלול כמו קובץ מהמחשב.
+            </p>
+          </DialogContent>
+        </Dialog>
 
         {/* Pending batch files */}
         {pendingBatchFiles.length > 0 && (

@@ -111,6 +111,7 @@ export interface ServerConversionProgress {
 
 export type ProgressCallback = (p: ServerConversionProgress) => void;
 export type ConversionOutputFormat = "mp3" | "opus" | "aac";
+export type ConversionOutputQuality = "recommended" | "high" | "maximum";
 
 /**
  * Convert a file using the server-side FFmpeg endpoint.
@@ -120,6 +121,7 @@ export type ConversionOutputFormat = "mp3" | "opus" | "aac";
 export async function convertOnServer(
   file: File,
   outputFormat: ConversionOutputFormat,
+  outputQuality: ConversionOutputQuality,
   onProgress?: ProgressCallback,
   abortSignal?: AbortSignal,
 ): Promise<Blob> {
@@ -128,11 +130,13 @@ export async function convertOnServer(
     fileName: file.name,
     fileSize: file.size,
     outputFormat,
+    outputQuality,
     url,
   });
   const formData = new FormData();
   formData.append("file", file);
   formData.append("output_format", outputFormat);
+  formData.append("output_quality", outputQuality);
 
   // Try SSE streaming for progress
   const res = await fetch(`${url}/convert-mp3`, {
