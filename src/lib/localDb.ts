@@ -10,6 +10,7 @@ export interface LocalTranscript {
   notes: string;
   title: string;
   folder: string;
+  folder_id?: string | null;
   category: string;
   is_favorite: boolean;
   audio_file_path: string | null;
@@ -21,6 +22,8 @@ export interface LocalTranscript {
   updated_at: string;
   /** Audio blob cached locally for offline use */
   audio_blob?: Blob;
+  /** Explicitly retained on this device and excluded from cloud sync. */
+  local_only?: boolean;
   /** Tracks if this record needs to be pushed to cloud */
   _dirty?: boolean;
   /** Tracks if this record was deleted locally and needs cloud delete */

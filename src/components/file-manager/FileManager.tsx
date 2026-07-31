@@ -2,12 +2,13 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { Search, Plus, Copy, Scissors, Clipboard, Trash2, Pin, Cloud, Loader2, X, Columns2, Rows3, LayoutGrid, Table2, Folder as FolderIcon, FileText } from 'lucide-react';
+import { Search, Plus, Copy, Scissors, Clipboard, Trash2, Pin, Cloud, Loader2, X, Columns2, Rows3, LayoutGrid, Table2, Folder as FolderIcon, FileText, ListChecks, CheckCheck } from 'lucide-react';
 import { useFolderTree, type FolderNode } from '@/hooks/useFolderTree';
 import { useCloudTranscripts, type CloudTranscript } from '@/hooks/useCloudTranscripts';
 import { FolderTree } from './FolderTree';
@@ -19,6 +20,7 @@ import { DriveFolderPicker } from '@/components/DriveFolderPicker';
 import { DriveUploadStatus } from './DriveUploadStatus';
 import { driveUploadQueue } from '@/lib/driveUploadQueue';
 import { supabase } from '@/integrations/supabase/client';
+import { db } from '@/lib/localDb';
 
 type DriveDropFile = {
   id: string;
@@ -36,6 +38,7 @@ type DragPreview = {
   kind: 'folder' | 'transcript';
   id: string;
   name: string;
+  count: number;
   targetName: string | null;
 };
 
@@ -43,15 +46,22 @@ const NATIVE_DRAG_START_EVENT = 'fm-native-drag-start';
 const NATIVE_DRAG_TARGET_EVENT = 'fm-native-drag-target';
 const NATIVE_DRAG_END_EVENT = 'fm-native-drag-end';
 const DROP_SNAP_EVENT = 'fm-drop-snap';
+let activeLocalAudioUrl: string | null = null;
 
 export const FileManager = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { tree, folders, createFolder, updateFolder, deleteFolder, moveFolder, togglePin, getPath } = useFolderTree();
-  const { transcripts, updateTranscript, deleteTranscript } = useCloudTranscripts();
+  const {
+    transcripts,
+    updateTranscript,
+    deleteTranscript,
+    ensureTranscriptAudioUploaded,
+  } = useCloudTranscripts();
 
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
   const [search, setSearch] = useState('');
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   const [, forceRender] = useState(0);
@@ -113,25 +123,37 @@ export const FileManager = () => {
   );
 
   // ── Selection ──
+  const visibleItemIds = useMemo(() => itemsInCurrent.map(item => item.data.id), [itemsInCurrent]);
+  const allVisibleSelected = visibleItemIds.length > 0 && visibleItemIds.every(id => selected.has(id));
+
   const onSelect = useCallback((id: string, _kind: 'folder' | 'transcript', mod: { shift: boolean; ctrl: boolean }) => {
     setSelected(prev => {
       const next = new Set(prev);
-      if (mod.ctrl) { next.has(id) ? next.delete(id) : next.add(id); return next; }
+      if (selectionMode || mod.ctrl) { next.has(id) ? next.delete(id) : next.add(id); return next; }
       return new Set([id]);
     });
-  }, []);
+  }, [selectionMode]);
+
+  const toggleSelectAllVisible = useCallback(() => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (allVisibleSelected) visibleItemIds.forEach(id => next.delete(id));
+      else visibleItemIds.forEach(id => next.add(id));
+      return next;
+    });
+  }, [allVisibleSelected, visibleItemIds]);
 
   // ── Clipboard ops ──
   const cutIds = useMemo(() => new Set(fileClipboard.mode === 'cut' ? fileClipboard.items.map(i => i.id) : []), []);
 
-  const getSelectedItems = () => {
+  const getSelectedItems = useCallback(() => {
     const items: { kind: 'folder' | 'transcript'; id: string }[] = [];
     selected.forEach(id => {
       if (folders.find(f => f.id === id)) items.push({ kind: 'folder', id });
       else if (transcripts.find((t: any) => t.id === id)) items.push({ kind: 'transcript', id });
     });
     return items;
-  };
+  }, [folders, selected, transcripts]);
 
   const doCopy = () => {
     const items = getSelectedItems();
@@ -227,6 +249,7 @@ export const FileManager = () => {
         kind: detail.kind,
         id: detail.id,
         name: detail.name || resolveItemName(detail.kind, detail.id),
+        count: selected.has(detail.id) ? Math.max(1, selected.size) : 1,
         targetName: null,
       });
     };
@@ -246,44 +269,82 @@ export const FileManager = () => {
       window.removeEventListener(NATIVE_DRAG_TARGET_EVENT, onNativeTarget as EventListener);
       window.removeEventListener(NATIVE_DRAG_END_EVENT, onNativeEnd);
     };
-  }, [resolveItemName]);
+  }, [resolveItemName, selected]);
 
   const handleDropLocalItemToFolder = useCallback(async (
     targetId: string | null,
     item: { kind: 'folder' | 'transcript'; id: string; name?: string }
   ) => {
     const targetFolder = folders.find((f) => f.id === targetId);
-    try {
-      if (item.kind === 'transcript') {
-        await updateTranscript(item.id, { folder_id: targetId } as any);
-        emitDropSnap(targetId);
-        toast({ title: '✅ הועבר' });
+    const draggedSelection = selected.has(item.id) && selected.size > 1
+      ? getSelectedItems()
+      : [{ kind: item.kind, id: item.id }];
+    const itemsToMove = draggedSelection.filter(
+      (candidate) => !(candidate.kind === 'folder' && candidate.id === targetId),
+    );
+    if (itemsToMove.length === 0) {
+      setDragPreview(null);
+      return;
+    }
 
-        // If target folder is linked to Drive — also upload there with confirmation flow
-        if (targetFolder?.drive_folder_id !== undefined && targetFolder?.drive_folder_id !== null) {
-          const tr: any = transcripts.find((t: any) => t.id === item.id);
-          if (tr) {
-            driveUploadQueue.enqueue([{
-              transcriptId: tr.id,
-              title: tr.title || 'תמלול',
-              text: tr.text || '',
-              driveFolderId: targetFolder.drive_folder_id,
-              driveFolderName: targetFolder.drive_folder_name || targetFolder.name,
-            }]);
+    let movedCount = 0;
+    const failedItems: string[] = [];
+    try {
+      for (const candidate of itemsToMove) {
+        try {
+          if (candidate.kind === 'transcript') {
+            const transcript = transcripts.find((entry) => entry.id === candidate.id);
+            if (transcript?.engine === 'audio-cut' && !transcript.audio_file_path) {
+              const audioPath = await ensureTranscriptAudioUploaded(candidate.id);
+              if (!audioPath) {
+                throw new Error('לא ניתן היה לשמור את קובץ האודיו בענן');
+              }
+            }
+            await updateTranscript(candidate.id, { folder_id: targetId } as any);
+
+            // If target folder is linked to Drive — also upload there.
+            if (targetFolder?.drive_folder_id) {
+              const tr: any = transcripts.find((t: any) => t.id === candidate.id);
+              if (tr) {
+                driveUploadQueue.enqueue([{
+                  transcriptId: tr.id,
+                  title: tr.title || 'תמלול',
+                  text: tr.text || '',
+                  driveFolderId: targetFolder.drive_folder_id,
+                  driveFolderName: targetFolder.drive_folder_name || targetFolder.name,
+                }]);
+              }
+            }
+          } else {
+            await moveFolder(candidate.id, targetId);
           }
+          movedCount += 1;
+        } catch {
+          failedItems.push(resolveItemName(candidate.kind, candidate.id));
         }
-      } else if (item.kind === 'folder') {
-        if (item.id === targetId) return;
-        await moveFolder(item.id, targetId);
+      }
+
+      if (movedCount > 0) {
         emitDropSnap(targetId);
-        toast({ title: '✅ תיקייה הועברה' });
+        toast({
+          title: movedCount === 1 ? 'הפריט הועבר' : `${movedCount} פריטים הועברו`,
+          description: targetFolder ? `אל ${targetFolder.name}` : 'אל התיקייה הראשית',
+        });
+        setSelected(new Set());
+      }
+      if (failedItems.length > 0) {
+        toast({
+          title: `${failedItems.length} פריטים לא הועברו`,
+          description: failedItems.slice(0, 3).join(', '),
+          variant: 'destructive',
+        });
       }
     } catch (err: any) {
       toast({ title: 'שגיאה בהעברה', description: err.message, variant: 'destructive' });
     } finally {
       setDragPreview(null);
     }
-  }, [emitDropSnap, folders, moveFolder, transcripts, updateTranscript]);
+  }, [emitDropSnap, folders, getSelectedItems, moveFolder, resolveItemName, selected, transcripts, updateTranscript]);
 
   const onDragEnd = async (e: DragEndEvent) => {
     const { active, over } = e;
@@ -313,6 +374,43 @@ export const FileManager = () => {
     await updateFolder(renameOpen.id, { name: renameValue.trim() });
     setRenameOpen(null); setRenameValue('');
   };
+
+  const handleRenameTranscript = useCallback(async (transcript: CloudTranscript, title: string) => {
+    try {
+      await updateTranscript(transcript.id, { title });
+      toast({ title: 'השם עודכן', description: title });
+    } catch (error: any) {
+      toast({ title: 'שגיאה בעדכון השם', description: error.message, variant: 'destructive' });
+      throw error;
+    }
+  }, [updateTranscript]);
+
+  const handlePlayTranscript = useCallback(async (transcript: CloudTranscript) => {
+    let localAudioUrl: string | undefined;
+    if (!transcript.audio_file_path) {
+      const localTranscript = await db.transcripts.get(transcript.id);
+      if (!localTranscript?.audio_blob) {
+        toast({ title: 'קובץ האודיו עדיין אינו זמין', description: 'נסה שוב לאחר סיום השמירה לענן', variant: 'destructive' });
+        return;
+      }
+      if (activeLocalAudioUrl) URL.revokeObjectURL(activeLocalAudioUrl);
+      activeLocalAudioUrl = URL.createObjectURL(localTranscript.audio_blob);
+      localAudioUrl = activeLocalAudioUrl;
+    }
+
+    navigate('/text-editor', {
+      state: {
+        text: transcript.edited_text || transcript.text || '',
+        transcriptId: transcript.id,
+        audioFilePath: transcript.audio_file_path,
+        audioUrl: localAudioUrl,
+        audioFileName: transcript.title || 'קטע אודיו',
+        wordTimings: transcript.word_timings || undefined,
+        openFloatingPlayer: true,
+      },
+    });
+
+  }, [navigate]);
 
   const handleLinkDrive = async (driveFolder: { id: string | null; name: string }) => {
     if (!driveLinkOpen) return;
@@ -607,6 +705,7 @@ export const FileManager = () => {
           kind: a.kind,
           id: a.id,
           name: resolveItemName(a.kind, a.id),
+          count: selected.has(a.id) ? Math.max(1, selected.size) : 1,
           targetName: null,
         });
       }}
@@ -632,6 +731,24 @@ export const FileManager = () => {
           </div>
           <Button size="sm" variant="outline" onClick={() => setNewFolderOpen({ parentId: currentFolderId })}>
             <Plus className="w-4 h-4 ml-1" /> תיקייה חדשה
+          </Button>
+          <Button
+            size="sm"
+            variant={selectionMode ? 'default' : 'outline'}
+            onClick={() => setSelectionMode(value => !value)}
+            aria-pressed={selectionMode}
+          >
+            <ListChecks className="w-4 h-4 ml-1" />
+            {selectionMode ? 'סיום בחירה' : 'בחירה מרובה'}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={toggleSelectAllVisible}
+            disabled={visibleItemIds.length === 0}
+          >
+            <CheckCheck className="w-4 h-4 ml-1" />
+            {allVisibleSelected ? 'בטל בחירה' : 'בחר הכל'}
           </Button>
           <div className="h-6 w-px bg-border mx-1" />
           <Button size="sm" variant="ghost" onClick={doCopy} disabled={selected.size === 0} title="Ctrl+C">
@@ -737,11 +854,14 @@ export const FileManager = () => {
                 items={itemsInCurrent}
                 viewMode={localViewMode}
                 selected={selected}
+                selectionMode={selectionMode}
                 cutIds={cutIds}
                 onSelect={onSelect}
                 onOpenFolder={setCurrentFolderId}
                 onOpenTranscript={(id) => navigate(`/editor/${id}`)}
                 onDeleteTranscript={async (id) => { if (confirm('למחוק תמלול זה?')) await deleteTranscript(id); }}
+                onRenameTranscript={handleRenameTranscript}
+                onPlayTranscript={handlePlayTranscript}
                 onToggleFavorite={(t) => updateTranscript(t.id, { is_favorite: !t.is_favorite })}
                 onTogglePinFolder={togglePin}
                 onDeleteFolder={async (f) => { if (confirm(`למחוק את "${f.name}"?`)) await deleteFolder(f.id); }}
@@ -828,6 +948,9 @@ export const FileManager = () => {
                 <FileText className="w-4 h-4 text-blue-700" />
               )}
               <span className="max-w-[220px] truncate">{dragPreview.name}</span>
+              {dragPreview.count > 1 && (
+                <Badge variant="secondary">{dragPreview.count} פריטים</Badge>
+              )}
             </div>
             <div className="text-[11px] text-muted-foreground mt-1">
               {dragPreview.targetName

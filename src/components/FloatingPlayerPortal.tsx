@@ -18,15 +18,38 @@ const STORAGE_KEY = "floating_player_pos_v1";
 
 interface Pos { x: number; y: number; w: number; h: number; minimized: boolean }
 
+const VIEWPORT_GAP = 12;
+const TITLE_BAR_HEIGHT = 42;
+const MIN_PANEL_WIDTH = 320;
+const MIN_PANEL_HEIGHT = 400;
+
+function normalizePos(pos: Pos, defW: number, defH: number): Pos {
+  const maxW = Math.max(240, window.innerWidth - VIEWPORT_GAP * 2);
+  const maxH = Math.max(TITLE_BAR_HEIGHT, window.innerHeight - VIEWPORT_GAP * 2);
+  const minW = Math.min(MIN_PANEL_WIDTH, maxW);
+  const minH = Math.min(MIN_PANEL_HEIGHT, maxH);
+  const w = clamp(Number.isFinite(pos.w) ? pos.w : defW, minW, maxW);
+  const h = clamp(Number.isFinite(pos.h) ? pos.h : defH, minH, maxH);
+  const visibleHeight = pos.minimized ? TITLE_BAR_HEIGHT : h;
+
+  return {
+    ...pos,
+    w,
+    h,
+    x: clamp(Number.isFinite(pos.x) ? pos.x : VIEWPORT_GAP, VIEWPORT_GAP, Math.max(VIEWPORT_GAP, window.innerWidth - w - VIEWPORT_GAP)),
+    y: clamp(Number.isFinite(pos.y) ? pos.y : VIEWPORT_GAP, VIEWPORT_GAP, Math.max(VIEWPORT_GAP, window.innerHeight - visibleHeight - VIEWPORT_GAP)),
+  };
+}
+
 function loadPos(key: string, defW: number, defH: number): Pos {
   try {
     const raw = localStorage.getItem(key);
-    if (raw) return { ...defaultPos(defW, defH), ...JSON.parse(raw) };
+    if (raw) return normalizePos({ ...defaultPos(defW, defH), ...JSON.parse(raw) }, defW, defH);
   } catch { /* ignore */ }
-  return defaultPos(defW, defH);
+  return normalizePos(defaultPos(defW, defH), defW, defH);
 }
 
-function defaultPos(w = 480, h = 300): Pos {
+function defaultPos(w = 480, h = 440): Pos {
   return {
     x: Math.max(16, window.innerWidth - w - 40),
     y: Math.max(16, window.innerHeight - h - 40),
@@ -51,6 +74,15 @@ export function FloatingPlayerPortal({ children, onClose, title = '🎵 נגן �
     localStorage.setItem(storageKey, JSON.stringify(pos));
   }, [pos, storageKey]);
 
+  useEffect(() => {
+    const keepInsideViewport = () => {
+      setPos(current => normalizePos(current, defaultWidth, defaultHeight));
+    };
+    keepInsideViewport();
+    window.addEventListener("resize", keepInsideViewport);
+    return () => window.removeEventListener("resize", keepInsideViewport);
+  }, [defaultHeight, defaultWidth]);
+
   // --- Drag ---
   const onDragStart = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
@@ -65,8 +97,8 @@ export function FloatingPlayerPortal({ children, onClose, title = '🎵 נגן �
     const dy = e.clientY - drag.startY;
     setPos(p => ({
       ...p,
-      x: clamp(drag.origX + dx, 0, window.innerWidth - 120),
-      y: clamp(drag.origY + dy, 0, window.innerHeight - 40),
+      x: clamp(drag.origX + dx, VIEWPORT_GAP, Math.max(VIEWPORT_GAP, window.innerWidth - p.w - VIEWPORT_GAP)),
+      y: clamp(drag.origY + dy, VIEWPORT_GAP, Math.max(VIEWPORT_GAP, window.innerHeight - (p.minimized ? TITLE_BAR_HEIGHT : p.h) - VIEWPORT_GAP)),
     }));
   }, []);
 
@@ -87,8 +119,8 @@ export function FloatingPlayerPortal({ children, onClose, title = '🎵 נגן �
     const dy = e.clientY - resize.startY;
     setPos(p => ({
       ...p,
-      w: clamp(resize.origW + dx, 320, window.innerWidth - p.x),
-      h: clamp(resize.origH + dy, 80, window.innerHeight - p.y),
+      w: clamp(resize.origW + dx, Math.min(MIN_PANEL_WIDTH, window.innerWidth - VIEWPORT_GAP * 2), window.innerWidth - p.x - VIEWPORT_GAP),
+      h: clamp(resize.origH + dy, Math.min(MIN_PANEL_HEIGHT, window.innerHeight - VIEWPORT_GAP * 2), window.innerHeight - p.y - VIEWPORT_GAP),
     }));
   }, []);
 

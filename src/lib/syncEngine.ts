@@ -388,7 +388,7 @@ export async function reconcileDeletedTranscripts(userId: string, cloudIds: Set<
   if (!(await isDbAvailable())) return;
   const localIds = await db.transcripts
     .where('user_id').equals(userId)
-    .and(t => !t._dirty && !t._deleted)
+    .and(t => !t._dirty && !t._deleted && !t.local_only)
     .primaryKeys();
 
   const toDelete = localIds.filter(id => !cloudIds.has(id));

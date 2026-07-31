@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useDroppable, useDraggable } from '@dnd-kit/core';
-import { Folder, FileAudio, FileText, Star, MoreHorizontal, Pin } from 'lucide-react';
+import { Folder, FileAudio, FileText, Star, MoreHorizontal, Pin, Pencil, Play, Check, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
@@ -57,10 +57,13 @@ interface Props {
   items: Item[];
   viewMode?: FileGridViewMode;
   selected: Set<string>;
+  selectionMode?: boolean;
   onSelect: (id: string, kind: 'folder' | 'transcript', mod: { shift: boolean; ctrl: boolean }) => void;
   onOpenFolder: (id: string) => void;
   onOpenTranscript: (id: string) => void;
   onDeleteTranscript: (id: string) => void;
+  onRenameTranscript: (t: CloudTranscript, title: string) => Promise<void>;
+  onPlayTranscript: (t: CloudTranscript) => void;
   onToggleFavorite: (t: CloudTranscript) => void;
   onTogglePinFolder: (id: string) => void;
   onDeleteFolder: (f: FolderNode) => void;
@@ -68,7 +71,92 @@ interface Props {
   cutIds: Set<string>;
 }
 
-const FolderCard = ({ f, isSel, isSnap, onClick, isCut, onPin, onDelete, onDropLocalItemToFolder }: any) => {
+const EditableTranscriptTitle = ({ t, onRename }: { t: CloudTranscript; onRename: (t: CloudTranscript, title: string) => Promise<void> }) => {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(t.title || '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!editing) setValue(t.title || '');
+  }, [editing, t.title]);
+
+  const save = async () => {
+    const title = value.trim();
+    if (!title || title === (t.title || '').trim()) {
+      setValue(t.title || '');
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onRename(t, title);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div
+        className="flex min-w-0 flex-1 items-center gap-1"
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <input
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') void save();
+            if (event.key === 'Escape') {
+              setValue(t.title || '');
+              setEditing(false);
+            }
+          }}
+          aria-label="עריכת שם הקובץ"
+          disabled={saving}
+          autoFocus
+          className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2 text-right text-sm outline-none focus:ring-2 focus:ring-primary/40"
+        />
+        <Button type="button" size="icon" variant="ghost" className="h-7 w-7" onClick={() => void save()} disabled={saving} title="שמור שם">
+          <Check className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          onClick={() => {
+            setValue(t.title || '');
+            setEditing(false);
+          }}
+          disabled={saving}
+          title="בטל עריכה"
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        setEditing(true);
+      }}
+      onPointerDown={(event) => event.stopPropagation()}
+      className="group/title flex min-w-0 max-w-full items-center gap-1 rounded px-1 text-right font-medium hover:bg-muted"
+      title="לחץ לעריכת השם"
+    >
+      <span className="truncate">{t.title || 'ללא שם'}</span>
+      <Pencil className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover/title:opacity-70" />
+    </button>
+  );
+};
+
+const FolderCard = ({ f, isSel, isSnap, onClick, isCut, onPin, onDelete, onDropLocalItemToFolder, selectionMode }: any) => {
   const { setNodeRef: dropRef, isOver } = useDroppable({ id: `card-folder-${f.id}`, data: { kind: 'folder', id: f.id } });
   const { setNodeRef: dragRef, listeners, attributes } = useDraggable({ id: `drag-card-folder-${f.id}`, data: { kind: 'folder', id: f.id } });
   return (
@@ -105,6 +193,7 @@ const FolderCard = ({ f, isSel, isSnap, onClick, isCut, onPin, onDelete, onDropL
         isCut && 'opacity-50',
       )}
     >
+      {selectionMode && <Checkbox checked={isSel} aria-label={`בחר תיקייה ${f.name}`} className="pointer-events-none shrink-0" />}
       <div
         ref={dragRef}
         {...listeners}
@@ -148,9 +237,9 @@ const FolderCard = ({ f, isSel, isSnap, onClick, isCut, onPin, onDelete, onDropL
   );
 };
 
-const TranscriptCard = ({ t, isSel, isCut, onClick, onDelete, onFav }: any) => {
+const TranscriptCard = ({ t, isSel, isCut, onClick, onDelete, onFav, onRename, onPlay, selectionMode }: any) => {
   const { setNodeRef: dragRef, listeners, attributes } = useDraggable({ id: `drag-tr-${t.id}`, data: { kind: 'transcript', id: t.id } });
-  const isAudio = !!t.audio_file_path;
+  const isAudio = !!t.audio_file_path || t.engine === 'audio-cut';
   return (
     <div
       onClick={onClick}
@@ -160,6 +249,7 @@ const TranscriptCard = ({ t, isSel, isCut, onClick, onDelete, onFav }: any) => {
         isCut && 'opacity-50',
       )}
     >
+      {selectionMode && <Checkbox checked={isSel} aria-label={`בחר תמלול ${t.title || 'ללא שם'}`} className="pointer-events-none shrink-0" />}
       <div
         ref={dragRef}
         {...listeners}
@@ -179,13 +269,26 @@ const TranscriptCard = ({ t, isSel, isCut, onClick, onDelete, onFav }: any) => {
 
         {isAudio ? <FileAudio className="w-6 h-6 text-yellow-700 shrink-0" /> : <FileText className="w-6 h-6 text-muted-foreground shrink-0" />}
         <div className="flex-1 min-w-0">
-          <div className="font-medium truncate">{t.title || 'ללא שם'}</div>
+          <EditableTranscriptTitle t={t} onRename={onRename} />
           <div className="text-xs text-muted-foreground truncate">
             {new Date(t.updated_at).toLocaleDateString('he-IL')} · {t.engine || 'תמלול'}
             {t.tags?.length > 0 && ` · ${t.tags.length} תגיות`}
           </div>
         </div>
       </div>
+      {isAudio && (
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8 text-primary"
+          onClick={(event) => { event.stopPropagation(); onPlay(); }}
+          onPointerDown={(event) => event.stopPropagation()}
+          title="נגן בנגן המתקדם"
+        >
+          <Play className="h-4 w-4 fill-current" />
+        </Button>
+      )}
       <button onClick={(e) => { e.stopPropagation(); onFav(); }} className="opacity-60 hover:opacity-100">
         <Star className={cn('w-4 h-4', t.is_favorite && 'text-yellow-500 fill-current')} />
       </button>
@@ -203,7 +306,7 @@ const TranscriptCard = ({ t, isSel, isCut, onClick, onDelete, onFav }: any) => {
   );
 };
 
-const FolderTableRow = ({ f, isSel, isSnap, isCut, onSelectRow, onOpenFolder, onPin, onDelete, onDropLocalItemToFolder }: any) => {
+const FolderTableRow = ({ f, isSel, isSnap, isCut, onSelectRow, onOpenFolder, onPin, onDelete, onDropLocalItemToFolder, selectionMode }: any) => {
   const { setNodeRef: dropRef, isOver } = useDroppable({ id: `table-folder-${f.id}`, data: { kind: 'folder', id: f.id } });
   const { setNodeRef: dragRef, listeners, attributes } = useDraggable({ id: `drag-table-folder-${f.id}`, data: { kind: 'folder', id: f.id } });
   return (
@@ -254,6 +357,7 @@ const FolderTableRow = ({ f, isSel, isSnap, isCut, onSelectRow, onOpenFolder, on
         onDragEnd={() => emitNativeDragEnd()}
         className="flex items-center gap-2 min-w-0"
       >
+        {selectionMode && <Checkbox checked={isSel} aria-label={`בחר תיקייה ${f.name}`} className="pointer-events-none shrink-0" />}
         <Folder className="w-4 h-4 shrink-0" style={{ color: f.color || '#eab308' }} />
         <span className="truncate">{f.name}</span>
         {f.drive_folder_id && <Badge variant="outline" className="text-[10px] py-0 h-4">Drive</Badge>}
@@ -277,9 +381,9 @@ const FolderTableRow = ({ f, isSel, isSnap, isCut, onSelectRow, onOpenFolder, on
   );
 };
 
-const TranscriptTableRow = ({ t, isSel, isCut, onSelectRow, onOpenTranscript, onDelete, onFav }: any) => {
+const TranscriptTableRow = ({ t, isSel, isCut, onSelectRow, onOpenTranscript, onDelete, onFav, onRename, onPlay, selectionMode }: any) => {
   const { setNodeRef: dragRef, listeners, attributes } = useDraggable({ id: `drag-table-tr-${t.id}`, data: { kind: 'transcript', id: t.id } });
-  const isAudio = !!t.audio_file_path;
+  const isAudio = !!t.audio_file_path || t.engine === 'audio-cut';
   return (
     <div
       onClick={onSelectRow}
@@ -305,11 +409,25 @@ const TranscriptTableRow = ({ t, isSel, isCut, onSelectRow, onOpenTranscript, on
         onDragEnd={() => emitNativeDragEnd()}
         className="flex items-center gap-2 min-w-0"
       >
+        {selectionMode && <Checkbox checked={isSel} aria-label={`בחר תמלול ${t.title || 'ללא שם'}`} className="pointer-events-none shrink-0" />}
         {isAudio ? <FileAudio className="w-4 h-4 text-yellow-700 shrink-0" /> : <FileText className="w-4 h-4 text-muted-foreground shrink-0" />}
-        <span className="truncate">{t.title || 'ללא שם'}</span>
+        <EditableTranscriptTitle t={t} onRename={onRename} />
       </div>
       <div className="text-muted-foreground truncate text-right">{new Date(t.updated_at).toLocaleDateString('he-IL')}</div>
       <div className="flex items-center gap-1 justify-start">
+        {isAudio && (
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 text-primary"
+            onClick={(event) => { event.stopPropagation(); onPlay(); }}
+            onPointerDown={(event) => event.stopPropagation()}
+            title="נגן בנגן המתקדם"
+          >
+            <Play className="h-3.5 w-3.5 fill-current" />
+          </Button>
+        )}
         <button onClick={(e) => { e.stopPropagation(); onFav(); }} className="opacity-60 hover:opacity-100">
           <Star className={cn('w-4 h-4', t.is_favorite && 'text-yellow-500 fill-current')} />
         </button>
@@ -328,7 +446,7 @@ const TranscriptTableRow = ({ t, isSel, isCut, onSelectRow, onOpenTranscript, on
   );
 };
 
-export const FileGrid = ({ items, viewMode = 'grid', selected, onSelect, onOpenFolder, onOpenTranscript, onDeleteTranscript, onToggleFavorite, onTogglePinFolder, onDeleteFolder, onDropLocalItemToFolder, cutIds }: Props) => {
+export const FileGrid = ({ items, viewMode = 'grid', selected, selectionMode = false, onSelect, onOpenFolder, onOpenTranscript, onDeleteTranscript, onRenameTranscript, onPlayTranscript, onToggleFavorite, onTogglePinFolder, onDeleteFolder, onDropLocalItemToFolder, cutIds }: Props) => {
   const [snapTargetId, setSnapTargetId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -375,6 +493,7 @@ export const FileGrid = ({ items, viewMode = 'grid', selected, onSelect, onOpenF
                 isSel={selected.has(f.id)}
                 isSnap={snapTargetId === f.id}
                 isCut={cutIds.has(f.id)}
+                selectionMode={selectionMode}
                 onSelectRow={(e: React.MouseEvent) => onSelect(f.id, 'folder', { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
                 onOpenFolder={onOpenFolder}
                 onPin={() => onTogglePinFolder(f.id)}
@@ -390,10 +509,13 @@ export const FileGrid = ({ items, viewMode = 'grid', selected, onSelect, onOpenF
               t={t}
               isSel={selected.has(t.id)}
               isCut={cutIds.has(t.id)}
+              selectionMode={selectionMode}
               onSelectRow={(e: React.MouseEvent) => onSelect(t.id, 'transcript', { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
               onOpenTranscript={onOpenTranscript}
               onDelete={() => onDeleteTranscript(t.id)}
               onFav={() => onToggleFavorite(t)}
+              onRename={onRenameTranscript}
+              onPlay={() => onPlayTranscript(t)}
             />
           );
         })}
@@ -415,6 +537,7 @@ export const FileGrid = ({ items, viewMode = 'grid', selected, onSelect, onOpenF
                 isSel={selected.has(f.id)}
                 isSnap={snapTargetId === f.id}
                 isCut={cutIds.has(f.id)}
+                selectionMode={selectionMode}
                 onClick={click}
                 onPin={() => onTogglePinFolder(f.id)}
                 onDelete={() => onDeleteFolder(f)}
@@ -430,12 +553,15 @@ export const FileGrid = ({ items, viewMode = 'grid', selected, onSelect, onOpenF
             t={t}
             isSel={selected.has(t.id)}
             isCut={cutIds.has(t.id)}
+            selectionMode={selectionMode}
             onClick={(e: React.MouseEvent) => {
               if (e.detail === 2) onOpenTranscript(t.id);
               else onSelect(t.id, 'transcript', { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
             }}
             onDelete={() => onDeleteTranscript(t.id)}
             onFav={() => onToggleFavorite(t)}
+            onRename={onRenameTranscript}
+            onPlay={() => onPlayTranscript(t)}
           />
         );
       })}

@@ -69,7 +69,11 @@ const Index = lazyWithLog('Transcribe', () => import("./pages/Index"));
 const Login = lazyWithLog('Login', () => import("./pages/Login"));
 const Settings = lazyWithLog('Settings', () => import("./pages/Settings"));
 const Setup = lazyWithLog('Setup', () => import("./pages/Setup"));
-const TextEditor = lazyWithLog('TextEditor', () => import("./pages/TextEditor"));
+const TextEditor = lazyWithLog('TextEditor', () => (
+  import.meta.env.DEV
+    ? import(/* @vite-ignore */ `/src/pages/TextEditor.tsx?retry=${Date.now()}`)
+    : import("./pages/TextEditor")
+));
 const Folders = lazyWithLog('Folders', () => import("./pages/Folders"));
 const Benchmark = lazyWithLog('Benchmark', () => import("./pages/Benchmark"));
 const Diarization = lazyWithLog('Diarization', () => import("./pages/Diarization"));
@@ -185,7 +189,6 @@ const App = () => {
 
     // Tier 2 — medium pages, load after Tier 1
     const prefetchTier2 = () => {
-      import("./pages/TextEditor").catch(() => {});
       import("./pages/Diarization").catch(() => {});
       import("./pages/MeetingRecorder").catch(() => {});
     };

@@ -30,6 +30,7 @@ import {
 } from "@/lib/studioLayout";
 import { usePlayerShortcuts } from "@/hooks/usePlayerShortcuts";
 import { findActiveWordIndex } from "@/lib/whisperAlignment";
+import { cn } from "@/lib/utils";
 
 export interface WordTiming {
   word: string;
@@ -3124,7 +3125,10 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
             )}
 
             {/* ─── Compact transport deck ── */}
-            <div className="rounded-lg border bg-card/70 shadow-sm p-2.5 space-y-2">
+            <div className={cn(
+              "rounded-lg border bg-card/95 shadow-sm p-2.5 space-y-2",
+              compact && "sticky bottom-0 z-20 backdrop-blur supports-[backdrop-filter]:bg-card/90",
+            )}>
             {!seekBarCollapsed ? (
               <div
                 className="relative"
@@ -3193,7 +3197,13 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => seek(-5)}><FastForward className="w-4 h-4 no-theme-icon" /></Button>
               </TooltipTrigger><TooltipContent>5 שניות אחורה</TooltipContent></Tooltip>
 
-              <Button size="icon" className="h-10 w-10 rounded-full" onClick={togglePlay}>
+              <Button
+                size="icon"
+                className="h-10 w-10 rounded-full"
+                onClick={togglePlay}
+                aria-label={isPlaying ? "השהה ניגון" : "הפעל אודיו"}
+                title={isPlaying ? "השהה ניגון" : "הפעל אודיו"}
+              >
                 {isPlaying ? <Pause className="w-5 h-5 no-theme-icon" /> : <Play className="w-5 h-5 mr-0.5 no-theme-icon" />}
               </Button>
 
@@ -4355,7 +4365,13 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                     <div className="flex items-center justify-center gap-2">
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={restart}><RotateCcw className="w-4 h-4 no-theme-icon" /></Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => seek(-5)}><FastForward className="w-4 h-4 no-theme-icon" /></Button>
-                      <Button size="icon" className="h-10 w-10 rounded-full" onClick={togglePlay}>
+                      <Button
+                        size="icon"
+                        className="h-10 w-10 rounded-full"
+                        onClick={togglePlay}
+                        aria-label={isPlaying ? "השהה ניגון" : "הפעל אודיו"}
+                        title={isPlaying ? "השהה ניגון" : "הפעל אודיו"}
+                      >
                         {isPlaying ? <Pause className="w-5 h-5 no-theme-icon" /> : <Play className="w-5 h-5 mr-0.5 no-theme-icon" />}
                       </Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => seek(5)}><Rewind className="w-4 h-4 no-theme-icon" /></Button>

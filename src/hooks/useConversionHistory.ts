@@ -54,6 +54,7 @@ export function useConversionHistory() {
     output_size: number;
     duration_ms: number;
     file_path?: string | null;
+    folder?: string;
   }) => {
     if (!isAuthenticated || !user) return null;
     const { data, error } = await supabase
@@ -67,7 +68,7 @@ export function useConversionHistory() {
         output_size: item.output_size,
         duration_ms: item.duration_ms,
         file_path: item.file_path || null,
-        folder: "",
+        folder: item.folder || "",
       } as any)
       .select()
       .single();

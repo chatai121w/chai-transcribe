@@ -58,6 +58,7 @@ backups/
 
 # Local DBs and benchmark assets (do not commit)
 server/lk_data.db
+server/lora_runs/
 tools/transcription_feedback.db
 tools/*.wav
 tools/voice-command/__pycache__/

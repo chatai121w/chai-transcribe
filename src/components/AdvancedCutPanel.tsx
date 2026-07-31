@@ -30,6 +30,8 @@ import {
   type EnhanceQueueJob,
 } from "@/lib/audioEnhanceQueue";
 import { useConversionHistory } from "@/hooks/useConversionHistory";
+import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
+import { useFolderTree, type FolderNode } from "@/hooks/useFolderTree";
 import { convertAudio, onJobUpdate, type ConversionJob, type OutputFormat } from "@/lib/ffmpegConverter";
 import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
@@ -45,6 +47,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import AudioEnhanceDialog from "@/components/AudioEnhanceDialog";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -71,10 +80,14 @@ import {
   Sparkles,
   Pencil,
   FolderOpen,
+  FolderPlus,
   Save,
   Check,
   Music,
   FileAudio2,
+  FolderTree,
+  Cloud,
+  HardDrive,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -112,6 +125,103 @@ function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const secs = (ms / 1000).toFixed(1);
   return `${secs}s`;
+}
+
+function FolderDestinationTree({
+  folders,
+  selectedId,
+  includeRoot,
+  disabled,
+  onSelect,
+}: {
+  folders: FolderNode[];
+  selectedId: string;
+  includeRoot: boolean;
+  disabled: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const childrenByParent = useMemo(() => {
+    const map = new Map<string | null, FolderNode[]>();
+    folders.forEach((folder) => {
+      const parentId = folder.parent_id || null;
+      const children = map.get(parentId) || [];
+      children.push(folder);
+      map.set(parentId, children);
+    });
+    map.forEach((children) => children.sort((a, b) => a.name.localeCompare(b.name, "he")));
+    return map;
+  }, [folders]);
+
+  const renderBranch = (parentId: string | null, depth: number, ancestors: Set<string>): React.ReactNode =>
+    (childrenByParent.get(parentId) || []).map((folder) => {
+      if (ancestors.has(folder.id)) return null;
+      const nextAncestors = new Set(ancestors).add(folder.id);
+      const isSelected = selectedId === folder.id;
+      return (
+        <div key={folder.id}>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onSelect(folder.id)}
+            aria-pressed={isSelected}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md border border-transparent py-2 text-right text-sm transition-colors",
+              "hover:border-primary/30 hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-60",
+              isSelected && "border-primary bg-primary/10 text-foreground",
+            )}
+            style={{ paddingInlineStart: `${12 + depth * 22}px`, paddingInlineEnd: "12px" }}
+          >
+            <span
+              className={cn(
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
+                isSelected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/50",
+              )}
+              aria-hidden="true"
+            >
+              {isSelected && <Check className="h-3 w-3" />}
+            </span>
+            {folder.emoji
+              ? <span className="text-base" aria-hidden="true">{folder.emoji}</span>
+              : <FolderOpen className="h-4 w-4 shrink-0 text-primary" />}
+            <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+          </button>
+          {renderBranch(folder.id, depth + 1, nextAncestors)}
+        </div>
+      );
+    });
+
+  return (
+    <div className="max-h-56 overflow-y-auto rounded-md border bg-background p-1" role="tree" aria-label="עץ תיקיות יעד">
+      {includeRoot && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onSelect("__root__")}
+          aria-pressed={selectedId === "__root__"}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-md border border-transparent px-3 py-2 text-right text-sm transition-colors",
+            "hover:border-primary/30 hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-60",
+            selectedId === "__root__" && "border-primary bg-primary/10",
+          )}
+        >
+          <span
+            className={cn(
+              "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
+              selectedId === "__root__" ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/50",
+            )}
+            aria-hidden="true"
+          >
+            {selectedId === "__root__" && <Check className="h-3 w-3" />}
+          </span>
+          <FolderTree className="h-4 w-4 text-primary" />
+          <span>תיקיות ראשיות</span>
+        </button>
+      )}
+      {folders.length > 0
+        ? renderBranch(null, 0, new Set())
+        : <p className="px-3 py-4 text-center text-xs text-muted-foreground">עדיין אין תיקיות במערכת</p>}
+    </div>
+  );
 }
 
 // ─── Manual segment row ──────────────────────────────────────────────────────
@@ -274,6 +384,9 @@ function CutResultRow({
   onEnhance,
   onDelete,
   onSaveToHistory,
+  selected,
+  onToggleSelected,
+  onSaveToFolder,
 }: {
   result: CutResult;
   convertedFile?: File;
@@ -284,6 +397,9 @@ function CutResultRow({
   onEnhance: () => void;
   onDelete: () => void;
   onSaveToHistory: (name: string, folder: string) => void;
+  selected: boolean;
+  onToggleSelected: () => void;
+  onSaveToFolder: () => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(result.label);
@@ -306,6 +422,12 @@ function CutResultRow({
   return (
     <div className="border rounded-xl p-2.5 space-y-1.5 bg-card/50 hover:bg-card/80 transition-colors" dir="rtl">
       <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+        <Checkbox
+          checked={selected}
+          onCheckedChange={onToggleSelected}
+          aria-label={`בחר קטע ${editName}`}
+          className="shrink-0"
+        />
         <AudioPreview file={displayFile} />
         <div className="flex-1 min-w-0">
           {isEditing ? (
@@ -363,6 +485,15 @@ function CutResultRow({
           <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7" title="שמור להיסטוריה" onClick={handleSaveToHistory} disabled={saved}>
             {saved ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Save className="w-3.5 h-3.5" />}
           </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-9 w-9 sm:h-7 sm:w-7 text-primary"
+            title="שמור קטע זה בתיקייה"
+            onClick={onSaveToFolder}
+          >
+            <FolderPlus className="w-3.5 h-3.5" />
+          </Button>
           <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7" title="תיקייה" onClick={() => setShowFolder(!showFolder)}>
             <FolderOpen className="w-3.5 h-3.5" />
           </Button>
@@ -413,6 +544,7 @@ function CutJobCard({
   onEnhanceResult,
   onDeleteResult,
   onSaveResultToHistory,
+  onSaveAllToFolder,
 }: {
   job: CutJob;
   convertedMap: Record<string, File>;
@@ -429,8 +561,24 @@ function CutJobCard({
   onEnhanceResult: (result: CutResult) => void;
   onDeleteResult: (jobId: string, segmentIndex: number) => void;
   onSaveResultToHistory: (result: CutResult, name: string, folder: string) => void;
+  onSaveAllToFolder: (job: CutJob) => void;
 }) {
   const [expanded, setExpanded] = useState(job.status === "done");
+  const [selectedSegments, setSelectedSegments] = useState<Set<number>>(new Set());
+  const resultIndexes = useMemo(() => job.results.map((result) => result.segmentIndex), [job.results]);
+  const allSegmentsSelected = resultIndexes.length > 0 && resultIndexes.every((index) => selectedSegments.has(index));
+
+  useEffect(() => {
+    setSelectedSegments((current) => {
+      const validIndexes = new Set(resultIndexes);
+      return new Set([...current].filter((index) => validIndexes.has(index)));
+    });
+  }, [resultIndexes]);
+
+  const openFolderDialogForResults = (results: CutResult[]) => {
+    if (results.length === 0) return;
+    onSaveAllToFolder({ ...job, results });
+  };
   const elapsed =
     job.startedAt && job.finishedAt
       ? formatDuration(job.finishedAt - job.startedAt)
@@ -485,6 +633,15 @@ function CutJobCard({
             <CutStatusBadge status={job.status} />
             {job.status === "done" && job.results.length > 0 && (
               <>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-9 w-9 sm:h-7 sm:w-7 text-primary"
+                  title="שמור את כל הקטעים בתיקייה"
+                  onClick={() => onSaveAllToFolder(job)}
+                >
+                  <FolderPlus className="w-3.5 h-3.5" />
+                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -570,6 +727,36 @@ function CutJobCard({
 
         {expanded && job.results.length > 0 && (
           <div className="space-y-1 pt-1 border-t">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/30 px-2 py-1.5" dir="rtl">
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-medium">
+                <Checkbox
+                  checked={allSegmentsSelected}
+                  onCheckedChange={() => {
+                    setSelectedSegments(allSegmentsSelected ? new Set() : new Set(resultIndexes));
+                  }}
+                  aria-label="בחר את כל הקטעים"
+                />
+                {allSegmentsSelected ? "בטל בחירת הכל" : "בחר הכל"}
+              </label>
+              <div className="flex items-center gap-2">
+                {selectedSegments.size > 0 && (
+                  <span className="text-xs text-muted-foreground">{selectedSegments.size} נבחרו</span>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 gap-1.5"
+                  disabled={selectedSegments.size === 0}
+                  onClick={() => openFolderDialogForResults(
+                    job.results.filter((result) => selectedSegments.has(result.segmentIndex)),
+                  )}
+                >
+                  <FolderPlus className="h-4 w-4" />
+                  שמור נבחרים בתיקייה
+                </Button>
+              </div>
+            </div>
             {job.results.map((r) => {
               const key = `${job.id}_${r.segmentIndex}`;
               const converted = convertedMap[key];
@@ -596,6 +783,15 @@ function CutJobCard({
                 onEnhance={() => onEnhanceResult(r)}
                 onDelete={() => onDeleteResult(job.id, r.segmentIndex)}
                 onSaveToHistory={(name, folder) => onSaveResultToHistory(r, name, folder)}
+                selected={selectedSegments.has(r.segmentIndex)}
+                onToggleSelected={() => {
+                  setSelectedSegments((current) => {
+                    const next = new Set(current);
+                    next.has(r.segmentIndex) ? next.delete(r.segmentIndex) : next.add(r.segmentIndex);
+                    return next;
+                  });
+                }}
+                onSaveToFolder={() => openFolderDialogForResults([r])}
               />
               );
             })}
@@ -623,6 +819,20 @@ export default function AdvancedCutPanel({
 }: AdvancedCutPanelProps) {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { saveTranscript, saveLocalTranscript, updateTranscript } = useCloudTranscripts();
+  const { folders, createFolder, getPath } = useFolderTree();
+  const [folderJob, setFolderJob] = useState<CutJob | null>(null);
+  const [folderChoice, setFolderChoice] = useState<string>("__new__");
+  const [parentFolderChoice, setParentFolderChoice] = useState<string>("__root__");
+  const [newFolderName, setNewFolderName] = useState("");
+  const [savingFolder, setSavingFolder] = useState(false);
+  const [folderStorageMode, setFolderStorageMode] = useState<"cloud" | "local">(
+    () => localStorage.getItem("cut-folder-storage-mode") === "local" ? "local" : "cloud",
+  );
+
+  useEffect(() => {
+    localStorage.setItem("cut-folder-storage-mode", folderStorageMode);
+  }, [folderStorageMode]);
 
   // Source state
   const [sourceFile, setSourceFile] = useState<File | null>(initialFile ?? null);
@@ -854,11 +1064,129 @@ export default function AdvancedCutPanel({
         file_size: result.sizeBytes,
         output_size: result.sizeBytes,
         duration_ms: Math.round(result.durationSec * 1000),
+        folder,
       });
     } catch {
       toast({ title: "שגיאה בשמירה", variant: "destructive" });
     }
   }, [addHistoryItem]);
+
+  const handleSaveAllToFolder = useCallback(async () => {
+    if (!folderJob || folderJob.results.length === 0) return;
+
+    const requestedName = newFolderName.trim();
+    const requestedParentId = parentFolderChoice === "__root__" ? null : parentFolderChoice;
+    let targetFolder = folderChoice === "__new__"
+      ? folders.find(
+          (folder) =>
+            folder.name.trim() === requestedName
+            && (folder.parent_id || null) === requestedParentId,
+        )
+      : folders.find((folder) => folder.id === folderChoice);
+
+    if (folderChoice === "__new__" && !requestedName) {
+      toast({ title: "יש להזין שם לתיקייה", variant: "destructive" });
+      return;
+    }
+
+    setSavingFolder(true);
+    try {
+      if (!targetFolder) {
+        targetFolder = await createFolder({
+          name: requestedName,
+          parent_id: requestedParentId,
+          emoji: "🎧",
+        });
+      }
+
+      const orderedResults = [...folderJob.results].sort((a, b) => a.segmentIndex - b.segmentIndex);
+      const digits = Math.max(2, String(orderedResults.length).length);
+      const safeFolderName = targetFolder.name.replace(/[/\\:*?"<>|]/g, "_").trim() || "קטעים";
+
+      for (let index = 0; index < orderedResults.length; index += 1) {
+        const result = orderedResults[index];
+        const extension = result.file.name.match(/(\.[^.]+)$/)?.[1] || ".wav";
+        const number = String(index + 1).padStart(digits, "0");
+        const numberedName = `${safeFolderName}_${number}${extension}`;
+        const numberedFile = new File([result.file], numberedName, {
+          type: result.file.type,
+          lastModified: result.file.lastModified,
+        });
+
+        if (folderStorageMode === "cloud") {
+          const transcript = await saveTranscript(
+            "",
+            "audio-cut",
+            numberedName.replace(/\.[^.]+$/, ""),
+            numberedFile,
+            null,
+            targetFolder.name,
+            { waitForAudioUpload: true },
+          );
+
+          if (!transcript?.audio_file_path) {
+            throw new Error(`הקטע ${numberedName} לא נשמר בענן`);
+          }
+
+          await updateTranscript(transcript.id, {
+            folder: targetFolder.name,
+            folder_id: targetFolder.id,
+          });
+        } else {
+          const transcript = await saveLocalTranscript({
+            title: numberedName.replace(/\.[^.]+$/, ""),
+            audioFile: numberedFile,
+            folder: targetFolder.name,
+            folderId: targetFolder.id,
+          });
+          if (!transcript) {
+            throw new Error(`הקטע ${numberedName} לא נשמר במחשב`);
+          }
+        }
+
+        await addHistoryItem({
+          file_name: numberedName,
+          original_name: result.file.name,
+          output_format: extension.slice(1).toLowerCase() || "wav",
+          file_size: result.sizeBytes,
+          output_size: result.sizeBytes,
+          duration_ms: Math.round(result.durationSec * 1000),
+          folder: targetFolder.name,
+        });
+      }
+
+      toast({
+        title: "הקטעים נשמרו בתיקייה",
+        description: `${orderedResults.length} קטעים נשמרו ב־${targetFolder.name} ${
+          folderStorageMode === "cloud" ? "במחשב ובענן" : "במחשב בלבד"
+        }`,
+      });
+      setFolderJob(null);
+      setFolderChoice("__new__");
+      setParentFolderChoice("__root__");
+      setNewFolderName("");
+    } catch (error) {
+      toast({
+        title: "שמירת הקטעים נכשלה",
+        description: error instanceof Error ? error.message : "נסה שוב",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingFolder(false);
+    }
+  }, [
+    addHistoryItem,
+    createFolder,
+    folderChoice,
+    folderJob,
+    folderStorageMode,
+    folders,
+    newFolderName,
+    parentFolderChoice,
+    saveTranscript,
+    saveLocalTranscript,
+    updateTranscript,
+  ]);
 
   const inferOutputFormat = useCallback((fileName: string): "mp3" | "opus" | "aac" => {
     const lower = fileName.toLowerCase();
@@ -1339,6 +1667,7 @@ export default function AdvancedCutPanel({
                     onEnhanceResult={setEnhanceTarget}
                     onDeleteResult={handleDeleteResult}
                     onSaveResultToHistory={handleSaveResultToHistory}
+                    onSaveAllToFolder={setFolderJob}
                   />
                 ))}
               </div>
@@ -1347,6 +1676,184 @@ export default function AdvancedCutPanel({
       )}
 
 {/* enhance queue panel removed per user request */}
+
+      <Dialog
+        open={folderJob !== null}
+        onOpenChange={(open) => {
+          if (!open && !savingFolder) {
+            setFolderJob(null);
+            setFolderChoice("__new__");
+            setParentFolderChoice("__root__");
+            setNewFolderName("");
+          }
+        }}
+      >
+        <DialogContent dir="rtl" className="sm:max-w-md">
+          <DialogHeader className="text-right">
+            <DialogTitle className="flex items-center gap-2">
+              <FolderPlus className="h-5 w-5 text-primary" />
+              שמירת כל הקטעים בתיקייה
+            </DialogTitle>
+            <DialogDescription>
+              הקטעים יישמרו כאודיו בענן, ימוספרו לפי הסדר ויופיעו במנהל התיקיות.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+              <span className="font-medium">{folderJob?.results.length || 0} קטעים</span>
+              <span className="text-muted-foreground"> מתוך {folderJob?.sourceFileName}</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={folderChoice === "__new__" ? "default" : "outline"}
+                onClick={() => setFolderChoice("__new__")}
+                disabled={savingFolder}
+                className="gap-2"
+              >
+                <FolderPlus className="h-4 w-4" />
+                צור תיקייה חדשה
+              </Button>
+              <Button
+                type="button"
+                variant={folderChoice !== "__new__" ? "default" : "outline"}
+                onClick={() => {
+                  const selectedExists = folders.some((folder) => folder.id === parentFolderChoice);
+                  setFolderChoice(selectedExists ? parentFolderChoice : (folders[0]?.id || "__new__"));
+                }}
+                disabled={savingFolder || folders.length === 0}
+                className="gap-2"
+              >
+                <FolderOpen className="h-4 w-4" />
+                תיקייה קיימת
+              </Button>
+            </div>
+
+            {folderChoice === "__new__" && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>בחר היכן ליצור את התיקייה החדשה</Label>
+                  <FolderDestinationTree
+                    folders={folders}
+                    selectedId={parentFolderChoice}
+                    includeRoot
+                    disabled={savingFolder}
+                    onSelect={setParentFolderChoice}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="cut-folder-name">שם תיקיית הקטעים</Label>
+                  <Input
+                    id="cut-folder-name"
+                    value={newFolderName}
+                    onChange={(event) => setNewFolderName(event.target.value)}
+                    placeholder="לדוגמה: פרשת וירא"
+                    disabled={savingFolder}
+                    autoFocus
+                  />
+                </div>
+
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
+                  הנתיב שייווצר:{" "}
+                  <span className="font-medium">
+                    {parentFolderChoice === "__root__"
+                      ? newFolderName.trim() || "שם התיקייה"
+                      : `${getPath(parentFolderChoice).map((item) => item.name).join(" / ")} / ${newFolderName.trim() || "שם התיקייה"}`}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {folderChoice !== "__new__" && (
+              <div className="space-y-2">
+                <Label>בחר תיקיית יעד קיימת</Label>
+                <FolderDestinationTree
+                  folders={folders}
+                  selectedId={folderChoice}
+                  includeRoot={false}
+                  disabled={savingFolder}
+                  onSelect={setFolderChoice}
+                />
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
+                  הקטעים יישמרו בתוך:{" "}
+                  <span className="font-medium">
+                    {getPath(folderChoice).map((item) => item.name).join(" / ")}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>מיקום שמירת הקטעים</Label>
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="מיקום שמירת הקטעים">
+                <Button
+                  type="button"
+                  variant={folderStorageMode === "cloud" ? "default" : "outline"}
+                  onClick={() => setFolderStorageMode("cloud")}
+                  disabled={savingFolder}
+                  className="h-auto min-h-12 gap-2 py-2"
+                  role="radio"
+                  aria-checked={folderStorageMode === "cloud"}
+                  title="שמור עותק מקומי והעלה גם לענן"
+                >
+                  <Cloud className="h-4 w-4" />
+                  מקומי וגם בענן
+                </Button>
+                <Button
+                  type="button"
+                  variant={folderStorageMode === "local" ? "default" : "outline"}
+                  onClick={() => setFolderStorageMode("local")}
+                  disabled={savingFolder}
+                  className="h-auto min-h-12 gap-2 py-2"
+                  role="radio"
+                  aria-checked={folderStorageMode === "local"}
+                  title="שמור במאגר המקומי של המכשיר ללא העלאה לענן"
+                >
+                  <HardDrive className="h-4 w-4" />
+                  במחשב בלבד
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                הבחירה האחרונה נשמרת כברירת המחדל לפעם הבאה.
+              </p>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              שמות הקבצים יהיו בפורמט: שם_התיקייה_01, שם_התיקייה_02 וכן הלאה.
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2 sm:justify-start">
+            <Button
+              onClick={handleSaveAllToFolder}
+              disabled={
+                savingFolder
+                || !folderJob
+                || (folderChoice === "__new__" && !newFolderName.trim())
+              }
+              className="gap-2"
+            >
+              {savingFolder
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Save className="h-4 w-4" />}
+              שמור {folderJob?.results.length || 0} קטעים
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setFolderJob(null);
+                setParentFolderChoice("__root__");
+              }}
+              disabled={savingFolder}
+            >
+              ביטול
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AudioEnhanceDialog
         open={!!enhanceTarget}

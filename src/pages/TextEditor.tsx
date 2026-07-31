@@ -5,6 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
+import { SyncMirrorLayout } from "@/components/SyncMirrorLayout";
 import { debugLog } from "@/lib/debugLogger";
 import type { TextVersion } from "@/components/TextEditHistory";
 import type { WordTiming, SyncAudioPlayerRef } from "@/components/SyncAudioPlayer";
@@ -26,7 +27,6 @@ const EditPipeline = lazy(() => import("@/components/EditPipeline").then(m => ({
 const OllamaManager = lazy(() => import("@/components/OllamaManager").then(m => ({ default: m.OllamaManager })));
 const SyncEditableView = lazy(() => import("@/components/SyncEditableView").then(m => ({ default: m.SyncEditableView })));
 const SyncTranscriptView = lazy(() => import("@/components/SyncTranscriptView").then(m => ({ default: m.SyncTranscriptView })));
-const SyncMirrorLayout = lazy(() => import("@/components/SyncMirrorLayout").then(m => ({ default: m.SyncMirrorLayout })));
 const LearningRegressionPanel = lazy(() => import("@/components/LearningRegressionPanel").then(m => ({ default: m.LearningRegressionPanel })));
 const AudioLearningQueue = lazy(() => import("@/components/AudioLearningQueue").then(m => ({ default: m.AudioLearningQueue })));
 const DictionaryValidator = lazy(() => import("@/components/DictionaryValidator").then(m => ({ default: m.DictionaryValidator })));
@@ -663,6 +663,11 @@ const TextEditor = () => {
     }
 
     // Load audio URL from navigation state or resolve from Supabase Storage
+    if (location.state?.openFloatingPlayer) {
+      setActiveTab('player');
+      setIsPlayerFloating(true);
+    }
+
     if (location.state?.audioUrl) {
       const url = location.state.audioUrl as string;
       if (url.startsWith('blob:')) {
@@ -1968,7 +1973,7 @@ const TextEditor = () => {
             {/* ── Player card ── */}
             {isPlayerFloating ? (
               <Suspense fallback={null}>
-                <FloatingPlayerPortal onClose={togglePlayerFloating}>
+                <FloatingPlayerPortal onClose={togglePlayerFloating} defaultHeight={440}>
                   <SyncAudioPlayer
                     audioUrl={audioUrl}
                     wordTimings={wordTimings}
