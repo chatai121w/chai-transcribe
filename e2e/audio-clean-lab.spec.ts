@@ -37,6 +37,17 @@ test.describe('מעבדת ניקוי קול — AudioCleanLab', () => {
     await expect(page.getByText('אקולייזר ומסננים')).toBeVisible();
     await expect(page.getByText('איזון עוצמה').first()).toBeVisible();
     await expect(page.getByText('שיפור בבינה מלאכותית (שרת)').first()).toBeVisible();
+
+    const infoTitle = page.getByTestId('audio-info-title');
+    const step = page.getByTestId('audio-info-step-1');
+    const stepNumber = page.getByTestId('audio-info-step-number-1');
+    const stepContent = page.getByTestId('audio-info-step-content-1');
+    expect(await infoTitle.evaluate(element => getComputedStyle(element).direction)).toBe('rtl');
+    expect(await infoTitle.evaluate(element => getComputedStyle(element).textAlign)).toBe('right');
+    expect(await step.evaluate(element => getComputedStyle(element).direction)).toBe('rtl');
+    const numberX = await stepNumber.evaluate(element => element.getBoundingClientRect().x);
+    const contentX = await stepContent.evaluate(element => element.getBoundingClientRect().x);
+    expect(numberX).toBeGreaterThan(contentX);
   });
 
   test('טאב השוואה A/B מציג אזור העלאה', async ({ page }) => {

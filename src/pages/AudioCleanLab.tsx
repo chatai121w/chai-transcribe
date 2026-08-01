@@ -653,7 +653,7 @@ export default function AudioCleanLab() {
         )}
       </div>
 
-      <Tabs defaultValue="pipeline" className="w-full">
+      <Tabs defaultValue="pipeline" className="w-full" dir="rtl">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="pipeline" className="gap-1"><Layers className="w-4 h-4" /> תהליך עיבוד</TabsTrigger>
           <TabsTrigger value="compare" className="gap-1"><AudioLines className="w-4 h-4" /> השוואת מקור ופלט</TabsTrigger>
@@ -1038,7 +1038,7 @@ export default function AudioCleanLab() {
         <TabsContent value="info" className="mt-4 space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Layers className="w-5 h-5" /> מבנה תהליך העיבוד</CardTitle>
+              <CardTitle className="flex items-center gap-2" data-testid="audio-info-title"><Layers className="w-5 h-5" /> מבנה תהליך העיבוד</CardTitle>
               <CardDescription>שלבי העיבוד ברצף — מהמקור לפלט נקי</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
@@ -1126,11 +1126,14 @@ function InfoStep({ num, color, title, desc, tags }: { num: number; color: strin
     purple: "bg-purple-500",
   };
   return (
-    <div className="flex gap-3">
-      <div className={`${colorMap[color] || "bg-gray-500"} text-white w-6 h-6 flex items-center justify-center rounded-full flex-shrink-0 text-xs font-bold`}>
+    <div className="flex gap-3 text-right" dir="rtl" data-testid={`audio-info-step-${num}`}>
+      <div
+        className={`${colorMap[color] || "bg-gray-500"} text-white w-6 h-6 flex items-center justify-center rounded-full flex-shrink-0 text-xs font-bold`}
+        data-testid={`audio-info-step-number-${num}`}
+      >
         {num}
       </div>
-      <div className="space-y-1">
+      <div className="min-w-0 flex-1 space-y-1 text-right" data-testid={`audio-info-step-content-${num}`}>
         <p className="font-semibold">{title}</p>
         <p className="text-muted-foreground text-xs">{desc}</p>
         <div className="flex gap-1 flex-wrap">
