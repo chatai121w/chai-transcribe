@@ -9,6 +9,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "@/hooks/use-toast";
+import { AudioQualityReport } from "@/components/AudioQualityReport";
+import {
+  compareAudioBlobs,
+  type AudioQualityAssessment,
+} from "@/lib/audioQualityMetrics";
 import {
   enhanceAudioOnServer,
   fetchAiEnhanceStatus,
@@ -79,10 +84,10 @@ interface StageResult {
 /* ─── constants ────────────────────────────────────────────── */
 
 const AI_PRESETS: { id: EnhancementPreset; label: string; desc: string; icon: typeof Brain }[] = [
-  { id: "ai_hebrew", label: "AI עברית", desc: "MetricGAN-U + EQ ממוקד עברית", icon: Brain },
-  { id: "ai_full", label: "AI מלא", desc: "ניקוי + שיפור + נורמליזציה מלאה", icon: Sparkles },
+  { id: "ai_hebrew", label: "בינה מלאכותית לעברית", desc: "MetricGAN-U ואקולייזר ממוקד עברית", icon: Brain },
+  { id: "ai_full", label: "בינה מלאכותית מלאה", desc: "ניקוי, שיפור ואיזון עוצמה", icon: Sparkles },
   { id: "ai_enhance", label: "שיפור דיבור", desc: "שיפור בהירות קול בלבד", icon: Mic },
-  { id: "ai_denoise", label: "ניקוי רעש AI", desc: "ניקוי ספקטרלי מבוסס AI", icon: Shield },
+  { id: "ai_denoise", label: "ניקוי רעש חכם", desc: "ניקוי ספקטרלי מבוסס בינה מלאכותית", icon: Shield },
   { id: "clean", label: "ניקוי קלאסי", desc: "FFmpeg HP+LP+Compressor", icon: Filter },
   { id: "podcast", label: "פודקאסט", desc: "FFmpeg שרשרת מקצועית", icon: AudioLines },
 ];
@@ -269,6 +274,8 @@ export default function AudioCleanLab() {
   // Resume support: track which stages completed + last good blob
   const [completedStages, setCompletedStages] = useState<Set<string>>(new Set());
   const lastGoodBlobRef = useRef<Blob | null>(null);
+  const [qualityAssessment, setQualityAssessment] = useState<AudioQualityAssessment | null>(null);
+  const [qualityAnalyzing, setQualityAnalyzing] = useState(false);
 
   /* ── server status ── */
   const [aiStatus, setAiStatus] = useState<AiEnhanceStatus | null>(null);
@@ -318,6 +325,8 @@ export default function AudioCleanLab() {
     setProgress(0);
     setError(null);
     setCompletedStages(new Set());
+    setQualityAssessment(null);
+    setQualityAnalyzing(false);
     lastGoodBlobRef.current = null;
     setIsPlaying(false);
     setCurrentTime(0);
@@ -356,27 +365,14 @@ export default function AudioCleanLab() {
       setCleanedUrl(null);
       setCompletedStages(new Set());
       lastGoodBlobRef.current = null;
+      setQualityAssessment(null);
     }
     setIsPlaying(false);
 
     const results: StageResult[] = [...resumeResults];
 
     try {
-      /* ── kick off AI server in background (it's the slowest stage) ── */
-      let aiPromise: Promise<{ blob: Blob; elapsed: number }> | null = null;
-      if (enableAI && !completedStages.has("ai") && !ac.signal.aborted) {
-        aiPromise = (async () => {
-          const t0 = performance.now();
-          const result = await enhanceAudioOnServer(file, {
-            preset: aiPreset,
-            outputFormat,
-            signal: ac.signal,
-          });
-          return { blob: result.blob, elapsed: performance.now() - t0 };
-        })();
-      }
-
-      /* ── browser stages run sequentially (each depends on previous output) ── */
+      /* ── stages run sequentially so no successful stage is silently discarded ── */
       let currentBlob: Blob = isResuming ? lastGoodBlobRef.current! : file;
       const done = completedStages;
 
@@ -416,8 +412,8 @@ export default function AudioCleanLab() {
           const elapsed = performance.now() - t0;
           const url = URL.createObjectURL(combined);
           const label = enableNormalize
-            ? `EQ (HP ${hpFreq}Hz / LP ${lpFreq}Hz) + נורמליזציה (${targetDb}dB)`
-            : `EQ (HP ${hpFreq}Hz / LP ${lpFreq}Hz)`;
+            ? `אקולייזר (מסנן גבוה ${hpFreq}Hz / מסנן נמוך ${lpFreq}Hz) ואיזון עוצמה (${targetDb}dB)`
+            : `אקולייזר (מסנן גבוה ${hpFreq}Hz / מסנן נמוך ${lpFreq}Hz)`;
           results.push({ label, blob: combined, url, durationMs: elapsed });
           currentBlob = combined;
         } else {
@@ -443,15 +439,26 @@ export default function AudioCleanLab() {
         setProgress(70);
       }
 
-      // Stage 4: Wait for AI server result (already running in background)
-      if (aiPromise && !ac.signal.aborted) {
+      // Stage 4: AI receives the actual output of RNNoise/EQ/normalization.
+      if (enableAI && !done.has("ai") && !ac.signal.aborted) {
         setPipelineStage("ai");
         setProgress(75);
-        const aiResult = await aiPromise;
-        const url = URL.createObjectURL(aiResult.blob);
+        const t0 = performance.now();
+        const aiInput = new File(
+          [currentBlob],
+          currentBlob === file ? file.name : file.name.replace(/\.[^/.]+$/, "") + ".pipeline.wav",
+          { type: currentBlob.type || file.type || "audio/wav" },
+        );
+        const aiResponse = await enhanceAudioOnServer(aiInput, {
+          preset: aiPreset,
+          outputFormat,
+          signal: ac.signal,
+        });
+        const aiElapsed = performance.now() - t0;
+        const url = URL.createObjectURL(aiResponse.blob);
         const presetLabel = AI_PRESETS.find(p => p.id === aiPreset)?.label || aiPreset;
-        results.push({ label: `AI שיפור (${presetLabel})`, blob: aiResult.blob, url, durationMs: aiResult.elapsed });
-        currentBlob = aiResult.blob;
+        results.push({ label: `שיפור חכם (${presetLabel})`, blob: aiResponse.blob, url, durationMs: aiElapsed });
+        currentBlob = aiResponse.blob;
         lastGoodBlobRef.current = currentBlob;
         setCompletedStages(prev => new Set(prev).add("ai"));
         setStageResults([...results]);
@@ -469,8 +476,23 @@ export default function AudioCleanLab() {
       setCompletedStages(new Set());
       lastGoodBlobRef.current = null;
       setActiveTrack("cleaned");
+
+      setQualityAnalyzing(true);
+      try {
+        const assessment = await compareAudioBlobs(file, currentBlob);
+        setQualityAssessment(assessment);
+      } catch (qualityError) {
+        console.warn("[AudioCleanLab] quality analysis failed", qualityError);
+        toast({
+          title: "הניקוי הסתיים, אך המדידה נכשלה",
+          description: "ניתן להאזין ולהוריד את הפלט; שער האיכות לא הצליח לפענח אחד הקבצים.",
+          variant: "destructive",
+        });
+      } finally {
+        setQualityAnalyzing(false);
+      }
       toast({
-        title: "Pipeline הושלם!",
+        title: "תהליך העיבוד הושלם",
         description: `${results.length} שלבים עובדו בהצלחה`,
       });
     } catch (err: unknown) {
@@ -483,7 +505,7 @@ export default function AudioCleanLab() {
       if (lastGoodBlobRef.current) {
         setCleanedUrl(URL.createObjectURL(lastGoodBlobRef.current));
       }
-      toast({ title: "שגיאה ב-Pipeline", description: msg, variant: "destructive" });
+      toast({ title: "שגיאה בתהליך העיבוד", description: msg, variant: "destructive" });
     }
   }, [file, enableDenoise, enableEQ, enableNormalize, enableAI, aiPreset, outputFormat, hpFreq, lpFreq, boostPresence, targetDb, completedStages, stageResults]);
 
@@ -585,17 +607,19 @@ export default function AudioCleanLab() {
     setCurrentTime(0);
     setDuration(0);
     setActiveTrack("original");
+    setQualityAssessment(null);
+    setQualityAnalyzing(false);
   }, [originalUrl, cleanedUrl, stageResults]);
 
   /* ── stage label helper ── */
   const stageLabel: Record<PipelineStage, string> = {
     idle: "ממתין",
     converting: "ממיר פורמט...",
-    vad: "מזהה דיבור (VAD)...",
+    vad: "מזהה אזורי דיבור...",
     denoise: "מנקה רעשים (RNNoise)...",
-    eq: "מפעיל EQ...",
+    eq: "מפעיל אקולייזר ומסננים...",
     normalize: "מנרמל עוצמה...",
-    ai: "שיפור AI (שרת)...",
+    ai: "מפעיל שיפור חכם בשרת...",
     done: "הושלם!",
     error: "שגיאה",
   };
@@ -604,31 +628,35 @@ export default function AudioCleanLab() {
 
   /* ─── render ─────────────────────────────────────────────── */
   return (
-    <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-6" dir="rtl">
+    <div
+      className="p-4 md:p-6 max-w-6xl mx-auto space-y-6 text-right"
+      dir="rtl"
+      data-testid="audio-clean-lab"
+    >
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
         <Wand2 className="w-7 h-7 text-purple-500" />
         <h1 className="text-2xl font-bold">מעבדת ניקוי קול</h1>
         <Badge variant="secondary" className="gap-1">
-          <Layers className="w-3 h-3" /> Pipeline
+          <Layers className="w-3 h-3" /> תהליך עיבוד
         </Badge>
         {aiStatus?.available && (
           <Badge variant="outline" className="gap-1 text-green-600 border-green-300">
-            <Zap className="w-3 h-3" /> AI זמין
-            {aiStatus.engines.gpu && ` • GPU ${aiStatus.engines.gpu_name || "CUDA"}`}
+            <Zap className="w-3 h-3" /> בינה מלאכותית זמינה
+            {aiStatus.engines.gpu && ` • מעבד גרפי ${aiStatus.engines.gpu_name || "CUDA"}`}
           </Badge>
         )}
         {aiStatus?.available && !aiStatus.engines.gpu && (
           <Badge variant="outline" className="gap-1 text-yellow-600 border-yellow-300">
-            <AlertTriangle className="w-3 h-3" /> CPU בלבד — GPU לא זמין
+            <AlertTriangle className="w-3 h-3" /> מעבד מרכזי בלבד — מעבד גרפי אינו זמין
           </Badge>
         )}
       </div>
 
       <Tabs defaultValue="pipeline" className="w-full">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="pipeline" className="gap-1"><Layers className="w-4 h-4" /> Pipeline</TabsTrigger>
-          <TabsTrigger value="compare" className="gap-1"><AudioLines className="w-4 h-4" /> השוואה A/B</TabsTrigger>
+          <TabsTrigger value="pipeline" className="gap-1"><Layers className="w-4 h-4" /> תהליך עיבוד</TabsTrigger>
+          <TabsTrigger value="compare" className="gap-1"><AudioLines className="w-4 h-4" /> השוואת מקור ופלט</TabsTrigger>
           <TabsTrigger value="info" className="gap-1"><Settings2 className="w-4 h-4" /> מידע</TabsTrigger>
         </TabsList>
 
@@ -671,12 +699,20 @@ export default function AudioCleanLab() {
                 </CardContent>
               </Card>
 
+              {qualityAnalyzing && (
+                <div className="flex items-center justify-center gap-2 rounded-md border bg-muted/30 px-4 py-3 text-sm" data-testid="audio-quality-analyzing">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  מודד יחס אות לרעש, רצפת רעש, עיוות ושימור תוכן...
+                </div>
+              )}
+              {qualityAssessment && <AudioQualityReport assessment={qualityAssessment} />}
+
               <div className="grid md:grid-cols-[1fr_300px] gap-4">
                 {/* Left: Pipeline steps config */}
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-lg flex items-center gap-2">
-                      <Settings2 className="w-5 h-5" /> הגדרות Pipeline
+                      <Settings2 className="w-5 h-5" /> הגדרות תהליך העיבוד
                     </CardTitle>
                     <CardDescription>בחר את שלבי העיבוד והגדר פרמטרים</CardDescription>
                   </CardHeader>
@@ -701,8 +737,8 @@ export default function AudioCleanLab() {
                           <Badge className="bg-green-500 text-white w-6 h-6 flex items-center justify-center p-0 rounded-full">2</Badge>
                           <Filter className="w-5 h-5 text-green-500" />
                           <div>
-                            <p className="font-medium text-sm">EQ + פילטרים</p>
-                            <p className="text-xs text-muted-foreground">High-Pass + Low-Pass + חיזוק דיבור</p>
+                            <p className="font-medium text-sm">אקולייזר ומסננים</p>
+                            <p className="text-xs text-muted-foreground">מסנן תדרים גבוהים, מסנן תדרים נמוכים וחיזוק דיבור</p>
                           </div>
                         </div>
                         <Switch checked={enableEQ} onCheckedChange={setEnableEQ} disabled={isRunning} />
@@ -711,14 +747,14 @@ export default function AudioCleanLab() {
                         <div className="space-y-3 pr-12">
                           <div className="space-y-1">
                             <div className="flex justify-between text-xs">
-                              <span>High-Pass (הסרת בס)</span>
+                              <span>מסנן תדרים גבוהים (הסרת בס)</span>
                               <span className="font-mono">{hpFreq} Hz</span>
                             </div>
                             <Slider min={20} max={300} step={5} value={[hpFreq]} onValueChange={v => setHpFreq(v[0])} disabled={isRunning} />
                           </div>
                           <div className="space-y-1">
                             <div className="flex justify-between text-xs">
-                              <span>Low-Pass (הסרת שריקות)</span>
+                              <span>מסנן תדרים נמוכים (הסרת שריקות)</span>
                               <span className="font-mono">{lpFreq} Hz</span>
                             </div>
                             <Slider min={4000} max={20000} step={500} value={[lpFreq]} onValueChange={v => setLpFreq(v[0])} disabled={isRunning} />
@@ -762,7 +798,7 @@ export default function AudioCleanLab() {
                           <Badge className="bg-purple-500 text-white w-6 h-6 flex items-center justify-center p-0 rounded-full">4</Badge>
                           <Brain className="w-5 h-5 text-purple-500" />
                           <div>
-                            <p className="font-medium text-sm">שיפור AI (שרת)</p>
+                            <p className="font-medium text-sm">שיפור בבינה מלאכותית (שרת)</p>
                             <p className="text-xs text-muted-foreground">Demucs / DeepFilter / MetricGAN</p>
                           </div>
                         </div>
@@ -772,7 +808,7 @@ export default function AudioCleanLab() {
                         <div className="pr-12 space-y-3">
                           <Select value={aiPreset} onValueChange={v => setAiPreset(v as EnhancementPreset)} disabled={isRunning}>
                             <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
+                            <SelectContent dir="rtl" className="text-right">
                               {AI_PRESETS.map(p => (
                                 <SelectItem key={p.id} value={p.id}>
                                   <div className="flex items-center gap-2">
@@ -788,7 +824,7 @@ export default function AudioCleanLab() {
                             <span className="text-xs">פורמט פלט:</span>
                             <Select value={outputFormat} onValueChange={v => setOutputFormat(v as EnhancementOutputFormat)} disabled={isRunning}>
                               <SelectTrigger className="w-24 h-8"><SelectValue /></SelectTrigger>
-                              <SelectContent>
+                              <SelectContent dir="rtl" className="text-right">
                                 {OUTPUT_FORMATS.map(f => (
                                   <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>
                                 ))}
@@ -798,7 +834,7 @@ export default function AudioCleanLab() {
                           {!aiStatus?.available && (
                             <div className="flex items-center gap-2 text-xs text-yellow-600">
                               <AlertTriangle className="w-4 h-4" />
-                              <span>שרת AI לא זמין — ודא שהשרת פעיל</span>
+                              <span>שרת הבינה המלאכותית אינו זמין — ודא שהשרת פעיל</span>
                             </div>
                           )}
                         </div>
@@ -822,7 +858,7 @@ export default function AudioCleanLab() {
                           {completedStages.size > 0 ? (
                             <><RotateCcw className="w-4 h-4" /> המשך מאיפה שנתקע</>
                           ) : (
-                            <><Wand2 className="w-4 h-4" /> הפעל Pipeline</>
+                            <><Wand2 className="w-4 h-4" /> הפעל תהליך עיבוד</>
                           )}
                         </Button>
                       )}
@@ -952,7 +988,7 @@ export default function AudioCleanLab() {
                   <Card>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm flex items-center gap-2">
-                        <Layers className="w-4 h-4" /> זרימת Pipeline
+                        <Layers className="w-4 h-4" /> זרימת תהליך העיבוד
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
@@ -967,19 +1003,19 @@ export default function AudioCleanLab() {
                         {enableEQ && (
                           <>
                             <ArrowDown className="w-3 h-3 text-muted-foreground" />
-                            <PipelineNode label="EQ" icon={Filter} active={pipelineStage === "eq"} done={progress > 55} enabled />
+                            <PipelineNode label="אקולייזר" icon={Filter} active={pipelineStage === "eq"} done={progress > 55} enabled />
                           </>
                         )}
                         {enableNormalize && (
                           <>
                             <ArrowDown className="w-3 h-3 text-muted-foreground" />
-                            <PipelineNode label="Normalize" icon={Volume2} active={pipelineStage === "normalize"} done={progress > 70} enabled />
+                            <PipelineNode label="איזון עוצמה" icon={Volume2} active={pipelineStage === "normalize"} done={progress > 70} enabled />
                           </>
                         )}
                         {enableAI && (
                           <>
                             <ArrowDown className="w-3 h-3 text-muted-foreground" />
-                            <PipelineNode label="AI" icon={Brain} active={pipelineStage === "ai"} done={progress > 95} enabled />
+                            <PipelineNode label="שיפור חכם" icon={Brain} active={pipelineStage === "ai"} done={progress > 95} enabled />
                           </>
                         )}
                         <ArrowDown className="w-3 h-3 text-muted-foreground" />
@@ -1002,15 +1038,15 @@ export default function AudioCleanLab() {
         <TabsContent value="info" className="mt-4 space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Layers className="w-5 h-5" /> ארכיטקטורת Pipeline</CardTitle>
+              <CardTitle className="flex items-center gap-2"><Layers className="w-5 h-5" /> מבנה תהליך העיבוד</CardTitle>
               <CardDescription>שלבי העיבוד ברצף — מהמקור לפלט נקי</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               <div className="space-y-3">
-                <InfoStep num={1} color="blue" title="ניקוי רעש — RNNoise" desc="רשת נוירונים (WASM) שרצה בדפדפן. מסירה רעשי רקע קבועים: מזגן, מאוורר, זמזום חשמלי. מעבדת 480 דגימות בכל פריים ב-48KHz." tags={["CPU", "< 1MB", "מהיר"]} />
-                <InfoStep num={2} color="green" title="EQ + פילטרים" desc="High-Pass מסיר רעשי בס מתחת ל-80Hz, Low-Pass מסיר ציפצופים מעל 12KHz. חיזוק אופציונלי ב-3KHz לבהירות דיבור ו-250Hz לחמימות." tags={["CPU", "Web Audio", "מהיר"]} />
-                <InfoStep num={3} color="orange" title="נורמליזציה" desc="מאזן עוצמת שמע כך שחלקים שקטים וחזקים יהיו ברמה אחידה. ברירת מחדל: -20 dBFS." tags={["CPU", "מהיר"]} />
-                <InfoStep num={4} color="purple" title="שיפור AI (שרת)" desc="Demucs להפרדת קולות ממוזיקה (~1GB), DeepFilterNet לשיפור בהירות קול (~100MB), MetricGAN-U לניקוי מתקדם. דורש שרת פעיל." tags={["GPU מומלץ", "2-30 שניות"]} />
+                <InfoStep num={1} color="blue" title="ניקוי רעש — RNNoise" desc="רשת נוירונים שרצה בדפדפן באמצעות WebAssembly. מסירה רעשי רקע קבועים: מזגן, מאוורר וזמזום חשמלי. מעבדת 480 דגימות בכל מקטע ב-48KHz." tags={["מעבד מרכזי", "פחות ממגה-בית", "מהיר"]} />
+                <InfoStep num={2} color="green" title="אקולייזר ומסננים" desc="מסנן תדרים גבוהים מסיר רעשי בס מתחת ל-80Hz, ומסנן תדרים נמוכים מסיר צפצופים מעל 12KHz. ניתן לחזק 3KHz לבהירות דיבור ו-250Hz לחמימות." tags={["מעבד מרכזי", "שמע בדפדפן", "מהיר"]} />
+                <InfoStep num={3} color="orange" title="איזון עוצמה" desc="מאזן עוצמת שמע כך שחלקים שקטים וחזקים יהיו ברמה אחידה. ברירת מחדל: -20 dBFS." tags={["מעבד מרכזי", "מהיר"]} />
+                <InfoStep num={4} color="purple" title="שיפור בבינה מלאכותית (שרת)" desc="Demucs להפרדת קולות ממוזיקה (~1GB), DeepFilterNet לשיפור בהירות קול (~100MB), MetricGAN-U לניקוי מתקדם. דורש שרת פעיל." tags={["מעבד גרפי מומלץ", "2-30 שניות"]} />
               </div>
 
               <Separator />
@@ -1024,7 +1060,7 @@ export default function AudioCleanLab() {
                   </div>
                   <div className="p-2 bg-green-50 dark:bg-green-950/30 rounded">
                     <p className="font-medium">📻 ציפצופים / זמזום</p>
-                    <p className="text-muted-foreground">רעש חשמלי → שלב 2 (EQ)</p>
+                    <p className="text-muted-foreground">רעש חשמלי → שלב 2 (אקולייזר)</p>
                   </div>
                   <div className="p-2 bg-orange-50 dark:bg-orange-950/30 rounded">
                     <p className="font-medium">🔊 ווליום לא אחיד</p>
@@ -1046,14 +1082,14 @@ export default function AudioCleanLab() {
                     <Zap className="w-5 h-5 text-yellow-500 flex-shrink-0" />
                     <div>
                       <p className="font-medium">⚡ מהיר (90% מהמקרים)</p>
-                      <p className="text-muted-foreground">RNNoise → EQ → Normalize — פחות משנייה, CPU בלבד</p>
+                      <p className="text-muted-foreground">RNNoise ← אקולייזר ← איזון עוצמה — פחות משנייה, במעבד המרכזי בלבד</p>
                     </div>
                   </div>
                   <div className="p-3 bg-muted/50 rounded flex items-center gap-3">
                     <Brain className="w-5 h-5 text-purple-500 flex-shrink-0" />
                     <div>
                       <p className="font-medium">🤖 מלא (אודיו בעייתי)</p>
-                      <p className="text-muted-foreground">RNNoise → EQ → Normalize → AI — 5-30 שניות, GPU מומלץ</p>
+                      <p className="text-muted-foreground">RNNoise ← אקולייזר ← איזון עוצמה ← שיפור חכם — 5-30 שניות, מעבד גרפי מומלץ</p>
                     </div>
                   </div>
                 </div>
@@ -1242,8 +1278,8 @@ function QuickCompare({ aiStatus }: { aiStatus: AiEnhanceStatus | null }) {
       >
         <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
           <AudioLines className="w-12 h-12 text-muted-foreground" />
-          <p className="text-lg font-medium">גרור קובץ להשוואת A/B/C</p>
-          <p className="text-sm text-muted-foreground">מקור vs RNNoise (דפדפן) vs AI (שרת)</p>
+          <p className="text-lg font-medium">גרור קובץ להשוואה משולשת</p>
+          <p className="text-sm text-muted-foreground">מקור מול RNNoise בדפדפן מול בינה מלאכותית בשרת</p>
           <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
         </CardContent>
       </Card>
@@ -1251,7 +1287,7 @@ function QuickCompare({ aiStatus }: { aiStatus: AiEnhanceStatus | null }) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 text-right" dir="rtl">
       <Card>
         <CardContent className="py-3 flex items-center gap-3 flex-wrap">
           <FileAudio className="w-5 h-5 text-blue-500" />
@@ -1260,7 +1296,7 @@ function QuickCompare({ aiStatus }: { aiStatus: AiEnhanceStatus | null }) {
           <div className="flex-1" />
           <Select value={preset} onValueChange={v => setPreset(v as EnhancementPreset)}>
             <SelectTrigger className="w-48 h-8"><SelectValue /></SelectTrigger>
-            <SelectContent>
+            <SelectContent dir="rtl" className="text-right">
               {AI_PRESETS.map(p => (
                 <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
               ))}
@@ -1292,7 +1328,7 @@ function QuickCompare({ aiStatus }: { aiStatus: AiEnhanceStatus | null }) {
           onDownload={() => downloadTrack("rnnoise")}
         />
         <TrackCard
-          label="AI (שרת)"
+          label="בינה מלאכותית (שרת)"
           icon={Brain}
           active={activeTrack === "server"}
           ready={!!serverUrl}
@@ -1316,7 +1352,7 @@ function QuickCompare({ aiStatus }: { aiStatus: AiEnhanceStatus | null }) {
               onValueChange={v => { const a = getAudioEl(activeTrack); if (a && !isNaN(a.duration)) a.currentTime = (v[0] / 100) * a.duration; }}
               className="flex-1"
             />
-            <span className="text-xs font-mono w-20 text-center">{formatTime(currentTime)} / {formatTime(duration)}</span>
+            <span dir="ltr" className="text-xs font-mono w-20 text-center">{formatTime(currentTime)} / {formatTime(duration)}</span>
           </div>
         </CardContent>
       </Card>

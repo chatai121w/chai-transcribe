@@ -110,8 +110,31 @@ test.describe('ממיר וידאו ואודיו', () => {
     // Verify we arrived at the page via sidebar
     await expect(page.getByText(/ממיר וידאו ל-MP3|ממיר וידאו ואודיו/)).toBeVisible({ timeout: 15000 });
     // Check the sidebar has the nav item (text or link)
-    const sidebarItem = page.getByText('ממיר ל-MP3');
+    const sidebarItem = page.getByText(/מרכז אודיו וחיתוך|ממיר ל-MP3/);
     await expect(sidebarItem.first()).toBeVisible({ timeout: 10000 });
+  });
+
+  test('קישור ישיר פותח את מערכת החיתוך המאוחדת', async ({ page }) => {
+    await page.goto('/video-to-mp3?tab=cut', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText('מערכת חיתוך מתקדמת')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('tab', { name: 'חיתוך קבצים' })).toHaveAttribute('data-state', 'active');
+  });
+
+  test('מערכת החיתוך המאוחדת חותכת WAV אמיתי לשני קטעים', async ({ page }) => {
+    await page.goto('/video-to-mp3?tab=cut', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText('מערכת חיתוך מתקדמת')).toBeVisible({ timeout: 15000 });
+
+    await page.locator('input[type="file"][accept="audio/*,video/*"]').setInputFiles({
+      name: 'unified-cut.wav',
+      mimeType: 'audio/wav',
+      buffer: createToneWavBuffer(2),
+    });
+    await expect(page.getByText('unified-cut.wav')).toBeVisible();
+    await page.getByRole('button', { name: '2 חלקים', exact: true }).click();
+    await page.getByRole('button', { name: /חתוך 2 קטעים/ }).click();
+
+    await expect(page.getByText('WAV ישיר').first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('2/2 קטעים')).toBeVisible();
   });
 
   test('תגית מנוע מוכן/טוען מוצגת', async ({ page }) => {

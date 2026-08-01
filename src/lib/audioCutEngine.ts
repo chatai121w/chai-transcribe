@@ -64,6 +64,8 @@ export interface CutJob {
   startedAt?: number;
   finishedAt?: number;
   durationSec?: number; // total audio duration
+  /** Concrete engine selected by the unified tiered cutter. */
+  engine?: "wav-slice" | "ffmpeg-copy" | "audio-buffer";
 }
 
 export type CutJobCallback = (job: CutJob) => void;
@@ -90,6 +92,7 @@ interface PersistedCutJob {
   finishedAt?: number;
   durationSec?: number;
   error?: string;
+  engine?: "wav-slice" | "ffmpeg-copy" | "audio-buffer";
 }
 
 interface PersistedCutResult {
@@ -175,6 +178,7 @@ async function persistCutJob(job: CutJob) {
     finishedAt: job.finishedAt,
     durationSec: job.durationSec,
     error: job.error,
+    engine: job.engine,
   };
   await dbPutCut(STORE_JOBS, pj).catch(() => {});
 }
@@ -575,6 +579,7 @@ export async function restorePersistedCutJobs(): Promise<CutJob[]> {
         finishedAt: pj.finishedAt,
         durationSec: pj.durationSec,
         error: pj.error,
+        engine: pj.engine,
       };
 
       // Interrupted mid-cut → mark as error
@@ -588,6 +593,14 @@ export async function restorePersistedCutJobs(): Promise<CutJob[]> {
   } catch {
     return [];
   }
+}
+
+/** Persist a job completed by the unified tiered engine. */
+export async function persistCompletedCutJob(job: CutJob): Promise<void> {
+  await Promise.all([
+    persistCutJob(job),
+    ...job.results.map((result) => persistCutResult(job.id, result)),
+  ]);
 }
 
 /** Remove persisted data for a cut job */

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   convertAudio,
   extractAudio,
@@ -342,6 +342,7 @@ function JobCard({
 
 export default function VideoToMp3() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, isAuthenticated } = useAuth();
   const isMobile = useIsMobile();
   const [jobs, setJobs] = useState<ConversionJob[]>([]);
@@ -362,9 +363,13 @@ export default function VideoToMp3() {
   const [enhanceQueueJobs, setEnhanceQueueJobs] = useState<EnhanceQueueJob[]>(() => getEnhanceQueueJobs());
   const [saveAndTranscribeBusyId, setSaveAndTranscribeBusyId] = useState<string | null>(null);
   const [autoTranscribe, setAutoTranscribe] = useState(false);
-  const [activeTab, setActiveTab] = useState<"convert" | "extract" | "cut">("convert");
+  const [activeTab, setActiveTab] = useState<"convert" | "extract" | "cut">(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    return requested === "cut" || requested === "extract" ? requested : "convert";
+  });
   const [cutInitialFile, setCutInitialFile] = useState<File | null>(null);
   const [cutInitialLabel, setCutInitialLabel] = useState("");
+  const [cutInitialPreset, setCutInitialPreset] = useState<"halves" | "thirds" | "every5min" | undefined>();
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
@@ -379,6 +384,28 @@ export default function VideoToMp3() {
   const [folderName, setFolderName] = useState("");
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<Set<string>>(new Set());
   const savedJobIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const requested = new URLSearchParams(location.search).get("tab");
+    if (requested === "convert" || requested === "extract" || requested === "cut") {
+      setActiveTab(requested);
+    }
+
+    const state = location.state as {
+      cutFile?: File;
+      cutLabel?: string;
+      cutPreset?: "halves" | "thirds" | "every5min";
+    } | null;
+    if (state?.cutFile instanceof File) {
+      setCutInitialFile(state.cutFile);
+      setCutInitialLabel(state.cutLabel || state.cutFile.name);
+      setActiveTab("cut");
+    }
+    if (state?.cutPreset) {
+      setCutInitialPreset(state.cutPreset);
+      setActiveTab("cut");
+    }
+  }, [location.search, location.state]);
 
   const toOutputFile = useCallback((job: ConversionJob): File | null => {
     if (!job.outputBlob) return null;
@@ -811,10 +838,10 @@ export default function VideoToMp3() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
             <Music className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
-            ממיר וידאו ואודיו
+            מרכז אודיו: ממיר וידאו ואודיו וחיתוך
           </h1>
           <p className="text-muted-foreground text-xs sm:text-sm mt-1">
-            המרה היברידית ל-MP3 / OPUS / AAC — דפדפן לקבצים קטנים, שרת לקבצים גדולים.
+            המרה, חילוץ וחיתוך מדורג בממשק אחד — כולל תיקיות, שיפור ותמלול.
           </p>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -839,7 +866,16 @@ export default function VideoToMp3() {
       </div>
 
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "convert" | "extract" | "cut")} className="space-y-4" dir="rtl">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          const next = value as "convert" | "extract" | "cut";
+          setActiveTab(next);
+          navigate(`/video-to-mp3?tab=${next}`, { replace: true });
+        }}
+        className="space-y-4"
+        dir="rtl"
+      >
         <TabsList className="grid w-full grid-cols-3 max-w-full sm:max-w-[480px] h-11 sm:h-10">
           <TabsTrigger value="convert" className="gap-1.5">
             <Music className="w-4 h-4" />
@@ -1601,6 +1637,7 @@ export default function VideoToMp3() {
             <AdvancedCutPanel
               initialFile={cutInitialFile ?? undefined}
               initialSourceLabel={cutInitialLabel || undefined}
+              initialPreset={cutInitialPreset}
               convertedFiles={doneJobs.map((j) => ({
                 id: j.id,
                 name: j.fileName,

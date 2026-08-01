@@ -7,11 +7,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  submitCutJob,
-  onCutJobUpdate,
-  probeAudioDuration,
   restorePersistedCutJobs,
   removePersistedCutJob,
+  persistCompletedCutJob,
   generateSegments,
   formatTime,
   parseTimeInput,
@@ -21,6 +19,7 @@ import {
   type CutSegment,
   type CutResult,
 } from "@/lib/audioCutEngine";
+import { cutWithFallback, probeDurationFast, type CutTier } from "@/lib/tieredCutEngine";
 import {
   clearEnhanceQueueCompleted,
   getEnhanceQueueJobs,
@@ -608,6 +607,15 @@ function CutJobCard({
                 <Badge variant="outline" className="text-[10px] h-4 px-1.5">
                   {modeLabel}
                 </Badge>
+                {job.engine && (
+                  <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
+                    {{
+                      "wav-slice": "WAV ישיר",
+                      "ffmpeg-copy": "FFmpeg ללא קידוד",
+                      "audio-buffer": "פיענוח מלא",
+                    }[job.engine]}
+                  </Badge>
+                )}
                 <span className="whitespace-nowrap">
                   {job.completedSegments}/{job.totalSegments || "?"} קטעים
                 </span>
@@ -787,7 +795,8 @@ function CutJobCard({
                 onToggleSelected={() => {
                   setSelectedSegments((current) => {
                     const next = new Set(current);
-                    next.has(r.segmentIndex) ? next.delete(r.segmentIndex) : next.add(r.segmentIndex);
+                    if (next.has(r.segmentIndex)) next.delete(r.segmentIndex);
+                    else next.add(r.segmentIndex);
                     return next;
                   });
                 }}
@@ -810,12 +819,14 @@ interface AdvancedCutPanelProps {
   initialSourceLabel?: string;
   /** Converted files available to pick from */
   convertedFiles?: Array<{ id: string; name: string; file: File }>;
+  initialPreset?: "halves" | "thirds" | "every5min";
 }
 
 export default function AdvancedCutPanel({
   initialFile,
   initialSourceLabel,
   convertedFiles = [],
+  initialPreset,
 }: AdvancedCutPanelProps) {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -856,6 +867,7 @@ export default function AdvancedCutPanel({
 
   // Jobs
   const [cutJobs, setCutJobs] = useState<CutJob[]>([]);
+  const [isSubmittingCut, setIsSubmittingCut] = useState(false);
   const [enhanceQueueJobs, setEnhanceQueueJobs] = useState<EnhanceQueueJob[]>(() => getEnhanceQueueJobs());
 
   // Per-segment conversion state — key = `${jobId}_${segIndex}`
@@ -875,6 +887,20 @@ export default function AdvancedCutPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialFile]);
 
+  useEffect(() => {
+    if (initialPreset === "halves") {
+      setCutMode("count");
+      setPartCount("2");
+    } else if (initialPreset === "thirds") {
+      setCutMode("count");
+      setPartCount("3");
+    } else if (initialPreset === "every5min") {
+      setCutMode("time");
+      setChunkMinutes("5");
+      setChunkSeconds("0");
+    }
+  }, [initialPreset]);
+
   // Restore persisted jobs on mount
   useEffect(() => {
     restorePersistedCutJobs().then((restored) => {
@@ -882,27 +908,6 @@ export default function AdvancedCutPanel({
         setCutJobs((prev) => [...prev, ...restored]);
       }
     });
-  }, []);
-
-  // Listen to job updates
-  useEffect(() => {
-    const unsub = onCutJobUpdate((updatedJob) => {
-      setCutJobs((prev) => {
-        const idx = prev.findIndex((j) => j.id === updatedJob.id);
-        if (idx === -1) return prev;
-        const next = [...prev];
-        next[idx] = updatedJob;
-        return next;
-      });
-
-      if (updatedJob.status === "done") {
-        toast({
-          title: "חיתוך הושלם",
-          description: `${updatedJob.completedSegments} קטעים נוצרו מ-${updatedJob.sourceFileName}`,
-        });
-      }
-    });
-    return unsub;
   }, []);
 
   useEffect(() => {
@@ -916,7 +921,8 @@ export default function AdvancedCutPanel({
     setSourceLabel(label || file.name);
     setIsProbing(true);
     try {
-      const duration = await probeAudioDuration(file);
+      const duration = await probeDurationFast(file);
+      if (!duration || duration <= 0) throw new Error("duration-unavailable");
       setSourceDuration(duration);
       // Auto-set end time for first manual row
       setManualRows((prev) => {
@@ -974,7 +980,7 @@ export default function AdvancedCutPanel({
     }
   }
 
-  const handleSubmitCut = useCallback(() => {
+  const handleSubmitCut = useCallback(async () => {
     if (!sourceFile) {
       toast({ title: "לא נבחר קובץ", variant: "destructive" });
       return;
@@ -988,12 +994,85 @@ export default function AdvancedCutPanel({
       });
       return;
     }
+    if (isSubmittingCut) return;
 
-    const job = submitCutJob(sourceFile, config);
-    setCutJobs((prev) => [job, ...prev]);
-    toast({ title: "חיתוך נכנס לתור", description: `${sourceFile.name}` });
+    const jobId = `cut_unified_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const startedAt = Date.now();
+    const initialJob: CutJob = {
+      id: jobId,
+      sourceFileName: sourceFile.name,
+      sourceFileSize: sourceFile.size,
+      sourceFile,
+      config,
+      status: "decoding",
+      progress: 0,
+      totalSegments: previewSegments.length,
+      completedSegments: 0,
+      results: [],
+      startedAt,
+      durationSec: sourceDuration ?? undefined,
+    };
+    setCutJobs((prev) => [initialJob, ...prev]);
+    setIsSubmittingCut(true);
+    toast({ title: "החיתוך התחיל", description: "המנוע יבחר אוטומטית את השיטה המהירה והבטוחה ביותר" });
+
+    try {
+      const outcome = await cutWithFallback(sourceFile, {
+        config,
+        knownDurationSec: sourceDuration ?? undefined,
+        onProgress: (progress) => {
+          const total = Math.max(1, progress.total);
+          const percent = Math.min(99, Math.round((progress.completed / total) * 100));
+          setCutJobs((prev) => prev.map((job) => job.id === jobId ? {
+            ...job,
+            status: progress.tier === "audio-buffer" && progress.completed === 0 ? "decoding" : "cutting",
+            progress: percent,
+            totalSegments: total,
+            completedSegments: progress.completed,
+            engine: progress.tier,
+          } : job));
+        },
+      });
+
+      const completedJob: CutJob = {
+        ...initialJob,
+        status: "done",
+        progress: 100,
+        totalSegments: outcome.results.length,
+        completedSegments: outcome.results.length,
+        results: outcome.results,
+        durationSec: outcome.durationSec,
+        finishedAt: Date.now(),
+        engine: outcome.tier,
+      };
+      setCutJobs((prev) => prev.map((job) => job.id === jobId ? completedJob : job));
+
+      if (outcome.sourceJobId) await removePersistedCutJob(outcome.sourceJobId);
+      await persistCompletedCutJob(completedJob);
+
+      const engineLabel: Record<CutTier, string> = {
+        "wav-slice": "WAV ישיר",
+        "ffmpeg-copy": "FFmpeg ללא קידוד מחדש",
+        "audio-buffer": "פיענוח מלא",
+      };
+      toast({
+        title: "חיתוך הושלם",
+        description: `${outcome.results.length} קטעים נוצרו באמצעות ${engineLabel[outcome.tier]}`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCutJobs((prev) => prev.map((job) => job.id === jobId ? {
+        ...job,
+        status: "error",
+        error: message,
+        finishedAt: Date.now(),
+      } : job));
+      toast({ title: "שגיאת חיתוך", description: message, variant: "destructive" });
+    } finally {
+      setIsSubmittingCut(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceFile, cutMode, manualRows, chunkMinutes, chunkSeconds, partCount]);
+  }, [sourceFile, sourceDuration, cutMode, manualRows, chunkMinutes, chunkSeconds, partCount, isSubmittingCut, previewSegments.length]);
 
   // Manual row management
   const addManualRow = useCallback(() => {
@@ -1595,15 +1674,17 @@ export default function AdvancedCutPanel({
               <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                 <Button
                   className="gap-2 h-11 sm:h-10 w-full sm:w-auto shadow-sm"
-                  disabled={!sourceFile || previewSegments.length === 0}
-                  onClick={handleSubmitCut}
+                  disabled={!sourceFile || previewSegments.length === 0 || isSubmittingCut}
+                  onClick={() => void handleSubmitCut()}
                 >
-                  <Scissors className="w-4 h-4" />
-                  חתוך {previewSegments.length} קטעים
+                  {isSubmittingCut
+                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                    : <Scissors className="w-4 h-4" />}
+                  {isSubmittingCut ? "חותך במנוע המדורג..." : `חתוך ${previewSegments.length} קטעים`}
                 </Button>
                 {previewSegments.length > 0 && (
                   <span className="text-xs text-muted-foreground text-center sm:text-right">
-                    עיבוד מקבילי — עד {Math.min(4, previewSegments.length)} בו-זמנית
+                    WAV ישיר → FFmpeg ללא קידוד → פיענוח מלא כגיבוי
                   </span>
                 )}
               </div>

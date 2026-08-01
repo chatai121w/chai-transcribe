@@ -34,12 +34,10 @@ import {
   Youtube,
   Bot,
   ScrollText,
-  Scissors,
   Palette,
   GraduationCap,
   BookOpen,
 } from "lucide-react";
-import { openQuickCut } from "@/lib/quickCutBus";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -73,7 +71,7 @@ const navItems: NavItem[] = [
   { label: "מילון ולמידה אישית", icon: BookOpen, path: "/personal-learning" },
   { label: "זיהוי דוברים", icon: Users, path: "/diarization" },
   { label: "השוואות", icon: GitCompareArrows, path: "/compare" },
-  { label: "ממיר ל-MP3", icon: Music, path: "/video-to-mp3" },
+  { label: "מרכז אודיו וחיתוך", icon: Music, path: "/video-to-mp3" },
   { label: "הרמוניקיה", icon: AudioLines, path: "/harmonika" },
   { label: "התקנת שרת", icon: Server, path: "/setup" },
   { label: "לוח בקרה", icon: Bot, path: "/system-dashboard" },
@@ -392,18 +390,6 @@ const AppSidebar = () => {
                 <span className="flex-1 text-right">{item.label}</span>
               </button>
             ))}
-
-            {/* Quick Cut – global action (not a route) */}
-            <button
-              onClick={() => {
-                openQuickCut();
-                if (!isPinned) setIsOpen(false);
-              }}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors w-full border border-yellow-500/40 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/10"
-            >
-              <Scissors className="w-5 h-5 shrink-0" />
-              <span className="flex-1 text-right">✂️ חיתוך מהיר</span>
-            </button>
 
             {/* Admin-only: Voice Command */}
             {isAdmin && (

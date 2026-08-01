@@ -14,9 +14,13 @@ test.describe('מעבדת ניקוי קול — AudioCleanLab', () => {
     // Page title
     await expect(page.getByText('מעבדת ניקוי קול').first()).toBeVisible({ timeout: 15000 });
 
+    const lab = page.getByTestId('audio-clean-lab');
+    await expect(lab).toHaveAttribute('dir', 'rtl');
+    expect(await lab.evaluate(element => getComputedStyle(element).textAlign)).toBe('right');
+
     // 3 tabs
-    await expect(page.getByRole('tab', { name: /Pipeline/i })).toBeVisible();
-    await expect(page.getByRole('tab', { name: /השוואה/i })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /תהליך עיבוד/i })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /השוואת מקור ופלט/i })).toBeVisible();
     await expect(page.getByRole('tab', { name: /מידע/i })).toBeVisible();
   });
 
@@ -28,17 +32,17 @@ test.describe('מעבדת ניקוי קול — AudioCleanLab', () => {
   test('טאב מידע מציג ארכיטקטורת Pipeline', async ({ page }) => {
     await page.goto('/audio-clean');
     await page.getByRole('tab', { name: /מידע/i }).click();
-    await expect(page.getByText('ארכיטקטורת Pipeline')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('מבנה תהליך העיבוד')).toBeVisible({ timeout: 10000 });
     await expect(page.getByText('ניקוי רעש — RNNoise')).toBeVisible();
-    await expect(page.getByText('EQ + פילטרים')).toBeVisible();
-    await expect(page.getByText('נורמליזציה').first()).toBeVisible();
-    await expect(page.getByText('שיפור AI (שרת)').first()).toBeVisible();
+    await expect(page.getByText('אקולייזר ומסננים')).toBeVisible();
+    await expect(page.getByText('איזון עוצמה').first()).toBeVisible();
+    await expect(page.getByText('שיפור בבינה מלאכותית (שרת)').first()).toBeVisible();
   });
 
   test('טאב השוואה A/B מציג אזור העלאה', async ({ page }) => {
     await page.goto('/audio-clean');
-    await page.getByRole('tab', { name: /השוואה/i }).click();
-    await expect(page.getByText('גרור קובץ להשוואת A/B/C')).toBeVisible({ timeout: 10000 });
+    await page.getByRole('tab', { name: /השוואת מקור ופלט/i }).click();
+    await expect(page.getByText('גרור קובץ להשוואה משולשת')).toBeVisible({ timeout: 10000 });
   });
 
   test('Pipeline מציג הגדרות אחרי העלאת קובץ', async ({ page }) => {
@@ -54,11 +58,11 @@ test.describe('מעבדת ניקוי קול — AudioCleanLab', () => {
     });
 
     // Pipeline config should appear
-    await expect(page.getByText('הגדרות Pipeline')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('הגדרות תהליך העיבוד')).toBeVisible({ timeout: 10000 });
     await expect(page.getByText('ניקוי רעש (RNNoise)')).toBeVisible();
-    await expect(page.getByText('EQ + פילטרים')).toBeVisible();
-    await expect(page.getByText('הפעל Pipeline')).toBeVisible();
-    await expect(page.getByText('זרימת Pipeline')).toBeVisible();
+    await expect(page.getByText('אקולייזר ומסננים')).toBeVisible();
+    await expect(page.getByText('הפעל תהליך עיבוד')).toBeVisible();
+    await expect(page.getByText('זרימת תהליך העיבוד')).toBeVisible();
   });
 
   test('Pipeline flow visualization מוצג', async ({ page }) => {
@@ -85,13 +89,49 @@ test.describe('מעבדת ניקוי קול — AudioCleanLab', () => {
       buffer: createTestWav(),
     });
 
-    await expect(page.getByText('הפעל Pipeline')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('הפעל תהליך עיבוד')).toBeVisible({ timeout: 10000 });
 
     // Click run — the progress should show a percentage
-    await page.getByText('הפעל Pipeline').click();
+    await page.getByText('הפעל תהליך עיבוד').click();
 
     // Wait for percentage to appear (e.g. "5%" or "15%" etc.)
     await expect(page.getByText(/%/).first()).toBeVisible({ timeout: 15000 });
+  });
+
+  test('Pipeline אמיתי מפיק תוצאה עקבית בשתי הרצות על אותו קובץ', async ({ page }) => {
+    await page.goto('/audio-clean');
+    const fileInput = page.locator('input[type="file"]').first();
+    await fileInput.setInputFiles({
+      name: 'speech-with-noise.wav',
+      mimeType: 'audio/wav',
+      buffer: createNoisySpeechWav(),
+    });
+
+    const runAndReadQuality = async () => {
+      await page.getByText('הפעל תהליך עיבוד').click();
+      const report = page.getByTestId('audio-quality-report');
+      await expect(report).toBeVisible({ timeout: 60000 });
+      return {
+        verdict: (await page.getByTestId('audio-quality-verdict').innerText()).trim(),
+        score: (await page.getByTestId('audio-quality-score').innerText()).trim(),
+        snrDelta: (await page.getByTestId('audio-quality-snr-delta').innerText()).trim(),
+        noiseFloorDelta: (await page.getByTestId('audio-quality-noise-floor-delta').innerText()).trim(),
+        contentSimilarity: (await page.getByTestId('audio-quality-content-similarity').innerText()).trim(),
+        durationDrift: (await page.getByTestId('audio-quality-duration-drift').innerText()).trim(),
+      };
+    };
+
+    const firstRun = await runAndReadQuality();
+    const secondRun = await runAndReadQuality();
+
+    expect(secondRun).toEqual(firstRun);
+    expect(firstRun.verdict).not.toContain('רגרסיה');
+
+    const report = page.getByTestId('audio-quality-report');
+    await expect(report.getByText('שער איכות אובייקטיבי')).toBeVisible();
+    await expect(report.getByText(/שיפור מדיד|יציב|לא חד-משמעי/)).toBeVisible();
+    await expect(report.getByText('דמיון תוכן')).toBeVisible();
+    await expect(report.getByText('סטיית משך')).toBeVisible();
   });
 
   test('כפתור המשך מוצג אחרי שגיאה ב-AI', async ({ page }) => {
@@ -108,7 +148,7 @@ test.describe('מעבדת ניקוי קול — AudioCleanLab', () => {
       buffer: createTestWav(),
     });
 
-    await expect(page.getByText('הפעל Pipeline')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('הפעל תהליך עיבוד')).toBeVisible({ timeout: 10000 });
 
     // Turn off RNNoise and EQ, turn on AI using nth switch indexes
     // Switch order: 0=RNNoise(on), 1=EQ(on), 2=boostPresence(on, inside EQ), 3=Normalize(off), 4=AI(off)
@@ -123,7 +163,7 @@ test.describe('מעבדת ניקוי קול — AudioCleanLab', () => {
     await expect(page.getByText('Demucs / DeepFilter / MetricGAN')).toBeVisible({ timeout: 5000 });
 
     // Run pipeline — AI stage should fail
-    await page.getByText('הפעל Pipeline').click();
+    await page.getByText('הפעל תהליך עיבוד').click();
 
     // Should show error message
     await expect(page.locator('.text-red-500').first()).toBeVisible({ timeout: 30000 });
@@ -174,5 +214,39 @@ function createTestWav(): Buffer {
   buffer.writeUInt32LE(dataSize, 40);
   // samples are already 0 (silence)
 
+  return buffer;
+}
+
+function createNoisySpeechWav(): Buffer {
+  const sampleRate = 48000;
+  const durationSec = 1;
+  const numSamples = sampleRate * durationSec;
+  const dataSize = numSamples * 2;
+  const buffer = Buffer.alloc(44 + dataSize);
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write('WAVE', 8);
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * 2, 28);
+  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataSize, 40);
+
+  let seed = 123456789;
+  for (let index = 0; index < numSamples; index += 1) {
+    seed = (1664525 * seed + 1013904223) >>> 0;
+    const noise = (seed / 0xffffffff * 2 - 1) * 0.07;
+    const time = index / sampleRate;
+    const speech = (Math.floor(time * 5) % 2 === 0)
+      ? 0.35 * Math.sin(2 * Math.PI * 220 * time)
+      : 0;
+    const sample = Math.max(-1, Math.min(1, speech + noise));
+    buffer.writeInt16LE(Math.round(sample * 32767), 44 + index * 2);
+  }
   return buffer;
 }

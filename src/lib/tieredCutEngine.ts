@@ -57,6 +57,8 @@ export interface TieredCutOutcome {
   tier: CutTier;
   results: CutResult[];
   durationSec: number;
+  /** Set only when the AudioBuffer fallback created a legacy queued job. */
+  sourceJobId?: string;
 }
 
 
@@ -408,7 +410,7 @@ async function tierAudioBuffer(
       });
       if (upd.status === "done") {
         unsub();
-        resolve({ tier: "audio-buffer", results: upd.results, durationSec: upd.durationSec ?? 0 });
+        resolve({ tier: "audio-buffer", results: upd.results, durationSec: upd.durationSec ?? 0, sourceJobId: job.id });
       } else if (upd.status === "error") {
         unsub();
         reject(new Error(upd.error || "שגיאת חיתוך"));

@@ -1,6 +1,5 @@
 /**
- * Tiny global event bus to open the QuickCutDialog from anywhere
- * (sidebar, page buttons, keyboard shortcuts, …).
+ * Compatibility event bus that opens the unified cutter from anywhere.
  */
 
 const EVT_OPEN = "quick-cut:open";

@@ -2256,10 +2256,10 @@ const Index = () => {
                 type="button"
                 onClick={() => openQuickCut()}
                 className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md border border-yellow-500/50 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
-                title="פתח חיתוך מהיר לקובץ חיצוני"
+                title="פתח את מרכז החיתוך המתקדם"
               >
                 <Scissors className="w-3.5 h-3.5" />
-                חיתוך מהיר
+                מרכז חיתוך
               </button>
               <span className="text-xs text-muted-foreground">מומלץ לקבצים ארוכים</span>
             </div>
