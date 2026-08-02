@@ -131,29 +131,37 @@ const AppSidebar = () => {
   };
   const { preferences, updatePreference, updatePreferences } = useCloudPreferences();
   const { activeThemeId, allThemes, setTheme } = useTheme();
-  const [isPinned, setIsPinned] = useState(preferences.sidebar_pinned);
+  const [isPinnedPreference, setIsPinned] = useState(preferences.sidebar_pinned);
   const lastPinnedRef = useRef(preferences.sidebar_pinned);
 
   useEffect(() => {
-    if (preferences.sidebar_pinned !== isPinned) {
+    if (preferences.sidebar_pinned !== isPinnedPreference) {
       setIsPinned(preferences.sidebar_pinned);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preferences.sidebar_pinned]);
 
   useEffect(() => {
-    if (lastPinnedRef.current === isPinned) return;
-    lastPinnedRef.current = isPinned;
-    if (isPinned !== preferences.sidebar_pinned) {
-      updatePreference('sidebar_pinned', isPinned);
+    if (lastPinnedRef.current === isPinnedPreference) return;
+    lastPinnedRef.current = isPinnedPreference;
+    if (isPinnedPreference !== preferences.sidebar_pinned) {
+      updatePreference('sidebar_pinned', isPinnedPreference);
     }
-    window.dispatchEvent(new CustomEvent("sidebar-pin-change", { detail: isPinned }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPinnedPreference]);
+
+  // Pinning is a desktop preference. On mobile the sidebar is always an
+  // off-canvas overlay and must never reserve horizontal page space.
+  const isPinned = isPinnedPreference && !isMobile;
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("sidebar-pin-change", { detail: isPinned }));
   }, [isPinned]);
 
   useEffect(() => {
     if (isPinned) setIsOpen(true);
-  }, [isPinned]);
+    else if (isMobile) setIsOpen(false);
+  }, [isMobile, isPinned]);
 
   // Notify AppLayout when sidebar visibility changes
   useEffect(() => {
@@ -344,18 +352,20 @@ const AppSidebar = () => {
             >
               <Palette className="w-4 h-4" />
             </button>
-            <button
-              onClick={() => setIsPinned((p) => !p)}
-              className={cn(
-                "p-1.5 rounded-md transition-colors",
-                isPinned
-                  ? "text-primary bg-primary/10"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-              )}
-              title={isPinned ? "שחרר" : "הצמד"}
-            >
-              {isPinned ? <Pin className="w-4 h-4" /> : <PinOff className="w-4 h-4" />}
-            </button>
+            {!isMobile && (
+              <button
+                onClick={() => setIsPinned((p) => !p)}
+                className={cn(
+                  "p-1.5 rounded-md transition-colors",
+                  isPinned
+                    ? "text-primary bg-primary/10"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+                title={isPinned ? "שחרר" : "הצמד"}
+              >
+                {isPinned ? <Pin className="w-4 h-4" /> : <PinOff className="w-4 h-4" />}
+              </button>
+            )}
             {!isPinned && (
               <button
                 onClick={() => setIsOpen(false)}

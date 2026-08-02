@@ -39,7 +39,7 @@ const FloatingPlayerPortal = lazy(() => import("@/components/FloatingPlayerPorta
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })));
 const LoshonKodeshRules = lazy(() => import("@/pages/LoshonKodeshRules"));
 const AIVersionsGrid = lazy(() => import("@/components/AIVersionsGrid").then(m => ({ default: m.AIVersionsGrid })));
-import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Columns2, Columns3, AlignJustify, LayoutGrid, Rows3, Save, Copy, LayoutPanelTop, LayoutPanelLeft, Square, StretchHorizontal, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle, Link, AudioWaveform } from "lucide-react";
+import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Rows3, Save, Copy, LayoutPanelLeft, Square, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle, Link, AudioWaveform } from "lucide-react";
 import { uploadToDrive } from "@/components/GoogleDriveBrowser";
 import { DriveFolderPicker } from "@/components/DriveFolderPicker";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
@@ -97,6 +97,8 @@ import {
   type AudioLearningCandidate,
 } from "@/lib/audioLearning";
 import "@/styles/mobile-pages.css";
+
+type PlayerLayout = 'split' | 'full' | 'eq-wide';
 
 // Inline editor for the transcript's title — shown at the top of the AI tab.
 function TranscriptTitleEditor({
@@ -411,12 +413,16 @@ const TextEditor = () => {
   const setTextColor = (v: string) => updatePreference('text_color', v);
   const setLineHeight = (v: number) => updatePreference('line_height', v);
 
-  // Column view (cloud-synced)
-  const columns = preferences.editor_columns;
-
   // Player layout (cloud-synced)
-  const playerLayout = (preferences.player_layout || 'split') as 'split' | 'stacked' | 'full' | 'wide' | 'eq-wide';
-  const setPlayerLayout = useCallback((v: 'split' | 'stacked' | 'full' | 'wide' | 'eq-wide') => updatePreference('player_layout', v), [updatePreference]);
+  const storedPlayerLayout = preferences.player_layout || 'split';
+  const playerLayout: PlayerLayout = storedPlayerLayout === 'full' || storedPlayerLayout === 'eq-wide'
+    ? storedPlayerLayout
+    : 'split';
+  const setPlayerLayout = useCallback((v: PlayerLayout) => updatePreference('player_layout', v), [updatePreference]);
+  useEffect(() => {
+    if (!cloudPreferencesLoaded || storedPlayerLayout === playerLayout) return;
+    updatePreference('player_layout', playerLayout);
+  }, [cloudPreferencesLoaded, playerLayout, storedPlayerLayout, updatePreference]);
   const [isPlayerFloating, setIsPlayerFloating] = useState(false);
   const togglePlayerFloating = useCallback(() => setIsPlayerFloating(p => !p), []);
   const [isMarkingActive, setIsMarkingActive] = useState(false);
@@ -461,17 +467,6 @@ const TextEditor = () => {
     if (opts?.jump) setActiveTab("loshon");
   }, [text]);
 
-  const setColumns = (v: number) => updatePreference('editor_columns', v);
-  const cycleColumnView = () => {
-    const next = columns === 1 ? 2 : columns === 2 ? 3 : 1;
-    setColumns(next);
-  };
-
-  const columnStyle: React.CSSProperties = columns > 1 ? {
-    columnCount: columns,
-    columnGap: '2rem',
-    columnRule: '1px solid hsl(var(--border))',
-  } : {};
   const textWordCount = useMemo(() => {
     const trimmed = text.trim();
     return trimmed ? trimmed.split(/\s+/).length : 0;
@@ -1570,15 +1565,13 @@ const TextEditor = () => {
 
   // The AI dual-editor is rendered in two places (the "ai" tab and inside the
   // "compare" tab). Both share identical wiring; this builder keeps them in sync.
-  // `withColumns` mirrors the multi-column layout only in the standalone AI tab.
-  const renderAiEditor = (opts: { label: string; withColumns?: boolean }) => (
+  const renderAiEditor = (opts: { label: string }) => (
     <div
       style={{
         fontSize: `${fontSize}px`,
         fontFamily,
         color: textColor,
         lineHeight,
-        ...(opts.withColumns ? columnStyle : {}),
       }}
     >
       <LazyErrorBoundary label={opts.label}>
@@ -1616,34 +1609,6 @@ const TextEditor = () => {
             <span className="text-xs text-muted-foreground hidden sm:inline">ערוך · שפר · השווה</span>
           </div>
           <div className="flex items-center gap-2">
-            {/* Column view selector */}
-            <div className="flex items-center border rounded-md overflow-hidden">
-              {[
-                { cols: 1, icon: AlignJustify, label: "עמודה אחת" },
-                { cols: 2, icon: Columns2, label: "2 עמודות" },
-                { cols: 3, icon: Columns3, label: "3 עמודות" },
-              ].map(({ cols, icon: Icon, label }) => (
-                <Button
-                  key={cols}
-                  variant={columns === cols ? "default" : "ghost"}
-                  size="icon"
-                  className="h-7 w-7 rounded-none"
-                  onClick={() => setColumns(cols)}
-                  title={label}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                </Button>
-              ))}
-            </div>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7"
-              onClick={cycleColumnView}
-              title={`החלף תצוגה מהירה · עכשיו: ${columns === 1 ? 'רשימה' : columns === 2 ? 'רשת' : 'טבלה'}`}
-            >
-              <LayoutGrid className="h-3.5 w-3.5 text-[#0f1e43]" />
-            </Button>
             <TextStyleControl
               fontSize={fontSize}
               fontFamily={fontFamily}
@@ -1900,10 +1865,10 @@ const TextEditor = () => {
             <LazyErrorBoundary label="עורך טקסט">
 
             {/* ── Toolbar: layout controls ── */}
-            <div className="flex items-center justify-between gap-3" dir="rtl">
+            <div className="flex flex-wrap items-center justify-between gap-3" dir="rtl">
 
               {/* Left: floating toggles */}
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1">
                 <Button
                   variant={forcedAlignmentState.status === 'aligned' ? 'default' : 'outline'}
                   size="sm"
@@ -1964,13 +1929,11 @@ const TextEditor = () => {
               </div>
 
               {/* Right: layout presets */}
-              <div className="flex items-center gap-1.5 bg-muted/50 rounded-xl p-1 border border-border/40">
+              <div className="flex shrink-0 items-center gap-1.5 bg-muted/50 rounded-xl p-1 border border-border/40">
                 {([
-                  { id: 'split',   icon: LayoutPanelLeft,   title: 'פריסה מפוצלת' },
-                  { id: 'stacked', icon: LayoutPanelTop,    title: 'פריסה מוערמת' },
-                  { id: 'wide',    icon: StretchHorizontal, title: 'רחבה — נגן+EQ מלא' },
-                  { id: 'full',    icon: Square,            title: 'נגן בלבד (ללא תמלול)' },
-                  { id: 'eq-wide', icon: SlidersHorizontal, title: 'EQ פרוס — מיקסר מלא' },
+                  { id: 'split',   icon: LayoutPanelLeft,   title: 'נגן ותמלול' },
+                  { id: 'full',    icon: Square,            title: 'נגן בלבד' },
+                  { id: 'eq-wide', icon: SlidersHorizontal, title: 'נגן ותמלול עם מיקסר רחב' },
                 ] as const).map(({ id, icon: Icon, title }) => (
                   <Button
                     key={id}
@@ -2140,7 +2103,6 @@ const TextEditor = () => {
                   learningEnabled={true}
                   onSaveLearning={handleSaveLearningToProfile}
                   enableRichEdit
-                  richColumnStyle={columnStyle}
                   onWordCorrected={(original, corrected) => {
                     debugLog.info('TextEditor', `Spell correction: "${original}" → "${corrected}"`);
                   }}
@@ -2199,7 +2161,7 @@ const TextEditor = () => {
             </div>
 
             {aiPolishEnabled ? (
-              renderAiEditor({ label: "עורך AI", withColumns: true })
+              renderAiEditor({ label: "עורך AI" })
             ) : (
               <div className="rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">
                 עריכת AI כבויה. סמן את ה-V למעלה כדי להפעיל אותה ולהשתמש בשיפורי הניסוח, פיסוק והפסקאות.

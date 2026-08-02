@@ -32,7 +32,6 @@ import { WordContextMenu } from "@/components/WordContextMenu";
 import { alignEditedToWhisper, findActiveWordIndex } from "@/lib/whisperAlignment";
 import { getWordHighlightStyle, isWordApproved } from "@/lib/personalPronunciationModel";
 import { RichTextEditor } from "@/components/RichTextEditor";
-import { RichTextEditorMirror } from "@/components/RichTextEditorMirror";
 import { TextMarkingOverlay } from "@/components/TextMarkingOverlay";
 import { getTrustedWordSuggestion } from '@/lib/trustedWordSuggestion';
 
@@ -66,8 +65,6 @@ interface SyncMirrorLayoutProps {
   enableRichEdit?: boolean;
   /** Fired when RichTextEditor auto-corrects a word (for logging/learning). */
   onWordCorrected?: (original: string, corrected: string) => void;
-  /** Optional column style passed to RichTextEditor. */
-  richColumnStyle?: React.CSSProperties;
 }
 
 function normalizeWord(w: string) {
@@ -156,7 +153,6 @@ export const SyncMirrorLayout = ({
   onSaveLearning,
   enableRichEdit = false,
   onWordCorrected,
-  richColumnStyle,
 }: SyncMirrorLayoutProps) => {
   type ManualCorrectionMarker = {
     wordIndex: number;
@@ -186,6 +182,7 @@ export const SyncMirrorLayout = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const leftRichRef = useRef<HTMLDivElement>(null);
   const leftRowsRef = useRef<HTMLDivElement>(null);
+  const rightRowsRef = useRef<HTMLDivElement>(null);
   const [isMarkingActive, setIsMarkingActive] = useState(false);
   const [rightTopOffset, setRightTopOffset] = useState(0);
   // "Precise row alignment" — when true (default), left column renders via the
@@ -331,30 +328,28 @@ export const SyncMirrorLayout = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockedPane]);
 
-  // Measure the left column's real first-text surface so the right column starts
-  // on the same pixel line even when the left side has marking/edit toolbars.
+  // Measure the real editable surface. The read-only side receives only the
+  // required spacer, instead of rendering a duplicate toolbar full of no-op buttons.
   useEffect(() => {
     if (!enableRichEdit || fullEditMode) { setRightTopOffset(0); return; }
     const wrapper = leftRichRef.current;
-    const scroller = scrollRef.current;
-    if (!wrapper || !scroller) return;
+    const rightRows = rightRowsRef.current;
+    if (!wrapper || !rightRows) return;
     let raf = 0;
     const measure = () => {
       const editable = wrapper.querySelector('[contenteditable="true"]') as HTMLElement | null;
       const firstPreciseLine = leftRowsRef.current?.querySelector<HTMLElement>('[data-line="0"]') ?? null;
       const target = effectiveRichEdit ? editable : firstPreciseLine;
       const anchor = target ?? wrapper;
-      const diff = Math.max(0, Math.round(anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop));
+      const diff = Math.max(16, Math.round(anchor.getBoundingClientRect().top - rightRows.getBoundingClientRect().top));
       setRightTopOffset(diff);
     };
     const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
     schedule();
     const ro = new ResizeObserver(schedule);
     ro.observe(wrapper);
-    ro.observe(scroller);
     window.addEventListener('resize', schedule);
-    const t = window.setInterval(schedule, 800); // catch async toolbar/spell changes
-    return () => { ro.disconnect(); window.removeEventListener('resize', schedule); window.clearInterval(t); cancelAnimationFrame(raf); };
+    return () => { ro.disconnect(); window.removeEventListener('resize', schedule); cancelAnimationFrame(raf); };
   }, [enableRichEdit, effectiveRichEdit, fullEditMode, isMarkingActive, localFontSize, localFontFamily, localLineHeight, preciseAlign]);
 
 
@@ -1647,16 +1642,16 @@ export const SyncMirrorLayout = ({
       {/* Shared scroll container — two equal flex columns (no individual headers) */}
       <div
         ref={scrollRef}
-        className="flex flex-1 min-h-0 overflow-y-auto"
+        className="flex flex-col lg:flex-row flex-1 min-h-0 overflow-y-auto"
       >
         {/* ── RIGHT column — full mirror, fully editable (unless locked) ── */}
         <div
           ref={rightColRef}
+          style={{ '--pane-basis': `${rightPct}%` } as React.CSSProperties}
           className={cn(
-            "min-w-0 flex flex-col border-s border-border/40 relative transition-opacity",
+            "min-w-0 w-full lg:w-auto lg:[flex:0_0_var(--pane-basis)] flex flex-col border-s border-border/40 relative transition-opacity",
             lockedPane === 'right' && "opacity-90 bg-muted/30",
           )}
-          style={{ flex: `0 0 ${rightPct}%` }}
         >
 
           {/* Per-column control strip: active selector + lock */}
@@ -1682,23 +1677,13 @@ export const SyncMirrorLayout = ({
               {lockedPane === 'right' ? 'נעול' : 'פתוח'}
             </button>
           </div>
-          {/* Mirror toolbar — visually identical strip to the left RichTextEditor toolbar.
-              Keeps both columns aligned at the same vertical offset so matching rows
-              line up at the same height. Only alignment buttons are interactive
-              (broadcasting via sharedTextAlign). */}
-          {effectiveRichEdit && !paddedAlignment && (
-            <div className="flex flex-col gap-2 p-3" dir="rtl" style={{ pointerEvents: 'auto' }}>
-              <div style={{ ...textStyle, ...(localTextColor ? { color: localTextColor } : {}), ...richColumnStyle }}>
-                <RichTextEditorMirror textAlign={sharedTextAlign} onTextAlignChange={setSharedTextAlign} />
-              </div>
-            </div>
-          )}
           {/* word rows — when rich-edit is on, pad-top dynamically to align with editor's first line */}
           <div
+            ref={rightRowsRef}
             className="px-4 pb-4"
             style={{
               ...textStyle,
-              paddingTop: 16,
+              paddingTop: effectiveRichEdit && !paddedAlignment ? rightTopOffset : 16,
             }}
           >
             {paddedAlignment && !compareMode ? (() => {
@@ -1748,7 +1733,7 @@ export const SyncMirrorLayout = ({
             window.addEventListener('pointerup', onUp);
           }}
           onDoubleClick={() => setManualSplit(null)}
-          className="group/divider relative shrink-0 w-1.5 cursor-col-resize bg-border/40 hover:bg-primary/50 transition-colors"
+          className="group/divider relative hidden lg:block shrink-0 w-1.5 cursor-col-resize bg-border/40 hover:bg-primary/50 transition-colors"
         >
           <div className="absolute inset-y-0 -left-1 -right-1" />
           <div className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 h-8 w-1 rounded-full bg-foreground/20 group-hover/divider:bg-primary/80 transition-colors" />
@@ -1757,11 +1742,11 @@ export const SyncMirrorLayout = ({
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
         <div
           ref={leftColRef}
+          style={{ '--pane-basis': `${leftPct}%` } as React.CSSProperties}
           className={cn(
-            "min-w-0 flex flex-col relative transition-opacity",
+            "min-w-0 w-full lg:w-auto lg:[flex:0_0_var(--pane-basis)] flex flex-col relative transition-opacity",
             lockedPane === 'left' && "opacity-90 bg-muted/30",
           )}
-          style={{ flex: `0 0 ${leftPct}%` }}
         >
 
           {/* Per-column control strip: active selector + lock */}
@@ -1794,17 +1779,11 @@ export const SyncMirrorLayout = ({
               {/* RichTextEditor — full editing surface */}
               {!isMarkingActive && (
                 <div
-                  style={{
-                    ...textStyle,
-                    ...(localTextColor ? { color: localTextColor } : {}),
-                    ...richColumnStyle,
-                  }}
+                  style={{ ...textStyle, ...(localTextColor ? { color: localTextColor } : {}) }}
                 >
                   <RichTextEditor
                     text={text}
                     onChange={(v) => handleTextChangeFromPane('left', v)}
-                    embeddedInSplit
-                    columnStyle={richColumnStyle}
                     onSaveReplaceOriginal={onSaveReplace}
                     onDuplicateSave={onDuplicateSave ? () => onDuplicateSave('') : undefined}
                     onWordCorrected={onWordCorrected}

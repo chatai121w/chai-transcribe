@@ -2,10 +2,12 @@ import { useState, useEffect, ReactNode } from "react";
 import { ConnectionStatusBanner } from "./ConnectionStatusBanner";
 import { PWAInstallBanner } from "./PWAInstallBanner";
 import { GlobalJobsWidget } from "./GlobalJobsWidget";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 const SIDEBAR_WIDTH = 260;
 
 const AppLayout = ({ children }: { children: ReactNode }) => {
+  const isMobile = useIsMobile();
   const [isPinned, setIsPinned] = useState(() => {
     try {
       return localStorage.getItem("sidebar-pinned") === "true";
@@ -37,7 +39,7 @@ const AppLayout = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
-  const showMargin = isPinned || isOpen;
+  const showMargin = !isMobile && (isPinned || isOpen);
 
   return (
     <div
