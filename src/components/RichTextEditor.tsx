@@ -45,6 +45,9 @@ interface RichTextEditorProps {
    *  columns) instead of running execCommand on the local selection. */
   textAlign?: 'right' | 'left' | 'center' | 'justify';
   onTextAlignChange?: (align: 'right' | 'left' | 'center' | 'justify') => void;
+  /** The editor is already hosted inside a paired synchronized layout.
+   *  Prevents a second nested split and keeps the toolbar usable in a pane. */
+  embeddedInSplit?: boolean;
 }
 
 const sanitize = (html: string): string => DOMPurify.sanitize(html, {
@@ -70,7 +73,7 @@ const stripHtml = (html: string): string => {
 
 type ViewMode = 'edit' | 'preview' | 'split';
 
-export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrected, onSaveReplaceOriginal, onDuplicateSave, textAlign, onTextAlignChange }: RichTextEditorProps) => {
+export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrected, onSaveReplaceOriginal, onDuplicateSave, textAlign, onTextAlignChange, embeddedInSplit = false }: RichTextEditorProps) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const [showFormatBar, setShowFormatBar] = useState(false);
   const [textColor, setTextColor] = useState("#000000");
@@ -95,6 +98,10 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
   const spellCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contextWordRangeRef = useRef<Range | null>(null);
   const [contextWord, setContextWord] = useState("");
+
+  useEffect(() => {
+    if (embeddedInSplit && viewMode !== 'edit') setViewMode('edit');
+  }, [embeddedInSplit, viewMode]);
 
   const highlightColors = [
     "#ffff00", "#00ff00", "#00ffff", "#ff00ff", "#ffa500", "#ff0000",
@@ -548,7 +555,7 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
   );
 
   const cardClass = cn(
-    "p-4 transition-all duration-300",
+    embeddedInSplit ? "p-2 transition-all duration-300" : "p-4 transition-all duration-300",
     isFullscreen && "fixed inset-0 z-50 rounded-none overflow-auto bg-background"
   );
 
@@ -557,7 +564,10 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
       <div className="space-y-3">
 
         {/* === שורת כלים ראשית === */}
-        <div className="flex flex-wrap items-center gap-1 pb-3 border-b">
+        <div className={cn(
+          "flex items-center gap-1 pb-3 border-b",
+          embeddedInSplit ? "flex-nowrap overflow-x-auto overflow-y-hidden" : "flex-wrap",
+        )}>
 
           {/* Undo / Redo */}
           <ToolBtn icon={Undo} label="ביטול (Ctrl+Z)" onClick={() => execCommand('undo')} />
@@ -756,18 +766,22 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
             onClick={() => setViewMode('edit')}
             active={viewMode === 'edit'}
           />
-          <ToolBtn
-            icon={Eye}
-            label="תצוגה מקדימה"
-            onClick={() => setViewMode('preview')}
-            active={viewMode === 'preview'}
-          />
-          <ToolBtn
-            icon={SplitSquareVertical}
-            label="תצוגה מפוצלת"
-            onClick={() => setViewMode('split')}
-            active={viewMode === 'split'}
-          />
+          {!embeddedInSplit && (
+            <ToolBtn
+              icon={Eye}
+              label="תצוגה מקדימה"
+              onClick={() => setViewMode('preview')}
+              active={viewMode === 'preview'}
+            />
+          )}
+          {!embeddedInSplit && (
+            <ToolBtn
+              icon={SplitSquareVertical}
+              label="תצוגה מפוצלת"
+              onClick={() => setViewMode('split')}
+              active={viewMode === 'split'}
+            />
+          )}
           <ToolBtn
             icon={isFullscreen ? Minimize2 : Maximize2}
             label={isFullscreen ? "יציאה ממסך מלא" : "מסך מלא"}
@@ -830,12 +844,12 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
         {/* === אזור עריכה === */}
         <div className={cn(
           "grid gap-4",
-          viewMode === 'split' ? "grid-cols-2" : "grid-cols-1"
+          !embeddedInSplit && viewMode === 'split' ? "grid-cols-2" : "grid-cols-1"
         )}>
           {/* Editor */}
-          {(viewMode === 'edit' || viewMode === 'split') && (
+          {(embeddedInSplit || viewMode === 'edit' || viewMode === 'split') && (
             <div className="space-y-1">
-              {viewMode === 'split' && (
+              {!embeddedInSplit && viewMode === 'split' && (
                 <Label className="text-xs text-muted-foreground">עריכה</Label>
               )}
               <div className="relative">
@@ -880,9 +894,9 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
           )}
 
           {/* Preview */}
-          {(viewMode === 'preview' || viewMode === 'split') && (
+          {(viewMode === 'preview' || (!embeddedInSplit && viewMode === 'split')) && (
             <div className="space-y-1">
-              {viewMode === 'split' && (
+              {!embeddedInSplit && viewMode === 'split' && (
                 <Label className="text-xs text-muted-foreground">תצוגה מקדימה</Label>
               )}
               <div
@@ -1024,7 +1038,7 @@ export const RichTextEditor = memo(({ text, onChange, columnStyle, onWordCorrect
         </p>
 
         {/* === סטטיסטיקות === */}
-        <div className="flex gap-4 text-xs text-muted-foreground border-t pt-3">
+        <div className="flex flex-wrap gap-4 text-xs text-muted-foreground border-t pt-3">
           <span>תווים: {stats.chars}</span>
           <span>מילים: {stats.words}</span>
           <span>שורות: {stats.lines}</span>

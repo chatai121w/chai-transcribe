@@ -1803,6 +1803,7 @@ export const SyncMirrorLayout = ({
                   <RichTextEditor
                     text={text}
                     onChange={(v) => handleTextChangeFromPane('left', v)}
+                    embeddedInSplit
                     columnStyle={richColumnStyle}
                     onSaveReplaceOriginal={onSaveReplace}
                     onDuplicateSave={onDuplicateSave ? () => onDuplicateSave('') : undefined}

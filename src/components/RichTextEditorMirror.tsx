@@ -67,9 +67,9 @@ const MirrorBtn = ({
 
 export const RichTextEditorMirror = ({ textAlign, onTextAlignChange }: RichTextEditorMirrorProps) => {
   return (
-    <Card className="p-4" dir="rtl">
+    <Card className="p-2" dir="rtl">
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-1 pb-3 border-b">
+        <div className="flex flex-nowrap items-center gap-1 pb-3 border-b overflow-x-auto overflow-y-hidden">
           {/* Undo / Redo — mirror only */}
           <MirrorBtn icon={Undo} label={NOOP_TITLE} />
           <MirrorBtn icon={Redo} label={NOOP_TITLE} />
