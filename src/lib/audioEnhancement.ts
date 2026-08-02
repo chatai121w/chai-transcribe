@@ -1,12 +1,13 @@
 import { getServerUrl } from "@/lib/serverConfig";
 import { getApiKey } from "@/lib/keyCrypto";
+import { computeOrthographicCER, computeOrthographicWER } from "@/lib/asrMetrics";
 
-export type EnhancementPreset = "clean" | "ai_voice" | "podcast" | "broadcast" | "ai_denoise" | "ai_enhance" | "ai_full" | "ai_hebrew";
+export type EnhancementPreset = "clean" | "ai_voice" | "podcast" | "broadcast" | "ai_denoise" | "ai_enhance" | "ai_full" | "ai_hebrew" | "ai_deepfilter" | "ai_transcription";
 export type EnhancementOutputFormat = "mp3" | "opus" | "aac";
 
 export interface AiEnhanceStatus {
   available: boolean;
-  engines: { spectral?: boolean; metricgan?: boolean; gpu?: boolean; gpu_name?: string };
+  engines: { spectral?: boolean; metricgan?: boolean; deepfilter?: boolean; gpu?: boolean; gpu_name?: string };
   presets: Array<{ id: string; label: string; description: string; ai: boolean }>;
   error?: string;
 }
@@ -53,14 +54,32 @@ export interface EnhancementRecommendation {
   rationale: string;
 }
 
+export interface ReferenceTranscriptionAssessment {
+  baseline: { text: string; wer: number; cer: number };
+  processed: { text: string; wer: number; cer: number };
+  werDelta: number;
+  cerDelta: number;
+  verdict: "improved" | "stable" | "regression";
+}
+
+export function classifyReferenceDelta(
+  werDelta: number,
+  cerDelta: number,
+  tolerance = 0.002,
+): ReferenceTranscriptionAssessment["verdict"] {
+  if (werDelta > tolerance || cerDelta > tolerance) return "regression";
+  if (werDelta < -tolerance || cerDelta < -tolerance) return "improved";
+  return "stable";
+}
+
 function parseFileNameFromContentDisposition(cd: string | null, fallback: string): string {
   if (!cd) return fallback;
-  const m = cd.match(/filename\*?=(?:UTF-8''|\")?([^;\"\n]+)/i);
+  const m = cd.match(/filename\*?=(?:UTF-8''|")?([^;"\n]+)/i);
   if (!m || !m[1]) return fallback;
   try {
-    return decodeURIComponent(m[1].replace(/\"/g, "").trim());
+    return decodeURIComponent(m[1].replace(/"/g, "").trim());
   } catch {
-    return m[1].replace(/\"/g, "").trim();
+    return m[1].replace(/"/g, "").trim();
   }
 }
 
@@ -93,17 +112,48 @@ async function transcribeForQuality(file: File, language: "he" | "auto" = "he") 
     throw new Error(body.error || `Transcription failed (${res.status})`);
   }
 
-  const data = await res.json();
+  const data = await res.json() as {
+    text?: unknown;
+    wordTimings?: Array<{ probability?: unknown }>;
+    processing_time?: unknown;
+  };
   const text = String(data.text || "");
   const wordTimings = Array.isArray(data.wordTimings) ? data.wordTimings : [];
   const avgProbability = wordTimings.length > 0
-    ? wordTimings.reduce((sum: number, w: any) => sum + (Number(w?.probability) || 0), 0) / wordTimings.length
+    ? wordTimings.reduce((sum, word) => sum + (Number(word.probability) || 0), 0) / wordTimings.length
     : 0;
 
   return {
+    text,
     wordCount: text.split(/\s+/).filter(Boolean).length,
     avgProbability,
     processingTimeSec: Number(data.processing_time) || (performance.now() - started) / 1000,
+  };
+}
+
+export async function compareEnhancementWithReference(
+  original: File,
+  processed: File,
+  reference: string,
+): Promise<ReferenceTranscriptionAssessment> {
+  if (!reference.trim()) throw new Error("נדרש טקסט אמת להשוואה");
+  // Run sequentially so local GPU engines do not load two transcription jobs at once.
+  const baselineTranscription = await transcribeForQuality(original, "he");
+  const processedTranscription = await transcribeForQuality(processed, "he");
+  const baselineWer = computeOrthographicWER(reference, baselineTranscription.text).wer;
+  const baselineCer = computeOrthographicCER(reference, baselineTranscription.text).cer;
+  const processedWer = computeOrthographicWER(reference, processedTranscription.text).wer;
+  const processedCer = computeOrthographicCER(reference, processedTranscription.text).cer;
+  const werDelta = processedWer - baselineWer;
+  const cerDelta = processedCer - baselineCer;
+  // A measurable regression in either strict metric blocks automatic approval.
+  const verdict = classifyReferenceDelta(werDelta, cerDelta);
+  return {
+    baseline: { text: baselineTranscription.text, wer: baselineWer, cer: baselineCer },
+    processed: { text: processedTranscription.text, wer: processedWer, cer: processedCer },
+    werDelta,
+    cerDelta,
+    verdict,
   };
 }
 
@@ -130,7 +180,7 @@ export async function recommendEnhancementForTranscription(
   const outputFormat = options?.outputFormat || "mp3";
   const presets = options?.presets?.length
     ? options.presets
-    : (["ai_hebrew", "ai_full", "ai_enhance", "ai_denoise", "ai_voice", "clean", "podcast", "broadcast"] as EnhancementPreset[]);
+    : (["ai_transcription", "ai_deepfilter", "ai_hebrew", "ai_full", "ai_enhance", "ai_denoise", "ai_voice", "clean", "podcast", "broadcast"] as EnhancementPreset[]);
 
   const baseline = await transcribeForQuality(file, language);
 

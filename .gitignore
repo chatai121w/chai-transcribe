@@ -26,6 +26,7 @@ dist-ssr
 # Python virtualenvs
 venv-whisper/
 .venv/
+.venv-deepfilter/
 
 # Test audio files
 test_*.wav

@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 import { AudioQualityReport } from "@/components/AudioQualityReport";
 import {
@@ -16,10 +17,12 @@ import {
 } from "@/lib/audioQualityMetrics";
 import {
   enhanceAudioOnServer,
+  compareEnhancementWithReference,
   fetchAiEnhanceStatus,
   type AiEnhanceStatus,
   type EnhancementPreset,
   type EnhancementOutputFormat,
+  type ReferenceTranscriptionAssessment,
 } from "@/lib/audioEnhancement";
 
 /* ─── lazy RNNoise singleton ─────────────────────────────── */
@@ -73,6 +76,7 @@ import {
 
 type PipelineStage = "idle" | "converting" | "vad" | "denoise" | "eq" | "normalize" | "ai" | "done" | "error";
 type TrackId = "original" | "cleaned";
+type ProcessingProfile = "fast" | "recommended" | "difficult" | "manual";
 
 interface StageResult {
   label: string;
@@ -84,6 +88,8 @@ interface StageResult {
 /* ─── constants ────────────────────────────────────────────── */
 
 const AI_PRESETS: { id: EnhancementPreset; label: string; desc: string; icon: typeof Brain }[] = [
+  { id: "ai_transcription", label: "מיטוב לתמלול (מומלץ)", desc: "DeepFilterNet 3 ב־48kHz עם עיבוד עדין", icon: Sparkles },
+  { id: "ai_deepfilter", label: "DeepFilterNet 3", desc: "ניקוי עצבי מלא־תחום ושמירת פרטי דיבור", icon: Waves },
   { id: "ai_hebrew", label: "בינה מלאכותית לעברית", desc: "MetricGAN-U ואקולייזר ממוקד עברית", icon: Brain },
   { id: "ai_full", label: "בינה מלאכותית מלאה", desc: "ניקוי, שיפור ואיזון עוצמה", icon: Sparkles },
   { id: "ai_enhance", label: "שיפור דיבור", desc: "שיפור בהירות קול בלבד", icon: Mic },
@@ -258,6 +264,7 @@ export default function AudioCleanLab() {
   const [enableEQ, setEnableEQ] = useState(true);
   const [enableNormalize, setEnableNormalize] = useState(true);
   const [enableAI, setEnableAI] = useState(false);
+  const [processingProfile, setProcessingProfile] = useState<ProcessingProfile>("fast");
   const [aiPreset, setAiPreset] = useState<EnhancementPreset>("ai_hebrew");
   const [outputFormat, setOutputFormat] = useState<EnhancementOutputFormat>("mp3");
   const [hpFreq, setHpFreq] = useState(80);
@@ -276,9 +283,31 @@ export default function AudioCleanLab() {
   const lastGoodBlobRef = useRef<Blob | null>(null);
   const [qualityAssessment, setQualityAssessment] = useState<AudioQualityAssessment | null>(null);
   const [qualityAnalyzing, setQualityAnalyzing] = useState(false);
+  const [referenceText, setReferenceText] = useState("");
+  const [asrAssessment, setAsrAssessment] = useState<ReferenceTranscriptionAssessment | null>(null);
+  const [asrAnalyzing, setAsrAnalyzing] = useState(false);
 
   /* ── server status ── */
   const [aiStatus, setAiStatus] = useState<AiEnhanceStatus | null>(null);
+
+  const applyProcessingProfile = useCallback((profile: ProcessingProfile) => {
+    setProcessingProfile(profile);
+    setCompletedStages(new Set());
+    lastGoodBlobRef.current = null;
+    if (profile === "manual") return;
+    if (profile === "fast") {
+      setEnableDenoise(true);
+      setEnableEQ(true);
+      setEnableNormalize(true);
+      setEnableAI(false);
+      return;
+    }
+    setEnableDenoise(false);
+    setEnableEQ(false);
+    setEnableNormalize(false);
+    setEnableAI(true);
+    setAiPreset(profile === "recommended" ? "ai_transcription" : "ai_full");
+  }, []);
 
   /* ── playback ── */
   const [activeTrack, setActiveTrack] = useState<TrackId>("original");
@@ -326,6 +355,7 @@ export default function AudioCleanLab() {
     setError(null);
     setCompletedStages(new Set());
     setQualityAssessment(null);
+    setAsrAssessment(null);
     setQualityAnalyzing(false);
     lastGoodBlobRef.current = null;
     setIsPlaying(false);
@@ -333,6 +363,30 @@ export default function AudioCleanLab() {
     setActiveTrack("original");
     toast({ title: "קובץ נטען", description: `${f.name} (${formatBytes(f.size)})` });
   }, [originalUrl, cleanedUrl, stageResults]);
+
+  const runReferenceAssessment = useCallback(async () => {
+    const processedBlob = stageResults.at(-1)?.blob;
+    if (!file || !processedBlob || !referenceText.trim()) return;
+    setAsrAnalyzing(true);
+    try {
+      const processed = new File([processedBlob], `${file.name}.cleaned.wav`, { type: processedBlob.type || "audio/wav" });
+      const assessment = await compareEnhancementWithReference(file, processed, referenceText);
+      setAsrAssessment(assessment);
+      toast({
+        title: assessment.verdict === "improved" ? "נמדד שיפור בתמלול" : assessment.verdict === "regression" ? "נמדדה רגרסיה בתמלול" : "התמלול נשאר יציב",
+        description: `WER מקור ${(assessment.baseline.wer * 100).toFixed(1)}% ← פלט ${(assessment.processed.wer * 100).toFixed(1)}%`,
+        variant: assessment.verdict === "regression" ? "destructive" : "default",
+      });
+    } catch (assessmentError) {
+      toast({
+        title: "בדיקת התמלול נכשלה",
+        description: assessmentError instanceof Error ? assessmentError.message : "שגיאה לא צפויה",
+        variant: "destructive",
+      });
+    } finally {
+      setAsrAnalyzing(false);
+    }
+  }, [file, referenceText, stageResults]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -475,12 +529,20 @@ export default function AudioCleanLab() {
       setProgress(100);
       setCompletedStages(new Set());
       lastGoodBlobRef.current = null;
-      setActiveTrack("cleaned");
-
       setQualityAnalyzing(true);
       try {
         const assessment = await compareAudioBlobs(file, currentBlob);
         setQualityAssessment(assessment);
+        if (assessment.verdict === "regression") {
+          setActiveTrack("original");
+          toast({
+            title: "זוהתה רגרסיה — המקור נשאר פעיל",
+            description: "הפלט נשמר להשוואה ולהורדה, אך לא נבחר אוטומטית.",
+            variant: "destructive",
+          });
+        } else {
+          setActiveTrack("cleaned");
+        }
       } catch (qualityError) {
         console.warn("[AudioCleanLab] quality analysis failed", qualityError);
         toast({
@@ -646,6 +708,11 @@ export default function AudioCleanLab() {
             {aiStatus.engines.gpu && ` • מעבד גרפי ${aiStatus.engines.gpu_name || "CUDA"}`}
           </Badge>
         )}
+        {aiStatus?.engines.deepfilter && (
+          <Badge variant="outline" className="gap-1 text-blue-600 border-blue-300">
+            <Waves className="w-3 h-3" /> DeepFilterNet 3 מותקן
+          </Badge>
+        )}
         {aiStatus?.available && !aiStatus.engines.gpu && (
           <Badge variant="outline" className="gap-1 text-yellow-600 border-yellow-300">
             <AlertTriangle className="w-3 h-3" /> מעבד מרכזי בלבד — מעבד גרפי אינו זמין
@@ -706,6 +773,45 @@ export default function AudioCleanLab() {
                 </div>
               )}
               {qualityAssessment && <AudioQualityReport assessment={qualityAssessment} />}
+              {cleanedUrl && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <CheckCircle2 className="w-5 h-5" /> בדיקת תמלול אובייקטיבית
+                    </CardTitle>
+                    <CardDescription>הדבק נוסח מדויק; המקור והפלט יתומללו ויימדדו ב־WER וב־CER מחמירים, כולל אותיות סופיות.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <Textarea
+                      value={referenceText}
+                      onChange={event => setReferenceText(event.target.value)}
+                      placeholder="הדבק כאן את הטקסט המדויק שנאמר בהקלטה"
+                      rows={4}
+                      dir="rtl"
+                      className="text-right"
+                    />
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Button onClick={() => void runReferenceAssessment()} disabled={!referenceText.trim() || asrAnalyzing} className="gap-2">
+                        {asrAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
+                        השווה תמלול מקור מול פלט
+                      </Button>
+                      {asrAssessment && (
+                        <Badge variant={asrAssessment.verdict === "regression" ? "destructive" : "secondary"}>
+                          {asrAssessment.verdict === "improved" ? "שיפור" : asrAssessment.verdict === "regression" ? "רגרסיה" : "יציב"}
+                        </Badge>
+                      )}
+                    </div>
+                    {asrAssessment && (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center text-sm">
+                        <div className="rounded-md border p-2"><p className="text-muted-foreground">WER מקור</p><strong>{(asrAssessment.baseline.wer * 100).toFixed(1)}%</strong></div>
+                        <div className="rounded-md border p-2"><p className="text-muted-foreground">WER פלט</p><strong>{(asrAssessment.processed.wer * 100).toFixed(1)}%</strong></div>
+                        <div className="rounded-md border p-2"><p className="text-muted-foreground">CER מקור</p><strong>{(asrAssessment.baseline.cer * 100).toFixed(1)}%</strong></div>
+                        <div className="rounded-md border p-2"><p className="text-muted-foreground">CER פלט</p><strong>{(asrAssessment.processed.cer * 100).toFixed(1)}%</strong></div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
 
               <div className="grid md:grid-cols-[1fr_300px] gap-4">
                 {/* Left: Pipeline steps config */}
@@ -717,6 +823,27 @@ export default function AudioCleanLab() {
                     <CardDescription>בחר את שלבי העיבוד והגדר פרמטרים</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    <div className="rounded-md border bg-muted/20 p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div>
+                          <p className="text-sm font-medium">מסלול עיבוד</p>
+                          <p className="text-xs text-muted-foreground">בחר מסלול מוכן או שליטה ידנית בכל שלב</p>
+                        </div>
+                        <Select value={processingProfile} onValueChange={value => applyProcessingProfile(value as ProcessingProfile)} disabled={isRunning}>
+                          <SelectTrigger className="w-full sm:w-56"><SelectValue /></SelectTrigger>
+                          <SelectContent dir="rtl" className="text-right">
+                            <SelectItem value="fast">מהיר — RNNoise ומסננים</SelectItem>
+                            <SelectItem value="recommended">מומלץ — DeepFilterNet לתמלול</SelectItem>
+                            <SelectItem value="difficult">הקלטה קשה — עיבוד עצבי עמוק</SelectItem>
+                            <SelectItem value="manual">ידני — בחירת שלבים</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {processingProfile === "recommended" && !aiStatus?.engines.deepfilter && (
+                        <p className="text-xs text-yellow-700">DeepFilterNet אינו זמין כרגע; אפשר לעבור למסלול המהיר או להפעיל את השרת המקומי.</p>
+                      )}
+                    </div>
+
                     {/* Step 1: Denoise */}
                     <div className="flex items-center justify-between p-3 rounded-lg border bg-card">
                       <div className="flex items-center gap-3">
@@ -727,7 +854,7 @@ export default function AudioCleanLab() {
                           <p className="text-xs text-muted-foreground">רשת נוירונים — מסיר רעש רקע קבוע</p>
                         </div>
                       </div>
-                      <Switch checked={enableDenoise} onCheckedChange={setEnableDenoise} disabled={isRunning} />
+                      <Switch checked={enableDenoise} onCheckedChange={value => { setProcessingProfile("manual"); setEnableDenoise(value); }} disabled={isRunning} />
                     </div>
 
                     {/* Step 2: EQ */}
@@ -741,7 +868,7 @@ export default function AudioCleanLab() {
                             <p className="text-xs text-muted-foreground">מסנן תדרים גבוהים, מסנן תדרים נמוכים וחיזוק דיבור</p>
                           </div>
                         </div>
-                        <Switch checked={enableEQ} onCheckedChange={setEnableEQ} disabled={isRunning} />
+                        <Switch checked={enableEQ} onCheckedChange={value => { setProcessingProfile("manual"); setEnableEQ(value); }} disabled={isRunning} />
                       </div>
                       {enableEQ && (
                         <div className="space-y-3 pr-12">
@@ -778,7 +905,7 @@ export default function AudioCleanLab() {
                             <p className="text-xs text-muted-foreground">איזון עוצמת שמע אחידה</p>
                           </div>
                         </div>
-                        <Switch checked={enableNormalize} onCheckedChange={setEnableNormalize} disabled={isRunning} />
+                        <Switch checked={enableNormalize} onCheckedChange={value => { setProcessingProfile("manual"); setEnableNormalize(value); }} disabled={isRunning} />
                       </div>
                       {enableNormalize && (
                         <div className="pr-12 space-y-1">
@@ -799,14 +926,14 @@ export default function AudioCleanLab() {
                           <Brain className="w-5 h-5 text-purple-500" />
                           <div>
                             <p className="font-medium text-sm">שיפור בבינה מלאכותית (שרת)</p>
-                            <p className="text-xs text-muted-foreground">Demucs / DeepFilter / MetricGAN</p>
+                            <p className="text-xs text-muted-foreground">DeepFilterNet / MetricGAN / ניקוי ספקטרלי</p>
                           </div>
                         </div>
-                        <Switch checked={enableAI} onCheckedChange={setEnableAI} disabled={isRunning} />
+                        <Switch checked={enableAI} onCheckedChange={value => { setProcessingProfile("manual"); setEnableAI(value); }} disabled={isRunning} />
                       </div>
                       {enableAI && (
                         <div className="pr-12 space-y-3">
-                          <Select value={aiPreset} onValueChange={v => setAiPreset(v as EnhancementPreset)} disabled={isRunning}>
+                          <Select value={aiPreset} onValueChange={v => { setProcessingProfile("manual"); setAiPreset(v as EnhancementPreset); }} disabled={isRunning}>
                             <SelectTrigger><SelectValue /></SelectTrigger>
                             <SelectContent dir="rtl" className="text-right">
                               {AI_PRESETS.map(p => (
@@ -836,6 +963,11 @@ export default function AudioCleanLab() {
                               <AlertTriangle className="w-4 h-4" />
                               <span>שרת הבינה המלאכותית אינו זמין — ודא שהשרת פעיל</span>
                             </div>
+                          )}
+                          {aiStatus?.available && (
+                            <p className="text-xs text-muted-foreground">
+                              העיבוד רץ מקומית במחשב ואינו צורך טוקנים או קרדיטי API.
+                            </p>
                           )}
                         </div>
                       )}
@@ -1046,7 +1178,7 @@ export default function AudioCleanLab() {
                 <InfoStep num={1} color="blue" title="ניקוי רעש — RNNoise" desc="רשת נוירונים שרצה בדפדפן באמצעות WebAssembly. מסירה רעשי רקע קבועים: מזגן, מאוורר וזמזום חשמלי. מעבדת 480 דגימות בכל מקטע ב-48KHz." tags={["מעבד מרכזי", "פחות ממגה-בית", "מהיר"]} />
                 <InfoStep num={2} color="green" title="אקולייזר ומסננים" desc="מסנן תדרים גבוהים מסיר רעשי בס מתחת ל-80Hz, ומסנן תדרים נמוכים מסיר צפצופים מעל 12KHz. ניתן לחזק 3KHz לבהירות דיבור ו-250Hz לחמימות." tags={["מעבד מרכזי", "שמע בדפדפן", "מהיר"]} />
                 <InfoStep num={3} color="orange" title="איזון עוצמה" desc="מאזן עוצמת שמע כך שחלקים שקטים וחזקים יהיו ברמה אחידה. ברירת מחדל: -20 dBFS." tags={["מעבד מרכזי", "מהיר"]} />
-                <InfoStep num={4} color="purple" title="שיפור בבינה מלאכותית (שרת)" desc="Demucs להפרדת קולות ממוזיקה (~1GB), DeepFilterNet לשיפור בהירות קול (~100MB), MetricGAN-U לניקוי מתקדם. דורש שרת פעיל." tags={["מעבד גרפי מומלץ", "2-30 שניות"]} />
+                <InfoStep num={4} color="purple" title="שיפור עצבי מקומי (שרת)" desc="DeepFilterNet 3 מנקה רעש בתחום מלא של 48kHz ושומר על פרטי דיבור. מסלולי MetricGAN-U וניקוי ספקטרלי זמינים כחלופות לקבצים קשים. העיבוד מקומי ואינו צורך קרדיטי API." tags={["מעבד גרפי מומלץ", "מקומי ללא קרדיטים"]} />
               </div>
 
               <Separator />
@@ -1067,8 +1199,8 @@ export default function AudioCleanLab() {
                     <p className="text-muted-foreground">חלקים חלשים/חזקים → שלב 3</p>
                   </div>
                   <div className="p-2 bg-purple-50 dark:bg-purple-950/30 rounded">
-                    <p className="font-medium">🎵 מוזיקה / קולות ברקע</p>
-                    <p className="text-muted-foreground">רדיו, שיחות → שלב 4 (Demucs)</p>
+                    <p className="font-medium">הקלטה קשה או רעש משתנה</p>
+                    <p className="text-muted-foreground">שלב 4 עם DeepFilterNet; מוזיקה חזקה דורשת הפרדת מקורות נפרדת</p>
                   </div>
                 </div>
               </div>

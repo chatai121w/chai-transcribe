@@ -85,6 +85,38 @@ _metricgan_lock = None          # threading.Lock – created on first use
 _SAMPLE_RATE_METRICGAN = 16_000  # MetricGAN-U operates at 16 kHz
 
 
+def _deepfilter_executable() -> Path | None:
+    """Locate the isolated DeepFilterNet CLI without coupling server dependencies."""
+    override = os.environ.get("DEEPFILTER_EXECUTABLE")
+    candidates = [Path(override)] if override else []
+    repo_root = Path(__file__).resolve().parent.parent
+    if os.name == "nt":
+        candidates.append(repo_root / ".venv-deepfilter" / "Scripts" / "deepFilter.exe")
+    else:
+        candidates.append(repo_root / ".venv-deepfilter" / "bin" / "deepFilter")
+    system_executable = shutil.which("deepFilter")
+    if system_executable:
+        candidates.append(Path(system_executable))
+    return next((candidate for candidate in candidates if candidate.is_file()), None)
+
+
+def _convert_to_fullband_wav(input_path: str, output_path: str) -> None:
+    """Decode media to the 48 kHz mono input expected by DeepFilterNet."""
+    import subprocess
+
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-i", input_path, "-vn", "-acodec", "pcm_s16le",
+         "-ar", "48000", "-ac", "1", output_path],
+        capture_output=True,
+        timeout=180,
+    )
+    if result.returncode != 0 or not os.path.exists(output_path):
+        raise RuntimeError(
+            "DeepFilterNet input conversion failed: "
+            + result.stderr.decode("utf-8", errors="replace")[-500:]
+        )
+
+
 def _get_lock():
     global _metricgan_lock
     if _metricgan_lock is None:
@@ -298,6 +330,94 @@ def enhance_spectral(input_path: str, output_wav_path: str,
 
 
 # ────────────────────────────────────────────────────────────────────
+#  Engine: DeepFilterNet3 — full-band neural speech enhancement
+# ────────────────────────────────────────────────────────────────────
+
+def enhance_deepfilter(input_path: str, output_wav_path: str,
+                       attenuation_limit_db: int = 18) -> bool:
+    """Run DeepFilterNet3 in its isolated Python 3.12 environment.
+
+    The attenuation limit keeps some ambient signal and reduces the risk of
+    erasing Hebrew fricatives. The server environment remains untouched even
+    when DeepFilterNet or its native extension is unavailable.
+    """
+    import subprocess
+
+    executable = _deepfilter_executable()
+    if executable is None:
+        raise RuntimeError(
+            "DeepFilterNet is not installed. Run scripts/install-deepfilter.ps1"
+        )
+
+    with tempfile.TemporaryDirectory(prefix="deepfilter-") as temp_dir:
+        temp_root = Path(temp_dir)
+        input_wav = temp_root / "input.wav"
+        output_dir = temp_root / "output"
+        output_dir.mkdir()
+        _convert_to_fullband_wav(input_path, str(input_wav))
+
+        command = [
+            str(executable),
+            "--model-base-dir", "DeepFilterNet3",
+            "--no-suffix",
+            "--log-level", "error",
+            "--atten-lim", str(attenuation_limit_db),
+            "--output-dir", str(output_dir),
+            str(input_wav),
+        ]
+        startupinfo = None
+        creationflags = 0
+        if os.name == "nt":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            creationflags = subprocess.CREATE_NO_WINDOW
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            timeout=900,
+            startupinfo=startupinfo,
+            creationflags=creationflags,
+        )
+        produced = output_dir / input_wav.name
+        if result.returncode != 0 or not produced.exists():
+            details = (result.stderr or result.stdout).decode("utf-8", errors="replace")[-1000:]
+            raise RuntimeError(f"DeepFilterNet failed: {details}")
+        shutil.copy2(produced, output_wav_path)
+    return True
+
+
+def enhance_transcription_fullband(input_path: str, output_wav_path: str) -> bool:
+    """Full-band denoise followed by conservative speech EQ and loudness."""
+    import subprocess
+
+    stage_path = output_wav_path + ".deepfilter.wav"
+    try:
+        enhance_deepfilter(input_path, stage_path, attenuation_limit_db=18)
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", stage_path, "-vn",
+                "-af", (
+                    "highpass=f=70,lowpass=f=14000,"
+                    "equalizer=f=3200:t=q:w=1.4:g=1.5,"
+                    "loudnorm=I=-19:TP=-1.5:LRA=11"
+                ),
+                "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1",
+                output_wav_path,
+            ],
+            capture_output=True,
+            timeout=240,
+        )
+        if result.returncode != 0 or not os.path.exists(output_wav_path):
+            shutil.copy2(stage_path, output_wav_path)
+        return True
+    finally:
+        try:
+            os.unlink(stage_path)
+        except OSError:
+            pass
+
+
+# ────────────────────────────────────────────────────────────────────
 #  Combined pipeline: spectral + MetricGAN-U for maximum quality
 # ────────────────────────────────────────────────────────────────────
 
@@ -386,6 +506,16 @@ def enhance_hebrew_speech(input_path: str, output_wav_path: str) -> bool:
 # ────────────────────────────────────────────────────────────────────
 
 AI_ENHANCE_PRESETS = {
+    "ai_deepfilter": {
+        "func": enhance_deepfilter,
+        "label": "DeepFilterNet 3",
+        "description": "ניקוי עצבי מלא-תחום 48kHz, מומלץ לדיבור",
+    },
+    "ai_transcription": {
+        "func": enhance_transcription_fullband,
+        "label": "מיטוב לתמלול",
+        "description": "DeepFilterNet 3 עם מסננים עדינים ואיזון עוצמה",
+    },
     "ai_denoise":  {
         "func": enhance_spectral,
         "label": "AI ניקוי רעש",
@@ -452,7 +582,12 @@ def get_ai_presets_info() -> list:
 
 def is_available() -> dict:
     """Check which AI engines are available."""
-    result = {"spectral": False, "metricgan": False}
+    result = {"spectral": False, "metricgan": False, "deepfilter": False}
+
+    deepfilter_executable = _deepfilter_executable()
+    if deepfilter_executable:
+        result["deepfilter"] = True
+        result["deepfilter_executable"] = str(deepfilter_executable)
 
     try:
         import noisereduce

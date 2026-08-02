@@ -11,6 +11,8 @@ speechbrain>=1.0.0
 noisereduce>=3.0.0
 soundfile>=0.12.0
 scipy>=1.10.0
+# DeepFilterNet is installed into an isolated Python 3.12 environment because
+# its native dependency currently pins NumPy <2. Run scripts/install-deepfilter.ps1.
 # Hebrew nikud / diacritization (optional — DICTA dictabert-large-char-menaked)
 transformers>=4.40.0
 # ── LoRA fine-tuning (optional — only needed when running training jobs) ──

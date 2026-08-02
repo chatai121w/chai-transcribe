@@ -2630,7 +2630,10 @@ _ENHANCE_PRESET_FILTERS = {
 }
 
 # AI enhancement presets (neural network based) — loaded lazily
-_AI_ENHANCE_PRESETS = {"ai_denoise", "ai_enhance", "ai_full", "ai_hebrew"}
+_AI_ENHANCE_PRESETS = {
+    "ai_denoise", "ai_enhance", "ai_full", "ai_hebrew",
+    "ai_deepfilter", "ai_transcription",
+}
 
 @app.route("/convert-mp3", methods=["POST"])
 def convert_mp3():
@@ -2825,7 +2828,7 @@ def enhance_audio():
     Form fields:
       - file: uploaded input media
       - output_format: mp3|opus|aac (default: mp3)
-      - preset: clean|ai_voice|podcast|broadcast|ai_denoise|ai_enhance|ai_full|ai_hebrew
+      - preset: clean|ai_voice|podcast|broadcast|ai_denoise|ai_enhance|ai_full|ai_hebrew|ai_deepfilter|ai_transcription
     """
     if not _check_ffmpeg():
         return jsonify({"error": "FFmpeg not available on server"}), 503
