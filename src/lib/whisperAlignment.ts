@@ -67,6 +67,7 @@ export function findActiveWordIndex(
   timings: Array<Pick<WordTiming, 'start' | 'end'>>,
   time: number,
   toleranceSeconds = 0.04,
+  holdUntilNextWord = false,
 ): number {
   if (!timings.length || !Number.isFinite(time)) return -1;
 
@@ -88,7 +89,12 @@ export function findActiveWordIndex(
   const end = Number.isFinite(timing.end) && timing.end >= timing.start
     ? timing.end
     : timings[candidate + 1]?.start ?? timing.start;
-  return time <= end + toleranceSeconds ? candidate : -1;
+  if (time <= end + toleranceSeconds) return candidate;
+  if (holdUntilNextWord) {
+    const nextStart = timings[candidate + 1]?.start;
+    if (nextStart === undefined || time < nextStart) return candidate;
+  }
+  return -1;
 }
 
 // ── Hebrew normalization ─────────────────────────────────────────────────────

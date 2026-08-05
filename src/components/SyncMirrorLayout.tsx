@@ -207,17 +207,13 @@ export const SyncMirrorLayout = ({
   const [fullEditMode, setFullEditMode] = useState(false);
   const [editDraft, setEditDraft] = useState(text);
   const [followPlayback, setFollowPlayback] = useState(() => {
-    try { return localStorage.getItem('sync_mirror_follow_playback') !== '0'; } catch { return true; }
+    try { return localStorage.getItem('sync_mirror_follow_playback_v2') !== '0'; } catch { return true; }
   });
 
   const updateFollowPlayback = useCallback((enabled: boolean) => {
     setFollowPlayback(enabled);
-    try { localStorage.setItem('sync_mirror_follow_playback', enabled ? '1' : '0'); } catch {}
+    try { localStorage.setItem('sync_mirror_follow_playback_v2', enabled ? '1' : '0'); } catch {}
   }, []);
-
-  const pauseFollowForManualScroll = useCallback(() => {
-    if (followPlayback) updateFollowPlayback(false);
-  }, [followPlayback, updateFollowPlayback]);
 
   // ── Duplicate & save dialog ───────────────────────────────────────────────
   const [dupDialogOpen, setDupDialogOpen] = useState(false);
@@ -531,7 +527,7 @@ export const SyncMirrorLayout = ({
   // ── Active word index (timing sync) ────────────────────────────────────────
   const activeIdx = useMemo(() => {
     if (!syncEnabled || !hasAudioTimings || !displayTimings.length) return -1;
-    return findActiveWordIndex(displayTimings, currentTime);
+    return findActiveWordIndex(displayTimings, currentTime, 0.04, true);
   }, [displayTimings, currentTime, syncEnabled, hasAudioTimings]);
 
   // ── Active line index ───────────────────────────────────────────────────────
@@ -922,6 +918,7 @@ export const SyncMirrorLayout = ({
           const wordSpan = (
             <span
               key={globalIdx}
+              data-active-word={isActiveVisible ? 'true' : undefined}
               style={{ ...highlightStyle, ...(isActiveVisible ? getActiveWordStyle(wordHighlightMode) : {}) }}
               className={cn(
                 "inline cursor-pointer select-text transition-all px-[1px]",
@@ -1039,7 +1036,12 @@ export const SyncMirrorLayout = ({
 
   // ── Main render ─────────────────────────────────────────────────────────────
   return (
-    <div ref={containerRef} className="flex flex-col h-full relative overflow-hidden">
+    <div
+      ref={containerRef}
+      className="flex flex-col h-full relative overflow-hidden"
+      data-sync-active-index={activeIdx}
+      data-sync-following={followPlayback ? 'true' : 'false'}
+    >
       {/* Full-text edit — two-panel side-by-side (replaces old overlay) */}
       {fullEditMode && (
         <div className="flex flex-col flex-1 min-h-0" dir="rtl">
@@ -1129,14 +1131,13 @@ export const SyncMirrorLayout = ({
                 ref={fullEditScrollRef}
                 className="flex-1 overflow-y-auto break-words select-none text-muted-foreground/80"
                 dir="rtl"
-                onWheelCapture={pauseFollowForManualScroll}
-                onTouchMoveCapture={pauseFollowForManualScroll}
                 style={{ ...textStyle, padding: '8px 12px', boxSizing: 'border-box' }}
               >
                 {displayTimings.map((wt, i) => (
                   <React.Fragment key={i}>
                     <span
                       data-word-index={i}
+                      data-active-word={i === activeIdx ? 'true' : undefined}
                       style={i === activeIdx ? getActiveWordStyle(wordHighlightMode) : undefined}
                       className={cn(
                         "rounded-sm px-[1px] transition-all duration-150",
@@ -1336,7 +1337,7 @@ export const SyncMirrorLayout = ({
                   ? "border-blue-400 text-blue-600 bg-blue-50 dark:bg-blue-950/40"
                   : "border-border text-muted-foreground hover:bg-muted",
               )}
-              title={followPlayback ? "מעקב פעיל. גלילה ידנית בתוך הטקסט תפסיק אותו" : "הפעל מעקב אחרי המילה המתנגנת"}
+              title={followPlayback ? "מעקב פעיל בתוך אזור התמלול" : "הפעל מעקב אחרי המילה המתנגנת"}
             >
               <LocateFixed className="w-3 h-3" />
               {followPlayback ? 'עוקב' : 'לא עוקב'}
@@ -1696,8 +1697,6 @@ export const SyncMirrorLayout = ({
       <div
         ref={scrollRef}
         className="flex flex-col lg:flex-row flex-1 min-h-0 overflow-y-auto"
-        onWheelCapture={pauseFollowForManualScroll}
-        onTouchMoveCapture={pauseFollowForManualScroll}
       >
         {/* ── RIGHT column — full mirror, fully editable (unless locked) ── */}
         <div

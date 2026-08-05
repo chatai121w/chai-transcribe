@@ -986,7 +986,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   // Current word index for sync
   const currentWordIndex = useMemo(() => {
     if (!isSyncEnabled || !wordTimings.length) return -1;
-    return findActiveWordIndex(wordTimings, currentTime);
+    return findActiveWordIndex(wordTimings, currentTime, 0.04, true);
   }, [currentTime, wordTimings, isSyncEnabled]);
 
   useEffect(() => {

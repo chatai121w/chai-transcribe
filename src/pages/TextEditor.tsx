@@ -726,6 +726,16 @@ const TextEditor = () => {
       // then refresh from cloud if available.
       wordTimingsRef.current = [];
       setWordTimings([]);
+      try {
+        const storedTranscriptId = localStorage.getItem('last_word_timings_transcript_id');
+        const storedTimings = JSON.parse(localStorage.getItem('last_word_timings') || '[]');
+        if (storedTranscriptId === effectiveTranscriptId
+            && Array.isArray(storedTimings)
+            && storedTimings.length > 0) {
+          wordTimingsRef.current = storedTimings as WordTiming[];
+          setWordTimings(storedTimings as WordTiming[]);
+        }
+      } catch { /* malformed or unavailable local cache */ }
       const requestedAtRevision = wordTimingsRevisionRef.current;
       db.transcripts.get(effectiveTranscriptId).then((localTranscript) => {
         if (localTranscript?.word_timings?.length
@@ -791,6 +801,17 @@ const TextEditor = () => {
       const latestTimings = latest.word_timings as WordTiming[];
       wordTimingsRef.current = latestTimings;
       setWordTimings(latestTimings);
+    } else {
+      try {
+        const storedTranscriptId = localStorage.getItem('last_word_timings_transcript_id');
+        const storedTimings = JSON.parse(localStorage.getItem('last_word_timings') || '[]');
+        if (storedTranscriptId === latest.id
+            && Array.isArray(storedTimings)
+            && storedTimings.length > 0) {
+          wordTimingsRef.current = storedTimings as WordTiming[];
+          setWordTimings(storedTimings as WordTiming[]);
+        }
+      } catch { /* malformed or unavailable local cache */ }
     }
     if (latest.audio_blob) {
       setOwnedAudioFromBlob(latest.audio_blob, latest.title || undefined);
@@ -1918,7 +1939,7 @@ const TextEditor = () => {
                     : <AudioWaveform className="w-3.5 h-3.5" />}
                   {forcedAlignmentState.status === 'aligning' ? 'מיישר...' : 'יישור מדויק'}
                 </Button>
-                {forcedAlignmentState.coverage != null && (
+                {forcedAlignmentState.coverage != null && wordTimings.length > 0 && (
                   <span
                     className={`text-[10px] rounded border px-2 py-1 ${
                       forcedAlignmentState.status === 'error'

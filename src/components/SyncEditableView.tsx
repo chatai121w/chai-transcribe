@@ -117,7 +117,7 @@ export const SyncEditableView = ({
 
   const currentWordIndex = useMemo(() => {
     if (!syncEnabled || !wordTimings.length) return -1;
-    return findActiveWordIndex(wordTimings, currentTime);
+    return findActiveWordIndex(wordTimings, currentTime, 0.04, true);
   }, [currentTime, wordTimings, syncEnabled]);
 
   // Search matching

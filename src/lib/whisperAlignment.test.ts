@@ -15,6 +15,12 @@ describe('word timing synchronization', () => {
     expect(findActiveWordIndex(timings, 2)).toBe(-1);
   });
 
+  it('can keep the previous word highlighted during playback gaps', () => {
+    expect(findActiveWordIndex(timings, 0.78, 0.04, true)).toBe(0);
+    expect(findActiveWordIndex(timings, 1.35, 0.04, true)).toBe(1);
+    expect(findActiveWordIndex(timings, 2, 0.04, true)).toBe(2);
+  });
+
   it('preserves Whisper anchors rather than distributing the file uniformly', () => {
     const aligned = alignEditedToWhisper(['שלום', 'לכל', 'עולם', 'הבא'], timings);
     expect(aligned[0]).toMatchObject({ start: 0.2, end: 0.65 });
