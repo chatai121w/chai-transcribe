@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -136,12 +136,47 @@ export const FileUploader = ({
   const [siteSearch, setSiteSearch] = useState('');
   const [siteFolderId, setSiteFolderId] = useState<string>('all');
   const [importingSiteId, setImportingSiteId] = useState<string | null>(null);
+  const [localAudioIds, setLocalAudioIds] = useState<Set<string>>(new Set());
   const { transcripts, getAudioUrl } = useCloudTranscripts();
   const { folders, getPath } = useFolderTree();
 
-  const siteAudioItems = transcripts.filter((item) => Boolean(item.audio_file_path || (item as CloudTranscript & { audio_blob?: Blob }).audio_blob));
+  useEffect(() => {
+    if (!sitePickerOpen) return;
+    let cancelled = false;
+    void (async () => {
+      if (!(await isDbAvailable())) return;
+      const records = await db.transcripts.toArray();
+      if (!cancelled) {
+        setLocalAudioIds(new Set(records.filter(record => Boolean(record.audio_blob)).map(record => record.id)));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sitePickerOpen, transcripts]);
+
+  const selectedFolderIds = useMemo(() => {
+    if (siteFolderId === 'all' || siteFolderId === 'root') return null;
+    const ids = new Set<string>([siteFolderId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      folders.forEach(folder => {
+        if (folder.parent_id && ids.has(folder.parent_id) && !ids.has(folder.id)) {
+          ids.add(folder.id);
+          changed = true;
+        }
+      });
+    }
+    return ids;
+  }, [folders, siteFolderId]);
+
+  const siteAudioItems = transcripts.filter((item) => Boolean(
+    item.audio_file_path
+    || (item as CloudTranscript & { audio_blob?: Blob }).audio_blob
+    || localAudioIds.has(item.id),
+  ));
   const filteredSiteAudioItems = siteAudioItems.filter((item) => {
-    if (siteFolderId !== 'all' && (item.folder_id || 'root') !== siteFolderId) return false;
+    if (siteFolderId === 'root' && item.folder_id) return false;
+    if (selectedFolderIds && (!item.folder_id || !selectedFolderIds.has(item.folder_id))) return false;
     const query = siteSearch.trim().toLocaleLowerCase('he');
     if (!query) return true;
     const folderLabel = item.folder_id ? getPath(item.folder_id).map(folder => folder.name).join(' / ') : 'ללא תיקייה';
@@ -486,8 +521,8 @@ export const FileUploader = ({
           )}
         </div>
 
-        <Dialog open={sitePickerOpen} onOpenChange={setSitePickerOpen}>
-          <DialogContent className="max-w-3xl max-h-[82vh] overflow-hidden flex flex-col" dir="rtl">
+        <Dialog open={sitePickerOpen} onOpenChange={setSitePickerOpen} modal={false}>
+          <DialogContent hideOverlay className="max-w-3xl max-h-[82vh] overflow-hidden flex flex-col" dir="rtl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FolderOpen className="w-5 h-5 text-primary" />

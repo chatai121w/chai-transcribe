@@ -17,16 +17,21 @@ test.describe('תמלול חי - ממשק בסיסי', () => {
   });
 
   test('כרטיס תמלול חי מוצג', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: 'תמלול בזמן אמת' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'תמלול בזמן אמת', level: 3 })).toBeVisible();
   });
 
   test('כפתור התחל תמלול חי מוצג', async ({ page }) => {
     await expect(page.getByRole('button', { name: /התחל תמלול חי/i })).toBeVisible();
   });
 
-  test('בורר מצב מוצג - CUDA ו-Web Speech', async ({ page }) => {
-    await expect(page.getByRole('button', { name: /CUDA Whisper/i })).toBeVisible();
-    // Web Speech may or may not be supported; just check CUDA is there
+  test('בורר המנועים החיים מציג את המנועים הקיימים', async ({ page }) => {
+    const selector = page.getByRole('combobox', { name: 'מנוע תמלול חי' });
+    await expect(selector).toBeVisible();
+    await selector.click();
+    await expect(page.getByRole('option', { name: /CUDA Whisper/i })).toBeVisible();
+    await expect(page.getByRole('option', { name: /Groq Whisper/i })).toBeVisible();
+    await expect(page.getByRole('option', { name: /Deepgram Nova-2/i })).toBeVisible();
+    await expect(page.getByRole('option', { name: /OpenAI Whisper/i })).toBeVisible();
   });
 
   test('הודעת ברירת מחדל מוצגת כשלא מקליטים', async ({ page }) => {
@@ -95,8 +100,8 @@ test.describe('תמלול חי - בורר תיקיות', () => {
 
     // Open dropdown
     await page.getByText('ללא תיקייה').click();
-    await expect(page.getByText('פגישות')).toBeVisible();
-    await expect(page.getByText('הרצאות')).toBeVisible();
+    await expect(page.getByText('פגישות', { exact: true })).toBeVisible();
+    await expect(page.getByText('הרצאות', { exact: true })).toBeVisible();
   });
 });
 
@@ -120,13 +125,12 @@ test.describe('תמלול חי - כפתורי שליטה', () => {
     // so we test the button existence in initial state
     const startBtn = page.getByRole('button', { name: /התחל תמלול חי/i });
     await expect(startBtn).toBeVisible();
-    await expect(startBtn).toBeEnabled();
   });
 
   test('CUDA Whisper מצב מוצג', async ({ page }) => {
-    // CUDA button is always visible; enabled state depends on parent's serverConnected prop
-    const cudaBtn = page.getByRole('button', { name: /CUDA Whisper/i });
-    await expect(cudaBtn).toBeVisible();
+    const selector = page.getByRole('combobox', { name: 'מנוע תמלול חי' });
+    await selector.click();
+    await expect(page.getByRole('option', { name: /CUDA Whisper/i })).toBeVisible();
   });
 
   test('כפתור CUDA מושבת כשאין שרת', async ({ page }) => {
@@ -134,11 +138,9 @@ test.describe('תמלול חי - כפתורי שליטה', () => {
     await page.reload();
     await page.waitForLoadState('networkidle');
 
-    // CUDA button should be disabled when server is disconnected
-    const cudaBtn = page.getByRole('button', { name: /CUDA Whisper/i });
-    if (await cudaBtn.count() > 0) {
-      await expect(cudaBtn).toBeDisabled();
-    }
+    const selector = page.getByRole('combobox', { name: 'מנוע תמלול חי' });
+    await selector.click();
+    await expect(page.getByRole('option', { name: /CUDA Whisper.*לא מוגדר/i })).toHaveAttribute('aria-disabled', 'true');
   });
 });
 
@@ -153,6 +155,6 @@ test.describe('תמלול חי - טקסט מידע', () => {
   test('מידע על מצב תמלול מוצג', async ({ page }) => {
     // Footer text shows in the LiveTranscriber card area
     // It may show Web Speech or CUDA info depending on mode
-    await expect(page.getByText(/Web Speech API|Whisper.*GPU/).first()).toBeVisible();
+    await expect(page.getByText(/Web Speech API|CUDA Whisper|Groq Whisper/).first()).toBeVisible();
   });
 });

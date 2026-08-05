@@ -898,6 +898,44 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   // Notify parent of play state changes
   useEffect(() => { onPlayStateChange?.(isPlaying); }, [isPlaying, onPlayStateChange]);
 
+  // Keep browser/OS media controls connected when the page is in the background.
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    const mediaSession = navigator.mediaSession;
+    try {
+      mediaSession.metadata = new MediaMetadata({
+        title: "נגן התמלול",
+        artist: "Chai Transcribe",
+      });
+      mediaSession.setActionHandler("play", () => void audioRef.current?.play());
+      mediaSession.setActionHandler("pause", () => audioRef.current?.pause());
+      mediaSession.setActionHandler("seekbackward", (details) => {
+        const audio = audioRef.current;
+        if (audio) audio.currentTime = Math.max(0, audio.currentTime - (details.seekOffset ?? 10));
+      });
+      mediaSession.setActionHandler("seekforward", (details) => {
+        const audio = audioRef.current;
+        if (audio) audio.currentTime = Math.min(audio.duration || Infinity, audio.currentTime + (details.seekOffset ?? 10));
+      });
+    } catch {
+      // Some browsers expose MediaSession but do not support every action.
+    }
+
+    return () => {
+      try {
+        mediaSession.setActionHandler("play", null);
+        mediaSession.setActionHandler("pause", null);
+        mediaSession.setActionHandler("seekbackward", null);
+        mediaSession.setActionHandler("seekforward", null);
+      } catch {}
+    };
+  }, [audioUrl]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+  }, [isPlaying]);
+
   // Noise reduction state
   const [presetId, setPresetId] = useState(() => (_p.presetId as string) ?? 'off');
   const currentPreset = NOISE_PRESETS.find(p => p.id === presetId) || NOISE_PRESETS[0];
@@ -2207,26 +2245,56 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   }, [onTimeUpdate, focusEnabled, focusLoop, canEnableFocusLoop, focusEnd, focusStart, externalTime]);
 
   // Native `timeupdate` may fire only a few times per second. Publish a bounded
-  // 20 Hz clock while playing so short words update promptly without driving
-  // the editor at animation-frame frequency.
+  // 20 Hz clock while visible and a timer-backed clock while the tab is hidden.
+  // Audio playback remains native; this fallback keeps transcript state current
+  // when requestAnimationFrame is suspended in the background.
   useEffect(() => {
     if (!isPlaying) return;
     let frame = 0;
+    let backgroundTimer = 0;
     let lastPublishedAt = 0;
+    let disposed = false;
+
+    const publish = () => {
+      const audio = audioRef.current;
+      if (!audio || audio.paused || audio.ended) return false;
+      const time = audio.currentTime;
+      setCurrentTime(time);
+      lastEmittedTimeRef.current = time;
+      onTimeUpdate?.(time);
+      return true;
+    };
+
     const tick = (now: number) => {
+      if (disposed || document.hidden) return;
       const audio = audioRef.current;
       if (!audio || audio.paused || audio.ended) return;
       if (now - lastPublishedAt >= 50) {
-        const time = audio.currentTime;
         lastPublishedAt = now;
-        setCurrentTime(time);
-        lastEmittedTimeRef.current = time;
-        onTimeUpdate?.(time);
+        publish();
       }
       frame = requestAnimationFrame(tick);
     };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
+
+    const restartClock = () => {
+      cancelAnimationFrame(frame);
+      window.clearInterval(backgroundTimer);
+      publish();
+      if (document.hidden) {
+        backgroundTimer = window.setInterval(publish, 250);
+      } else {
+        frame = requestAnimationFrame(tick);
+      }
+    };
+
+    document.addEventListener("visibilitychange", restartClock);
+    restartClock();
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", restartClock);
+      cancelAnimationFrame(frame);
+      window.clearInterval(backgroundTimer);
+    };
   }, [isPlaying, onTimeUpdate]);
 
   const handleLoadedMetadata = useCallback(() => {
@@ -2788,6 +2856,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           preload="auto"
+          playsInline
           crossOrigin="anonymous"
         />
 

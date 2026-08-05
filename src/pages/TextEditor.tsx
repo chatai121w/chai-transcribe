@@ -562,19 +562,6 @@ const TextEditor = () => {
     };
   }, []);
 
-  // Always try to load audio blob from Dexie for SpeakerDiarization passthrough
-  useEffect(() => {
-    (async () => {
-      try {
-        const entry = await db.audioBlobs.get('last_audio');
-        if (entry?.blob) {
-          setAudioBlob(entry.blob);
-          setAudioFileName(entry.name || '');
-        }
-      } catch { /* Dexie not available */ }
-    })();
-  }, []);
-
   // Fallback: if audioUrl exists but audioBlob is still null, fetch the blob from URL
   useEffect(() => {
     if (audioBlob || !audioUrl) return;
@@ -598,6 +585,7 @@ const TextEditor = () => {
     const stateText = location.state?.text;
     const stateTranscriptId = location.state?.transcriptId as string | undefined;
     const savedTranscriptId = localStorage.getItem('current_transcript_id');
+    const effectiveTranscriptId = stateTranscriptId || (!stateText ? savedTranscriptId || undefined : undefined);
     const savedText = localStorage.getItem('current_editing_text');
     const savedVersions = localStorage.getItem('text_versions');
     if (stateText) {
@@ -663,7 +651,7 @@ const TextEditor = () => {
       transcriptIdRef.current = location.state.transcriptId;
       setTranscriptId(location.state.transcriptId);
       try { localStorage.setItem('current_transcript_id', location.state.transcriptId); } catch { /* noop */ }
-    } else {
+    } else if (!stateText) {
       try {
         const saved = localStorage.getItem('current_transcript_id');
         if (saved) {
@@ -671,6 +659,10 @@ const TextEditor = () => {
           setTranscriptId(saved);
         }
       } catch { /* noop */ }
+    } else {
+      transcriptIdRef.current = null;
+      setTranscriptId(null);
+      try { localStorage.removeItem('current_transcript_id'); } catch { /* noop */ }
     }
 
     // Load audio URL from navigation state or resolve from Supabase Storage
@@ -689,7 +681,7 @@ const TextEditor = () => {
             const blob = await resp.blob();
             setOwnedAudioFromBlob(blob, location.state?.audioFileName || undefined);
             try {
-              await db.audioBlobs.put({ id: 'last_audio', blob, type: blob.type, name: location.state?.audioFileName || audioFileName || 'audio', saved_at: Date.now() });
+              await db.audioBlobs.put({ id: 'last_audio', blob, type: blob.type, name: location.state?.audioFileName || 'audio', saved_at: Date.now() });
             } catch { /* Dexie not available */ }
           })
           .catch(() => {
@@ -704,8 +696,24 @@ const TextEditor = () => {
       getAudioUrl(location.state.audioFilePath).then((url) => {
         if (url) setAudioUrl(url);
       });
-    } else {
-      // No audio URL in navigation state — try recovering from Dexie
+    } else if (effectiveTranscriptId) {
+      // Restore audio only from the same transcript. A global "last audio"
+      // can belong to another recording and makes word highlighting misleading.
+      setAudioUrl(null);
+      setAudioBlob(null);
+      db.transcripts.get(effectiveTranscriptId).then(async (localTranscript) => {
+        if (transcriptIdRef.current !== effectiveTranscriptId) return;
+        if (localTranscript?.audio_blob) {
+          setOwnedAudioFromBlob(localTranscript.audio_blob, localTranscript.title || undefined);
+          return;
+        }
+        if (localTranscript?.audio_file_path) {
+          const url = await getAudioUrl(localTranscript.audio_file_path);
+          if (url && transcriptIdRef.current === effectiveTranscriptId) setAudioUrl(url);
+        }
+      }).catch(() => { /* Dexie not available */ });
+    } else if (!stateText) {
+      // Legacy recovery is allowed only when no transcript or text was selected.
       tryRecoverAudioFromDexie();
     }
 
@@ -713,16 +721,29 @@ const TextEditor = () => {
     if (location.state?.wordTimings) {
       wordTimingsRef.current = location.state.wordTimings;
       setWordTimings(location.state.wordTimings);
-    } else if (location.state?.transcriptId) {
-      // Try fetching word_timings from cloud
+    } else if (effectiveTranscriptId) {
+      // Load timings by transcript identity. Prefer the local coherent record,
+      // then refresh from cloud if available.
+      wordTimingsRef.current = [];
+      setWordTimings([]);
       const requestedAtRevision = wordTimingsRevisionRef.current;
+      db.transcripts.get(effectiveTranscriptId).then((localTranscript) => {
+        if (localTranscript?.word_timings?.length
+            && transcriptIdRef.current === effectiveTranscriptId
+            && wordTimingsRevisionRef.current === requestedAtRevision) {
+          const localTimings = localTranscript.word_timings as WordTiming[];
+          wordTimingsRef.current = localTimings;
+          setWordTimings(localTimings);
+        }
+      }).catch(() => { /* Dexie not available */ });
       supabase
         .from('transcripts')
         .select('word_timings')
-        .eq('id', location.state.transcriptId)
+        .eq('id', effectiveTranscriptId)
         .maybeSingle()
         .then(({ data }) => {
           if (data?.word_timings && Array.isArray(data.word_timings) && data.word_timings.length > 0
+              && transcriptIdRef.current === effectiveTranscriptId
               && wordTimingsRevisionRef.current === requestedAtRevision) {
             const cloudTimings = data.word_timings as unknown as WordTiming[];
             wordTimingsRef.current = cloudTimings;
@@ -731,17 +752,13 @@ const TextEditor = () => {
           }
         });
     } else {
-      try {
-        const saved = localStorage.getItem('last_word_timings');
-        if (saved) {
-          const restoredTimings = JSON.parse(saved) as WordTiming[];
-          wordTimingsRef.current = restoredTimings;
-          setWordTimings(restoredTimings);
-        }
-      } catch { /* corrupted */ }
+      // No matching identity means no trustworthy synchronization. Showing no
+      // highlight is safer than highlighting words from another recording.
+      wordTimingsRef.current = [];
+      setWordTimings([]);
     }
 
-  }, [location.state, tryRecoverAudioFromDexie, setOwnedAudioFromBlob, getAudioUrl, audioFileName]);
+  }, [location.state, tryRecoverAudioFromDexie, setOwnedAudioFromBlob, getAudioUrl]);
 
   // Direct entry fallback: when /text-editor opens without navigation state,
   // restore the latest cloud transcript so compare/history are not empty.
@@ -770,11 +787,23 @@ const TextEditor = () => {
     };
     setVersions(prev => prev.length ? prev : [initialVersion]);
     setSelectedVersionId(initialVersion.id);
+    if (latest.word_timings?.length) {
+      const latestTimings = latest.word_timings as WordTiming[];
+      wordTimingsRef.current = latestTimings;
+      setWordTimings(latestTimings);
+    }
+    if (latest.audio_blob) {
+      setOwnedAudioFromBlob(latest.audio_blob, latest.title || undefined);
+    } else if (latest.audio_file_path) {
+      getAudioUrl(latest.audio_file_path).then((url) => {
+        if (url) setAudioUrl(url);
+      });
+    }
     try {
       localStorage.setItem('current_transcript_id', latest.id);
       localStorage.setItem('current_editing_text', editorText);
     } catch { /* noop */ }
-  }, [transcripts, transcriptId, location.state, setText]);
+  }, [transcripts, transcriptId, location.state, setText, setOwnedAudioFromBlob, getAudioUrl]);
 
   // Auto-save text and versions to localStorage + debounce cloud save
   const cloudSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -832,9 +861,12 @@ const TextEditor = () => {
   }, [text, versions]);
 
   useEffect(() => {
-    if (!wordTimings.length) return;
-    try { localStorage.setItem('last_word_timings', JSON.stringify(wordTimings)); } catch { /* quota/unavailable */ }
-  }, [wordTimings]);
+    if (!wordTimings.length || !transcriptId) return;
+    try {
+      localStorage.setItem('last_word_timings', JSON.stringify(wordTimings));
+      localStorage.setItem('last_word_timings_transcript_id', transcriptId);
+    } catch { /* quota/unavailable */ }
+  }, [wordTimings, transcriptId]);
 
   const addVersion = (newText: string, source: TextVersion['source'], customPrompt?: string) => {
     const newVersion: TextVersion = {
@@ -1321,7 +1353,7 @@ const TextEditor = () => {
           && Number.isFinite(item.start)
           && Number.isFinite(item.end)
           && item.end >= item.start
-        )
+        ).sort((a: WordTiming, b: WordTiming) => a.start - b.start || a.end - b.end)
         : [];
       const monotonic = rawTimings.every((item: WordTiming, index: number) =>
         index === 0 || item.start >= rawTimings[index - 1].start
@@ -1331,18 +1363,22 @@ const TextEditor = () => {
       // WhisperX confidence is conservative for Hebrew and especially chanting.
       // Normalize 0.70 as excellent while still requiring broad word coverage.
       const quality = alignmentCoverage * Math.min(1, confidence / 0.7);
+      const words = referenceText.split(/\s+/).filter(Boolean);
 
-      if (!monotonic || alignmentCoverage < 0.72 || confidence < 0.18 || rawTimings.length < 3) {
+      const minimumAlignedWords = Math.max(3, Math.floor(words.length * 0.5));
+      if (!monotonic
+          || alignmentCoverage < 0.5
+          || confidence < 0.18
+          || rawTimings.length < minimumAlignedWords) {
         setForcedAlignmentState({ status: 'error', coverage: quality, confidence });
         toast({
           title: "היישור לא עבר בדיקת איכות",
-          description: `איכות ${Math.round(quality * 100)}% — התזמון הקיים נשמר ללא שינוי`,
+          description: `איכות ${Math.round(quality * 100)}% • כיסוי ${Math.round(alignmentCoverage * 100)}% — התזמון הקיים נשמר ללא שינוי`,
           variant: "destructive",
         });
         return;
       }
 
-      const words = referenceText.split(/\s+/).filter(Boolean);
       const alignedTimings = fitTimingsToDuration(
         alignEditedToWhisper(words, rawTimings),
         Number(result?.audioDuration) || 0,
@@ -1366,7 +1402,7 @@ const TextEditor = () => {
       }
       toast({
         title: "הטקסט יושר לאודיו",
-        description: `${Math.round(quality * 100)}% איכות • ${alignedTimings.length} מילים`,
+        description: `${Math.round(quality * 100)}% איכות • ${Math.round(alignmentCoverage * 100)}% עוגנים • ${alignedTimings.length} מילים`,
       });
     } catch (error) {
       if (controller.signal.aborted) return;

@@ -11,6 +11,8 @@ import { useTextMarking } from "@/hooks/useTextMarking";
 import { MarkingToolbar } from "@/components/MarkingToolbar";
 import { AlignRight, Clock, Search, ChevronUp, ChevronDown, X, Highlighter, Palette } from "lucide-react";
 import type { WordTiming } from "./SyncAudioPlayer";
+import { scrollWithinContainer } from "@/lib/scrollWithinContainer";
+import { findActiveWordIndex } from "@/lib/whisperAlignment";
 
 interface SyncTranscriptViewProps {
   wordTimings: WordTiming[];
@@ -124,10 +126,7 @@ export const SyncTranscriptView = ({
 
   const currentWordIndex = useMemo(() => {
     if (!syncEnabled || !wordTimings.length) return -1;
-    for (let i = wordTimings.length - 1; i >= 0; i--) {
-      if (currentTime >= wordTimings[i].start) return i;
-    }
-    return -1;
+    return findActiveWordIndex(wordTimings, currentTime);
   }, [currentTime, wordTimings, syncEnabled]);
 
   // Search matching
@@ -171,7 +170,7 @@ export const SyncTranscriptView = ({
       const wordRect = word.getBoundingClientRect();
       const isVisible = wordRect.top >= containerRect.top && wordRect.bottom <= containerRect.bottom;
       if (!isVisible) {
-        word.scrollIntoView({ behavior: "smooth", block: "center" });
+        scrollWithinContainer(container, word, "center");
       }
     }
   }, [currentWordIndex]);

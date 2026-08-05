@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger
 } from "@/components/ui/dialog";
@@ -21,7 +25,7 @@ import {
   Star, StarOff, Tag, Grid3X3, List, ArrowUpDown, X, Check,
   StickyNote, Briefcase, GraduationCap, Users, MessageSquare, MoreHorizontal,
   Download, Loader2, Play, Pause, Volume2, Table2, RectangleHorizontal, LayoutGrid,
-  Eye, Filter, SortAsc, SortDesc, SlidersHorizontal
+  Eye, Filter, SortAsc, SortDesc, SlidersHorizontal, ListChecks, CheckCheck
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
@@ -40,7 +44,7 @@ type ViewMode = "cards" | "grid" | "table" | "rectangles";
 interface FolderManagerProps {
   transcripts: CloudTranscript[];
   onUpdate: (id: string, updates: Partial<Pick<CloudTranscript, 'folder' | 'tags' | 'title' | 'notes' | 'category' | 'is_favorite'>>) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => void | Promise<void>;
   onGetAudioUrl?: (filePath: string) => Promise<string | null>;
 }
 
@@ -55,7 +59,7 @@ const saveCustomFolders = (folders: string[]) => {
 const normalizeForCompare = (value: string) =>
   value
     .replace(/\s+/g, ' ')
-    .replace(/["'`.,;:!?()\[\]{}<>\\/|\-]/g, '')
+    .replace(/["'`.,;:!?()[\]{}<>\\/|-]/g, '')
     .trim()
     .toLowerCase();
 
@@ -87,6 +91,7 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
   const viewMode = (preferences.folder_view_mode || 'cards') as ViewMode;
   const setViewMode = useCallback((m: ViewMode) => updatePreference('folder_view_mode', m), [updatePreference]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
@@ -183,14 +188,34 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
 
-  const handleBulkDelete = () => {
-    selectedIds.forEach(id => onDelete(id));
+  useEffect(() => {
+    const validIds = new Set(transcripts.map(transcript => transcript.id));
+    setSelectedIds(current => {
+      const next = new Set([...current].filter(id => validIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [transcripts]);
+
+  const toggleSelectionMode = () => {
+    if (selectionMode) setSelectedIds(new Set());
+    setSelectionMode(!selectionMode);
+  };
+
+  const allFilteredSelected = filteredTranscripts.length > 0 && filteredTranscripts.every(transcript => selectedIds.has(transcript.id));
+  const toggleAllFiltered = () => {
+    setSelectedIds(allFilteredSelected ? new Set() : new Set(filteredTranscripts.map(transcript => transcript.id)));
+  };
+
+  const handleBulkDelete = async () => {
+    await Promise.all([...selectedIds].map(id => onDelete(id)));
     setSelectedIds(new Set());
+    setSelectionMode(false);
   };
 
   const handleBulkMove = (folder: string) => {
@@ -272,30 +297,16 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
             <CardTitle className="text-xl">ניהול תמלולים</CardTitle>
           </div>
           <div className="flex items-center gap-2">
-            {selectedIds.size > 0 && (
-              <div className="flex items-center gap-1">
-                <Badge variant="secondary">{selectedIds.size} נבחרו</Badge>
-                <Button size="sm" variant="destructive" onClick={handleBulkDelete}>
-                  <Trash2 className="w-3 h-3 ml-1" />מחק
-                </Button>
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button size="sm" variant="outline"><FolderOpen className="w-3 h-3 ml-1" />העבר</Button>
-                  </DialogTrigger>
-                  <DialogContent dir="rtl" className="max-w-sm">
-                    <DialogHeader><DialogTitle>העבר נבחרים לתיקיה</DialogTitle></DialogHeader>
-                    <div className="space-y-2 py-2">
-                      <Button variant="outline" className="w-full justify-start" onClick={() => handleBulkMove('')}>ללא תיקיה</Button>
-                      {folders.map(f => (
-                        <Button key={f} variant="outline" className="w-full justify-start gap-2" onClick={() => handleBulkMove(f)}>
-                          <FolderOpen className="w-4 h-4" />{f}
-                        </Button>
-                      ))}
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            )}
+            <Button
+              variant={selectionMode ? "secondary" : "outline"}
+              size="icon"
+              className="h-8 w-8"
+              onClick={toggleSelectionMode}
+              title={selectionMode ? "סגור בחירה מרובה" : "בחירה מרובה"}
+              aria-label={selectionMode ? "סגור בחירה מרובה בניהול תמלולים" : "בחירה מרובה בניהול תמלולים"}
+            >
+              {selectionMode ? <X className="h-4 w-4" /> : <ListChecks className="h-4 w-4" />}
+            </Button>
             <DropdownMenu dir="rtl">
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon" className="h-8 w-8" title="תצוגה">
@@ -330,6 +341,54 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        {selectionMode && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/35 p-2">
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={toggleAllFiltered} disabled={filteredTranscripts.length === 0}>
+                <CheckCheck className="ml-1 h-4 w-4" />{allFilteredSelected ? 'בטל בחירת הכל' : 'בחר הכל'}
+              </Button>
+              <Badge variant="secondary">{selectedIds.size} נבחרו</Badge>
+            </div>
+            <div className="flex items-center gap-2">
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button size="sm" variant="outline" disabled={selectedIds.size === 0}><FolderOpen className="w-3 h-3 ml-1" />העבר</Button>
+                </DialogTrigger>
+                <DialogContent dir="rtl" className="max-w-sm">
+                  <DialogHeader><DialogTitle>העבר נבחרים לתיקיה</DialogTitle></DialogHeader>
+                  <div className="space-y-2 py-2">
+                    <Button variant="outline" className="w-full justify-start" onClick={() => handleBulkMove('')}>ללא תיקיה</Button>
+                    {folders.map(f => (
+                      <Button key={f} variant="outline" className="w-full justify-start gap-2" onClick={() => handleBulkMove(f)}>
+                        <FolderOpen className="w-4 h-4" />{f}
+                      </Button>
+                    ))}
+                  </div>
+                </DialogContent>
+              </Dialog>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm" variant="destructive" disabled={selectedIds.size === 0}>
+                    <Trash2 className="w-3 h-3 ml-1" />מחיקה
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent dir="rtl">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>למחוק {selectedIds.size} תמלולים?</AlertDialogTitle>
+                    <AlertDialogDescription>הפעולה תמחק את התמלולים שנבחרו מהמכשיר ומהענן ולא ניתן לבטל אותה.</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>ביטול</AlertDialogCancel>
+                    <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => void handleBulkDelete()}>
+                      מחק תמלולים
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <Button size="sm" variant="ghost" onClick={toggleSelectionMode}>סיום</Button>
+            </div>
+          </div>
+        )}
         {/* New Folder Input */}
         {showNewFolder && (
           <div className="flex gap-2">
@@ -449,6 +508,15 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
               <table className="w-full text-sm" dir="rtl">
                 <thead className="bg-muted/40">
                   <tr>
+                    {selectionMode && (
+                      <th className="w-10 px-3 py-2">
+                        <Checkbox
+                          checked={allFilteredSelected}
+                          onCheckedChange={toggleAllFiltered}
+                          aria-label="בחר את כל התמלולים המוצגים"
+                        />
+                      </th>
+                    )}
                     <th className="text-right px-3 py-2 font-medium">שם</th>
                     <th className="text-right px-3 py-2 font-medium">מנוע</th>
                     <th className="text-right px-3 py-2 font-medium">תיקיה</th>
@@ -458,7 +526,12 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
                 </thead>
                 <tbody>
                   {filteredTranscripts.map(t => (
-                    <tr key={t.id} className="border-t hover:bg-accent/30">
+                    <tr key={t.id} className={`border-t hover:bg-accent/30 ${selectedIds.has(t.id) ? 'bg-primary/5' : ''}`}>
+                      {selectionMode && (
+                        <td className="px-3 py-2">
+                          <Checkbox checked={selectedIds.has(t.id)} onCheckedChange={() => toggleSelect(t.id)} aria-label={`בחר ${t.title || 'תמלול'}`} />
+                        </td>
+                      )}
                       <td className="px-3 py-2 text-right max-w-[280px] truncate">{t.title || t.text.substring(0, 55)}</td>
                       <td className="px-3 py-2 text-right">{t.engine}</td>
                       <td className="px-3 py-2 text-right">{t.folder || 'ללא'}</td>
@@ -491,6 +564,7 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
                   key={t.id}
                   t={t}
                   isSelected={selectedIds.has(t.id)}
+                  selectionMode={selectionMode}
                   onToggleSelect={() => toggleSelect(t.id)}
                   onToggleFavorite={() => onUpdate(t.id, { is_favorite: !t.is_favorite })}
                   onCategoryChange={(cat) => onUpdate(t.id, { category: cat })}
@@ -545,6 +619,7 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
 interface TranscriptItemProps {
   t: CloudTranscript;
   isSelected: boolean;
+  selectionMode: boolean;
   onToggleSelect: () => void;
   onToggleFavorite: () => void;
   onCategoryChange: (cat: string) => void;
@@ -582,7 +657,7 @@ interface TranscriptItemProps {
 }
 
 const TranscriptItem = ({
-  t, isSelected, onToggleSelect, onToggleFavorite, onCategoryChange,
+  t, isSelected, selectionMode, onToggleSelect, onToggleFavorite, onCategoryChange,
   editingTitleId, editingTitle, onStartEditTitle, onEditTitleChange, onSaveTitle, onCancelEditTitle,
   editingNotesId, editingNotes, onStartEditNotes, onEditNotesChange, onSaveNotes, onCancelEditNotes,
   addingTagId, newTagInput, allTags, onStartAddTag, onNewTagChange, onAddTag, onRemoveTag, onCancelAddTag,
@@ -684,7 +759,7 @@ const TranscriptItem = ({
       {/* Top row */}
       <div className="flex items-center justify-between mb-1 gap-2">
         <div className="flex items-center gap-2">
-          <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} />
+          {selectionMode && <Checkbox checked={isSelected} onCheckedChange={onToggleSelect} aria-label={`בחר ${displayTitle}`} />}
           <Button
             size="icon"
             variant="ghost"

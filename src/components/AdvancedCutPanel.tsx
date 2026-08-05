@@ -905,7 +905,11 @@ export default function AdvancedCutPanel({
   useEffect(() => {
     restorePersistedCutJobs().then((restored) => {
       if (restored.length > 0) {
-        setCutJobs((prev) => [...prev, ...restored]);
+        setCutJobs((prev) => {
+          const unique = new Map(prev.map((job) => [job.id, job]));
+          restored.forEach((job) => unique.set(job.id, job));
+          return Array.from(unique.values());
+        });
       }
     });
   }, []);
@@ -1052,6 +1056,7 @@ export default function AdvancedCutPanel({
 
       const engineLabel: Record<CutTier, string> = {
         "wav-slice": "WAV ישיר",
+        "server-ffmpeg": "FFmpeg מקומי",
         "ffmpeg-copy": "FFmpeg ללא קידוד מחדש",
         "audio-buffer": "פיענוח מלא",
       };
@@ -1684,7 +1689,7 @@ export default function AdvancedCutPanel({
                 </Button>
                 {previewSegments.length > 0 && (
                   <span className="text-xs text-muted-foreground text-center sm:text-right">
-                    WAV ישיר → FFmpeg ללא קידוד → פיענוח מלא כגיבוי
+                    WAV ישיר → FFmpeg מקומי → FFmpeg בדפדפן → פיענוח מלא כגיבוי
                   </span>
                 )}
               </div>

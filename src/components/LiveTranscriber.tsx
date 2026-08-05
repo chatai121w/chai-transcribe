@@ -22,8 +22,23 @@ import { useCloudApiKeys } from "@/hooks/useCloudApiKeys";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { isLoshonKodeshEnabled } from "@/lib/loshonKodesh";
 import { buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
+import { LiveChunkQueue, type LiveChunkJob } from "@/lib/liveChunkQueue";
 
-type LiveMode = "browser" | "cuda" | "groq";
+export type LiveMode = "browser" | "cuda" | "groq" | "openai" | "deepgram" | "assemblyai" | "google";
+
+const CLOUD_LIVE_MODES: LiveMode[] = ["groq", "openai", "deepgram", "assemblyai", "google"];
+const isRecordedLiveMode = (mode: LiveMode) => mode !== "browser";
+const isCloudLiveMode = (mode: LiveMode) => CLOUD_LIVE_MODES.includes(mode);
+
+const LIVE_ENGINE_LABELS: Record<LiveMode, string> = {
+  browser: "Web Speech API",
+  cuda: "CUDA Whisper",
+  groq: "Groq Whisper",
+  openai: "OpenAI Whisper",
+  deepgram: "Deepgram Nova-2",
+  assemblyai: "AssemblyAI",
+  google: "Google Speech-to-Text",
+};
 
 const DEFAULT_CHUNK_SEC = 5;
 const LIVE_RECORDING_TIMESLICE_MS = 150;
@@ -34,7 +49,10 @@ const MAX_CONSECUTIVE_ERRORS = 5;
 const SEND_TIMEOUT_MS = 90000;        // 90s timeout — allows for long chunks (up to 60s) at high quality
 
 interface LiveStats {
+  chunksCaptured: number;
   chunksProcessed: number;
+  chunksQueued: number;
+  chunksDropped: number;
   totalLatencyMs: number;
   wordsTranscribed: number;
   errorsCount: number;
@@ -46,6 +64,8 @@ type SaveFormat = typeof SAVE_FORMATS[number];
 
 export interface LiveTranscriptResult {
   text: string;
+  engine: LiveMode;
+  engineLabel: string;
   audioBlob?: Blob;
   wordTimings?: Array<{word: string; start: number; end: number; probability?: number}>;
   folder?: string;
@@ -69,7 +89,25 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const [interimText, setInterimText] = useState("");
   const [finalText, setFinalText] = useState("");
   const [isSupported, setIsSupported] = useState(true);
-  const [mode, setMode] = useState<LiveMode>(serverConnected ? "cuda" : "groq");
+  const hasSavedModeRef = useRef(false);
+  const preferredModeRef = useRef<LiveMode | null>(null);
+  const [mode, setModeState] = useState<LiveMode>(() => {
+    try {
+      const saved = localStorage.getItem("live_transcription_engine") as LiveMode | null;
+      if (saved && [...CLOUD_LIVE_MODES, "browser", "cuda"].includes(saved)) {
+        hasSavedModeRef.current = true;
+        preferredModeRef.current = saved;
+        return saved;
+      }
+    } catch { /* */ }
+    return serverConnected ? "cuda" : "groq";
+  });
+  const setMode = useCallback((next: LiveMode) => {
+    hasSavedModeRef.current = true;
+    preferredModeRef.current = next;
+    setModeState(next);
+    try { localStorage.setItem("live_transcription_engine", next); } catch { /* */ }
+  }, []);
   const chunkSec = preferences.live_chunk_sec ?? DEFAULT_CHUNK_SEC;
   const setChunkSec = useCallback((v: number) => updatePreference('live_chunk_sec', v), [updatePreference]);
   const chunkSecRef = useRef<number>(DEFAULT_CHUNK_SEC);
@@ -85,6 +123,14 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   }, [fullRetranscribe]);
   const fullRetranscribeRef = useRef(fullRetranscribe);
   useEffect(() => { fullRetranscribeRef.current = fullRetranscribe; }, [fullRetranscribe]);
+  const [geminiFinalPass, setGeminiFinalPass] = useState(() => {
+    try { return localStorage.getItem("live_gemini_final_pass") === "1"; } catch { return false; }
+  });
+  const geminiFinalPassRef = useRef(geminiFinalPass);
+  useEffect(() => {
+    geminiFinalPassRef.current = geminiFinalPass;
+    try { localStorage.setItem("live_gemini_final_pass", geminiFinalPass ? "1" : "0"); } catch { /* */ }
+  }, [geminiFinalPass]);
   const recognitionRef = useRef<any>(null);
   const [isRefining, setIsRefining] = useState(false);
 
@@ -120,15 +166,13 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
   // CUDA live mode refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const archiveRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const allChunksRef = useRef<Blob[]>([]);
-  const headerChunkRef = useRef<Blob | null>(null);
-  const processingRef = useRef(false);
   const gpuBusyToastAtRef = useRef(0);
   const consecutiveErrorsRef = useRef(0);
-  const pendingRetryRef = useRef<Blob | null>(null);
+  const queueRef = useRef<LiveChunkQueue | null>(null);
   const audioLevelSamplesRef = useRef<number[]>([]);
   const finalTextRef = useRef("");
 
@@ -140,6 +184,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     startMs: number;
     offsetSec: number;
   } | null>(null);
+  const startCloudRecorderRef = useRef<(() => void) | null>(null);
 
   // Audio level indicator refs
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -154,7 +199,8 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mimeTypeRef = useRef("audio/webm");
   const [stats, setStats] = useState<LiveStats>({
-    chunksProcessed: 0, totalLatencyMs: 0, wordsTranscribed: 0, errorsCount: 0, silenceSkips: 0,
+    chunksCaptured: 0, chunksProcessed: 0, chunksQueued: 0, chunksDropped: 0,
+    totalLatencyMs: 0, wordsTranscribed: 0, errorsCount: 0, silenceSkips: 0,
   });
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -188,16 +234,20 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       if (recognitionRef.current) {
         recognitionRef.current.abort();
       }
+      queueRef.current?.stop();
+      queueRef.current = null;
       stopCudaCleanup();
     };
   }, []);
 
-  // Switch mode when server connection changes
+  // Preserve the user's selected engine; only recover from unavailable CUDA.
   useEffect(() => {
-    if (serverConnected && !isListening) {
-      setMode("cuda");
+    if (!serverConnected && mode === "cuda" && !isListening) setModeState("groq");
+    const shouldUseCuda = !hasSavedModeRef.current || preferredModeRef.current === "cuda";
+    if (serverConnected && shouldUseCuda && !isListening && mode !== "cuda") {
+      setModeState("cuda");
     }
-  }, [serverConnected, isListening]);
+  }, [serverConnected, isListening, mode]);
 
   // ─── Browser Web Speech API ───
   const startBrowser = useCallback(() => {
@@ -285,21 +335,19 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     };
   }, [preferences.cuda_hotwords]);
 
-  const sendChunk = useCallback(async (blob: Blob, offsetSec: number = 0) => {
-    if (blob.size < LIVE_MIN_BLOB_BYTES || processingRef.current) return;
-
-    // Client-side silence skip — use averaged audio level over chunk window
-    const avgLevel = audioLevelSamplesRef.current.length > 0
-      ? audioLevelSamplesRef.current.reduce((a, b) => a + b, 0) / audioLevelSamplesRef.current.length
-      : audioLevelRef.current;
-    audioLevelSamplesRef.current = []; // reset for next chunk window
-    if (avgLevel < SILENCE_THRESHOLD) {
+  const sendChunk = useCallback(async (job: LiveChunkJob): Promise<"done" | "retry"> => {
+    const { blob, offsetSec, averageLevel } = job;
+    if (blob.size < LIVE_MIN_BLOB_BYTES) {
       setStats(prev => ({ ...prev, silenceSkips: prev.silenceSkips + 1 }));
-      setInterimText("שקט — ממתין לדיבור...");
-      return;
+      return "done";
     }
 
-    processingRef.current = true;
+    if (averageLevel < SILENCE_THRESHOLD) {
+      setStats(prev => ({ ...prev, silenceSkips: prev.silenceSkips + 1 }));
+      setInterimText("שקט — ממתין לדיבור...");
+      return "done";
+    }
+
     setInterimText("מעבד...");
     const sendStart = performance.now();
     try {
@@ -320,46 +368,59 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       let data: any = null;
       let ok = false;
 
-      if (mode === "groq") {
-        // Pick a Groq key — pool first, then single key
-        const pool = apiKeys.groq_keys_pool?.filter(Boolean) || [];
-        const groqKey = pool.length > 0
-          ? pool[Math.floor(Math.random() * pool.length)]
-          : apiKeys.groq_key;
-        if (!groqKey) {
+      if (isCloudLiveMode(mode)) {
+        const keyConfig = {
+          groq: [apiKeys.groq_key, apiKeys.groq_keys_pool],
+          openai: [apiKeys.openai_key, apiKeys.openai_keys_pool],
+          deepgram: [apiKeys.deepgram_key, apiKeys.deepgram_keys_pool],
+          assemblyai: [apiKeys.assemblyai_key, apiKeys.assemblyai_keys_pool],
+          google: [apiKeys.google_key, apiKeys.google_keys_pool],
+        } as const;
+        const [singleKey, rawPool] = keyConfig[mode];
+        const pool = rawPool?.filter(Boolean) || [];
+        const apiKey = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : singleKey;
+        if (!apiKey) {
           toast({
-            title: "חסר מפתח Groq",
-            description: "הוסף מפתח Groq בהגדרות → API Keys",
+            title: `חסר מפתח ${LIVE_ENGINE_LABELS[mode]}`,
+            description: "הוסף מפתח מתאים בהגדרות API",
             variant: "destructive",
           });
-          setInterimText("חסר מפתח Groq — בדוק הגדרות");
+          setInterimText("חסר מפתח API — בדוק הגדרות");
           consecutiveErrorsRef.current = MAX_CONSECUTIVE_ERRORS;
-          return;
+          setStats(prev => ({ ...prev, chunksDropped: prev.chunksDropped + 1 }));
+          return "done";
         }
-        formData.append("apiKey", groqKey);
-        // Highest-quality model for live: prefer whisper-large-v3 when chunks are large enough
-        // (turbo is faster but slightly lower accuracy). For chunks ≥6s we have headroom for quality.
-        formData.append("model", chunkSecRef.current >= 6 ? "whisper-large-v3" : "whisper-large-v3-turbo");
-        // Groq via edge function — chunked near-live transcription
-        const { data: gd, error: gerr } = await supabase.functions.invoke('transcribe-groq', {
-          body: formData,
-        });
-        if (gerr) {
-          // 429 from Groq surfaces as error; treat as rate limited
-          const msg = String(gerr.message || gerr);
+        let response: { data: any; error: any };
+        if (mode === "google") {
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          let binary = "";
+          for (let i = 0; i < bytes.length; i += 0x8000) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+          }
+          response = await supabase.functions.invoke("transcribe-google", {
+            body: { audio: btoa(binary), fileName: "chunk.webm", apiKey, language: "he", targetLanguage: "he" },
+          });
+        } else {
+          formData.append("apiKey", apiKey);
+          if (mode === "groq") {
+            formData.append("model", chunkSecRef.current >= 6 ? "whisper-large-v3" : "whisper-large-v3-turbo");
+          }
+          response = await supabase.functions.invoke(`transcribe-${mode}`, { body: formData });
+        }
+        if (response.error) {
+          const msg = String(response.error.message || response.error);
           if (msg.includes('429') || /rate/i.test(msg)) {
-            pendingRetryRef.current = blob;
             const now = Date.now();
             if (now - gpuBusyToastAtRef.current > 4000) {
               gpuBusyToastAtRef.current = now;
-              toast({ title: "Groq עסוק", description: "ממתין ומנסה שוב" });
+              toast({ title: `${LIVE_ENGINE_LABELS[mode]} עסוק`, description: "המקטע נשמר בתור וינוסה שוב" });
             }
-            setInterimText("Groq rate limit — ממתין...");
-            return;
+            setInterimText("המנוע עסוק — המקטע נשמר בתור");
+            return "retry";
           }
           throw new Error(msg);
         }
-        data = gd;
+        data = response.data;
         ok = true;
       } else {
         const res = await fetch(`${getBaseUrl()}/transcribe-live`, {
@@ -370,32 +431,29 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         status = res.status;
         ok = res.ok;
         if (status === 429) {
-          pendingRetryRef.current = blob;
           const now = Date.now();
           if (now - gpuBusyToastAtRef.current > 4000) {
             gpuBusyToastAtRef.current = now;
             toast({ title: "GPU עסוק", description: "ממשיך אוטומטית כשהשרת יתפנה" });
           }
           setInterimText("GPU עסוק — ממתין...");
-          return;
+          return "retry";
         }
         if (status === 500) {
           consecutiveErrorsRef.current++;
           if (consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS) {
             toast({ title: "שגיאות חוזרות", description: "מנותק מהשרת — בדוק את שרת CUDA", variant: "destructive" });
             setInterimText("שגיאה — שרת לא מגיב");
-            return;
+            return "done";
           }
-          pendingRetryRef.current = blob;
           setStats(prev => ({ ...prev, errorsCount: prev.errorsCount + 1 }));
-          return;
+          return "retry";
         }
         if (ok) data = await res.json();
       }
 
       if (ok && data) {
         consecutiveErrorsRef.current = 0;
-        pendingRetryRef.current = null; // clear any pending retry on success
         const text = data.text?.trim();
         const latencyMs = Math.round(performance.now() - sendStart);
         const newWords = text ? text.split(/\s+/).length : 0;
@@ -428,19 +486,46 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         } else {
           setInterimText("מאזין...");
         }
+        return "done";
       }
+      return "retry";
     } catch (err) {
       console.error("Live chunk error:", err);
       consecutiveErrorsRef.current++;
-      pendingRetryRef.current = blob; // save for retry instead of unshift
       setStats(prev => ({ ...prev, errorsCount: prev.errorsCount + 1 }));
       if (consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS) {
         setInterimText("שרת לא מגיב — בדוק חיבור");
       }
-    } finally {
-      processingRef.current = false;
+      return consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS ? "done" : "retry";
     }
-  }, [appendDedupText, mode, apiKeys.groq_key, apiKeys.groq_keys_pool, getLiveBiasOptions]);
+  }, [appendDedupText, mode, apiKeys, getLiveBiasOptions]);
+
+  const ensureQueue = useCallback(() => {
+    if (!queueRef.current) {
+      queueRef.current = new LiveChunkQueue({
+        process: sendChunk,
+        maxAttempts: 3,
+        retryDelayMs: 1000,
+        onDepthChange: (depth) => setStats(prev => ({ ...prev, chunksQueued: depth })),
+        onDropped: () => setStats(prev => ({
+          ...prev,
+          chunksDropped: prev.chunksDropped + 1,
+          errorsCount: prev.errorsCount + 1,
+        })),
+      });
+    }
+    return queueRef.current;
+  }, [sendChunk]);
+
+  const enqueueChunk = useCallback((blob: Blob, offsetSec = 0) => {
+    const samples = audioLevelSamplesRef.current;
+    const averageLevel = samples.length > 0
+      ? samples.reduce((sum, level) => sum + level, 0) / samples.length
+      : audioLevelRef.current;
+    audioLevelSamplesRef.current = [];
+    setStats(prev => ({ ...prev, chunksCaptured: prev.chunksCaptured + 1 }));
+    ensureQueue().enqueue({ blob, offsetSec, averageLevel });
+  }, [ensureQueue]);
 
   const runFinalRefinePass = useCallback(async (): Promise<string | null> => {
     if (allChunksRef.current.length === 0) return null;
@@ -532,6 +617,35 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     }
   }, [apiKeys.groq_key, apiKeys.groq_keys_pool, getLiveBiasOptions]);
 
+  const runGeminiFinalPass = useCallback(async (audioBlob: Blob): Promise<string | null> => {
+    setIsRefining(true);
+    setInterimText("Gemini מבצע תמלול סופי מלא...");
+    try {
+      const { getPersonalGeminiKey, getPersonalGeminiModel } = await import("@/lib/personalGemini");
+      const personalKey = getPersonalGeminiKey();
+      const model = (localStorage.getItem("gemini_transcription_model") || getPersonalGeminiModel() || "gemini-flash-latest")
+        .replace(/^google\//, "");
+      const form = new FormData();
+      form.append("file", audioBlob, "live-final.webm");
+      form.append("model", model);
+      form.append("language", "he");
+      if (personalKey) form.append("apiKey", personalKey);
+      const { data, error } = await supabase.functions.invoke("transcribe-gemini", { body: form });
+      if (error) throw error;
+      const text = String(data?.text || "").trim();
+      if (!text) throw new Error("לא התקבל תמלול מ-Gemini");
+      toast({ title: "תמלול Gemini הושלם", description: `${text.split(/\s+/).length} מילים` });
+      return text;
+    } catch (error) {
+      console.error("Gemini live final pass failed:", error);
+      toast({ title: "שיפור Gemini נכשל", description: "נשמר התמלול החי שנצבר", variant: "destructive" });
+      return null;
+    } finally {
+      setIsRefining(false);
+      setInterimText("");
+    }
+  }, []);
+
   const startCuda = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -545,7 +659,12 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       });
       streamRef.current = stream;
       consecutiveErrorsRef.current = 0;
-      setStats({ chunksProcessed: 0, totalLatencyMs: 0, wordsTranscribed: 0, errorsCount: 0, silenceSkips: 0 });
+      queueRef.current?.stop();
+      queueRef.current = null;
+      setStats({
+        chunksCaptured: 0, chunksProcessed: 0, chunksQueued: 0, chunksDropped: 0,
+        totalLatencyMs: 0, wordsTranscribed: 0, errorsCount: 0, silenceSkips: 0,
+      });
 
       // Recording timer
       startTimeRef.current = Date.now();
@@ -613,85 +732,54 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
       const recorderStream = processedStreamRef.current ?? stream;
 
-      if (mode === "groq") {
-        // Groq requires a complete, standalone media file per request.
-        // Each chunk = its own standalone webm recording. We track per-chunk
-        // start time and cumulative offset to shift word timestamps correctly,
-        // and expose the active recorder so stopListening can flush the tail.
-        cumulativeAudioSecRef.current = 0;
-        wordTimingsRef.current = [];
+      // Keep one continuous archive for saving/refinement. Live chunks use a
+      // separate recorder so every request is a self-contained WebM file.
+      allChunksRef.current = [];
+      const archiveRecorder = new MediaRecorder(recorderStream, { mimeType });
+      archiveRecorderRef.current = archiveRecorder;
+      archiveRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) allChunksRef.current.push(event.data);
+      };
+      archiveRecorder.start(LIVE_RECORDING_TIMESLICE_MS);
 
-        const startGroqRecorder = () => {
-          const rec = new MediaRecorder(recorderStream, { mimeType });
-          const localChunks: Blob[] = [];
-          const ctx = {
-            rec,
-            chunks: localChunks,
-            startMs: Date.now(),
-            offsetSec: cumulativeAudioSecRef.current,
-          };
-          rec.ondataavailable = (e) => {
-            if (e.data.size > 0) localChunks.push(e.data);
-          };
-          // Default onstop: auto-cycle; overridden by cycleGroqRecorder / flush.
-          rec.onstop = async () => {
-            const durationSec = (Date.now() - ctx.startMs) / 1000;
-            cumulativeAudioSecRef.current += durationSec;
-            if (localChunks.length > 0) {
-              const blob = new Blob(localChunks, { type: mimeType });
-              allChunksRef.current.push(blob);
-              await sendChunk(blob, ctx.offsetSec);
-            }
-            if (isListeningRef.current && !isPausedRef.current && currentGroqRecorderRef.current === ctx) {
-              startGroqRecorder();
-            }
-          };
-          currentGroqRecorderRef.current = ctx;
-          mediaRecorderRef.current = rec;
-          rec.start();
+      cumulativeAudioSecRef.current = 0;
+      wordTimingsRef.current = [];
+
+      const startStandaloneRecorder = () => {
+        const rec = new MediaRecorder(recorderStream, { mimeType });
+        const localChunks: Blob[] = [];
+        const ctx = {
+          rec,
+          chunks: localChunks,
+          startMs: Date.now(),
+          offsetSec: cumulativeAudioSecRef.current,
         };
-        startGroqRecorder();
-
-        chunkIntervalRef.current = setInterval(() => {
-          const ctx = currentGroqRecorderRef.current;
-          if (ctx && ctx.rec.state === "recording") ctx.rec.stop();
-        }, chunkSecRef.current * 1000);
-      } else {
-        const recorder = new MediaRecorder(recorderStream, { mimeType });
-        mediaRecorderRef.current = recorder;
-
-        recorder.ondataavailable = (e) => {
-          if (e.data.size > 0) {
-            if (!headerChunkRef.current) {
-              headerChunkRef.current = e.data;
-              allChunksRef.current.push(e.data);
-              return;
-            }
-            chunksRef.current.push(e.data);
-            allChunksRef.current.push(e.data);
+        rec.ondataavailable = (event) => {
+          if (event.data.size > 0) localChunks.push(event.data);
+        };
+        // Start the next recorder before network processing so speech capture
+        // never waits for CUDA or a cloud provider.
+        rec.onstop = () => {
+          const durationSec = (Date.now() - ctx.startMs) / 1000;
+          cumulativeAudioSecRef.current += durationSec;
+          if (isListeningRef.current && !isPausedRef.current && currentGroqRecorderRef.current === ctx) {
+            startStandaloneRecorder();
+          }
+          if (localChunks.length > 0) {
+            enqueueChunk(new Blob(localChunks, { type: mimeType }), ctx.offsetSec);
           }
         };
+        currentGroqRecorderRef.current = ctx;
+        mediaRecorderRef.current = rec;
+        rec.start();
+      };
+      startCloudRecorderRef.current = startStandaloneRecorder;
+      startStandaloneRecorder();
 
-        recorder.start(LIVE_RECORDING_TIMESLICE_MS);
-
-        chunkIntervalRef.current = setInterval(() => {
-          if (processingRef.current) return;
-          if (pendingRetryRef.current) {
-            const retryBlob = pendingRetryRef.current;
-            pendingRetryRef.current = null;
-            sendChunk(retryBlob);
-            return;
-          }
-          if (chunksRef.current.length > 0) {
-            const parts: Blob[] = [];
-            if (headerChunkRef.current) parts.push(headerChunkRef.current);
-            parts.push(...chunksRef.current);
-            const blob = new Blob(parts, { type: mimeType });
-            chunksRef.current = [];
-            sendChunk(blob);
-          }
-        }, chunkSecRef.current * 1000);
-      }
+      chunkIntervalRef.current = setInterval(() => {
+        const ctx = currentGroqRecorderRef.current;
+        if (ctx && ctx.rec.state === "recording") ctx.rec.stop();
+      }, chunkSecRef.current * 1000);
 
       setInterimText("מאזין...");
       isListeningRef.current = true;
@@ -700,7 +788,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       console.error("Microphone access error:", err);
       toast({ title: "גישה למיקרופון נדחתה", description: "אנא אפשר גישה למיקרופון בהגדרות הדפדפן", variant: "destructive" });
     }
-  }, [sendChunk, mode]);
+  }, [enqueueChunk, mode]);
 
   const stopCudaCleanup = useCallback(() => {
     if (chunkIntervalRef.current) {
@@ -729,16 +817,17 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       mediaRecorderRef.current.stop();
     }
     mediaRecorderRef.current = null;
+    if (archiveRecorderRef.current && archiveRecorderRef.current.state !== "inactive") {
+      try { archiveRecorderRef.current.stop(); } catch { /* noop */ }
+    }
+    archiveRecorderRef.current = null;
     currentGroqRecorderRef.current = null;
+    startCloudRecorderRef.current = null;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
-    chunksRef.current = [];
     // NOTE: allChunksRef is NOT cleared here — used to build audio file
-    headerChunkRef.current = null;
-    processingRef.current = false;
-    pendingRetryRef.current = null;
     audioLevelSamplesRef.current = [];
     consecutiveErrorsRef.current = 0;
     isListeningRef.current = false;
@@ -750,7 +839,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     pausedAtRef.current = 0;
   }, []);
 
-  // ─── Pause / Resume (CUDA only) ───
+  // ─── Pause / Resume for recorded live engines ───
   const pauseCuda = useCallback(() => {
     if (!isListeningRef.current || isPausedRef.current) return;
     isPausedRef.current = true;
@@ -761,10 +850,9 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       clearInterval(chunkIntervalRef.current);
       chunkIntervalRef.current = null;
     }
-    // Pause MediaRecorder
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-      mediaRecorderRef.current.pause();
-    }
+    const ctx = currentGroqRecorderRef.current;
+    if (ctx && ctx.rec.state === "recording") ctx.rec.stop();
+    if (archiveRecorderRef.current?.state === "recording") archiveRecorderRef.current.pause();
     // Pause timer
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
@@ -789,10 +877,8 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       totalPausedMsRef.current += Date.now() - pausedAtRef.current;
       pausedAtRef.current = 0;
     }
-    // Resume MediaRecorder
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "paused") {
-      mediaRecorderRef.current.resume();
-    }
+    if (archiveRecorderRef.current?.state === "paused") archiveRecorderRef.current.resume();
+    startCloudRecorderRef.current?.();
     // Restart timer
     timerIntervalRef.current = setInterval(() => {
       setElapsedSec(Math.floor((Date.now() - startTimeRef.current - totalPausedMsRef.current) / 1000));
@@ -814,43 +900,26 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       };
       tick();
     }
-    // Restart chunk sending
-    const mimeType = mimeTypeRef.current;
+    // Restart chunk capture; queued processing continues independently.
     chunkIntervalRef.current = setInterval(() => {
-      if (processingRef.current) return;
-      if (pendingRetryRef.current) {
-        const retryBlob = pendingRetryRef.current;
-        pendingRetryRef.current = null;
-        sendChunk(retryBlob);
-        return;
-      }
-      if (chunksRef.current.length > 0) {
-        const parts: Blob[] = [];
-        if (headerChunkRef.current) {
-          parts.push(headerChunkRef.current);
-        }
-        parts.push(...chunksRef.current);
-        const blob = new Blob(parts, { type: mimeType });
-        chunksRef.current = [];
-        sendChunk(blob);
-      }
+      const ctx = currentGroqRecorderRef.current;
+      if (ctx && ctx.rec.state === "recording") ctx.rec.stop();
     }, chunkSecRef.current * 1000);
     setInterimText("מאזין...");
     toast({ title: "▶ תמלול ממשיך" });
-  }, [sendChunk]);
+  }, []);
 
   // ─── Unified controls ───
   const startListening = useCallback(() => {
-    if (mode === "cuda" || mode === "groq") {
+    if (isRecordedLiveMode(mode)) {
       startCuda();
     } else {
       startBrowser();
     }
   }, [mode, startCuda, startBrowser]);
 
-  // Flush the in-flight Groq recorder: stop it, transcribe the tail (if >=1s),
-  // and resolve once the final sendChunk completes. No auto-cycle.
-  const flushGroqTail = useCallback(async (): Promise<void> => {
+  // Flush the active standalone live chunk, then wait for the whole queue.
+  const flushCloudTail = useCallback(async (): Promise<void> => {
     const ctx = currentGroqRecorderRef.current;
     currentGroqRecorderRef.current = null;
     if (!ctx) return;
@@ -861,30 +930,35 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         cumulativeAudioSecRef.current += durationSec;
         if (ctx.chunks.length > 0 && durationSec >= 1) {
           const blob = new Blob(ctx.chunks, { type: mimeTypeRef.current });
-          allChunksRef.current.push(blob);
           setInterimText("מתמלל את הסיום...");
-          try { await sendChunk(blob, ctx.offsetSec); } catch { /* swallow */ }
+          enqueueChunk(blob, ctx.offsetSec);
         }
         resolve();
       };
       try { ctx.rec.stop(); } catch { resolve(); }
     });
-  }, [sendChunk]);
+    await queueRef.current?.idle();
+  }, [enqueueChunk]);
+
+  const flushArchiveRecording = useCallback(async (): Promise<void> => {
+    const recorder = archiveRecorderRef.current;
+    archiveRecorderRef.current = null;
+    if (!recorder || recorder.state === "inactive") return;
+    await new Promise<void>((resolve) => {
+      recorder.addEventListener("stop", () => resolve(), { once: true });
+      try { recorder.stop(); } catch { resolve(); }
+    });
+  }, []);
 
   const stopListening = useCallback(async () => {
-    if (mode === "cuda" || mode === "groq") {
+    if (isRecordedLiveMode(mode)) {
       // Stop the chunk timer first so no new cycles trigger during flush
       if (chunkIntervalRef.current) { clearInterval(chunkIntervalRef.current); chunkIntervalRef.current = null; }
       // Prevent auto-restart of groq recorder during flush
       isListeningRef.current = false;
 
-      if (mode === "groq") {
-        await flushGroqTail();
-      } else {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-          mediaRecorderRef.current.stop();
-        }
-      }
+      await flushCloudTail();
+      await flushArchiveRecording();
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
 
       // Build audio blob from all chunks BEFORE cleanup
@@ -898,8 +972,16 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       // unit and REPLACES the chunked text. Falls back to chunked text on failure.
       // For CUDA, this also enables the existing refine pass.
       let merged = finalTextRef.current;
-      const doFullRetranscribe = fullRetranscribeRef.current && (mode === "cuda" || mode === "groq");
-      if (doFullRetranscribe || mode === "cuda") {
+      if (geminiFinalPassRef.current && audioBlob) {
+        const geminiText = await runGeminiFinalPass(audioBlob);
+        if (geminiText) {
+          merged = geminiText;
+          wordTimingsRef.current = [];
+          setFinalText(geminiText);
+        }
+      } else {
+        const doFullRetranscribe = fullRetranscribeRef.current && (mode === "cuda" || mode === "groq");
+        if (doFullRetranscribe || mode === "cuda") {
         const prevTimings = [...wordTimingsRef.current];
         wordTimingsRef.current = [];
         const refinedText = mode === "groq"
@@ -921,12 +1003,17 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         } else {
           merged = currentFinalText;
         }
+        }
       }
       stopCudaCleanup();
+      queueRef.current?.stop();
+      queueRef.current = null;
       allChunksRef.current = [];
       if (merged.trim()) {
         onTranscriptComplete({
           text: merged.trim(),
+          engine: mode,
+          engineLabel: LIVE_ENGINE_LABELS[mode],
           audioBlob,
           wordTimings: wordTimingsRef.current.length > 0 ? wordTimingsRef.current : undefined,
           folder: selectedFolder || undefined,
@@ -941,13 +1028,15 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       if (currentText.trim()) {
         onTranscriptComplete({
           text: currentText.trim(),
+          engine: mode,
+          engineLabel: LIVE_ENGINE_LABELS[mode],
           folder: selectedFolder || undefined,
           fileName: fileName.trim() || undefined,
           format: saveFormat,
         });
       }
     }
-  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, runGroqFullRetranscribe, stopCudaCleanup, stopBrowser, flushGroqTail]);
+  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, runGroqFullRetranscribe, runGeminiFinalPass, stopCudaCleanup, stopBrowser, flushCloudTail, flushArchiveRecording]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(finalText);
@@ -962,13 +1051,21 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
   // Cancel recording — discard everything, do not save
   const handleCancel = useCallback(() => {
-    if ((mode === "cuda" || mode === "groq")) {
+    if (isRecordedLiveMode(mode)) {
+      isListeningRef.current = false;
       if (chunkIntervalRef.current) { clearInterval(chunkIntervalRef.current); chunkIntervalRef.current = null; }
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.onstop = null;
         mediaRecorderRef.current.stop();
+      }
+      if (archiveRecorderRef.current && archiveRecorderRef.current.state !== "inactive") {
+        archiveRecorderRef.current.ondataavailable = null;
+        archiveRecorderRef.current.stop();
       }
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); }
       allChunksRef.current = [];
+      queueRef.current?.stop();
+      queueRef.current = null;
       stopCudaCleanup();
     } else {
       stopBrowser();
@@ -985,6 +1082,8 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     if (!finalText.trim()) return;
     onTranscriptComplete({
       text: finalText.trim(),
+      engine: mode,
+      engineLabel: LIVE_ENGINE_LABELS[mode],
       folder: selectedFolder || undefined,
       fileName: fileName.trim() || undefined,
       format: saveFormat,
@@ -1054,6 +1153,20 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     ? Math.round(stats.totalLatencyMs / stats.chunksProcessed)
     : 0;
 
+  const hasLiveEngineKey = (engine: LiveMode) => {
+    if (engine === "browser") return browserSupported;
+    if (engine === "cuda") return !!serverConnected;
+    const keyMap = {
+      groq: [apiKeys.groq_key, apiKeys.groq_keys_pool],
+      openai: [apiKeys.openai_key, apiKeys.openai_keys_pool],
+      deepgram: [apiKeys.deepgram_key, apiKeys.deepgram_keys_pool],
+      assemblyai: [apiKeys.assemblyai_key, apiKeys.assemblyai_keys_pool],
+      google: [apiKeys.google_key, apiKeys.google_keys_pool],
+    } as const;
+    const [single, pool] = keyMap[engine];
+    return Boolean(single || pool?.some(Boolean));
+  };
+
   if (!isSupported && !serverConnected) {
     return (
       <Card className="p-6" dir="rtl">
@@ -1093,7 +1206,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         </div>
         <div className="flex items-center gap-2">
           {/* Timer */}
-          {isListening && (mode === "cuda" || mode === "groq") && (
+          {isListening && isRecordedLiveMode(mode) && (
             <Badge variant="outline" className="text-xs gap-1 font-mono">
               <Clock className="w-3 h-3" />
               {formatTime(elapsedSec)}
@@ -1104,7 +1217,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
               <Button variant="ghost" size="sm" onClick={handleSaveIntermediate} title="שמור תמלול נוכחי">
                 <Save className="w-4 h-4" />
               </Button>
-              {isListening && (mode === "cuda" || mode === "groq") && (
+              {isListening && isRecordedLiveMode(mode) && (
                 <Button variant="ghost" size="sm" onClick={handleDownloadAudio} title="הורד הקלטה">
                   <Download className="w-4 h-4" />
                 </Button>
@@ -1120,8 +1233,8 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         </div>
       </div>
 
-      {/* Audio Level Bar + Stats (CUDA only, while listening & not paused) */}
-      {isListening && (mode === "cuda" || mode === "groq") && !isPaused && (
+      {/* Audio level and loss-accounting stats for recorded engines. */}
+      {isListening && isRecordedLiveMode(mode) && !isPaused && (
         <div className="mb-3 space-y-2">
           {/* Waveform-style VU meter */}
           <div className="flex items-center gap-2">
@@ -1139,7 +1252,10 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
           </div>
           {/* Live stats bar */}
           <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
-            <span>חלקים: {stats.chunksProcessed}</span>
+            <span>נקלטו: {stats.chunksCaptured}</span>
+            <span>עובדו: {stats.chunksProcessed + stats.silenceSkips}</span>
+            {stats.chunksQueued > 0 && <span className="text-yellow-700">בתור: {stats.chunksQueued}</span>}
+            {stats.chunksDropped > 0 && <span className="text-destructive">נכשלו: {stats.chunksDropped}</span>}
             <span>מילים: {stats.wordsTranscribed}</span>
             {avgLatency > 0 && <span>השהיה: {avgLatency}ms</span>}
             {stats.silenceSkips > 0 && <span>שקט: {stats.silenceSkips}</span>}
@@ -1156,40 +1272,25 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       {/* Mode selector + Folder selector */}
       {!isListening && (
         <div className="space-y-3 mb-4">
-          <div className="flex gap-2 justify-center">
-            {browserSupported && (
-              <Button
-                variant={mode === "browser" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setMode("browser")}
-              >
-                <Globe className="w-4 h-4 ml-1" />
-                Web Speech
-              </Button>
-            )}
-            <Button
-              variant={mode === "cuda" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setMode("cuda")}
-              disabled={!serverConnected}
-              title={!serverConnected ? "שרת CUDA לא מחובר" : "תמלול עם Whisper GPU"}
-            >
-              <Cpu className="w-4 h-4 ml-1" />
-              CUDA Whisper
-            </Button>
-            <Button
-              variant={mode === "groq" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setMode("groq")}
-              title="Groq Whisper בענן — לא דורש שרת מקומי"
-            >
-              <Zap className="w-4 h-4 ml-1" />
-              Groq
-            </Button>
+          <div className="flex items-center gap-2 justify-center flex-wrap">
+            {mode === "cuda" ? <Cpu className="w-4 h-4 text-primary" /> : mode === "browser" ? <Globe className="w-4 h-4 text-primary" /> : <Zap className="w-4 h-4 text-primary" />}
+            <Label htmlFor="live-engine">מנוע חי</Label>
+            <Select value={mode} onValueChange={(value) => setMode(value as LiveMode)}>
+              <SelectTrigger id="live-engine" className="w-[240px]" aria-label="מנוע תמלול חי">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent dir="rtl">
+                {(["cuda", "groq", "deepgram", "openai", "assemblyai", "google", "browser"] as LiveMode[]).map((engine) => (
+                  <SelectItem key={engine} value={engine} disabled={!hasLiveEngineKey(engine)}>
+                    {LIVE_ENGINE_LABELS[engine]}{!hasLiveEngineKey(engine) ? " — לא מוגדר" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Badge variant="outline">{isCloudLiveMode(mode) ? "ענן · מקטעים רציפים" : mode === "cuda" ? "מקומי · GPU" : "דפדפן"}</Badge>
           </div>
 
-          {/* Chunk size — applies to CUDA & Groq */}
-          {(mode === "cuda" || mode === "groq") && (
+          {isRecordedLiveMode(mode) && (
             <div className="flex items-center gap-3 justify-center px-2">
               <Clock className="w-4 h-4 text-muted-foreground shrink-0" />
               <span className="text-xs text-muted-foreground whitespace-nowrap">גודל צ'אנק</span>
@@ -1220,6 +1321,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
                   id="full-retranscribe"
                   checked={fullRetranscribe}
                   onCheckedChange={setFullRetranscribe}
+                  disabled={geminiFinalPass}
                   className="data-[state=checked]:bg-yellow-500"
                 />
               </div>
@@ -1227,6 +1329,26 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
                 {fullRetranscribe
                   ? 'הצ׳אנקים הם רק תצוגה מקדימה. בלחיצה על שמור — כל ההקלטה תתמלל מחדש כיחידה אחת.'
                   : 'הטקסט שנצבר בצ׳אנקים יישמר כמו שהוא.'}
+              </span>
+            </div>
+          )}
+
+          {isRecordedLiveMode(mode) && (
+            <div className="flex items-center justify-center gap-3 px-2">
+              <div className="flex items-center gap-2 rounded-lg border border-green-500/40 bg-green-500/5 px-3 py-1.5">
+                <Zap className={`w-4 h-4 ${geminiFinalPass ? "text-green-600" : "text-muted-foreground"}`} />
+                <Label htmlFor="gemini-final-pass" className="text-xs cursor-pointer select-none">
+                  תמלול סופי מלא עם Gemini
+                </Label>
+                <Switch
+                  id="gemini-final-pass"
+                  checked={geminiFinalPass}
+                  onCheckedChange={setGeminiFinalPass}
+                  className="data-[state=checked]:bg-green-600"
+                />
+              </div>
+              <span className="text-[10px] text-muted-foreground max-w-[220px] leading-tight">
+                לאחר העצירה Gemini יקבל את כל ההקלטה ויחליף את תצוגת המקטעים. כרוך בשימוש API.
               </span>
             </div>
           )}
@@ -1289,8 +1411,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
             )}
           </div>
 
-          {/* Mic sensitivity (gain) — only relevant for CUDA mode */}
-          {(mode === "cuda" || mode === "groq") && (
+          {isRecordedLiveMode(mode) && (
             <div className="flex items-center gap-3 justify-center px-2">
               <Volume2 className="w-4 h-4 text-muted-foreground shrink-0" />
               <span className="text-xs text-muted-foreground whitespace-nowrap">רגישות מיקרופון</span>
@@ -1348,20 +1469,19 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       {/* Controls */}
       <div className="flex justify-center gap-3">
         {!isListening ? (
-          <Button onClick={startListening} className="gap-2 rounded-full px-8 h-12 text-base" disabled={isRefining}>
+          <Button onClick={startListening} className="gap-2 rounded-full px-8 h-12 text-base" disabled={isRefining || !hasLiveEngineKey(mode)}>
             <Mic className="w-5 h-5" />
             התחל תמלול חי
           </Button>
         ) : (
           <>
-            {/* Pause / Resume (CUDA only) */}
-            {(mode === "cuda" || mode === "groq") && !isPaused && (
+            {isRecordedLiveMode(mode) && !isPaused && (
               <Button onClick={pauseCuda} variant="outline" className="gap-2 rounded-full px-6 h-12 text-base border-yellow-400 text-yellow-700 hover:bg-yellow-50">
                 <Pause className="w-5 h-5" />
                 השהה
               </Button>
             )}
-            {(mode === "cuda" || mode === "groq") && isPaused && (
+            {isRecordedLiveMode(mode) && isPaused && (
               <Button onClick={resumeCuda} variant="outline" className="gap-2 rounded-full px-6 h-12 text-base border-green-400 text-green-700 hover:bg-green-50">
                 <Play className="w-5 h-5" />
                 המשך
@@ -1380,12 +1500,9 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       </div>
 
       <p className="text-xs text-muted-foreground text-center mt-3">
-        {mode === "cuda"
-          ? `Whisper + GPU — chunks כל ${chunkSec}s + refine בעצירה | השהה/המשך | שמירת הקלטה`
-          : mode === "groq"
-          ? `Groq Whisper בענן — chunks כל ${chunkSec}s | חכם וזריז`
-          : "Web Speech API — עובד ישירות בדפדפן, ללא מפתח API"
-        }
+        {mode === "browser"
+          ? "Web Speech API — עובד ישירות בדפדפן, ללא מפתח API"
+          : `${LIVE_ENGINE_LABELS[mode]} — הקלטה רציפה, עיבוד בתור כל ${chunkSec}s${mode === "cuda" ? " + שיפור סופי בעצירה" : ""}`}
       </p>
     </Card>
   );

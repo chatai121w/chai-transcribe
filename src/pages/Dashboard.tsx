@@ -9,9 +9,15 @@ import { RecentFilesWidget } from "@/components/RecentFiles";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import {
   Mic, FileText, Settings, LogIn, BarChart3, Clock, Zap, 
-  FileEdit, Cloud, Grid3X3, Table2, RectangleHorizontal, LayoutGrid, FolderOpen, Pencil
+  FileEdit, Cloud, Grid3X3, Table2, RectangleHorizontal, LayoutGrid, FolderOpen, Pencil,
+  ListChecks, CheckCheck, X, Trash2,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator
@@ -178,9 +184,39 @@ const Dashboard = () => {
   const stylePreset = activeLayout.baseStyle;
 
   const recentViewMode = (preferences.dashboard_view_mode || 'cards') as RecentViewMode;
+  const [recentSelectionMode, setRecentSelectionMode] = useState(false);
+  const [selectedRecentIds, setSelectedRecentIds] = useState<Set<string>>(new Set());
   const setRecentViewMode = useCallback((mode: RecentViewMode) => {
     updatePreference('dashboard_view_mode', mode);
   }, [updatePreference]);
+
+  const toggleRecentSelectionMode = useCallback(() => {
+    setRecentSelectionMode((current) => {
+      if (current) setSelectedRecentIds(new Set());
+      return !current;
+    });
+  }, []);
+
+  const toggleRecentSelection = useCallback((id: string) => {
+    setSelectedRecentIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const allRecentSelected = recentTranscripts.length > 0 && recentTranscripts.every((item) => selectedRecentIds.has(item.id));
+  const toggleAllRecent = useCallback(() => {
+    setSelectedRecentIds(allRecentSelected ? new Set() : new Set(recentTranscripts.map((item) => item.id)));
+  }, [allRecentSelected, recentTranscripts]);
+
+  const deleteSelectedRecent = useCallback(async () => {
+    const ids = [...selectedRecentIds];
+    await Promise.all(ids.map((id) => deleteTranscript(id)));
+    setSelectedRecentIds(new Set());
+    setRecentSelectionMode(false);
+  }, [deleteTranscript, selectedRecentIds]);
 
   const persistLayoutState = useCallback((nextPresets: DashboardLayoutPreset[], nextActiveId: string) => {
     const safePresets = sanitizeLayoutPresets(nextPresets);
@@ -302,7 +338,7 @@ const Dashboard = () => {
   const normalizeForCompare = (value: string) =>
     value
       .replace(/\s+/g, ' ')
-      .replace(/["'`.,;:!?()\[\]{}<>\\/|\-]/g, '')
+      .replace(/["'`.,;:!?()[\]{}<>\\/|-]/g, '')
       .trim()
       .toLowerCase();
 
@@ -492,6 +528,16 @@ const Dashboard = () => {
                   <CardTitle className="text-xl">תמלולים אחרונים</CardTitle>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button
+                    variant={recentSelectionMode ? "secondary" : "outline"}
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={toggleRecentSelectionMode}
+                    title={recentSelectionMode ? "סגור בחירה מרובה" : "בחירה מרובה"}
+                    aria-label={recentSelectionMode ? "סגור בחירה מרובה בתמלולים אחרונים" : "בחירה מרובה בתמלולים אחרונים"}
+                  >
+                    {recentSelectionMode ? <X className="h-4 w-4" /> : <ListChecks className="h-4 w-4" />}
+                  </Button>
                   <DropdownMenu dir="rtl">
                     <DropdownMenuTrigger asChild>
                       <Button variant="outline" size="icon" className="h-8 w-8" title="תצוגה">
@@ -522,11 +568,45 @@ const Dashboard = () => {
               </div>
             </CardHeader>
             <CardContent>
+              {recentSelectionMode && (
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/35 p-2">
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={toggleAllRecent}>
+                      <CheckCheck className="ml-1 h-4 w-4" />
+                      {allRecentSelected ? 'בטל בחירת הכל' : 'בחר הכל'}
+                    </Button>
+                    <Badge variant="secondary">{selectedRecentIds.size} נבחרו</Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="sm" disabled={selectedRecentIds.size === 0}>
+                          <Trash2 className="ml-1 h-4 w-4" />מחיקה
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent dir="rtl">
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>למחוק {selectedRecentIds.size} תמלולים?</AlertDialogTitle>
+                          <AlertDialogDescription>הפעולה תמחק את התמלולים שנבחרו מהמכשיר ומהענן ולא ניתן לבטל אותה.</AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>ביטול</AlertDialogCancel>
+                          <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => void deleteSelectedRecent()}>
+                            מחק תמלולים
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                    <Button variant="ghost" size="sm" onClick={toggleRecentSelectionMode}>סיום</Button>
+                  </div>
+                </div>
+              )}
               {recentViewMode === 'table' ? (
                 <div className="rounded-lg border overflow-hidden" dir="rtl">
                   <table className="w-full text-sm" dir="rtl">
                     <thead className="bg-muted/40">
                       <tr>
+                        {recentSelectionMode && <th className="w-10 px-3 py-2"><span className="sr-only">בחירה</span></th>}
                         <th className="text-right px-3 py-2 font-medium">כותרת</th>
                         <th className="text-right px-3 py-2 font-medium">מנוע</th>
                         <th className="text-right px-3 py-2 font-medium">תאריך</th>
@@ -539,9 +619,20 @@ const Dashboard = () => {
                         return (
                           <tr
                             key={t.id}
-                            className="border-t hover:bg-accent/30 cursor-pointer"
-                            onClick={() => navigate('/text-editor', { state: { text: t.edited_text ?? t.text ?? preview, transcriptId: t.id, audioFilePath: t.audio_file_path } })}
+                            className={`border-t hover:bg-accent/30 cursor-pointer ${selectedRecentIds.has(t.id) ? 'bg-primary/5' : ''}`}
+                            onClick={() => recentSelectionMode
+                              ? toggleRecentSelection(t.id)
+                              : navigate('/text-editor', { state: { text: t.edited_text ?? t.text ?? preview, transcriptId: t.id, audioFilePath: t.audio_file_path } })}
                           >
+                            {recentSelectionMode && (
+                              <td className="px-3 py-2" onClick={(event) => event.stopPropagation()}>
+                                <Checkbox
+                                  checked={selectedRecentIds.has(t.id)}
+                                  onCheckedChange={() => toggleRecentSelection(t.id)}
+                                  aria-label={`בחר ${title}`}
+                                />
+                              </td>
+                            )}
                             <td className="px-3 py-2 text-right truncate max-w-[280px]">{title}</td>
                             <td className="px-3 py-2 text-right">{t.engine}</td>
                             <td className="px-3 py-2 text-right">{formatDate(t.created_at)}</td>
@@ -559,12 +650,23 @@ const Dashboard = () => {
                     return (
                       <div
                         key={t.id}
-                        className={`flex items-center justify-between rounded-lg border hover:bg-accent/50 transition-colors cursor-pointer ${
+                        className={`flex items-center justify-between rounded-lg border hover:bg-accent/50 transition-colors cursor-pointer ${selectedRecentIds.has(t.id) ? 'border-primary bg-primary/5 ring-1 ring-primary' : ''} ${
                           recentViewMode === 'rectangles' ? 'p-2' : 'p-3'
                         }`}
-                        onClick={() => navigate('/text-editor', { state: { text: t.edited_text ?? t.text ?? preview, transcriptId: t.id, audioFilePath: t.audio_file_path } })}
+                        onClick={() => recentSelectionMode
+                          ? toggleRecentSelection(t.id)
+                          : navigate('/text-editor', { state: { text: t.edited_text ?? t.text ?? preview, transcriptId: t.id, audioFilePath: t.audio_file_path } })}
                       >
                         <div className="flex items-center gap-3 flex-1 min-w-0">
+                          {recentSelectionMode && (
+                            <div onClick={(event) => event.stopPropagation()}>
+                              <Checkbox
+                                checked={selectedRecentIds.has(t.id)}
+                                onCheckedChange={() => toggleRecentSelection(t.id)}
+                                aria-label={`בחר ${title}`}
+                              />
+                            </div>
+                          )}
                           <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium truncate">{title}</p>

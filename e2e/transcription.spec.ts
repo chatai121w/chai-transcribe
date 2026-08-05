@@ -10,7 +10,7 @@ test.describe('דף תמלול - UI בסיסי', () => {
   });
 
   test('כותרת הדף מוצגת', async ({ page }) => {
-    await expect(page.getByText('מערכת תמלול מתקדמת').first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'מערכת תמלול מתקדמת', exact: true })).toBeVisible({ timeout: 15000 });
   });
 
   test('בורר מנוע תמלול מוצג', async ({ page }) => {

@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor, MoreHorizontal } from "lucide-react";
+import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor, MoreHorizontal, LocateFixed } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -34,6 +34,7 @@ import { getWordHighlightStyle, isWordApproved } from "@/lib/personalPronunciati
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { TextMarkingOverlay } from "@/components/TextMarkingOverlay";
 import { getTrustedWordSuggestion } from '@/lib/trustedWordSuggestion';
+import { scrollWithinContainer } from '@/lib/scrollWithinContainer';
 
 interface SyncMirrorLayoutProps {
   wordTimings: WordTiming[];
@@ -180,6 +181,7 @@ export const SyncMirrorLayout = ({
   }, [correctionMarkersKey]);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fullEditScrollRef = useRef<HTMLDivElement>(null);
   const leftRichRef = useRef<HTMLDivElement>(null);
   const leftRowsRef = useRef<HTMLDivElement>(null);
   const rightRowsRef = useRef<HTMLDivElement>(null);
@@ -204,6 +206,18 @@ export const SyncMirrorLayout = ({
   const [colWidth, setColWidth] = useState(0);
   const [fullEditMode, setFullEditMode] = useState(false);
   const [editDraft, setEditDraft] = useState(text);
+  const [followPlayback, setFollowPlayback] = useState(() => {
+    try { return localStorage.getItem('sync_mirror_follow_playback') !== '0'; } catch { return true; }
+  });
+
+  const updateFollowPlayback = useCallback((enabled: boolean) => {
+    setFollowPlayback(enabled);
+    try { localStorage.setItem('sync_mirror_follow_playback', enabled ? '1' : '0'); } catch {}
+  }, []);
+
+  const pauseFollowForManualScroll = useCallback(() => {
+    if (followPlayback) updateFollowPlayback(false);
+  }, [followPlayback, updateFollowPlayback]);
 
   // ── Duplicate & save dialog ───────────────────────────────────────────────
   const [dupDialogOpen, setDupDialogOpen] = useState(false);
@@ -412,6 +426,7 @@ export const SyncMirrorLayout = ({
     }
     return alignEditedToWhisper(words, wordTimings, anchorsArr.length ? anchorsArr : undefined);
   }, [text, wordTimings, alignMode, userAnchors]);
+  const hasAudioTimings = wordTimings.length > 0;
 
   // ── ResizeObserver: track the NARROWER column's actual content width and
   // use it as the wrapping basis for `lines`. This keeps both columns visually
@@ -515,9 +530,9 @@ export const SyncMirrorLayout = ({
 
   // ── Active word index (timing sync) ────────────────────────────────────────
   const activeIdx = useMemo(() => {
-    if (!syncEnabled || !displayTimings.length) return -1;
+    if (!syncEnabled || !hasAudioTimings || !displayTimings.length) return -1;
     return findActiveWordIndex(displayTimings, currentTime);
-  }, [displayTimings, currentTime, syncEnabled]);
+  }, [displayTimings, currentTime, syncEnabled, hasAudioTimings]);
 
   // ── Active line index ───────────────────────────────────────────────────────
   const activeLineIdx = useMemo(() => {
@@ -532,10 +547,20 @@ export const SyncMirrorLayout = ({
 
   // ── Auto-scroll to active line ──────────────────────────────────────────────
   useEffect(() => {
-    if (activeLineIdx < 0 || !syncEnabled) return;
-    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-line="${activeLineIdx}"]`);
-    el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [activeLineIdx, syncEnabled]);
+    if (activeIdx < 0 || !syncEnabled || !followPlayback) return;
+
+    if (fullEditMode) {
+      const container = fullEditScrollRef.current;
+      const target = container?.querySelector<HTMLElement>(`[data-word-index="${activeIdx}"]`);
+      if (container && target) scrollWithinContainer(container, target, "nearest");
+      return;
+    }
+
+    if (activeLineIdx < 0) return;
+    const container = scrollRef.current;
+    const target = container?.querySelector<HTMLElement>(`[data-line="${activeLineIdx}"]`);
+    if (container && target) scrollWithinContainer(container, target, "nearest");
+  }, [activeIdx, activeLineIdx, syncEnabled, followPlayback, fullEditMode]);
 
   // ── Search highlighting ─────────────────────────────────────────────────────
   const searchMatchList = useMemo(() => {
@@ -929,12 +954,14 @@ export const SyncMirrorLayout = ({
                   });
                   return;
                 }
-                onWordClick(wt.start);
+                if (hasAudioTimings) onWordClick(wt.start);
               }}
               title={wasManuallyCorrected
                 ? `תוקן ידנית: ${correctionOriginal} ← ${correctionResult}`
                 : trustedSuggestion
                   ? `לחץ לתיקון: ${wt.word} ← ${trustedSuggestion.text === '__DELETE__' ? 'מחיקה' : trustedSuggestion.text} | ${trustedSuggestion.reason}`
+                : !hasAudioTimings
+                  ? 'אין תזמון אודיו מאומת למילה זו'
                 : isAnchor
                   ? `⚓ עוגן (${wt.start.toFixed(2)}s) — קליק לקפיצה`
                   : `קליק לקפיצה (${wt.start.toFixed(1)}s)`}
@@ -952,7 +979,7 @@ export const SyncMirrorLayout = ({
                 onReplace={(next) => { applyWordReplace(globalIdx, next); setDictionaryVersion((v) => v + 1); }}
                 onApproveAsCorrect={() => setDictionaryVersion((v) => v + 1)}
                 isAnchor={isAnchor}
-                onToggleAnchor={() => toggleUserAnchor(globalIdx, { start: wt.start, end: wt.end })}
+                onToggleAnchor={hasAudioTimings ? () => toggleUserAnchor(globalIdx, { start: wt.start, end: wt.end }) : undefined}
               >
                 {wordSpan}
               </WordContextMenu>
@@ -1021,6 +1048,15 @@ export const SyncMirrorLayout = ({
             <span className="text-sm font-semibold">עריכת טקסט מלאה</span>
             <span className="text-[11px] text-muted-foreground">מתעדכן אוטומטית אחרי 10 שניות או בסיום מילה</span>
             <div className="flex gap-2 ms-auto shrink-0">
+              <Button
+                size="sm"
+                variant={followPlayback ? "secondary" : "outline"}
+                onClick={() => updateFollowPlayback(!followPlayback)}
+                title={followPlayback ? "הפסק לעקוב אחרי המילה המתנגנת" : "עקוב אחרי המילה המתנגנת"}
+              >
+                <LocateFixed className="w-3.5 h-3.5 me-1" />
+                {followPlayback ? 'מעקב פעיל' : 'מעקב כבוי'}
+              </Button>
               {onSaveLearning && (
                 <div className="inline-flex items-center">
                   <Button
@@ -1090,14 +1126,17 @@ export const SyncMirrorLayout = ({
                 </div>
               )}
               <div
+                ref={fullEditScrollRef}
                 className="flex-1 overflow-y-auto break-words select-none text-muted-foreground/80"
                 dir="rtl"
+                onWheelCapture={pauseFollowForManualScroll}
+                onTouchMoveCapture={pauseFollowForManualScroll}
                 style={{ ...textStyle, padding: '8px 12px', boxSizing: 'border-box' }}
               >
                 {displayTimings.map((wt, i) => (
                   <React.Fragment key={i}>
                     <span
-                      ref={i === activeIdx ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) : undefined}
+                      data-word-index={i}
                       style={i === activeIdx ? getActiveWordStyle(wordHighlightMode) : undefined}
                       className={cn(
                         "rounded-sm px-[1px] transition-all duration-150",
@@ -1288,6 +1327,20 @@ export const SyncMirrorLayout = ({
               {syncEnabled ? <Link className="w-2.5 h-2.5" /> : <Unlink className="w-2.5 h-2.5" />}
               {syncEnabled ? "חי" : "מושהה"}
             </Badge>
+            <button
+              type="button"
+              onClick={() => updateFollowPlayback(!followPlayback)}
+              className={cn(
+                "h-5 px-1.5 rounded border text-[10px] inline-flex items-center gap-1 transition-colors",
+                followPlayback
+                  ? "border-blue-400 text-blue-600 bg-blue-50 dark:bg-blue-950/40"
+                  : "border-border text-muted-foreground hover:bg-muted",
+              )}
+              title={followPlayback ? "מעקב פעיל. גלילה ידנית בתוך הטקסט תפסיק אותו" : "הפעל מעקב אחרי המילה המתנגנת"}
+            >
+              <LocateFixed className="w-3 h-3" />
+              {followPlayback ? 'עוקב' : 'לא עוקב'}
+            </button>
           </div>
         </div>
 
@@ -1643,6 +1696,8 @@ export const SyncMirrorLayout = ({
       <div
         ref={scrollRef}
         className="flex flex-col lg:flex-row flex-1 min-h-0 overflow-y-auto"
+        onWheelCapture={pauseFollowForManualScroll}
+        onTouchMoveCapture={pauseFollowForManualScroll}
       >
         {/* ── RIGHT column — full mirror, fully editable (unless locked) ── */}
         <div

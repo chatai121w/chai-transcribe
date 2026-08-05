@@ -2637,9 +2637,9 @@ const Index = () => {
         <LiveTranscriber
           serverConnected={serverConnected}
           onTranscriptComplete={async (result: LiveTranscriptResult) => {
-            const { text, audioBlob, wordTimings, folder, durationSec } = result;
+            const { text, audioBlob, wordTimings, folder, durationSec, engineLabel } = result;
             setTranscriptFromEngine(text);
-            const engineLabel = audioBlob ? 'Live (CUDA Whisper)' : 'Live (Web Speech API)';
+            const historyEngineLabel = `Live (${engineLabel})`;
             const audioFile = audioBlob
               ? new File([audioBlob], `live-${Date.now()}.webm`, { type: audioBlob.type })
               : undefined;
@@ -2656,7 +2656,7 @@ const Index = () => {
               } catch { /* Dexie not available */ }
             }
             const liveAudioUrl = audioBlob ? URL.createObjectURL(audioBlob) : undefined;
-            saveToHistory(text, engineLabel, undefined, wordTimings, audioFile, folder).then((finalText) => {
+            saveToHistory(text, historyEngineLabel, undefined, wordTimings, audioFile, folder).then((finalText) => {
               setTimeout(() => navigate('/text-editor', { state: { text: finalText, audioUrl: liveAudioUrl, wordTimings, transcriptId: lastSavedTranscriptIdRef.current } }), 1000);
             });
             addAnalyticsRecord({

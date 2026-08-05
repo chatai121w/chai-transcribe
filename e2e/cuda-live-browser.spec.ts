@@ -129,61 +129,26 @@ test.describe('CUDA Live Transcription - Browser E2E', () => {
 
     await page.screenshot({ path: 'test-results/cuda-live-2-loaded.png', fullPage: true });
     
-    // Try to find and click CUDA mode selector
-    // Wait for server connection (health check polling) — up to 15s
+    // Select CUDA through the current engine combobox and wait for health polling.
     console.log('Waiting for CUDA server connection...');
-    const cudaBtn = page.locator('button:has-text("CUDA")').first();
-    try {
-      await cudaBtn.waitFor({ state: 'visible', timeout: 5000 });
-      // Wait for it to become enabled (health check succeeds)
-      await expect(cudaBtn).toBeEnabled({ timeout: 15000 });
-      await cudaBtn.click();
-      console.log('Selected CUDA mode');
-    } catch {
-      // Check if it's disabled
-      const isDisabled = await cudaBtn.isDisabled().catch(() => true);
-      console.log(`CUDA button found but disabled=${isDisabled} — server may not be reachable from browser`);
-      const title = await cudaBtn.getAttribute('title');
-      console.log(`CUDA button title: ${title}`);
-      await page.screenshot({ path: 'test-results/cuda-live-2-cuda-disabled.png', fullPage: true });
-      
-      // Force-enable and click anyway to test the recording flow
-      await page.evaluate(() => {
-        const btn = document.querySelector('button[title*="CUDA"]') as HTMLButtonElement;
-        if (btn) { btn.disabled = false; btn.click(); }
-      });
-      console.log('Force-clicked CUDA button');
-    }
+    const engineSelect = page.getByRole('combobox', { name: 'מנוע תמלול חי' });
+    await engineSelect.scrollIntoViewIfNeeded();
+    await expect(engineSelect).toBeVisible({ timeout: 15000 });
+    await engineSelect.click();
+    const cudaOption = page.getByRole('option', { name: 'CUDA Whisper', exact: true });
+    await expect(cudaOption).toBeEnabled({ timeout: 15000 });
+    await cudaOption.click();
+    await expect(engineSelect).toContainText('CUDA Whisper');
+    console.log('Selected CUDA mode');
     
     await page.waitForTimeout(1000);
     
     // Find and click start recording button
-    let started = false;
-    for (const label of ['התחל תמלול חי', 'התחל', 'הקלט', 'start']) {
-      const btn = page.getByRole('button', { name: new RegExp(label, 'i') }).first();
-      if (await btn.isVisible().catch(() => false)) {
-        console.log(`Clicking start button: "${label}"...`);
-        await btn.click();
-        started = true;
-        break;
-      }
-    }
-    
-    if (!started) {
-      // Try any button with mic/record icon
-      const micBtn = page.locator('button:has(svg)').filter({ hasText: /תמלול|הקלט|mic/i }).first();
-      if (await micBtn.isVisible().catch(() => false)) {
-        await micBtn.click();
-        started = true;
-        console.log('Clicked mic button');
-      }
-    }
-
-    if (!started) {
-      console.log('Could not find start button');
-      await page.screenshot({ path: 'test-results/cuda-live-2-no-start.png', fullPage: true });
-      return;
-    }
+    const startButton = page.getByRole('button', { name: 'התחל תמלול חי', exact: true });
+    await startButton.scrollIntoViewIfNeeded();
+    await expect(startButton).toBeEnabled();
+    await startButton.click();
+    console.log('Clicked live transcription start button');
 
     // Wait for recording and chunk sending
     console.log('Recording started — waiting 10s for chunks...');
@@ -213,6 +178,9 @@ test.describe('CUDA Live Transcription - Browser E2E', () => {
     const oks = allNetLog.filter(l => l.includes('<<< 200')).length;
     const errs = allNetLog.filter(l => l.includes('<<< 5') || l.includes('!!!')).length;
     console.log(`All requests: ${posts} | 200 OK: ${oks} | Errors: ${errs}`);
+    expect(allNetLog.some(l => l.includes('>>> POST') && l.includes('/whisper/transcribe-live'))).toBeTruthy();
+    expect(allNetLog.some(l => l.includes('<<< 200') && l.includes('/whisper/transcribe-live'))).toBeTruthy();
+    expect(errs).toBe(0);
     
     console.log('\n--- Console Errors ---');
     const errLogs = consoleLogs.filter(l => l.includes('[error]'));

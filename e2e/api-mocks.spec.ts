@@ -171,6 +171,6 @@ test.describe('שגיאות רשת', () => {
     await page.goto('/transcribe');
 
     // App should still be functional
-    await expect(page.getByText('מערכת תמלול מתקדמת').first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'מערכת תמלול מתקדמת', exact: true })).toBeVisible({ timeout: 15000 });
   });
 });

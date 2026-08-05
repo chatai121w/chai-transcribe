@@ -59,6 +59,29 @@ test.describe('CUDA Live Transcription - Debug Tests', () => {
     console.log(`✓ Transcription: "${body.text}"`);
   });
 
+  test('בדיקת רגרסיה: נרמול /transcribe אינו חותך אודיו ארוך', async ({ request }) => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const wav = fs.readFileSync(path.resolve('e2e/fixtures/hebrew_long.wav'));
+
+    const response = await request.post('http://localhost:3000/transcribe', {
+      multipart: {
+        file: { name: 'hebrew_long.wav', mimeType: 'audio/wav', buffer: wav },
+        language: 'he',
+        normalize: '1',
+        beam_size: '3',
+      },
+      timeout: 120_000,
+    });
+
+    expect(response.ok()).toBeTruthy();
+    const result = await response.json();
+    const timings = Array.isArray(result.wordTimings) ? result.wordTimings : [];
+    expect(result.duration).toBeGreaterThan(35);
+    expect(timings.length).toBeGreaterThanOrEqual(50);
+    expect(timings.at(-1)?.end).toBeGreaterThan(30);
+  });
+
   test('בדיקה 2: שלושה chunks ברצף (סימולציית live)', async ({ request }) => {
     console.log('\n===== TEST 2: Sequential chunks (simulating live flow) =====');
     const wavBuf = fs.readFileSync(WAV_PATH);

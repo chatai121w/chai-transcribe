@@ -455,24 +455,18 @@ def _normalize_audio(input_path: str) -> str:
     """Pre-process audio for best Whisper accuracy:
       1. Highpass 80Hz  — removes low-frequency rumble (HVAC, traffic)
       2. Lowpass 8kHz   — removes high-freq noise above speech range
-      3. afftdn         — spectral noise reduction (skipped if SNR too low)
-      4. loudnorm       — EBU R128 loudness normalization
-      5. 16kHz mono     — exactly what Whisper expects (skips internal ffmpeg pass)
+      3. loudnorm       — EBU R128 loudness normalization
+      4. 16kHz mono     — exactly what Whisper expects (skips internal ffmpeg pass)
+
+    Denoising is intentionally not part of baseline normalization. FFmpeg's
+    afftdn can classify clean, quiet speech as noise and silently remove whole
+    phrases. Explicit AI denoise remains available through the ai_denoise flag.
     Always outputs .wav (PCM s16le) — avoids container confusion from any input format.
     Returns path to processed .wav file (or original if FFmpeg unavailable)."""
     if not _check_ffmpeg():
         return input_path
     import subprocess
-    # Measure dynamic range to decide whether afftdn is safe to use.
-    # When the noise floor is very high (small dynamic range), afftdn
-    # suppresses speech energy and makes Whisper hallucinate / drop words.
-    dyn_range = _estimate_dynamic_range(input_path)
-    use_afftdn = dyn_range >= _AFFTDN_MIN_DYNAMIC_RANGE_DB
-    if use_afftdn:
-        af_chain = "highpass=f=80,lowpass=f=8000,afftdn=nf=-25,loudnorm=I=-16:TP=-1.5:LRA=11"
-    else:
-        af_chain = "highpass=f=80,lowpass=f=8000,loudnorm=I=-16:TP=-1.5:LRA=11"
-        _log.info(f"Audio dynamic range {dyn_range:.1f}dB < {_AFFTDN_MIN_DYNAMIC_RANGE_DB}dB — skipping afftdn (noisy input)")
+    af_chain = "highpass=f=80,lowpass=f=8000,loudnorm=I=-16:TP=-1.5:LRA=11"
 
     # Always output as .wav — Whisper reads it natively with no extra decode step
     output_path = input_path + "_norm.wav"
@@ -1287,7 +1281,10 @@ def transcribe():
     language = request.form.get("language", "he")
     model_id = request.form.get("model", _current_model_id or _default_model_for(language))
     beam_size = int(request.form.get("beam_size", 3))
-    normalize = request.form.get("normalize", "1") == "1"
+    # Preserve clean source audio by default. Normalization is opt-in because
+    # even non-denoising filters can alter Hebrew phonemes in an already clean
+    # recording and measurably increase WER.
+    normalize = request.form.get("normalize", "0") == "1"
     ai_denoise = request.form.get("ai_denoise", "0") == "1"
 
     # Resolve model ID
@@ -1351,18 +1348,21 @@ def transcribe():
         start = time.time()
 
         def _run_transcribe(m, prompt=initial_prompt, word_hints=hotwords):
-            from faster_whisper import BatchedInferencePipeline
-            pipeline = BatchedInferencePipeline(model=m)
             safe_prompt, safe_hotwords = _fit_whisper_prompt_budget(m, prompt, word_hints)
-            return pipeline.transcribe(
+            # Direct decoding is both more accurate and faster for the local
+            # Hebrew CT2 models used here. BatchedInferencePipeline previously
+            # truncated normalized speech and produced different Hebrew output
+            # for the same audio/model.
+            return m.transcribe(
                 transcribe_path,
                 language=language if language != "auto" else None,
                 word_timestamps=True,
                 beam_size=beam_size,
-                batch_size=auto_batch_size(),
+                vad_filter=True,
                 initial_prompt=safe_prompt,
                 hotwords=safe_hotwords,
                 condition_on_previous_text=True,
+                temperature=0.0,
             )
 
         try:
@@ -2581,8 +2581,105 @@ def stage_audio():
 _CONVERT_ALLOWED_SUFFIXES = frozenset({
     ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv", ".m4v", ".3gp",
     ".ogv", ".ts", ".mts", ".m2ts", ".vob", ".mpg", ".mpeg",
-    ".m4a", ".wav", ".ogg", ".flac", ".aac", ".wma", ".opus", ".amr",
+    ".mp3", ".m4a", ".wav", ".ogg", ".flac", ".aac", ".wma", ".opus", ".amr",
 })
+
+@app.route("/cut-audio", methods=["POST"])
+def cut_audio():
+    """Cut an uploaded audio/video file into multiple segments in one upload."""
+    if not _check_ffmpeg():
+        return jsonify({"error": "FFmpeg not available on server"}), 503
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    upload = request.files["file"]
+    filename = upload.filename or "input.mp3"
+    suffix = Path(filename).suffix.lower()
+    if suffix not in _CONVERT_ALLOWED_SUFFIXES:
+        return jsonify({"error": f"Unsupported format: {suffix}"}), 415
+
+    try:
+        segments = json.loads(request.form.get("segments") or "[]")
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid segments JSON"}), 400
+    if not isinstance(segments, list) or not 1 <= len(segments) <= 200:
+        return jsonify({"error": "Segments must contain between 1 and 200 items"}), 400
+
+    normalized = []
+    for position, segment in enumerate(segments):
+        try:
+            start = float(segment["startSec"])
+            end = float(segment["endSec"])
+            index = int(segment.get("index", position))
+        except (KeyError, TypeError, ValueError):
+            return jsonify({"error": f"Invalid segment at position {position}"}), 400
+        if start < 0 or end <= start or end - start > 12 * 60 * 60:
+            return jsonify({"error": f"Invalid time range at position {position}"}), 400
+        normalized.append({"start": start, "end": end, "index": index})
+
+    import subprocess
+    import zipfile
+    import shutil
+
+    work_dir = tempfile.mkdtemp(prefix="chai-cut-")
+    input_path = os.path.join(work_dir, "input" + suffix)
+    upload.save(input_path)
+    output_suffix = ".m4a" if suffix in {".mp4", ".m4v", ".mov"} else suffix
+    mime_by_suffix = {
+        ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
+        ".wav": "audio/wav", ".ogg": "audio/ogg", ".opus": "audio/ogg",
+        ".flac": "audio/flac", ".webm": "audio/webm",
+    }
+
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", input_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        duration = float(probe.stdout.strip()) if probe.returncode == 0 else 0.0
+        manifest_files = []
+        for position, segment in enumerate(normalized):
+            output_name = f"segment-{position + 1:03d}{output_suffix}"
+            output_path = os.path.join(work_dir, output_name)
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-ss", f"{segment['start']:.3f}", "-i", input_path,
+                 "-t", f"{segment['end'] - segment['start']:.3f}", "-map", "0:a:0", "-c", "copy", "-vn", output_path],
+                capture_output=True, timeout=600,
+            )
+            if result.returncode != 0 or not os.path.exists(output_path):
+                details = result.stderr.decode("utf-8", errors="replace")[-500:]
+                shutil.rmtree(work_dir, ignore_errors=True)
+                return jsonify({"error": f"FFmpeg failed on segment {position + 1}", "details": details}), 500
+            manifest_files.append({
+                "name": output_name,
+                "segmentIndex": segment["index"],
+                "mime": mime_by_suffix.get(output_suffix, "application/octet-stream"),
+            })
+
+        archive_path = os.path.join(work_dir, "segments.zip")
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_STORED) as archive:
+            for item in manifest_files:
+                archive.write(os.path.join(work_dir, item["name"]), item["name"])
+            archive.writestr("manifest.json", json.dumps({
+                "durationSec": duration,
+                "files": manifest_files,
+            }, ensure_ascii=False))
+
+        from flask import send_file, after_this_request
+
+        @after_this_request
+        def cleanup_cut(response):
+            shutil.rmtree(work_dir, ignore_errors=True)
+            return response
+
+        return send_file(archive_path, mimetype="application/zip", as_attachment=True, download_name="segments.zip")
+    except subprocess.TimeoutExpired:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return jsonify({"error": "Cutting timed out"}), 504
+    except Exception as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        _log.exception("cut-audio failed")
+        return jsonify({"error": str(exc)}), 500
 
 _CONVERT_OUTPUT_FORMATS = {
     "mp3": {
@@ -4405,6 +4502,7 @@ def main():
     print("    POST /youtube-transcribe — Download + transcribe YouTube video")
     print("    POST /stage-audio       — Pre-upload audio (parallel with preload)")
     print("    POST /convert-mp3       — Convert audio/video to MP3/OPUS/AAC (server FFmpeg)")
+    print("    POST /cut-audio         — Cut audio/video into multiple segments (server FFmpeg)")
     print("    POST /enhance-audio     — Enhance audio (AI/non-AI presets) to MP3/OPUS/AAC")
     print("    POST /harmonize         — Generate harmonies (basic/pro/studio)")
     print("    GET  /lk/dictionary     — Lashon Kodesh personal dictionary (list)")
@@ -4735,7 +4833,7 @@ def lk_transcribe():
     Transcribe audio with Lashon Kodesh mode ON + post-processing.
     Same as /transcribe but forces loshon_kodesh=True and applies the
     full LK post-processing pipeline (rules → dictionary).
-    Form fields: file, beam_size (default 5), normalize (default 1).
+    Form fields: file, beam_size (default 5), normalize (default 0).
     """
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
@@ -4743,7 +4841,7 @@ def lk_transcribe():
     audio_file = request.files["file"]
     language = "he"
     beam_size = int(request.form.get("beam_size", 5))
-    normalize = request.form.get("normalize", "1") == "1"
+    normalize = request.form.get("normalize", "0") == "1"
 
     # Force LK mode
     model_id = request.form.get("model", _current_model_id or _default_model_for("he"))

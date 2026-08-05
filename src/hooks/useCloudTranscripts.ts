@@ -473,7 +473,10 @@ export const useCloudTranscripts = () => {
       _dirty: false,
       _deleted: false,
     });
-    setState({ transcripts: [transcript, ...state.transcripts] });
+    // Keep the in-memory record usable immediately by folder pickers and
+    // players. Previously the blob existed only in IndexedDB until refresh,
+    // so newly cut local audio was incorrectly filtered out of the picker.
+    setState({ transcripts: [{ ...transcript, audio_blob: audioFile } as CloudTranscript, ...state.transcripts] });
     return transcript;
   }, [user]);
 

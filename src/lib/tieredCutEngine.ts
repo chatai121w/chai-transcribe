@@ -13,7 +13,10 @@
 
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
+import JSZip from "jszip";
 import { debugLog } from "./debugLogger";
+import { isServerAvailable } from "./conversionRouter";
+import { getServerUrl } from "./serverConfig";
 import {
   generateSegments,
   probeAudioDuration as legacyProbe,
@@ -24,7 +27,7 @@ import {
 } from "./audioCutEngine";
 
 export type { CutJobConfig, CutResult, CutSegment } from "./audioCutEngine";
-export type CutTier = "wav-slice" | "ffmpeg-copy" | "audio-buffer";
+export type CutTier = "wav-slice" | "server-ffmpeg" | "ffmpeg-copy" | "audio-buffer";
 
 export interface TieredCutProgress {
   tier: CutTier;
@@ -95,6 +98,69 @@ function toResult(
     durationSec: segment.endSec - segment.startSec,
     sizeBytes: outFile.size,
   };
+}
+
+// ─────────────────────── SERVER FFMPEG ─────────────────────────────────────
+
+async function tierServerFFmpeg(
+  file: File,
+  options: TieredCutOptions,
+): Promise<TieredCutOutcome | null> {
+  if (!(await isServerAvailable())) return null;
+
+  const duration = options.knownDurationSec ?? await probeDurationViaMediaElement(file) ?? 0;
+  if (duration <= 0) throw new Error("לא ניתן לזהות את אורך הקובץ");
+  const segments = generateSegments(options.config, duration);
+  if (segments.length === 0) throw new Error("לא נוצרו קטעים — בדוק את ההגדרות");
+
+  options.onProgress?.({
+    tier: "server-ffmpeg",
+    message: "מעלה פעם אחת למנוע FFmpeg המקומי…",
+    completed: 0,
+    total: segments.length,
+  });
+
+  const form = new FormData();
+  form.append("file", file);
+  form.append("segments", JSON.stringify(segments.map((segment) => ({
+    index: segment.index,
+    startSec: segment.startSec,
+    endSec: segment.endSec,
+    label: segment.label,
+  }))));
+
+  const response = await fetch(`${getServerUrl()}/cut-audio`, { method: "POST", body: form });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(body?.error || `שרת החיתוך החזיר ${response.status}`);
+  }
+
+  const zip = await JSZip.loadAsync(await response.blob());
+  const manifestEntry = zip.file("manifest.json");
+  if (!manifestEntry) throw new Error("תוצאת החיתוך חסרה manifest");
+  const manifest = JSON.parse(await manifestEntry.async("text")) as {
+    durationSec?: number;
+    files?: Array<{ name: string; segmentIndex: number; mime: string }>;
+  };
+  if (!manifest.files?.length) throw new Error("שרת החיתוך לא החזיר קטעים");
+
+  const results: CutResult[] = [];
+  for (let i = 0; i < manifest.files.length; i++) {
+    const item = manifest.files[i];
+    const entry = zip.file(item.name);
+    const segment = segments.find((candidate) => candidate.index === item.segmentIndex);
+    if (!entry || !segment) throw new Error(`קטע ${i + 1} חסר בתוצאת השרת`);
+    const blob = await entry.async("blob");
+    results.push(toResult(segment, file, blob.slice(0, blob.size, item.mime), fileExt(item.name)));
+    options.onProgress?.({
+      tier: "server-ffmpeg",
+      message: `קטע ${i + 1} / ${manifest.files.length} התקבל`,
+      completed: i + 1,
+      total: manifest.files.length,
+    });
+  }
+
+  return { tier: "server-ffmpeg", results, durationSec: manifest.durationSec || duration };
 }
 
 // ─────────────────────── TIER 1 — WAV byte-slice ────────────────────────────
@@ -509,6 +575,22 @@ export async function cutWithFallback(
   }
 
   // Tier 2 — ffmpeg stream copy
+  emit({ tier: "server-ffmpeg", status: "started", message: "בודק מנוע FFmpeg מקומי…" });
+  try {
+    const out = await tierServerFFmpeg(file, options);
+    if (out) {
+      emit({ tier: "server-ffmpeg", status: "success", message: `הצליח · ${out.results.length} מקטעים` });
+      return out;
+    }
+    emit({ tier: "server-ffmpeg", status: "skipped", message: "דולג", reason: "השרת המקומי אינו זמין" });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    errors.push(`Server FFmpeg: ${msg}`);
+    debugLog.warn("TieredCut", "Server tier failed", msg);
+    emit({ tier: "server-ffmpeg", status: "failed", message: "נכשל", reason: msg });
+  }
+
+  // Tier 3 — browser ffmpeg stream copy
   emit({ tier: "ffmpeg-copy", status: "started", message: "טוען FFmpeg.wasm…" });
   try {
     const out = await tierFFmpegCopy(file, options);
@@ -527,7 +609,7 @@ export async function cutWithFallback(
     emit({ tier: "ffmpeg-copy", status: "failed", message: "נכשל — לכן הפלט יהיה WAV", reason: msg });
   }
 
-  // Tier 3 — legacy full decode (skip for large non-WAV to prevent OOM crash)
+  // Tier 4 — legacy full decode (skip for large non-WAV to prevent OOM crash)
   const LARGE_FILE_LIMIT = 25 * 1024 * 1024; // 25MB
   if (file.size > LARGE_FILE_LIMIT && !["wav", "wave"].includes(fileExt(file.name))) {
     console.error(`%c[TieredCut]%c 🛑 Aborting — file too large for Tier 3 fallback`, "color:#ef4444;font-weight:bold", "color:inherit");

@@ -65,6 +65,33 @@ test.describe('ניווט וראוטינג', () => {
 });
 
 test.describe('דשבורד', () => {
+  test('בחירה מרובה ובחר הכל עובדים בכל רשימות הדשבורד', async ({ page }) => {
+    await mockSupabase(page);
+    await injectAuthSession(page);
+    await mockLocalServer(page);
+    await page.addInitScript(() => {
+      localStorage.setItem('recent_files_history', JSON.stringify([
+        { id: 'recent-1', fileName: 'קובץ ראשון.wav', engine: 'groq', wordCount: 12, charCount: 50, createdAt: Date.now(), preview: 'טקסט ראשון' },
+        { id: 'recent-2', fileName: 'קובץ שני.wav', engine: 'openai', wordCount: 10, charCount: 44, createdAt: Date.now() - 1000, preview: 'טקסט שני' },
+      ]));
+    });
+    await page.goto('/');
+
+    await page.getByRole('button', { name: 'בחירה מרובה בתמלולים אחרונים', exact: true }).click();
+    await page.getByRole('button', { name: 'בחר הכל', exact: true }).click();
+    await expect(page.getByText('2 נבחרו', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'סגור בחירה מרובה בתמלולים אחרונים', exact: true }).click();
+
+    await page.getByRole('button', { name: 'בחירה מרובה בניהול תמלולים', exact: true }).click();
+    await page.getByRole('button', { name: 'בחר הכל', exact: true }).click();
+    await expect(page.getByText('2 נבחרו', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'סגור בחירה מרובה בניהול תמלולים', exact: true }).click();
+
+    await page.getByRole('button', { name: 'בחירה מרובה בקבצים אחרונים', exact: true }).click();
+    await page.getByRole('button', { name: 'בחר הכל', exact: true }).click();
+    await expect(page.getByText('2 נבחרו', { exact: true })).toBeVisible();
+  });
+
   test('מציג ברכה למשתמש מחובר', async ({ page }) => {
     await mockSupabase(page);
     await injectAuthSession(page);
