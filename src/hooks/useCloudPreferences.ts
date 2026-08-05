@@ -617,11 +617,28 @@ const useCloudPreferencesImpl = () => {
     });
   }, [saveToCloud]);
 
+  const patchTabSettings = useCallback((patch: Record<string, unknown>) => {
+    setPreferences(prev => {
+      let current: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(prev.tab_settings_json || '{}');
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) current = parsed;
+      } catch { /* use an empty object for malformed legacy state */ }
+
+      const nextJson = JSON.stringify({ ...current, ...patch });
+      if (nextJson === prev.tab_settings_json) return prev;
+      const updated = { ...prev, tab_settings_json: nextJson };
+      saveToCloud(updated, { immediate: true });
+      return updated;
+    });
+  }, [saveToCloud]);
+
   return {
     preferences,
     isLoaded,
     updatePreference,
     updatePreferences,
+    patchTabSettings,
   };
 };
 

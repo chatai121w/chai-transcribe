@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -6,12 +6,15 @@ import {
   ChevronUp,
   Columns2,
   EyeOff,
+  Cloud,
+  CloudOff,
   LayoutDashboard,
   Maximize2,
   RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 
 type WidgetSpan = "half" | "full";
 
@@ -37,7 +40,13 @@ interface WorkspaceContextValue {
 }
 
 const STORAGE_KEY = "chai-transcribe-widget-layout-v1";
+const CLOUD_KEY = "transcription_widget_layout_v2";
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
+
+interface LayoutEnvelope {
+  updatedAt: number;
+  preferences: Record<string, WidgetPreference>;
+}
 
 function defaultsFor(definitions: WidgetDefinition[]) {
   return Object.fromEntries(
@@ -53,15 +62,47 @@ function defaultsFor(definitions: WidgetDefinition[]) {
   );
 }
 
-function loadPreferences(definitions: WidgetDefinition[]) {
+function sanitizePreferences(
+  definitions: WidgetDefinition[],
+  stored: Record<string, Partial<WidgetPreference>>,
+) {
+  const defaults = defaultsFor(definitions);
+  return Object.fromEntries(
+    definitions.map((definition) => [definition.id, { ...defaults[definition.id], ...stored[definition.id] }]),
+  );
+}
+
+function loadLocalLayout(definitions: WidgetDefinition[]): LayoutEnvelope {
   const defaults = defaultsFor(definitions);
   try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") as Record<string, Partial<WidgetPreference>>;
-    return Object.fromEntries(
-      definitions.map((definition) => [definition.id, { ...defaults[definition.id], ...stored[definition.id] }]),
-    );
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") as Partial<LayoutEnvelope> & Record<string, unknown>;
+    if (stored.preferences && typeof stored.preferences === 'object') {
+      return {
+        updatedAt: Number(stored.updatedAt) || 0,
+        preferences: sanitizePreferences(definitions, stored.preferences),
+      };
+    }
+    // Migrate the original local-only layout and prefer it on the first cloud sync.
+    return {
+      updatedAt: Object.keys(stored).length ? Date.now() : 0,
+      preferences: sanitizePreferences(definitions, stored as Record<string, Partial<WidgetPreference>>),
+    };
   } catch {
-    return defaults;
+    return { updatedAt: 0, preferences: defaults };
+  }
+}
+
+function parseCloudLayout(value: string, definitions: WidgetDefinition[]): LayoutEnvelope | null {
+  try {
+    const settings = JSON.parse(value || '{}') as Record<string, unknown>;
+    const envelope = settings[CLOUD_KEY] as Partial<LayoutEnvelope> | undefined;
+    if (!envelope?.preferences || typeof envelope.preferences !== 'object') return null;
+    return {
+      updatedAt: Number(envelope.updatedAt) || 0,
+      preferences: sanitizePreferences(definitions, envelope.preferences),
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -72,9 +113,14 @@ export function TranscriptionWidgetWorkspace({
   definitions: WidgetDefinition[];
   children: ReactNode;
 }) {
+  const { preferences: cloudPreferences, patchTabSettings, isLoaded: cloudLoaded } = useCloudPreferences();
+  const initialLayout = useMemo(() => loadLocalLayout(definitions), []);
   const [customizing, setCustomizing] = useState(false);
-  const [preferences, setPreferences] = useState<Record<string, WidgetPreference>>(() => loadPreferences(definitions));
+  const [preferences, setPreferences] = useState<Record<string, WidgetPreference>>(initialLayout.preferences);
+  const [layoutUpdatedAt, setLayoutUpdatedAt] = useState(initialLayout.updatedAt);
   const [mountedIds, setMountedIds] = useState<Set<string>>(() => new Set());
+  const cloudHydratedRef = useRef(false);
+  const localDirtyRef = useRef(false);
 
   const register = useCallback((id: string, mounted: boolean) => {
     setMountedIds((current) => {
@@ -86,15 +132,55 @@ export function TranscriptionWidgetWorkspace({
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
-  }, [preferences]);
+    const envelope: LayoutEnvelope = { updatedAt: layoutUpdatedAt, preferences };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(envelope));
+  }, [layoutUpdatedAt, preferences]);
+
+  useEffect(() => {
+    if (!cloudLoaded) return;
+    const remote = parseCloudLayout(cloudPreferences.tab_settings_json, definitions);
+
+    if (!cloudHydratedRef.current) {
+      cloudHydratedRef.current = true;
+      if (remote && remote.updatedAt > layoutUpdatedAt && !localDirtyRef.current) {
+        setPreferences(remote.preferences);
+        setLayoutUpdatedAt(remote.updatedAt);
+        return;
+      }
+      const updatedAt = layoutUpdatedAt || Date.now();
+      if (!layoutUpdatedAt) setLayoutUpdatedAt(updatedAt);
+      patchTabSettings({ [CLOUD_KEY]: { updatedAt, preferences } satisfies LayoutEnvelope });
+      localDirtyRef.current = false;
+      return;
+    }
+
+    if (remote && remote.updatedAt > layoutUpdatedAt && !localDirtyRef.current) {
+      setPreferences(remote.preferences);
+      setLayoutUpdatedAt(remote.updatedAt);
+    }
+  }, [cloudLoaded, cloudPreferences.tab_settings_json, definitions, layoutUpdatedAt, patchTabSettings, preferences]);
+
+  const commitPreferences = useCallback((updater: (current: Record<string, WidgetPreference>) => Record<string, WidgetPreference>) => {
+    setPreferences((current) => {
+      const next = updater(current);
+      if (next === current) return current;
+      const updatedAt = Date.now();
+      localDirtyRef.current = true;
+      setLayoutUpdatedAt(updatedAt);
+      if (cloudHydratedRef.current) {
+        patchTabSettings({ [CLOUD_KEY]: { updatedAt, preferences: next } satisfies LayoutEnvelope });
+        localDirtyRef.current = false;
+      }
+      return next;
+    });
+  }, [patchTabSettings]);
 
   const patch = (id: string, changes: Partial<WidgetPreference>) => {
-    setPreferences((current) => ({ ...current, [id]: { ...current[id], ...changes } }));
+    commitPreferences((current) => ({ ...current, [id]: { ...current[id], ...changes } }));
   };
 
   const move = (id: string, direction: -1 | 1) => {
-    setPreferences((current) => {
+    commitPreferences((current) => {
       const ordered = definitions
         .filter((definition) => mountedIds.has(definition.id) && !current[definition.id].hidden)
         .sort((a, b) => current[a.id].order - current[b.id].order);
@@ -142,6 +228,16 @@ export function TranscriptionWidgetWorkspace({
                 הצג {definition.title}
               </Button>
             ))}
+            <span
+              className={cn(
+                "inline-flex h-8 items-center gap-1.5 px-2 text-xs",
+                cloudLoaded ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground",
+              )}
+              title={cloudLoaded ? "הפריסה נשמרת בחשבון ומסתנכרנת בין מכשירים" : "ממתין לחיבור לענן"}
+            >
+              {cloudLoaded ? <Cloud className="h-3.5 w-3.5" /> : <CloudOff className="h-3.5 w-3.5" />}
+              {cloudLoaded ? 'פריסה בענן' : 'ממתין לענן'}
+            </span>
           </div>
           {customizing && (
             <Button
@@ -150,7 +246,7 @@ export function TranscriptionWidgetWorkspace({
               variant="ghost"
               className="h-8 w-8"
               title="איפוס סידור האזורים"
-              onClick={() => setPreferences(defaultsFor(definitions))}
+              onClick={() => commitPreferences(() => defaultsFor(definitions))}
             >
               <RotateCcw className="h-4 w-4" />
             </Button>
