@@ -678,6 +678,49 @@ _current_model_id: str | None = None
 MODEL_TTL_SECONDS = 30 * 60  # 30 minutes — evict unused models to free VRAM
 _flash_attention_disabled = False  # Set True after runtime flash-attention error
 
+# Whether flash attention works is a property of the GPU, not of the run — but it
+# can only be discovered by attempting inference and failing. Remembering the
+# answer across restarts saves a doomed transcription attempt plus a full model
+# reload on every cold start of a machine whose card does not support it.
+_FLASH_STATE_PATH = Path(__file__).parent / "flash_attention_state.json"
+
+
+def _flash_state_key() -> str:
+    """Identify the card, so the remembered answer does not follow a GPU swap."""
+    try:
+        if _has_torch and torch.cuda.is_available():
+            return torch.cuda.get_device_name(0)
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _load_flash_state() -> None:
+    """Restore a previously discovered flash-attention failure for this GPU."""
+    global _flash_attention_disabled
+    try:
+        if not _FLASH_STATE_PATH.exists():
+            return
+        data = json.loads(_FLASH_STATE_PATH.read_text(encoding="utf-8"))
+        if data.get("gpu") == _flash_state_key() and data.get("disabled") is True:
+            _flash_attention_disabled = True
+            _log.info(
+                f"Flash attention known unsupported on {data.get('gpu')} from a "
+                "previous run — skipping the attempt"
+            )
+    except Exception as exc:
+        _log.warning(f"Could not read flash-attention state: {exc}")
+
+
+def _persist_flash_state() -> None:
+    try:
+        _FLASH_STATE_PATH.write_text(
+            json.dumps({"gpu": _flash_state_key(), "disabled": True}),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        _log.warning(f"Could not persist flash-attention state: {exc}")
+
 # Background model loading state
 _model_loading_lock = threading.Lock()
 _model_loading: bool = False       # True while a model is being loaded in background
@@ -1015,6 +1058,8 @@ def _reload_model_without_flash(model_id: str, compute_type_override: str | None
     """Evict cached model and reload with flash_attention=False."""
     global _flash_attention_disabled
     _flash_attention_disabled = True
+    # Remember it, so the next cold start does not repeat the failed attempt.
+    _persist_flash_state()
     device = get_device()
     compute_type = compute_type_override or ("int8_float16" if device == "cuda" else "int8")
     cache_key = f"{model_id}::{compute_type}"
@@ -4577,6 +4622,10 @@ def main():
 
     if args.api_key:
         _api_key = args.api_key
+
+    # Before any model is loaded, so a card already known to reject flash
+    # attention is not asked to try again.
+    _load_flash_state()
 
     print("=" * 60)
     print("  Smart Hebrew Transcriber — Local Whisper Server")
