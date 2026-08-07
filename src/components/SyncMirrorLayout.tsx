@@ -913,6 +913,45 @@ export const SyncMirrorLayout = ({
     return {}; // line — no per-word style
   };
 
+  // ── Active-word decoration, applied straight to the DOM ────────────────────
+  // Marking the playing word through React meant every word change re-rendered
+  // the whole transcript — thirteen thousand spans rebuilt to move one
+  // highlight, which is what made playback unusable once marking was switched
+  // on. The two spans that actually change are touched directly instead.
+  const decoratedRef = useRef<HTMLElement[]>([]);
+  useEffect(() => {
+    const container = scrollRef.current;
+
+    // Clear whatever was decorated last time.
+    for (const el of decoratedRef.current) {
+      el.removeAttribute('data-active-word');
+      el.style.cssText = el.dataset.baseStyle ?? '';
+      el.classList.remove('font-bold', 'font-semibold');
+    }
+    decoratedRef.current = [];
+
+    if (!container || activeIdx < 0) return;
+    if (!rightWordHighlightOn && !leftWordHighlightOn) return;
+
+    const style = getActiveWordStyle(wordHighlightMode);
+    const targets = Array.from(
+      container.querySelectorAll<HTMLElement>(`[data-word-index="${activeIdx}"]`),
+    ).filter((el) => {
+      const side = el.dataset.wordSide;
+      return side === 'right' ? rightWordHighlightOn : leftWordHighlightOn;
+    });
+
+    for (const el of targets) {
+      // Remember the span's own styling once, so restoring it is exact.
+      if (el.dataset.baseStyle === undefined) el.dataset.baseStyle = el.style.cssText;
+      el.setAttribute('data-active-word', 'true');
+      Object.assign(el.style, style);
+      if (wordHighlightMode === 'word' || wordHighlightMode === 'glow') el.classList.add('font-bold');
+      else if (wordHighlightMode === 'underline') el.classList.add('font-semibold');
+      decoratedRef.current.push(el);
+    }
+  });
+
   // ── Render a single line row for one column ─────────────────────────────────
   const renderLine = (
     line: WordTiming[],
@@ -942,7 +981,6 @@ export const SyncMirrorLayout = ({
       >
         {line.map((wt, wi) => {
           const globalIdx = lineOffset + wi;
-          const isActive = globalIdx === activeIdx;
           const isSearchActive = globalIdx === activeSearchGlobalIdx;
           const isSearchMatch = !isSearchActive && searchMatchSet.has(globalIdx);
           const hasIssue =
@@ -964,7 +1002,6 @@ export const SyncMirrorLayout = ({
             : [];
 
           const wordHighlightOn = side === "right" ? rightWordHighlightOn : leftWordHighlightOn;
-          const isActiveVisible = isActive && wordHighlightOn;
           const isAnchor = userAnchors.has(globalIdx);
           // The word must still match what the marker recorded, same as before.
           const markerAtIdx = manualCorrectionByIndex.get(globalIdx);
@@ -976,7 +1013,6 @@ export const SyncMirrorLayout = ({
           const wordSpan = (
             <span
               key={globalIdx}
-              data-active-word={isActiveVisible ? 'true' : undefined}
               // Identity for the shared context menu. Carrying it on the element
               // means the menu can be resolved from the click, so the words
               // themselves stay plain spans.
@@ -985,26 +1021,24 @@ export const SyncMirrorLayout = ({
               data-word-side={side}
               data-word-start={wt.start}
               data-word-end={wt.end}
-              style={{ ...highlightStyle, ...(isActiveVisible ? getActiveWordStyle(wordHighlightMode) : {}) }}
+              style={highlightStyle}
               className={clsx(
                 // transition-colors, not transition-all: the browser has to watch
                 // every animatable property on every element that carries it, and
                 // there are two of these per word — over eleven thousand here.
                 // Only colour actually animates.
                 "inline cursor-pointer select-text transition-colors px-[1px]",
-                // base rounding only when NOT active-word (active word controls its own radius via style)
-                !isActiveVisible && "rounded-sm",
-                side === "left" && !isActive && "hover:bg-muted/70",
+                // The active-word decoration is applied to the DOM directly (see
+                // the effect below), so nothing here depends on which word is
+                // currently playing — that is what keeps a highlight move from
+                // rebuilding all thirteen thousand spans.
+                "rounded-sm",
+                side === "left" && "hover:bg-muted/70",
                 // anchor indicator
                 isAnchor && "ring-1 ring-amber-400 ring-offset-[1px]",
-                // active word structural classes (no color — handled by inline style)
-                isActiveVisible && wordHighlightMode === 'word' && "font-bold",
-                isActiveVisible && wordHighlightMode === 'underline' && "font-semibold",
-                isActiveVisible && wordHighlightMode === 'glow' && "rounded-sm font-bold",
-                // line mode: no word-level highlight, line bg handles it
-                !isActive && isSearchActive && "bg-yellow-400 dark:bg-yellow-600 rounded-sm",
-                !isActive && isSearchMatch && "bg-yellow-200 dark:bg-yellow-800 rounded-sm",
-                !isActive && wordHasIssue && "underline decoration-red-500 decoration-wavy underline-offset-2",
+                isSearchActive && "bg-yellow-400 dark:bg-yellow-600 rounded-sm",
+                isSearchMatch && "bg-yellow-200 dark:bg-yellow-800 rounded-sm",
+                wordHasIssue && "underline decoration-red-500 decoration-wavy underline-offset-2",
                 wasManuallyCorrected && "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-400/70 dark:bg-emerald-950/60 dark:text-emerald-100",
                 trustedSuggestion && !wasManuallyCorrected && "bg-red-100 text-red-900 ring-1 ring-red-400/80 hover:bg-red-200 dark:bg-red-950/60 dark:text-red-100",
               )}
@@ -1051,6 +1085,34 @@ export const SyncMirrorLayout = ({
       </div>
     );
   };
+
+  // The rendered word rows, built once per meaningful change. Deliberately not
+  // a function of the playing position: the active word is decorated on the DOM
+  // afterwards, so the clock can tick without rebuilding any of this.
+  const wordRows = useMemo(() => {
+    const src = compareMode ? frozenLines : lines;
+    let offset = 0;
+    return src.map((line, li) => {
+      const node = renderLine(line, offset, li, "left");
+      offset += line.length;
+      return node;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    compareMode, frozenLines, lines,
+    rightWordHighlightOn, leftWordHighlightOn,
+    // The marking hook hands back a fresh object every render, so depending on
+    // it would invalidate this on every tick. The three pieces the rows read
+    // are individually memoized and stable.
+    marking.getWordMarkingStyle, marking.localIssueMap, marking.resultMap,
+    searchMatchSet, activeSearchGlobalIdx,
+    userAnchors, manualCorrectionByIndex, hasAudioTimings,
+    applyWordReplace, onWordClick, dictionaryVersion,
+    // textStyle is deliberately absent: it is rebuilt on every render and would
+    // invalidate this memo continuously. The rows do not read it — the column
+    // that contains them carries the typography.
+    hlColors, hlOpacity,
+  ]);
 
   // Render a padded row (real line or phantom) with an edit-marker dot in the gutter.
   const renderPaddedRow = (
@@ -1827,13 +1889,7 @@ export const SyncMirrorLayout = ({
                 if (row.line) srcIdx++;
                 return renderPaddedRow(row, ri, 'left', src, row.line ? srcIdx : -1);
               });
-            })() : (compareMode ? frozenLines : lines).map((line, li) => {
-              const sourceLines = compareMode ? frozenLines : lines;
-              const offset = sourceLines.slice(0, li).reduce((a, l) => a + l.length, 0);
-              // Render right column with FULL "left"-side rendering so it mirrors 1:1
-              // (word context menu, marking, suggestions). Edits are still gated by the lock above.
-              return renderLine(line, offset, li, "left");
-            })}
+            })() : wordRows}
           </div>
         </div>
 
@@ -1943,10 +1999,7 @@ export const SyncMirrorLayout = ({
                       if (row.line) srcIdx++;
                       return renderPaddedRow(row, ri, 'left', src, row.line ? srcIdx : -1);
                     });
-                  })() : lines.map((line, li) => {
-                    const offset = lines.slice(0, li).reduce((a, l) => a + l.length, 0);
-                    return renderLine(line, offset, li, "left");
-                  })}
+                  })() : wordRows}
                 </div>
               )}
             </div>

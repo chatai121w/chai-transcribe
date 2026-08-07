@@ -1282,6 +1282,10 @@ const TextEditor = () => {
     }
   }, [wordTimings]);
 
+  // Stable identity: the synced view memoizes its word rows against its props,
+  // and a fresh arrow here would invalidate that on every clock tick.
+  const handleSyncedWordClick = useCallback((time: number) => setPlayerTime(time), []);
+
   const handlePlayerEditorChange = useCallback((newText: string) => {
     handleEditorChange(newText);
   }, [handleEditorChange]);
@@ -2373,7 +2377,7 @@ const TextEditor = () => {
                   text={text}
                   onTextChange={handlePlayerEditorChange}
                   onWordReplace={handleSyncedWordReplace}
-                  onWordClick={(time) => setPlayerTime(time)}
+                  onWordClick={handleSyncedWordClick}
                   correctionStorageKey={transcriptId || audioFileName || 'current-transcript'}
                   fontSize={fontSize}
                   fontFamily={fontFamily}
