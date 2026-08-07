@@ -2290,10 +2290,17 @@ def _yt_run_job(job_id: str, params: dict):
             target_model = _current_model_id or DEFAULT_MODEL
             resolved = MODEL_REGISTRY.get(target_model, target_model)
             model = load_model(resolved)
-            with _transcribe_lock:
+
+            def _run_yt_transcribe(m):
+                """Transcribe, reporting a real percentage as segments arrive.
+
+                The generator is consumed here rather than materialized in one
+                call, so the job advances continuously across 50→95 instead of
+                parking on a fixed number for the whole transcription.
+                """
                 from faster_whisper import BatchedInferencePipeline
-                pipeline = BatchedInferencePipeline(model=model)
-                segs_gen, info = pipeline.transcribe(
+                pipeline = BatchedInferencePipeline(model=m)
+                segs_gen, info_ = pipeline.transcribe(
                     str(audio_file),
                     language="he",
                     beam_size=3,
@@ -2301,25 +2308,37 @@ def _yt_run_job(job_id: str, params: dict):
                     batch_size=auto_batch_size(),
                     initial_prompt="תמלול שיחה בעברית.",
                 )
-                # Consume the generator segment by segment so the job reports a
-                # real, continuously advancing percentage across 50→95 instead
-                # of parking on a fixed number for the whole transcription.
-                total_sec = float(getattr(info, "duration", 0) or 0)
-                segments = []
+                total_sec_ = float(getattr(info_, "duration", 0) or 0)
+                collected = []
                 last_pct = 50
                 for seg in segs_gen:
-                    segments.append(seg)
-                    if total_sec > 0:
-                        pct = 50 + int(min(1.0, max(0.0, seg.end / total_sec)) * 45)
+                    collected.append(seg)
+                    if total_sec_ > 0:
+                        pct = 50 + int(min(1.0, max(0.0, seg.end / total_sec_)) * 45)
                         if pct > last_pct:
                             last_pct = pct
                             _yt_update(
                                 job_id,
                                 progress_pct=pct,
                                 transcribe_sec=round(float(seg.end), 1),
-                                transcribe_total_sec=round(total_sec, 1),
-                                transcribe_segments=len(segments),
+                                transcribe_total_sec=round(total_sec_, 1),
+                                transcribe_segments=len(collected),
                             )
+                return collected, info_
+
+            with _transcribe_lock:
+                # Same fallback every other transcription path already has: the
+                # flash-attention kernel only fails once inference actually runs,
+                # so without this the whole job dies on an unsupported GPU.
+                try:
+                    segments, info = _run_yt_transcribe(model)
+                except Exception as fa_err:
+                    if "flash attention" in str(fa_err).lower():
+                        _yt_update(job_id, progress_pct=50, transcribe_segments=0)
+                        model = _reload_model_without_flash(resolved)
+                        segments, info = _run_yt_transcribe(model)
+                    else:
+                        raise
 
             # Write TXT
             txt_path = job_dir / "transcript.txt"
