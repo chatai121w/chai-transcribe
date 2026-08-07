@@ -89,6 +89,7 @@ import {
   listProfiles,
 } from "@/lib/pronunciationProfiles";
 import { alignEditedToWhisper, findActiveWordIndex, fitTimingsToDuration } from "@/lib/whisperAlignment";
+import { syncLog, startLongTaskWatch } from "@/lib/syncPerfTrace";
 import { LazyErrorBoundary } from "@/components/LazyErrorBoundary";
 import { CollapsibleWidget } from "@/components/ui/CollapsibleWidget";
 import {
@@ -262,6 +263,7 @@ const TextEditor = () => {
   const lastWordIdxRef = useRef(-2); // -2 = uninitialised
   const playerTimeRef = useRef(0);
   const lastPlayerRenderAtRef = useRef(-1);
+  const clockStats = useRef({ ticks: 0, renders: 0, wordChanges: 0, since: 0 });
   const transcriptIdRef = useRef<string | null>(null);
   const manualVersionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { updateTranscript, getAudioUrl, saveTranscript, transcripts } = useCloudTranscripts();
@@ -510,6 +512,7 @@ const TextEditor = () => {
 
   useEffect(() => {
     debugLog.info('TextEditor', '📝 TextEditor mounted');
+    const stopLongTaskWatch = startLongTaskWatch();
 
     // Keyboard shortcut: Ctrl+Shift+F → toggle floating player
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -556,6 +559,7 @@ const TextEditor = () => {
     return () => {
       window.clearTimeout(preloadTimer);
       window.removeEventListener('keydown', handleKeyDown);
+      stopLongTaskWatch();
       if (ownedAudioUrlRef.current) {
         URL.revokeObjectURL(ownedAudioUrlRef.current);
         ownedAudioUrlRef.current = null;
@@ -1249,6 +1253,7 @@ const TextEditor = () => {
   const PLAYER_CLOCK_RENDER_INTERVAL = 0.25;
   const handlePlayerTimeUpdate = useCallback((t: number) => {
     playerTimeRef.current = t;
+    clockStats.current.ticks += 1;
     if (!wordTimings.length) {
       setPlayerTime(t);
       return;
@@ -1256,9 +1261,24 @@ const TextEditor = () => {
     const idx = findActiveWordIndex(wordTimings, t);
     const elapsed = Math.abs(t - lastPlayerRenderAtRef.current);
     if (idx !== lastWordIdxRef.current || elapsed >= PLAYER_CLOCK_RENDER_INTERVAL || t < lastPlayerRenderAtRef.current) {
+      if (idx !== lastWordIdxRef.current) clockStats.current.wordChanges += 1;
       lastWordIdxRef.current = idx;
       lastPlayerRenderAtRef.current = t;
+      clockStats.current.renders += 1;
       setPlayerTime(t);
+    }
+    // How many of the player's ticks actually reach React, and why. If `renders`
+    // tracks `ticks` the gate is doing nothing; it should track `wordChanges`
+    // plus roughly four clock refreshes a second.
+    const now = performance.now();
+    if (now - clockStats.current.since >= 3000) {
+      const secs = (now - clockStats.current.since) / 1000;
+      syncLog('🕐 player clock', {
+        ticksPerSec: +(clockStats.current.ticks / secs).toFixed(1),
+        rendersPerSec: +(clockStats.current.renders / secs).toFixed(1),
+        wordChangesPerSec: +(clockStats.current.wordChanges / secs).toFixed(1),
+      });
+      clockStats.current = { ticks: 0, renders: 0, wordChanges: 0, since: now };
     }
   }, [wordTimings]);
 
@@ -2320,7 +2340,17 @@ const TextEditor = () => {
                     variant="outline"
                     size="sm"
                     className="h-8 text-xs gap-1.5"
-                    onClick={() => setForceFullSyncView(true)}
+                    onClick={() => {
+                      // The exact size of the job the view is about to be handed.
+                      syncLog('▶ full sync requested', {
+                        words: textWordCount,
+                        chars: text.length,
+                        wordTimings: wordTimings.length,
+                        // Each word becomes a span in both panes.
+                        expectedSpans: wordTimings.length * 2,
+                      });
+                      setForceFullSyncView(true);
+                    }}
                   >
                     <Link className="w-3.5 h-3.5" />
                     פתח סנכרון מלא

@@ -15,7 +15,7 @@
  * and exposes the menu through `<ContextMenuTrigger asChild>`.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   ContextMenu,
@@ -93,14 +93,28 @@ export const WordContextMenu = ({
 }: WordContextMenuProps) => {
   const [customInput, setCustomInput] = useState(word);
   const [verifyInput, setVerifyInput] = useState('');
+  // The synced transcript wraps every word in one of these — over eleven
+  // thousand of them on a long recording. The menu body is around fifty
+  // elements, so building it for words nobody has right-clicked meant
+  // constructing roughly half a million React elements on every render, which
+  // measured at ~2.2s per render and made playback impossible. Nothing below
+  // the trigger is built until the menu is actually opened.
+  const [open, setOpen] = useState(false);
 
-  const similar = useMemo(() => getSimilarWords(word, 8), [word]);
+  // A single instance now serves every word, so the inputs must follow the word
+  // the menu was opened on rather than keeping the first one they ever saw.
+  useEffect(() => {
+    setCustomInput(word);
+    setVerifyInput('');
+  }, [word]);
+
+  const similar = useMemo(() => (open ? getSimilarWords(word, 8) : []), [word, open]);
   const uniqueSuggestions = useMemo(
-    () => uniqueWordSuggestions(suggestions, word),
-    [suggestions, word],
+    () => (open ? uniqueWordSuggestions(suggestions, word) : []),
+    [suggestions, word, open],
   );
-  const currentHighlight = useMemo(() => getWordHighlight(word), [word]);
-  const approved = isWordApproved(word);
+  const currentHighlight = useMemo(() => (open ? getWordHighlight(word) : undefined), [word, open]);
+  const approved = open ? isWordApproved(word) : false;
 
   const handleReplace = (next: string) => {
     const trimmed = next.trim();
@@ -155,8 +169,9 @@ export const WordContextMenu = ({
   };
 
   return (
-    <ContextMenu>
+    <ContextMenu onOpenChange={setOpen}>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      {open && word && (
       <ContextMenuContent className="w-64">
         <ContextMenuLabel className="text-xs flex items-center justify-between gap-2">
           <span className="truncate">{word}</span>
@@ -424,6 +439,7 @@ export const WordContextMenu = ({
           </div>
         </div>
       </ContextMenuContent>
+      )}
     </ContextMenu>
   );
 };

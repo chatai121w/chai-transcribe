@@ -18,6 +18,9 @@ import { cn } from "@/lib/utils";
 // on the word span are mutually exclusive by construction, so there is nothing
 // for the merge to resolve and plain clsx gives the same result.
 import clsx from "clsx";
+import { createRenderReporter, syncLog, syncTime, notePhase, syncTraceEnabled } from "@/lib/syncPerfTrace";
+
+const syncRenderReporter = createRenderReporter('SyncMirrorLayout');
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -161,6 +164,14 @@ export const SyncMirrorLayout = ({
   enableRichEdit = false,
   onWordCorrected,
 }: SyncMirrorLayoutProps) => {
+  // Every render of this component is measured, because the view re-runs its
+  // whole word loop whenever the highlight moves and that is the cost that
+  // decides whether playback is smooth. Reported as a rolling summary, so the
+  // probe itself does not become the load.
+  const endRenderMeasure = syncRenderReporter.begin();
+  useEffect(() => { endRenderMeasure(); });
+  notePhase('SyncMirrorLayout render');
+
   type ManualCorrectionMarker = {
     wordIndex: number;
     original: string;
@@ -483,8 +494,11 @@ export const SyncMirrorLayout = ({
     letterSpacing: localLetterSpacing,
   }), [localFontWeight, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing]);
 
+  // Canvas text measurement over every word. Should run only when the text,
+  // column width or font changes — never on a clock tick. If this shows up
+  // repeatedly during playback, one of its inputs is unstable.
   const lines = useMemo(
-    () => measureLineBreaks(displayTimings, colWidth, fontMetrics),
+    () => syncTime('measureLineBreaks', () => measureLineBreaks(displayTimings, colWidth, fontMetrics)),
     [displayTimings, colWidth, fontMetrics],
   );
 
@@ -506,8 +520,23 @@ export const SyncMirrorLayout = ({
     const keyOf = (l: WordTiming[]) => l.map(w => w.word).join(' ').trim();
     const A = snapshotLines.map(keyOf); // snapshot
     const B = lines.map(keyOf);          // current
-    // LCS DP
     const n = A.length, m = B.length;
+
+    // The diff below is O(n·m) in both time and memory. On a long transcript
+    // that is a matrix of hundreds of thousands of cells, built the moment this
+    // mode is switched on. When nothing has been edited yet — the usual case
+    // right after locking — the two sides are identical and the whole thing is
+    // avoidable.
+    if (n === m && A.every((row, i) => row === B[i])) {
+      syncLog('⇉ padded alignment: identical, diff skipped', { lines: n });
+      return {
+        current: lines.map((line) => ({ line, edited: false })),
+        snapshot: snapshotLines.map((line) => ({ line, edited: false })),
+      };
+    }
+    syncLog('⇉ padded alignment: running LCS', { snapshotLines: n, currentLines: m, cells: n * m });
+
+    // LCS DP
     const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
     for (let i = 1; i <= n; i++) {
       for (let j = 1; j <= m; j++) {
@@ -663,6 +692,47 @@ export const SyncMirrorLayout = ({
     },
     [displayTimings, onWordReplace, rememberManualCorrection],
   );
+
+  // ── Shared word context menu ──────────────────────────────────────────────
+  // Resolved from whichever word was right-clicked, so a single menu instance
+  // serves the whole transcript instead of one per word.
+  const [menuTarget, setMenuTarget] = useState<{
+    globalIdx: number;
+    word: string;
+    side: 'left' | 'right';
+    start: number;
+    end: number;
+  } | null>(null);
+
+  const handleWordContextMenu = useCallback((event: React.MouseEvent) => {
+    const el = (event.target as HTMLElement | null)?.closest?.('[data-word-index]') as HTMLElement | null;
+    if (!el) {
+      setMenuTarget(null);
+      return;
+    }
+    const globalIdx = Number(el.dataset.wordIndex);
+    if (!Number.isFinite(globalIdx)) {
+      setMenuTarget(null);
+      return;
+    }
+    setMenuTarget({
+      globalIdx,
+      word: el.dataset.word ?? '',
+      side: (el.dataset.wordSide as 'left' | 'right') ?? 'left',
+      start: Number(el.dataset.wordStart) || 0,
+      end: Number(el.dataset.wordEnd) || 0,
+    });
+  }, []);
+
+  // Suggestions for the targeted word, using the same inputs the row render uses.
+  const menuSuggestions = useMemo(() => {
+    if (!menuTarget || menuTarget.side !== 'left') return [];
+    const { globalIdx, word } = menuTarget;
+    if (marking.getWordMarkingStyle(globalIdx) === '' || isWordApproved(word)) return [];
+    const local = marking.localIssueMap.get(globalIdx) ?? [];
+    const result = marking.resultMap.get(globalIdx)?.suggestion;
+    return [...local.map((s) => s.text), ...(result ? [result] : [])];
+  }, [menuTarget, marking]);
 
   // ── Per-column word-highlight toggle + style ──────────────────────────────
   const [rightWordHighlightOn, setRightWordHighlightOn] = useState(true);
@@ -941,6 +1011,14 @@ export const SyncMirrorLayout = ({
             <span
               key={globalIdx}
               data-active-word={isActiveVisible ? 'true' : undefined}
+              // Identity for the shared context menu. Carrying it on the element
+              // means the menu can be resolved from the click, so the words
+              // themselves stay plain spans.
+              data-word-index={globalIdx}
+              data-word={wt.word}
+              data-word-side={side}
+              data-word-start={wt.start}
+              data-word-end={wt.end}
               style={{ ...highlightStyle, ...(isActiveVisible ? getActiveWordStyle(wordHighlightMode) : {}) }}
               className={clsx(
                 // transition-colors, not transition-all: the browser has to watch
@@ -994,18 +1072,12 @@ export const SyncMirrorLayout = ({
             </span>
           );
 
+          // One shared context menu serves every word (see menuTarget below).
+          // Wrapping each word in its own Radix menu meant eleven thousand menu
+          // roots on a long transcript, which alone cost seconds per render.
           return (
             <React.Fragment key={globalIdx}>
-              <WordContextMenu
-                word={wt.word}
-                suggestions={suggestions}
-                onReplace={(next) => { applyWordReplace(globalIdx, next); setDictionaryVersion((v) => v + 1); }}
-                onApproveAsCorrect={() => setDictionaryVersion((v) => v + 1)}
-                isAnchor={isAnchor}
-                onToggleAnchor={hasAudioTimings ? () => toggleUserAnchor(globalIdx, { start: wt.start, end: wt.end }) : undefined}
-              >
-                {wordSpan}
-              </WordContextMenu>
+              {wordSpan}
               {' '}
             </React.Fragment>
           );
@@ -1720,8 +1792,23 @@ export const SyncMirrorLayout = ({
       )}
 
       {/* Shared scroll container — two equal flex columns (no individual headers) */}
+      <WordContextMenu
+        word={menuTarget?.word ?? ''}
+        suggestions={menuSuggestions}
+        onReplace={(next) => {
+          if (!menuTarget) return;
+          applyWordReplace(menuTarget.globalIdx, next);
+          setDictionaryVersion((v) => v + 1);
+        }}
+        onApproveAsCorrect={() => setDictionaryVersion((v) => v + 1)}
+        isAnchor={menuTarget ? userAnchors.has(menuTarget.globalIdx) : false}
+        onToggleAnchor={hasAudioTimings && menuTarget
+          ? () => toggleUserAnchor(menuTarget.globalIdx, { start: menuTarget.start, end: menuTarget.end })
+          : undefined}
+      >
       <div
         ref={scrollRef}
+        onContextMenuCapture={handleWordContextMenu}
         className="flex flex-col lg:flex-row flex-1 min-h-0 overflow-y-auto"
       >
         {/* ── RIGHT column — full mirror, fully editable (unless locked) ── */}
@@ -1901,6 +1988,7 @@ export const SyncMirrorLayout = ({
           </div>
         </div>
       </div>
+      </WordContextMenu>
       </>}
 
       {/* Word-replace popover */}
