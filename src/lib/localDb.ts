@@ -142,6 +142,35 @@ export interface LocalAudioBlob {
   saved_at: number; // Date.now()
 }
 
+/**
+ * Word timings pinned to the audio itself rather than to a transcript record.
+ *
+ * Alignment is expensive to produce, so it must survive even when the text has
+ * no saved transcript to hang on to. The key is a fingerprint of the audio, so
+ * reopening the same recording restores tracking regardless of how it arrived.
+ */
+export interface LocalAudioTimings {
+  /** Audio fingerprint — see buildAudioFingerprint(). */
+  id: string;
+  word_timings: Array<{ word: string; start: number; end: number; probability?: number }>;
+  /** Word count of the text these timings were aligned against. */
+  word_count: number;
+  transcript_id?: string | null;
+  audio_name?: string;
+  saved_at: number;
+}
+
+/** Stable key for a piece of audio: size + duration + name, no hashing needed. */
+export function buildAudioFingerprint(
+  audio: { size: number; name?: string },
+  durationSeconds?: number,
+): string {
+  // Keep letters/digits in any script so Hebrew filenames still contribute.
+  const name = (audio.name || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '').slice(-24);
+  const dur = durationSeconds && Number.isFinite(durationSeconds) ? Math.round(durationSeconds) : 0;
+  return `a_${audio.size}_${dur}_${name}`;
+}
+
 // ─── Database ────────────────────────────────────────────────────
 class SmartTranscriberDB extends Dexie {
   transcripts!: Table<LocalTranscript, string>;
@@ -152,6 +181,7 @@ class SmartTranscriberDB extends Dexie {
   audioBlobs!: Table<LocalAudioBlob, string>;
   versions!: Table<LocalVersion, string>;
   drivePending!: Table<PendingDriveUpload, string>;
+  audioTimings!: Table<LocalAudioTimings, string>;
 
   constructor() {
     super('SmartTranscriberDB');
@@ -180,6 +210,12 @@ class SmartTranscriberDB extends Dexie {
     // v5: pending Drive uploads (background-sync queue)
     this.version(5).stores({
       drivePending: 'id, created_at',
+    });
+
+    // v6: word timings keyed by audio fingerprint, so alignment survives even
+    // when the text has no saved transcript record to attach to
+    this.version(6).stores({
+      audioTimings: 'id, transcript_id, saved_at',
     });
   }
 }

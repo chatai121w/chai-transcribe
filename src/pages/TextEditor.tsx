@@ -78,7 +78,7 @@ import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import { useCloudVersions } from "@/hooks/useCloudVersions";
 import { useOllama, isOllamaModel } from "@/hooks/useOllama";
-import { db } from "@/lib/localDb";
+import { db, buildAudioFingerprint } from "@/lib/localDb";
 import { useCorrectionLearning } from "@/hooks/useCorrectionLearning";
 import { getServerUrl } from "@/lib/serverConfig";
 import {
@@ -1496,6 +1496,21 @@ const TextEditor = () => {
       if (id) {
         await updateTranscript(id, { word_timings: alignedTimings });
       }
+      // Pin the timings to the audio itself as well, so this alignment is never
+      // lost — it comes back for this recording even without a transcript record.
+      try {
+        await db.audioTimings.put({
+          id: buildAudioFingerprint(
+            { size: audioBlob.size, name: audioFileName || 'audio' },
+            Number(result?.audioDuration) || 0,
+          ),
+          word_timings: alignedTimings,
+          word_count: words.length,
+          transcript_id: id || null,
+          audio_name: audioFileName || undefined,
+          saved_at: Date.now(),
+        });
+      } catch { /* Dexie unavailable — cloud/local transcript copy still applies */ }
       toast({
         title: "הטקסט יושר לאודיו",
         description: `${Math.round(quality * 100)}% איכות • ${Math.round(alignmentCoverage * 100)}% עוגנים • ${alignedTimings.length} מילים`,
@@ -1528,15 +1543,44 @@ const TextEditor = () => {
     let cancelled = false;
     const healthCtrl = new AbortController();
     const healthTimer = setTimeout(() => healthCtrl.abort(), 3000);
-    fetch(`${getServerUrl()}/health`, { signal: healthCtrl.signal })
-      .then((res) => {
+
+    void (async () => {
+      // Cheapest path first: a previous alignment pinned to this same audio.
+      // Restoring it costs nothing and spares the user a redundant re-align.
+      try {
+        const matches = await db.audioTimings
+          .where('id').startsWith(`a_${audioBlob.size}_`).toArray();
+        const best = matches
+          .filter(entry => entry.word_timings?.length)
+          .sort((a, b) => b.saved_at - a.saved_at)[0];
+        if (best && !cancelled) {
+          const currentWordCount = text.trim().split(/\s+/).filter(Boolean).length;
+          // Only reuse when the text still matches what was aligned; otherwise
+          // the pinned timings belong to different words and would mislead.
+          const drift = Math.abs(best.word_count - currentWordCount) / Math.max(1, best.word_count);
+          if (drift <= 0.15) {
+            debugLog.info('TextEditor', `שוחזרו ${best.word_timings.length} תזמוני מילים המוצמדים לאודיו`);
+            wordTimingsRevisionRef.current += 1;
+            wordTimingsRef.current = best.word_timings;
+            setWordTimings(best.word_timings);
+            setSyncEnabled(true);
+            clearTimeout(healthTimer);
+            return;
+          }
+        }
+      } catch { /* Dexie unavailable — fall through to alignment */ }
+
+      if (cancelled) return;
+      try {
+        const res = await fetch(`${getServerUrl()}/health`, { signal: healthCtrl.signal });
         if (cancelled || !res.ok) return;
         debugLog.info('TextEditor', 'אין תזמוני מילים — מפעיל יישור מדויק אוטומטי');
         toast({ title: '🎯 מסנכרן טקסט לאודיו...', description: 'מחשב תזמוני מילים ברקע — המעקב יופעל בסיום' });
         void handleForcedAlignment();
-      })
-      .catch(() => { /* local server unavailable — skip silently */ })
-      .finally(() => clearTimeout(healthTimer));
+      } catch { /* local server unavailable — skip silently */ }
+      finally { clearTimeout(healthTimer); }
+    })();
+
     return () => { cancelled = true; healthCtrl.abort(); };
   }, [audioBlob, text, wordTimings.length, forcedAlignmentState.status, audioFileName, handleForcedAlignment]);
 
