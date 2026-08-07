@@ -235,7 +235,6 @@ export const SyncMirrorLayout = ({
   };
   const effectiveRichEdit = enableRichEdit && !preciseAlign;
 
-  const [colWidth, setColWidth] = useState(0);
   const [fullEditMode, setFullEditMode] = useState(false);
   const [editDraft, setEditDraft] = useState(text);
   const [followPlayback, setFollowPlayback] = useState(() => {
@@ -456,57 +455,29 @@ export const SyncMirrorLayout = ({
   }, [text, wordTimings, alignMode, userAnchors]);
   const hasAudioTimings = wordTimings.length > 0;
 
-  // ── ResizeObserver: track the NARROWER column's actual content width and
-  // use it as the wrapping basis for `lines`. This keeps both columns visually
-  // aligned at the source-column width; the wider editor column simply has
-  // trailing whitespace per line for inline edits without pushing rows down.
-  useEffect(() => {
-    const rEl = rightColRef.current;
-    const lEl = leftColRef.current;
-    if (!rEl && !lEl) return;
-    const compute = () => {
-      const rW = rEl?.clientWidth ?? 0;
-      const lW = lEl?.clientWidth ?? 0;
-      // Prefer the locked side as the source-of-truth wrapping width.
-      // Without a lock, use the smaller of the two so neither side overflows.
-      let basis = 0;
-      if (lockedPane === 'right' && rW) basis = rW;
-      else if (lockedPane === 'left' && lW) basis = lW;
-      else if (rW && lW) basis = Math.min(rW, lW);
-      else basis = rW || lW;
-      // Subtract ~32px for the column's px-4 horizontal padding.
-      setColWidth(Math.max(120, Math.floor(basis) - 32));
-    };
-    compute();
-    const ro = new ResizeObserver(compute);
-    if (rEl) ro.observe(rEl);
-    if (lEl) ro.observe(lEl);
-    return () => ro.disconnect();
-  }, [lockedPane, rightPct]);
+  // A ResizeObserver used to watch both columns and feed their width into the
+  // line-break measurement. With the browser doing the wrapping there is no
+  // width to feed, and the observer was actively harmful: it fires on every
+  // frame of a sidebar animation, and each notification rebuilt every line.
 
 
   // ── Canvas-measured line breaks ─────────────────────────────────────────────
-  const fontMetrics = useMemo<FontMetrics>(() => ({
-    weight: localFontWeight,
-    size: localFontSize,
-    family: localFontFamily,
-    wordSpacing: localWordSpacing,
-    letterSpacing: localLetterSpacing,
-  }), [localFontWeight, localFontSize, localFontFamily, localWordSpacing, localLetterSpacing]);
 
-  // Canvas text measurement over every word. Should run only when the text,
-  // column width or font changes — never on a clock tick. If this shows up
-  // repeatedly during playback, one of its inputs is unstable.
+  // Line breaking is off: the words are handed over as a single run and the
+  // browser wraps them. Measuring breaks on a canvas meant walking every word
+  // whenever the column width changed, and a column width changes for reasons
+  // that have nothing to do with the text — opening the sidebar, resizing the
+  // window, returning to the page — each one rebuilding the entire view.
   const lines = useMemo(
-    () => syncTime('measureLineBreaks', () => measureLineBreaks(displayTimings, colWidth, fontMetrics)),
-    [displayTimings, colWidth, fontMetrics],
+    () => (displayTimings.length ? [displayTimings] : []),
+    [displayTimings],
   );
 
   // ── Snapshot lines (the locked side's frozen view) ──────────────────────────
   const snapshotLines = useMemo<WordTiming[][]>(() => {
     if (!lockedSnapshotText.trim()) return [];
-    return measureLineBreaks(textToTimings(lockedSnapshotText), colWidth, fontMetrics);
-  }, [lockedSnapshotText, colWidth, fontMetrics]);
+    return [textToTimings(lockedSnapshotText)];
+  }, [lockedSnapshotText]);
 
   // ── Padded alignment via line-level LCS ────────────────────────────────────
   // Returns two arrays of identical length where each slot is either a real
@@ -581,15 +552,6 @@ export const SyncMirrorLayout = ({
   }, [displayTimings, currentTime, syncEnabled, hasAudioTimings]);
 
   // ── Active line index ───────────────────────────────────────────────────────
-  const activeLineIdx = useMemo(() => {
-    if (activeIdx < 0) return -1;
-    let offset = 0;
-    for (let li = 0; li < lines.length; li++) {
-      if (activeIdx < offset + lines[li].length) return li;
-      offset += lines[li].length;
-    }
-    return -1;
-  }, [activeIdx, lines]);
 
   // ── Auto-scroll to active line ──────────────────────────────────────────────
   useEffect(() => {
@@ -602,11 +564,13 @@ export const SyncMirrorLayout = ({
       return;
     }
 
-    if (activeLineIdx < 0) return;
+    // Follow the word, not the row: without measured line breaks the text is
+    // one flowing run, so a row is the whole transcript and scrolling to it
+    // would just jump to the top.
     const container = scrollRef.current;
-    const target = container?.querySelector<HTMLElement>(`[data-line="${activeLineIdx}"]`);
+    const target = container?.querySelector<HTMLElement>(`[data-word-index="${activeIdx}"]`);
     if (container && target) scrollWithinContainer(container, target, "nearest");
-  }, [activeIdx, activeLineIdx, syncEnabled, followPlayback, fullEditMode]);
+  }, [activeIdx, syncEnabled, followPlayback, fullEditMode]);
 
   // ── Search highlighting ─────────────────────────────────────────────────────
   const searchMatchList = useMemo(() => {
@@ -772,8 +736,8 @@ export const SyncMirrorLayout = ({
   // Lines for the frozen (right) panel in compare mode
   const frozenLines = useMemo<WordTiming[][]>(() => {
     if (!compareMode || !frozenTimings.length) return [];
-    return measureLineBreaks(frozenTimings, colWidth, fontMetrics);
-  }, [compareMode, frozenTimings, colWidth, fontMetrics]);
+    return [frozenTimings];
+  }, [compareMode, frozenTimings]);
 
   // ── Baseline (original) snapshot — set once on first non-empty mount, persisted ──
   const BASELINE_KEY = 'sync_mirror_baseline_v1';
@@ -956,10 +920,12 @@ export const SyncMirrorLayout = ({
     lineIdx: number,
     side: "left" | "right",
   ) => {
-    const isActiveLine = lineIdx === activeLineIdx;
+    // A "row" is now the entire transcript, so row-level highlighting would
+    // paint everything. Only the active word itself is marked.
+    const isActiveLine = false;
     const wordHighlightOn = side === "right" ? rightWordHighlightOn : leftWordHighlightOn;
-    const showLineMode = wordHighlightMode === 'line' && isActiveLine && wordHighlightOn;
-    const showSubtleLine = wordHighlightMode !== 'line' && isActiveLine;
+    const showLineMode = false;
+    const showSubtleLine = false;
     return (
       <div
         key={lineIdx}
