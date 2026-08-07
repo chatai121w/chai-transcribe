@@ -2283,7 +2283,7 @@ def _yt_run_job(job_id: str, params: dict):
 
         # TRANSCRIBE branch
         if mode in ("transcribe", "full"):
-            _yt_update(job_id, status="transcribing", progress_pct=75)
+            _yt_update(job_id, status="transcribing", progress_pct=50)
             audio_file = next((p for p in job_dir.iterdir() if p.name.startswith("audio.")), None)
             if not audio_file:
                 raise RuntimeError("No audio to transcribe")
@@ -2301,7 +2301,25 @@ def _yt_run_job(job_id: str, params: dict):
                     batch_size=auto_batch_size(),
                     initial_prompt="תמלול שיחה בעברית.",
                 )
-                segments = list(segs_gen)
+                # Consume the generator segment by segment so the job reports a
+                # real, continuously advancing percentage across 50→95 instead
+                # of parking on a fixed number for the whole transcription.
+                total_sec = float(getattr(info, "duration", 0) or 0)
+                segments = []
+                last_pct = 50
+                for seg in segs_gen:
+                    segments.append(seg)
+                    if total_sec > 0:
+                        pct = 50 + int(min(1.0, max(0.0, seg.end / total_sec)) * 45)
+                        if pct > last_pct:
+                            last_pct = pct
+                            _yt_update(
+                                job_id,
+                                progress_pct=pct,
+                                transcribe_sec=round(float(seg.end), 1),
+                                transcribe_total_sec=round(total_sec, 1),
+                                transcribe_segments=len(segments),
+                            )
 
             # Write TXT
             txt_path = job_dir / "transcript.txt"

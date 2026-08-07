@@ -223,6 +223,12 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
             server_job_id: serverJobId,
             dl_mb: dlMb, total_mb: totalMb, speed_mb: speedMb,
             server_status: s.status,
+            server_pct: s.progress_pct ?? 0,
+            // Live transcription position, so the UI can show a real number
+            // while the server works through the audio.
+            transcribe_sec: s.transcribe_sec ?? 0,
+            transcribe_total_sec: s.transcribe_total_sec ?? 0,
+            transcribe_segments: s.transcribe_segments ?? 0,
           },
         });
         if (s.status === "done") {

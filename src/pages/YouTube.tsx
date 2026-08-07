@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,10 +19,29 @@ import {
   type YtProbeResult, type YtMode, type YoutubeJob,
 } from "@/hooks/useYoutubeJobs";
 import { startYoutubeJob } from "@/lib/jobs/pipelines/youtubePipeline";
+import { YoutubeJobProgress } from "@/components/YoutubeJobProgress";
+import { useCloudPreferences } from "@/hooks/useCloudPreferences";
+import { getServerUrl } from "@/lib/serverConfig";
+import { useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useJobs } from "@/hooks/useJobs";
 import { JobCard } from "@/components/jobs/JobCard";
 import { WaveformPlayer } from "@/components/WaveformPlayer";
+
+/** Engines offered for YouTube transcription — same set as the main page. */
+type YtEngine = 'local-server' | 'groq' | 'openai' | 'gemini' | 'google' | 'assemblyai' | 'deepgram' | 'local';
+
+const YT_ENGINES: Array<{ id: YtEngine; label: string; hint: string; local?: boolean }> = [
+  { id: 'local-server', label: '🖥️ שרת מקומי (CUDA)', hint: 'מהיר, ללא עלות, רץ על הכרטיס שלך', local: true },
+  { id: 'gemini',       label: '✨ Gemini',            hint: 'איכות גבוהה לעברית' },
+  { id: 'groq',         label: '⚡ Groq',              hint: 'הכי מהיר בענן' },
+  { id: 'openai',       label: '🌐 OpenAI',            hint: 'Whisper בענן' },
+  { id: 'google',       label: '🔵 Google',            hint: 'Speech-to-Text' },
+  { id: 'assemblyai',   label: '🎙️ AssemblyAI',        hint: 'דיוק גבוה' },
+  { id: 'deepgram',     label: '🌊 Deepgram',          hint: 'מהיר וחסכוני' },
+  { id: 'local',        label: '💻 ONNX (בדפדפן)',     hint: 'ללא רשת כלל', local: true },
+];
 
 export default function YouTubePage() {
   const [url, setUrl] = useState("");
@@ -33,7 +52,27 @@ export default function YouTubePage() {
   const [videoQuality, setVideoQuality] = useState<"360" | "720" | "1080">("720");
   const [saveToCloud, setSaveToCloud] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [engine, setEngine] = useState<YtEngine>("local-server");
+  const [serverOk, setServerOk] = useState<boolean | null>(null);
+  const [handingOff, setHandingOff] = useState(false);
+  const navigate = useNavigate();
+  const { updatePreference } = useCloudPreferences();
 
+  // Health of the local transcription server — drives the readiness strip and
+  // decides whether the server-side engine can be offered at all.
+  useEffect(() => {
+    let cancelled = false;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3000);
+    fetch(`${getServerUrl()}/health`, { signal: ctrl.signal })
+      .then(res => res.json())
+      .then((h) => { if (!cancelled) setServerOk(h?.status === 'ok'); })
+      .catch(() => { if (!cancelled) setServerOk(false); })
+      .finally(() => clearTimeout(timer));
+    return () => { cancelled = true; ctrl.abort(); };
+  }, []);
+
+  const pendingHandoffRef = useRef<string | null>(null);
   const { jobs, loading, probeUrl, deleteJob } = useYoutubeJobs();
   const { user } = useAuth();
   const { jobs: centralJobs } = useJobs();
@@ -58,18 +97,30 @@ export default function YouTubePage() {
     }
   };
 
+  // A cloud engine cannot run inside the local server job, so for those the job
+  // only downloads the audio and the existing transcription pipeline takes over.
+  const wantsCloudEngine = engine !== 'local-server'
+    && (mode === 'transcribe' || mode === 'full')
+    && probe?.backend === 'local';
+
   const handleStart = async () => {
     if (!probe || !user) return;
     setSubmitting(true);
     try {
+      const effectiveMode: YtMode = wantsCloudEngine && mode === 'transcribe' ? 'audio' : mode;
+      if (wantsCloudEngine) {
+        // Applied before the handoff so the transcription page starts on it.
+        await updatePreference('engine', engine);
+      }
       const job = await startYoutubeJob({
         userId: user.id,
         url: url.trim(),
-        mode,
+        mode: effectiveMode,
         audioFormat,
         videoQuality,
         saveToCloud: probe?.backend === "local" ? saveToCloud : false,
       });
+      pendingHandoffRef.current = wantsCloudEngine ? job.id : null;
       setActiveJobId(job.id);
       toast({ title: "המשימה התחילה", description: "עקוב אחרי השלבים למטה או במרכז המשימות" });
     } catch (e) {
@@ -78,6 +129,40 @@ export default function YouTubePage() {
       setSubmitting(false);
     }
   };
+
+  // Once the download finishes, carry the audio into the regular transcription
+  // flow, which already supports every engine.
+  useEffect(() => {
+    if (!activeJob || activeJob.status !== 'done') return;
+    if (pendingHandoffRef.current !== activeJob.id) return;
+    pendingHandoffRef.current = null;
+
+    const audioFile = (activeJob.output_files ?? []).find(
+      (f: { kind?: string }) => f.kind === 'audio',
+    ) as { url?: string; filename?: string } | undefined;
+    if (!audioFile?.url) {
+      toast({ title: 'לא נמצא אודיו להעברה', description: 'ההורדה הסתיימה אך לא הופק קובץ אודיו', variant: 'destructive' });
+      return;
+    }
+
+    setHandingOff(true);
+    void (async () => {
+      try {
+        const res = await fetch(audioFile.url!);
+        if (!res.ok) throw new Error(`הורדת האודיו נכשלה (${res.status})`);
+        const blob = await res.blob();
+        const name = audioFile.filename || 'youtube-audio';
+        const file = new File([blob], name, { type: blob.type || 'audio/mpeg' });
+        const engineLabel = YT_ENGINES.find(e => e.id === engine)?.label ?? engine;
+        toast({ title: `מעביר לתמלול עם ${engineLabel}`, description: name });
+        navigate('/transcribe', { state: { file } });
+      } catch (e) {
+        toast({ title: 'שגיאה בהעברה לתמלול', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
+      } finally {
+        setHandingOff(false);
+      }
+    })();
+  }, [activeJob, engine, navigate]);
 
   const fmtDuration = (sec?: number | null) => {
     if (!sec) return "";
@@ -216,6 +301,56 @@ export default function YouTubePage() {
                 </div>
               )}
 
+              {/* Engine picker — every engine available on the main page */}
+              {(mode === "transcribe" || mode === "full") && (
+                <div className="mt-4">
+                  <Label className="text-sm font-semibold mb-2 block">מנוע תמלול</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {YT_ENGINES.map((e) => {
+                      const disabled = e.id === 'local-server' && serverOk === false;
+                      const active = engine === e.id;
+                      return (
+                        <button
+                          key={e.id}
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => setEngine(e.id)}
+                          title={disabled ? 'השרת המקומי לא זמין כרגע' : e.hint}
+                          className={`px-3 py-1.5 rounded-lg border text-xs transition ${
+                            active ? 'border-red-500 bg-red-500/10 font-medium'
+                              : 'border-border hover:bg-muted/50'
+                          } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                        >
+                          {e.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    {engine === 'local-server'
+                      ? 'התמלול ירוץ על השרת המקומי — הכל בתוך המשימה הזו.'
+                      : 'האודיו יורד כאן, ואז עובר אוטומטית לתמלול במנוע שנבחר.'}
+                  </p>
+                </div>
+              )}
+
+              {/* Readiness strip */}
+              <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+                <span className="text-xs font-medium text-muted-foreground">מצב מערכת:</span>
+                <StatusPill ok={true} label="קישור תקין" />
+                <StatusPill ok={probe.backend === 'local'} label={probe.backend === 'local' ? 'הורדה מקומית' : 'הורדה בענן'} />
+                <StatusPill
+                  ok={serverOk === null ? null : serverOk}
+                  label={serverOk === null ? 'בודק שרת...' : serverOk ? 'שרת מקומי פעיל' : 'שרת מקומי כבוי'}
+                />
+                {(mode === 'transcribe' || mode === 'full') && (
+                  <StatusPill
+                    ok={engine === 'local-server' ? serverOk : true}
+                    label={`מנוע: ${YT_ENGINES.find(e => e.id === engine)?.label ?? engine}`}
+                  />
+                )}
+              </div>
+
               <Button onClick={handleStart} disabled={submitting} size="lg" className="w-full mt-4 bg-red-500 hover:bg-red-600 text-white">
                 {submitting ? <Loader2 className="w-5 h-5 animate-spin ml-2" /> : <Download className="w-5 h-5 ml-2" />}
                 התחל
@@ -230,6 +365,13 @@ export default function YouTubePage() {
           {activeJob && (
             <div className="space-y-2">
               <div className="text-sm font-semibold text-muted-foreground">התקדמות המשימה</div>
+              <YoutubeJobProgress job={activeJob} />
+              {handingOff && (
+                <Alert className="border-primary/30 bg-primary/5">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <AlertDescription>מעביר את האודיו לתמלול...</AlertDescription>
+                </Alert>
+              )}
               <JobCard job={activeJob} />
               {activeJob.status === "done" && (() => {
                 const audioFile = (activeJob.output_files ?? []).find((f: any) => f.kind === "audio");
@@ -273,6 +415,21 @@ export default function YouTubePage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function StatusPill({ ok, label }: { ok: boolean | null; label: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${
+      ok === null ? 'border-border text-muted-foreground'
+        : ok ? 'border-green-500/40 text-green-700 dark:text-green-300 bg-green-500/5'
+        : 'border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-500/5'
+    }`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${
+        ok === null ? 'bg-muted-foreground animate-pulse' : ok ? 'bg-green-500' : 'bg-amber-500'
+      }`} />
+      {label}
+    </span>
   );
 }
 
