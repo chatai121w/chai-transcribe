@@ -104,6 +104,7 @@ const BackgroundSyncLazy = lazy(() => import("./components/BackgroundSync").then
 const SWUpdateNotifierLazy = lazy(() => import("./components/SWUpdateNotifier").then(m => ({ default: m.SWUpdateNotifier })));
 const CloudKeySyncLazy = lazyWithLog('CloudKeySync', () => import("./components/CloudKeySync"));
 const DiarizationFloatingStatusLazy = lazy(() => import("./components/DiarizationFloatingStatus").then(m => ({ default: m.DiarizationFloatingStatus })));
+const LocalServerIndicatorLazy = lazy(() => import("./components/LocalServerIndicator").then(m => ({ default: m.LocalServerIndicator })));
 const JobsCenterLazy = lazy(() => import("./components/jobs/JobsCenter").then(m => ({ default: m.JobsCenter })));
 const ConversionJobsBridgeLazy = lazy(() => import("./components/jobs/ConversionJobsBridge").then(m => ({ default: m.ConversionJobsBridge })));
 const TranscriptionJobsBridgeLazy = lazy(() => import("./components/jobs/TranscriptionJobsBridge").then(m => ({ default: m.TranscriptionJobsBridge })));
@@ -259,6 +260,7 @@ const App = () => {
           {devFloatingButtons.transcriptionAnalytics && <DeferredMount delay={1500}><TranscriptionAnalyticsLazy /></DeferredMount>}
           {devFloatingButtons.pwaInstall && <DeferredMount delay={2000}><PWAInstallButtonLazy /></DeferredMount>}
           {devFloatingButtons.diarizationStatus && <DeferredMount delay={500}><DiarizationFloatingStatusLazy /></DeferredMount>}
+          <DeferredMount delay={1800}><LocalServerIndicatorLazy /></DeferredMount>
           <DeferredMount delay={800}><JobsCenterLazy /></DeferredMount>
           <DeferredMount delay={1200}><ConversionJobsBridgeLazy /></DeferredMount>
           <DeferredMount delay={1400}><TranscriptionJobsBridgeLazy /></DeferredMount>

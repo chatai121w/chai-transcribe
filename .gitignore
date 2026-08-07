@@ -64,3 +64,6 @@ tools/transcription_feedback.db
 tools/*.wav
 tools/voice-command/__pycache__/
 flash_attention_state.json
+
+# Local runtime logs (watchdog + whisper server)
+logs/
