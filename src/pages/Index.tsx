@@ -44,6 +44,7 @@ import { isCustomVocabularyEnabled, setCustomVocabularyEnabled } from "@/utils/c
 import { addRecentFile } from "@/components/RecentFiles";
 import { applyTranscriptionKnowledge } from '@/lib/transcriptionKnowledge';
 import { buildTranscriptionHotwords } from '@/lib/transcriptionHotwords';
+import { getExpectedProcessingSeconds, asymptoticProgress, formatProcessingStatus } from '@/lib/cloudProgressEstimator';
 
 // Lazy-loaded heavy components
 const LiveTranscriber = lazy(() => import("@/components/LiveTranscriber").then(m => ({ default: m.LiveTranscriber })));
@@ -133,6 +134,10 @@ const Index = () => {
   const [originalTranscript, setOriginalTranscript] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  // Cloud engines report no progress of their own; we estimate the processing
+  // phase from this machine's measured throughput for the selected engine.
+  const [cloudStatusText, setCloudStatusText] = useState<string | undefined>(undefined);
+  const cloudAudioSecondsRef = useRef(0);
   const [completedEngine, setCompletedEngine] = useState<Engine | null>(null);
   const flashEngineDone = useCallback((eng: Engine) => {
     setCompletedEngine(eng);
@@ -491,22 +496,25 @@ const Index = () => {
         }
       };
 
-      // Once upload is done, animate processing progress 50-90%
+      // Upload finished — the cloud is now transcribing and reports nothing.
+      // Drive the bar against a measured estimate on an asymptotic curve so it
+      // keeps moving on long jobs instead of parking at a fixed number.
       let processingInterval: ReturnType<typeof setInterval> | null = null;
       xhr.upload.onloadend = () => {
         onProgress(50);
-        let current = 50;
+        const expectedSeconds = getExpectedProcessingSeconds(engine, cloudAudioSecondsRef.current);
+        const startedAt = Date.now();
+        setCloudStatusText(formatProcessingStatus(0, expectedSeconds));
         processingInterval = setInterval(() => {
-          current = Math.min(current + 2, 90);
-          onProgress(current);
-          if (current >= 90 && processingInterval) {
-            clearInterval(processingInterval);
-          }
-        }, 500);
+          const elapsed = (Date.now() - startedAt) / 1000;
+          onProgress(asymptoticProgress(elapsed, expectedSeconds));
+          setCloudStatusText(formatProcessingStatus(elapsed, expectedSeconds));
+        }, 400);
       };
 
       xhr.onload = () => {
         if (processingInterval) clearInterval(processingInterval);
+        setCloudStatusText(undefined);
         onProgress(100);
         const requestId = xhr.getResponseHeader('x-request-id') || undefined;
         try {
@@ -526,6 +534,7 @@ const Index = () => {
 
       xhr.onerror = () => {
         if (processingInterval) clearInterval(processingInterval);
+        setCloudStatusText(undefined);
         resolve({ error: { message: 'Network error', status: 0 } });
       };
 
@@ -677,6 +686,8 @@ const Index = () => {
       mediaEl.onloadedmetadata = () => {
         const dur = mediaEl.duration;
         if (dur && isFinite(dur)) {
+          // Feeds the cloud progress estimate for this transcription.
+          cloudAudioSecondsRef.current = dur;
           const mins = Math.floor(dur / 60);
           const secs = Math.round(dur % 60);
           toast({ title: `${isVideo ? '🎬' : '🎵'} ${file.name}`, description: `משך: ${mins}:${secs.toString().padStart(2, '0')} | ${formatFileSize(file.size)}` });
@@ -2305,7 +2316,7 @@ const Index = () => {
                 ? serverPhase === 'loading-model'
                   ? '⏳ טוען מודל AI...'
                   : '📤 מעלה קובץ לשרת...'
-                : undefined
+                : isLoading ? cloudStatusText : undefined
             }
             isAuthenticated={isAuthenticated}
             isCloudEngine={engine !== 'local' && engine !== 'local-server'}

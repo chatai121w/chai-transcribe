@@ -113,6 +113,10 @@ export function TranscriptionProgressPanel({
           {engine === 'local-server' && serverPhase === 'loading-model' && (
             <p className="text-xs text-muted-foreground text-center -mt-0.5">⏳ טוען מודל AI — התמלול יתחיל בקרוב</p>
           )}
+          {/* Cloud engines: estimated stage + ETA, since they report no progress */}
+          {statusText && engine !== 'local-server' && hasProgress && (
+            <p className="text-xs text-muted-foreground text-center -mt-0.5">{statusText}</p>
+          )}
 
           {/* Bottom row: timer + ETA */}
           <div className="flex items-center justify-between text-xs text-muted-foreground">
