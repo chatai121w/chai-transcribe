@@ -7,6 +7,7 @@ import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
 import { SyncMirrorLayout } from "@/components/SyncMirrorLayout";
 import { debugLog } from "@/lib/debugLogger";
+import { AlignmentStatusBanner } from "@/components/AlignmentStatusBanner";
 import type { TextVersion } from "@/components/TextEditHistory";
 import type { WordTiming, SyncAudioPlayerRef } from "@/components/SyncAudioPlayer";
 import { TextStyleControl } from "@/components/TextStyleControl";
@@ -2035,6 +2036,17 @@ const TextEditor = () => {
                 ))}
               </div>
             </div>
+
+            {/* ── Alignment status strip ── */}
+            <AlignmentStatusBanner
+              status={forcedAlignmentState.status}
+              hasTimings={wordTimings.length > 0}
+              hasAudio={Boolean(audioUrl || audioBlob)}
+              hasText={Boolean(text.trim())}
+              wordCount={wordTimings.length}
+              coverage={forcedAlignmentState.coverage}
+              onRetry={handleForcedAlignment}
+            />
 
             {/* ── Player card ── */}
             {isPlayerFloating ? (
