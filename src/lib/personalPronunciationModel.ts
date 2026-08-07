@@ -46,16 +46,41 @@ const APPROVED_WORDS_KEY = 'personal_pronunciation_approved';
 const WORD_HIGHLIGHTS_KEY = 'personal_pronunciation_highlights';
 
 // ─── Helpers ───────────────────────────────────────────────────────
+/**
+ * Parsed values, kept so a read does not hit localStorage every time.
+ *
+ * These lookups sit inside per-word render paths — the synced transcript calls
+ * isWordApproved and getWordHighlightStyle once per word, for thousands of
+ * words, twenty times a second during playback. Going to localStorage and
+ * running JSON.parse for each of those made a single frame take seconds.
+ *
+ * Every read and write in this module funnels through here, so the cache
+ * cannot drift from what is stored: writeJSON refreshes it, and a storage
+ * event (another tab) drops it.
+ */
+const _jsonCache = new Map<string, unknown>();
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === null) _jsonCache.clear();
+    else _jsonCache.delete(e.key);
+  });
+}
+
 function readJSON<T>(key: string, fallback: T): T {
+  if (_jsonCache.has(key)) return _jsonCache.get(key) as T;
   try {
     const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
+    const parsed = raw ? (JSON.parse(raw) as T) : fallback;
+    _jsonCache.set(key, parsed);
+    return parsed;
   } catch {
+    _jsonCache.set(key, fallback);
     return fallback;
   }
 }
 function writeJSON(key: string, value: unknown): void {
+  _jsonCache.set(key, value);
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
@@ -193,17 +218,26 @@ export function approveWord(word: string): void {
   const k = normalizeHebrewWord(word);
   if (!k) return;
   const list = loadApproved();
-  if (!list.includes(k)) {
-    list.unshift(k);
-    saveApproved(list);
-  }
+  // Copy rather than mutate: the loaded array is the cached one.
+  if (!list.includes(k)) saveApproved([k, ...list]);
   // Mirror to active profile.
   const activeId = getActiveProfileId();
   if (activeId) addProfileApproved(activeId, word);
 }
 
+// Derived from the approved list, rebuilt only when that array identity changes.
+// The linear scan it replaces ran once per word per render against a list that
+// holds up to 5000 entries.
+let _approvedSet: Set<string> | null = null;
+let _approvedSetSource: string[] | null = null;
+
 export function isWordApproved(word: string): boolean {
-  return loadApproved().includes(normalizeHebrewWord(word));
+  const list = loadApproved();
+  if (_approvedSetSource !== list) {
+    _approvedSetSource = list;
+    _approvedSet = new Set(list);
+  }
+  return _approvedSet!.has(normalizeHebrewWord(word));
 }
 
 export function unapproveWord(word: string): void {
@@ -254,9 +288,8 @@ function saveHighlights(h: Record<string, WordHighlight>): void {
 export function setWordHighlight(word: string, color: WordHighlightColor, bold = false): void {
   const k = normalizeHebrewWord(word);
   if (!k) return;
-  const all = loadHighlights();
-  all[k] = { key: k, color, bold, updatedAt: Date.now() };
-  saveHighlights(all);
+  // Copy rather than mutate: the loaded record is the cached one.
+  saveHighlights({ ...loadHighlights(), [k]: { key: k, color, bold, updatedAt: Date.now() } });
   const activeId = getActiveProfileId();
   if (activeId) setProfileHighlight(activeId, word, color, bold);
 }
@@ -265,8 +298,10 @@ export function clearWordHighlight(word: string): void {
   const k = normalizeHebrewWord(word);
   const all = loadHighlights();
   if (k in all) {
-    delete all[k];
-    saveHighlights(all);
+    // Copy rather than mutate: the loaded record is the cached one.
+    const next = { ...all };
+    delete next[k];
+    saveHighlights(next);
   }
 }
 

@@ -1236,8 +1236,17 @@ const TextEditor = () => {
     }, 2000);
   }, [learnCorrections]);
 
-  // Keep interpolated and inserted words accurate while bounding full editor
-  // renders to 20 Hz.
+  // The player publishes a 20 Hz clock, but a full editor render is only worth
+  // doing when the highlighted word actually moves — which on real speech is
+  // closer to twice a second. The elapsed threshold used to be 0.05s, i.e. the
+  // publish interval itself, so it let every single tick through and the whole
+  // editor re-rendered twenty times a second. On a long transcript the synced
+  // view renders thousands of word spans, and that was enough to hold the main
+  // thread for seconds at a time.
+  //
+  // Word changes still render immediately, so the highlight is never late; the
+  // interval only governs how often the clock readout refreshes in between.
+  const PLAYER_CLOCK_RENDER_INTERVAL = 0.25;
   const handlePlayerTimeUpdate = useCallback((t: number) => {
     playerTimeRef.current = t;
     if (!wordTimings.length) {
@@ -1246,7 +1255,7 @@ const TextEditor = () => {
     }
     const idx = findActiveWordIndex(wordTimings, t);
     const elapsed = Math.abs(t - lastPlayerRenderAtRef.current);
-    if (idx !== lastWordIdxRef.current || elapsed >= 0.05 || t < lastPlayerRenderAtRef.current) {
+    if (idx !== lastWordIdxRef.current || elapsed >= PLAYER_CLOCK_RENDER_INTERVAL || t < lastPlayerRenderAtRef.current) {
       lastWordIdxRef.current = idx;
       lastPlayerRenderAtRef.current = t;
       setPlayerTime(t);

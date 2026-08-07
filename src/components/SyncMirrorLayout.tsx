@@ -12,6 +12,12 @@
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { cn } from "@/lib/utils";
+// cn() runs the class string through tailwind-merge, which parses every class to
+// resolve conflicts. That is the right default, but it is far too costly to run
+// once per word: this view renders over eleven thousand word spans. The branches
+// on the word span are mutually exclusive by construction, so there is nothing
+// for the merge to resolve and plain clsx gives the same result.
+import clsx from "clsx";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -170,6 +176,21 @@ export const SyncMirrorLayout = ({
       setManualCorrectionMarkers(Array.isArray(saved) ? saved : []);
     } catch { setManualCorrectionMarkers([]); }
   }, [correctionMarkersKey]);
+
+  // Resolved once per marker change rather than re-derived inside the word loop.
+  // It used to run a linear scan with a regex split inside the predicate for
+  // every word on every render — thousands of allocations per frame, on a path
+  // that runs twenty times a second during playback.
+  const manualCorrectionByIndex = useMemo(() => {
+    const map = new Map<number, ManualCorrectionMarker & { wordAt: string }>();
+    for (const marker of manualCorrectionMarkers) {
+      const correctedWords = marker.corrected.split(/\s+/).filter(Boolean);
+      correctedWords.forEach((word, offset) => {
+        map.set(marker.wordIndex + offset, { ...marker, wordAt: word });
+      });
+    }
+    return map;
+  }, [manualCorrectionMarkers]);
 
   const rememberManualCorrection = useCallback((marker: ManualCorrectionMarker) => {
     setManualCorrectionMarkers((current) => {
@@ -569,6 +590,9 @@ export const SyncMirrorLayout = ({
   }, [displayTimings, searchQuery]);
 
   const activeSearchGlobalIdx = searchMatchList[searchActiveIndex ?? 0] ?? -1;
+  // Membership is tested once per word per render; an array scan there is
+  // quadratic in the number of matches.
+  const searchMatchSet = useMemo(() => new Set(searchMatchList), [searchMatchList]);
 
   useEffect(() => {
     onSearchMatchCount?.(searchMatchList.length);
@@ -884,7 +908,7 @@ export const SyncMirrorLayout = ({
           const globalIdx = lineOffset + wi;
           const isActive = globalIdx === activeIdx;
           const isSearchActive = globalIdx === activeSearchGlobalIdx;
-          const isSearchMatch = !isSearchActive && searchMatchList.includes(globalIdx);
+          const isSearchMatch = !isSearchActive && searchMatchSet.has(globalIdx);
           const hasIssue =
             side === "left" && marking.getWordMarkingStyle(globalIdx) !== "";
 
@@ -906,11 +930,9 @@ export const SyncMirrorLayout = ({
           const wordHighlightOn = side === "right" ? rightWordHighlightOn : leftWordHighlightOn;
           const isActiveVisible = isActive && wordHighlightOn;
           const isAnchor = userAnchors.has(globalIdx);
-          const manualCorrection = manualCorrectionMarkers.find((marker) => {
-            const correctedWords = marker.corrected.split(/\s+/).filter(Boolean);
-            const offset = globalIdx - marker.wordIndex;
-            return offset >= 0 && offset < correctedWords.length && correctedWords[offset] === wt.word;
-          });
+          // The word must still match what the marker recorded, same as before.
+          const markerAtIdx = manualCorrectionByIndex.get(globalIdx);
+          const manualCorrection = markerAtIdx?.wordAt === wt.word ? markerAtIdx : undefined;
           const correctionOriginal = manualCorrection?.original || wt.correctionOriginal;
           const correctionResult = manualCorrection?.corrected || wt.word;
           const wasManuallyCorrected = Boolean(correctionOriginal && correctionOriginal !== correctionResult);
@@ -920,8 +942,12 @@ export const SyncMirrorLayout = ({
               key={globalIdx}
               data-active-word={isActiveVisible ? 'true' : undefined}
               style={{ ...highlightStyle, ...(isActiveVisible ? getActiveWordStyle(wordHighlightMode) : {}) }}
-              className={cn(
-                "inline cursor-pointer select-text transition-all px-[1px]",
+              className={clsx(
+                // transition-colors, not transition-all: the browser has to watch
+                // every animatable property on every element that carries it, and
+                // there are two of these per word — over eleven thousand here.
+                // Only colour actually animates.
+                "inline cursor-pointer select-text transition-colors px-[1px]",
                 // base rounding only when NOT active-word (active word controls its own radius via style)
                 !isActiveVisible && "rounded-sm",
                 side === "left" && !isActive && "hover:bg-muted/70",
@@ -1140,7 +1166,7 @@ export const SyncMirrorLayout = ({
                       data-active-word={i === activeIdx ? 'true' : undefined}
                       style={i === activeIdx ? getActiveWordStyle(wordHighlightMode) : undefined}
                       className={cn(
-                        "rounded-sm px-[1px] transition-all duration-150",
+                        "rounded-sm px-[1px] transition-colors duration-150",
                         i === activeIdx && wordHighlightMode === 'word' && "font-bold",
                         i === activeIdx && wordHighlightMode === 'underline' && "font-semibold pb-px",
                         i === activeIdx && wordHighlightMode === 'glow' && "rounded-sm font-bold",
