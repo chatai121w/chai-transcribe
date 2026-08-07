@@ -34,15 +34,20 @@ export interface YoutubeJob {
   backend: "local" | "cobalt" | null;
   output_files: YtOutputFile[];
   transcript_id: string | null;
+  /** Legacy column; the orchestrator writes failures to last_error instead. */
   error: string | null;
+  last_error: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
   /** Stage list — populated by the job orchestrator (JSONB in DB) */
   stages?: Array<{
     key: string;
+    label?: string;
     status: string;
     percent: number;
+    weight?: number;
+    error?: string | null;
     meta?: {
       server_job_id?: string;
       dl_mb?: number;
@@ -134,7 +139,10 @@ export function useYoutubeJobs() {
     fetchJobs();
     if (!user) return;
     const channel = supabase
-      .channel(`yt_jobs_${user.id}`)
+      // Unique per mount: a fixed name collides with the previous mount's
+      // channel while it is still tearing down, and the new subscription dies
+      // silently — the list then never updates again until a full reload.
+      .channel(`yt_jobs_${user.id}_${Math.random().toString(36).slice(2, 10)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "youtube_jobs", filter: `user_id=eq.${user.id}` }, () => {
         fetchJobs();
       })

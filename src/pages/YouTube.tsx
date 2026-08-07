@@ -12,15 +12,17 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Youtube, Loader2, Download, FileText, Music, Video as VideoIcon,
   AlertTriangle, Search, History, Trash2, ExternalLink, Captions,
+  RotateCcw, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import {
   useYoutubeJobs, isValidYoutubeUrl,
   type YtProbeResult, type YtMode, type YoutubeJob,
 } from "@/hooks/useYoutubeJobs";
-import { startYoutubeJob } from "@/lib/jobs/pipelines/youtubePipeline";
+import { startYoutubeJob, resumeYoutubeJob } from "@/lib/jobs/pipelines/youtubePipeline";
 import { YoutubeJobProgress } from "@/components/YoutubeJobProgress";
 import { VideoTranscriptViewer } from "@/components/VideoTranscriptViewer";
+import type { JobRecord } from "@/lib/jobs/types";
 import { db } from "@/lib/localDb";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { getServerUrl } from "@/lib/serverConfig";
@@ -44,6 +46,36 @@ const YT_ENGINES: Array<{ id: YtEngine; label: string; hint: string; local?: boo
   { id: 'deepgram',     label: '🌊 Deepgram',          hint: 'מהיר וחסכוני' },
   { id: 'local',        label: '💻 ONNX (בדפדפן)',     hint: 'ללא רשת כלל', local: true },
 ];
+
+type FilterKey = 'all' | 'active' | 'done' | 'error';
+
+const FILTERS: Array<{ key: FilterKey; label: string }> = [
+  { key: 'all', label: 'הכל' },
+  { key: 'active', label: 'פעילות' },
+  { key: 'done', label: 'הושלמו' },
+  { key: 'error', label: 'נכשלו' },
+];
+
+const isTerminal = (status: string) => ["done", "error", "cancelled"].includes(status);
+
+function matchesFilter(job: YoutubeJob, key: FilterKey): boolean {
+  if (key === 'all') return true;
+  if (key === 'active') return !isTerminal(job.status);
+  if (key === 'done') return job.status === 'done';
+  return job.status === 'error' || job.status === 'cancelled';
+}
+
+/**
+ * The failure a job actually recorded. The orchestrator writes to last_error and
+ * to the stage that broke; the legacy `error` column stays null, so reading only
+ * that one made every failure look like a bare red badge with no explanation.
+ */
+function jobFailure(job: YoutubeJob): { message: string; stage?: string } | null {
+  const failedStage = job.stages?.find((s) => s.status === 'failed');
+  const message = job.last_error ?? job.error ?? failedStage?.error ?? null;
+  if (!message && !failedStage) return null;
+  return { message: message ?? 'המשימה נכשלה', stage: failedStage?.label ?? failedStage?.key };
+}
 
 export default function YouTubePage() {
   const [url, setUrl] = useState("");
@@ -80,7 +112,11 @@ export default function YouTubePage() {
   const { user } = useAuth();
   const { jobs: centralJobs } = useJobs();
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const activeJob = centralJobs.find((j) => j.id === activeJobId) ?? null;
+  // The row returned by startYoutubeJob, held so the progress readout has
+  // something to render before the realtime subscription delivers the same row.
+  const [seedJob, setSeedJob] = useState<JobRecord | null>(null);
+  const activeJob = centralJobs.find((j) => j.id === activeJobId)
+    ?? (seedJob?.id === activeJobId ? seedJob : null);
 
   const handleProbe = async () => {
     const trimmed = url.trim();
@@ -122,8 +158,15 @@ export default function YouTubePage() {
         audioFormat,
         videoQuality,
         saveToCloud: probe?.backend === "local" ? saveToCloud : false,
+        knownInfo: {
+          title: probe.title,
+          thumbnail: probe.thumbnail,
+          duration: probe.duration ?? null,
+          backend: probe.backend,
+        },
       });
       pendingHandoffRef.current = wantsCloudEngine ? job.id : null;
+      setSeedJob(job);
       setActiveJobId(job.id);
       toast({ title: "המשימה התחילה", description: "עקוב אחרי השלבים למטה או במרכז המשימות" });
     } catch (e) {
@@ -171,7 +214,7 @@ export default function YouTubePage() {
    * Load a finished job straight into the text editor: audio in the player,
    * transcript in the editor, word timings wiring the two together.
    */
-  const openInEditor = async (job: typeof activeJob) => {
+  const openInEditor = async (job: { output_files?: Array<{ kind?: string; url?: string; filename?: string }> | null } | null) => {
     if (!job) return;
     const outputs = (job.output_files ?? []) as Array<{ kind?: string; url?: string; filename?: string }>;
     const audio = outputs.find(f => f.kind === 'audio');
@@ -216,6 +259,16 @@ export default function YouTubePage() {
       setOpeningEditor(false);
     }
   };
+
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<FilterKey>("all");
+
+  const visibleJobs = jobs.filter((j) => {
+    if (!matchesFilter(j, filter)) return false;
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (j.video_title ?? "").toLowerCase().includes(q) || j.url.toLowerCase().includes(q);
+  });
 
   const fmtDuration = (sec?: number | null) => {
     if (!sec) return "";
@@ -415,6 +468,29 @@ export default function YouTubePage() {
             </Card>
           )}
 
+          {/* The row is on screen from the click, not from the first server reply */}
+          {submitting && !activeJob && (
+            <div className="space-y-2">
+              <div className="text-sm font-semibold text-muted-foreground">התקדמות המשימה</div>
+              <Card className="p-4" dir="rtl">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                    <span className="font-medium text-sm">פותח משימה...</span>
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-2xl font-bold tabular-nums leading-none text-primary">0</span>
+                    <span className="text-sm text-muted-foreground">%</span>
+                  </div>
+                </div>
+                <div className="relative h-3 rounded-full bg-muted overflow-hidden">
+                  <div className="absolute top-0 right-0 h-full w-[2%] rounded-full bg-primary animate-pulse" />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1.5">רושם את המשימה בשרת</p>
+              </Card>
+            </div>
+          )}
+
           {activeJob && (
             <div className="space-y-2">
               <div className="text-sm font-semibold text-muted-foreground">התקדמות המשימה</div>
@@ -497,9 +573,53 @@ export default function YouTubePage() {
                 <p>אין הורדות עדיין. התחל מהטאב הראשון.</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {jobs.map((job) => <JobRow key={job.id} job={job} onDelete={deleteJob} />)}
-              </div>
+              <>
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <div className="relative flex-1 min-w-[180px]">
+                    <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <Input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="חפש לפי כותרת או קישור"
+                      className="h-9 pr-8 text-sm"
+                    />
+                  </div>
+                  {FILTERS.map((f) => {
+                    const n = f.key === 'all' ? jobs.length : jobs.filter(j => matchesFilter(j, f.key)).length;
+                    return (
+                      <button
+                        key={f.key}
+                        type="button"
+                        onClick={() => setFilter(f.key)}
+                        className={`px-3 h-9 rounded-lg border text-xs transition ${
+                          filter === f.key ? 'border-red-500 bg-red-500/10 font-medium' : 'border-border hover:bg-muted/50'
+                        }`}
+                      >
+                        {f.label}
+                        <span className="mr-1.5 text-muted-foreground tabular-nums">{n}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {visibleJobs.length === 0 ? (
+                  <div className="text-center py-10 text-sm text-muted-foreground">
+                    אין משימות שתואמות לסינון.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {visibleJobs.map((job) => (
+                      <JobRow
+                        key={job.id}
+                        job={job}
+                        onDelete={deleteJob}
+                        onOpenEditor={openInEditor}
+                        openingEditor={openingEditor}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </Card>
         </TabsContent>
@@ -546,12 +666,19 @@ function FormatChip({ value, current, label }: { value: string; current: string;
   );
 }
 
-function JobRow({ job, onDelete }: { job: YoutubeJob; onDelete: (id: string) => void }) {
+function JobRow({ job, onDelete, onOpenEditor, openingEditor }: {
+  job: YoutubeJob;
+  onDelete: (id: string) => void;
+  onOpenEditor: (job: { output_files?: Array<{ kind?: string; url?: string; filename?: string }> | null }) => void;
+  openingEditor: boolean;
+}) {
   const statusLabel: Record<string, string> = {
     pending: "ממתין", downloading: "מוריד", extracting: "מחלץ", converting: "ממיר",
     transcribing: "מתמלל", finalizing: "מסיים", done: "הושלם", error: "שגיאה", cancelled: "בוטל",
   };
-  const isActive = !["done", "error", "cancelled"].includes(job.status);
+  const isActive = !isTerminal(job.status);
+  const [expanded, setExpanded] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   // Real-time download stats from stage meta
   const dlStage = job.stages?.find((s) => s.key === "download");
@@ -560,41 +687,95 @@ function JobRow({ job, onDelete }: { job: YoutubeJob; onDelete: (id: string) => 
     job.status !== "transcribing" &&
     (dlMeta?.dl_mb ?? 0) > 0;
 
+  const failure = jobFailure(job);
+  const outs = job.output_files ?? [];
+  const audioFile = outs.find((f) => f.kind === "audio");
+  const videoFile = outs.find((f) => f.kind === "video");
+  const jsonFile = outs.find((f) => f.kind === "json");
+  const srtFile = outs.find((f) => f.kind === "srt");
+  const hasTranscript = outs.some((f) => f.kind === "json" || f.kind === "txt");
+  const canOpenEditor = Boolean(audioFile && hasTranscript);
+  const canPlay = Boolean(audioFile || videoFile);
+
+  const retry = async () => {
+    setRetrying(true);
+    try {
+      await resumeYoutubeJob(job.id);
+      toast({ title: "ממשיך מהשלב שנכשל", description: job.video_title ?? job.url });
+    } catch (e) {
+      toast({ title: "לא הצלחתי להמשיך", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   return (
-    <div className="flex gap-3 p-3 border rounded-lg hover:bg-muted/30 transition">
-      {job.thumbnail_url ? (
-        <img src={job.thumbnail_url} alt="" className="w-24 h-16 object-cover rounded shrink-0" />
-      ) : (
-        <div className="w-24 h-16 bg-muted rounded shrink-0 flex items-center justify-center">
-          <Youtube className="w-6 h-6 text-muted-foreground" />
-        </div>
-      )}
-      <div className="flex-1 min-w-0">
-        <div className="font-medium text-sm truncate">{job.video_title ?? job.url}</div>
-        <div className="flex gap-2 items-center mt-1 flex-wrap">
-          <Badge variant={job.status === "done" ? "default" : job.status === "error" ? "destructive" : "secondary"} className="text-[10px]">
-            {statusLabel[job.status] ?? job.status}
-          </Badge>
-          <span className="text-xs text-muted-foreground">{job.mode}</span>
-          <span className="text-xs text-muted-foreground">•</span>
-          <span className="text-xs text-muted-foreground">{new Date(job.created_at).toLocaleString("he-IL")}</span>
-        </div>
-        {isActive && <Progress value={job.progress_pct} className="mt-2 h-1.5" />}
-        {showDlStats && (
-          <div className="flex gap-3 mt-1 text-xs text-muted-foreground font-mono">
-            <span>⬇ {(dlMeta!.dl_mb ?? 0).toFixed(1)} MB</span>
-            {(dlMeta!.total_mb ?? 0) > 0 && (
-              <span className="text-muted-foreground/60">/ {(dlMeta!.total_mb!).toFixed(1)} MB</span>
-            )}
-            {(dlMeta!.speed_mb ?? 0) > 0 && (
-              <span className="text-blue-500">{(dlMeta!.speed_mb!).toFixed(2)} MB/s</span>
-            )}
+    <div className="border rounded-lg hover:bg-muted/20 transition">
+      <div className="flex gap-3 p-3">
+        {job.thumbnail_url ? (
+          <img src={job.thumbnail_url} alt="" className="w-24 h-16 object-cover rounded shrink-0" />
+        ) : (
+          <div className="w-24 h-16 bg-muted rounded shrink-0 flex items-center justify-center">
+            <Youtube className="w-6 h-6 text-muted-foreground" />
           </div>
         )}
-        {job.error && <p className="text-xs text-destructive mt-1">{job.error}</p>}
-        {job.output_files?.length > 0 && (
-          <div className="flex gap-1 mt-2 flex-wrap">
-            {job.output_files.map((f, i) => (
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-sm truncate">{job.video_title ?? job.url}</div>
+          <div className="flex gap-2 items-center mt-1 flex-wrap">
+            <Badge variant={job.status === "done" ? "default" : job.status === "error" ? "destructive" : "secondary"} className="text-[10px]">
+              {statusLabel[job.status] ?? job.status}
+            </Badge>
+            <span className="text-xs text-muted-foreground">{job.mode}</span>
+            <span className="text-xs text-muted-foreground">•</span>
+            <span className="text-xs text-muted-foreground">{new Date(job.created_at).toLocaleString("he-IL")}</span>
+          </div>
+
+          {isActive && (
+            <div className="mt-2">
+              <div className="flex items-center gap-2">
+                <Progress value={job.progress_pct} className="h-1.5 flex-1" />
+                <span className="text-xs font-semibold tabular-nums text-primary shrink-0">{job.progress_pct}%</span>
+              </div>
+            </div>
+          )}
+          {showDlStats && (
+            <div className="flex gap-3 mt-1 text-xs text-muted-foreground font-mono">
+              <span>⬇ {(dlMeta!.dl_mb ?? 0).toFixed(1)} MB</span>
+              {(dlMeta!.total_mb ?? 0) > 0 && (
+                <span className="text-muted-foreground/60">/ {(dlMeta!.total_mb!).toFixed(1)} MB</span>
+              )}
+              {(dlMeta!.speed_mb ?? 0) > 0 && (
+                <span className="text-blue-500">{(dlMeta!.speed_mb!).toFixed(2)} MB/s</span>
+              )}
+            </div>
+          )}
+
+          {/* The reason it failed, not just that it failed */}
+          {failure && (
+            <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2">
+              <div className="flex items-start gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-destructive shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  {failure.stage && (
+                    <div className="text-[10px] text-muted-foreground">נכשל בשלב: {failure.stage}</div>
+                  )}
+                  <p className="text-xs text-destructive break-words">{failure.message}</p>
+                </div>
+                <Button
+                  variant="outline" size="sm"
+                  className="h-6 text-[11px] shrink-0"
+                  onClick={retry}
+                  disabled={retrying}
+                >
+                  {retrying ? <Loader2 className="w-3 h-3 animate-spin ml-1" /> : <RotateCcw className="w-3 h-3 ml-1" />}
+                  נסה שוב
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-1 mt-2 flex-wrap items-center">
+            {outs.map((f, i) => (
               <Button key={i} variant="outline" size="sm" className="h-7 text-xs" asChild>
                 <a href={f.url} target="_blank" rel="noreferrer" download={f.filename}>
                   <Download className="w-3 h-3 ml-1" />
@@ -602,17 +783,51 @@ function JobRow({ job, onDelete }: { job: YoutubeJob; onDelete: (id: string) => 
                 </a>
               </Button>
             ))}
+            {canOpenEditor && (
+              <Button
+                size="sm" className="h-7 text-xs gap-1"
+                onClick={() => onOpenEditor(job)}
+                disabled={openingEditor}
+              >
+                {openingEditor ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+                פתח בעורך
+              </Button>
+            )}
+            {canPlay && (
+              <Button
+                variant="ghost" size="sm" className="h-7 text-xs gap-1"
+                onClick={() => setExpanded((v) => !v)}
+              >
+                {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                {expanded ? "סגור נגן" : videoFile ? "נגן וידאו" : "נגן אודיו"}
+              </Button>
+            )}
           </div>
-        )}
+        </div>
+        <div className="flex flex-col gap-1">
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" asChild title="פתח ב-YouTube">
+            <a href={job.url} target="_blank" rel="noreferrer"><ExternalLink className="w-3.5 h-3.5" /></a>
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => onDelete(job.id)} title="מחק">
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+        </div>
       </div>
-      <div className="flex flex-col gap-1">
-        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" asChild title="פתח ב-YouTube">
-          <a href={job.url} target="_blank" rel="noreferrer"><ExternalLink className="w-3.5 h-3.5" /></a>
-        </Button>
-        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => onDelete(job.id)} title="מחק">
-          <Trash2 className="w-3.5 h-3.5" />
-        </Button>
-      </div>
+
+      {/* Play the result here instead of sending the user back to the first tab */}
+      {expanded && canPlay && (
+        <div className="border-t p-3 space-y-3">
+          {videoFile?.url && (
+            <VideoTranscriptViewer
+              videoUrl={videoFile.url}
+              transcriptJsonUrl={jsonFile?.url}
+              srtUrl={srtFile?.url}
+              srtFilename={srtFile?.filename}
+            />
+          )}
+          {audioFile?.url && !videoFile?.url && <WaveformPlayer audioSrc={audioFile.url} />}
+        </div>
+      )}
     </div>
   );
 }

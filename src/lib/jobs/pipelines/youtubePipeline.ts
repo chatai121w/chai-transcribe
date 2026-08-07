@@ -23,6 +23,12 @@ export interface StartYoutubeParams {
   videoQuality?: "360" | "720" | "1080";
   /** If true, upload transcript files (txt/srt/json) to Supabase Storage after local server finishes */
   saveToCloud?: boolean;
+  /**
+   * Result of the probe the caller already ran. Supplying it skips the probe
+   * here, so the job row — and with it the progress readout — exists the moment
+   * the user presses start instead of seconds later.
+   */
+  knownInfo?: { title?: string | null; thumbnail?: string | null; duration?: number | null; backend: string };
 }
 
 function localServer(): string | null {
@@ -96,17 +102,22 @@ async function getPreferredYoutubeEngine(userId: string): Promise<string> {
 export async function startYoutubeJob(params: StartYoutubeParams): Promise<JobRecord> {
   if (!isValidYoutubeUrl(params.url)) throw new Error("קישור YouTube לא תקין");
 
-  // Quick probe first to populate title/thumbnail in the job
-  let info: { title?: string; thumbnail?: string; duration?: number; backend: string } | null = null;
-  const local = await probeLocal(params.url);
-  if (local) {
-    info = { title: local.title, thumbnail: local.thumbnail, duration: local.duration, backend: "local" };
+  // Title/thumbnail for the job row. The page normally probed already, and
+  // re-probing here would stall job creation for seconds with nothing on screen.
+  let info: { title?: string | null; thumbnail?: string | null; duration?: number | null; backend: string };
+  if (params.knownInfo) {
+    info = params.knownInfo;
   } else {
-    try {
-      const c = await probeCobalt(params.url);
-      info = { title: c?.title, thumbnail: c?.thumbnail, duration: undefined, backend: "cobalt" };
-    } catch {
-      info = { backend: "cobalt" };
+    const local = await probeLocal(params.url);
+    if (local) {
+      info = { title: local.title, thumbnail: local.thumbnail, duration: local.duration, backend: "local" };
+    } else {
+      try {
+        const c = await probeCobalt(params.url);
+        info = { title: c?.title, thumbnail: c?.thumbnail, duration: undefined, backend: "cobalt" };
+      } catch {
+        info = { backend: "cobalt" };
+      }
     }
   }
 
