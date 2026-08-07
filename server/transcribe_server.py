@@ -2335,11 +2335,24 @@ def _yt_run_job(job_id: str, params: dict):
             for i, seg in enumerate(segments, 1):
                 srt_lines.append(f"{i}\n{_ts(seg.start)} --> {_ts(seg.end)}\n{seg.text.strip()}\n")
             (job_dir / "transcript.srt").write_text("\n".join(srt_lines), encoding="utf-8")
-            # Write JSON
+            # Write JSON — includes word-level timings so the editor can wire the
+            # transcript to the audio immediately, with no re-alignment pass.
+            word_timings = [
+                {
+                    "word": w.word.strip(),
+                    "start": round(float(w.start), 3),
+                    "end": round(float(w.end), 3),
+                    "probability": round(float(getattr(w, "probability", 0.0) or 0.0), 4),
+                }
+                for s in segments
+                for w in (s.words or [])
+                if w.word and w.word.strip() and w.end >= w.start
+            ]
             (job_dir / "transcript.json").write_text(_json.dumps({
                 "language": info.language,
                 "duration": info.duration,
                 "segments": [{"start": s.start, "end": s.end, "text": s.text} for s in segments],
+                "wordTimings": word_timings,
             }, ensure_ascii=False, indent=2), encoding="utf-8")
 
             for kind, name in [("txt", "transcript.txt"), ("srt", "transcript.srt"), ("json", "transcript.json")]:

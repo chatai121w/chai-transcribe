@@ -891,6 +891,28 @@ const TextEditor = () => {
     } catch { /* quota/unavailable */ }
   }, [wordTimings, transcriptId]);
 
+  // Pin any timings we hold to the audio itself, whatever produced them — an
+  // alignment pass, or a transcription that already carried word timings.
+  useEffect(() => {
+    if (!wordTimings.length || !audioBlob) return;
+    const words = text.trim().split(/\s+/).filter(Boolean).length;
+    if (!words) return;
+    const handle = setTimeout(() => {
+      void db.audioTimings.put({
+        id: buildAudioFingerprint(
+          { size: audioBlob.size, name: audioFileName || 'audio' },
+          wordTimings.at(-1)?.end || 0,
+        ),
+        word_timings: wordTimings,
+        word_count: words,
+        transcript_id: transcriptIdRef.current,
+        audio_name: audioFileName || undefined,
+        saved_at: Date.now(),
+      }).catch(() => { /* Dexie unavailable */ });
+    }, 1500);
+    return () => clearTimeout(handle);
+  }, [wordTimings, audioBlob, audioFileName, text]);
+
   const addVersion = (newText: string, source: TextVersion['source'], customPrompt?: string) => {
     const newVersion: TextVersion = {
       id: crypto.randomUUID(),

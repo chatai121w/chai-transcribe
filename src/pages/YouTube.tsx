@@ -20,6 +20,8 @@ import {
 } from "@/hooks/useYoutubeJobs";
 import { startYoutubeJob } from "@/lib/jobs/pipelines/youtubePipeline";
 import { YoutubeJobProgress } from "@/components/YoutubeJobProgress";
+import { VideoTranscriptViewer } from "@/components/VideoTranscriptViewer";
+import { db } from "@/lib/localDb";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { getServerUrl } from "@/lib/serverConfig";
 import { useNavigate } from "react-router-dom";
@@ -55,6 +57,7 @@ export default function YouTubePage() {
   const [engine, setEngine] = useState<YtEngine>("local-server");
   const [serverOk, setServerOk] = useState<boolean | null>(null);
   const [handingOff, setHandingOff] = useState(false);
+  const [openingEditor, setOpeningEditor] = useState(false);
   const navigate = useNavigate();
   const { updatePreference } = useCloudPreferences();
 
@@ -163,6 +166,56 @@ export default function YouTubePage() {
       }
     })();
   }, [activeJob, engine, navigate]);
+
+  /**
+   * Load a finished job straight into the text editor: audio in the player,
+   * transcript in the editor, word timings wiring the two together.
+   */
+  const openInEditor = async (job: typeof activeJob) => {
+    if (!job) return;
+    const outputs = (job.output_files ?? []) as Array<{ kind?: string; url?: string; filename?: string }>;
+    const audio = outputs.find(f => f.kind === 'audio');
+    const json = outputs.find(f => f.kind === 'json');
+    const txt = outputs.find(f => f.kind === 'txt');
+    if (!audio?.url || (!json?.url && !txt?.url)) {
+      toast({ title: 'חסרים קבצים', description: 'צריך אודיו ותמלול כדי לפתוח בעורך', variant: 'destructive' });
+      return;
+    }
+
+    setOpeningEditor(true);
+    try {
+      let text = '';
+      let wordTimings: Array<{ word: string; start: number; end: number; probability?: number }> = [];
+
+      if (json?.url) {
+        const data = await (await fetch(json.url)).json();
+        text = (data.segments ?? []).map((s: { text: string }) => (s.text || '').trim()).filter(Boolean).join(' ');
+        wordTimings = Array.isArray(data.wordTimings) ? data.wordTimings : [];
+      }
+      if (!text && txt?.url) text = await (await fetch(txt.url)).text();
+      if (!text.trim()) throw new Error('התמלול ריק');
+
+      const blob = await (await fetch(audio.url)).blob();
+      const name = audio.filename || 'youtube-audio';
+      // Persist for recovery, exactly like a normal transcription would.
+      try {
+        await db.audioBlobs.put({ id: 'last_audio', blob, type: blob.type, name, saved_at: Date.now() });
+      } catch { /* Dexie unavailable */ }
+
+      navigate('/text-editor', {
+        state: {
+          text,
+          audioUrl: URL.createObjectURL(blob),
+          audioFileName: name,
+          wordTimings,
+        },
+      });
+    } catch (e) {
+      toast({ title: 'פתיחה בעורך נכשלה', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
+    } finally {
+      setOpeningEditor(false);
+    }
+  };
 
   const fmtDuration = (sec?: number | null) => {
     if (!sec) return "";
@@ -373,6 +426,43 @@ export default function YouTubePage() {
                 </Alert>
               )}
               <JobCard job={activeJob} />
+              {activeJob.status === "done" && (() => {
+                const outs = (activeJob.output_files ?? []) as Array<{ kind?: string; url?: string; filename?: string }>;
+                const videoFile = outs.find(f => f.kind === "video");
+                const jsonFile = outs.find(f => f.kind === "json");
+                const srtFile = outs.find(f => f.kind === "srt");
+                const hasTranscript = Boolean(jsonFile || outs.some(f => f.kind === "txt"));
+                const audioFile = outs.find(f => f.kind === "audio");
+
+                return (
+                  <>
+                    {/* One click: audio in the player, transcript in the editor, linked */}
+                    {audioFile && hasTranscript && (
+                      <Button
+                        onClick={() => openInEditor(activeJob)}
+                        disabled={openingEditor}
+                        size="lg"
+                        className="w-full gap-2"
+                      >
+                        {openingEditor
+                          ? <Loader2 className="w-5 h-5 animate-spin" />
+                          : <FileText className="w-5 h-5" />}
+                        פתח בעורך טקסט עם האודיו — מחובר ומסונכרן
+                      </Button>
+                    )}
+
+                    {videoFile?.url && (
+                      <VideoTranscriptViewer
+                        videoUrl={videoFile.url}
+                        transcriptJsonUrl={jsonFile?.url}
+                        srtUrl={srtFile?.url}
+                        srtFilename={srtFile?.filename}
+                      />
+                    )}
+                  </>
+                );
+              })()}
+
               {activeJob.status === "done" && (() => {
                 const audioFile = (activeJob.output_files ?? []).find((f: any) => f.kind === "audio");
                 if (!audioFile) return null;
