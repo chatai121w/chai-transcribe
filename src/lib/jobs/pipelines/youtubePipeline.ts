@@ -214,6 +214,18 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
 
       // poll
       let done = false;
+      // The server is polled every 2s, but most polls report the same percentage
+      // and status as the one before. Writing each of those to the database costs
+      // a read-modify-write, a WAL record carrying the whole row twice (the table
+      // is REPLICA IDENTITY FULL for realtime under RLS), and a broadcast that
+      // makes every subscribed hook refetch its list — all to redraw an identical
+      // number. So a poll is only persisted when it actually says something new.
+      let lastPct = -1;
+      let lastServerStatus: string | null = null;
+      let lastWriteAt = 0;
+      // Still write occasionally while nothing changes, so updated_at keeps
+      // moving and a stalled job stays distinguishable from a quiet one.
+      const HEARTBEAT_MS = 20_000;
       while (!done) {
         await new Promise((r) => setTimeout(r, 2000));
         const sRes = await fetch(`${srv}/yt/status/${serverJobId}`);
@@ -226,22 +238,29 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
         const dlMb  = (s.audio_dl_mb  ?? s.video_dl_mb  ?? 0) as number;
         const totalMb = (s.audio_total_mb ?? s.video_total_mb ?? 0) as number;
         const speedMb = (s.audio_speed_mb ?? s.video_speed_mb ?? 0) as number;
-        // Reflect server transcription status in the stage label so the user knows
-        const serverIsTranscribing = s.status === "transcribing";
-        await updateStage(jobId, "download", {
-          percent: Math.min(95, s.progress_pct ?? 0),
-          meta: {
-            server_job_id: serverJobId,
-            dl_mb: dlMb, total_mb: totalMb, speed_mb: speedMb,
-            server_status: s.status,
-            server_pct: s.progress_pct ?? 0,
-            // Live transcription position, so the UI can show a real number
-            // while the server works through the audio.
-            transcribe_sec: s.transcribe_sec ?? 0,
-            transcribe_total_sec: s.transcribe_total_sec ?? 0,
-            transcribe_segments: s.transcribe_segments ?? 0,
-          },
-        });
+
+        const pct = Math.min(95, s.progress_pct ?? 0);
+        const isTerminal = s.status === "done" || s.status === "error";
+        const changed = pct !== lastPct || s.status !== lastServerStatus;
+        if (changed || isTerminal || Date.now() - lastWriteAt >= HEARTBEAT_MS) {
+          lastPct = pct;
+          lastServerStatus = s.status;
+          lastWriteAt = Date.now();
+          await updateStage(jobId, "download", {
+            percent: pct,
+            meta: {
+              server_job_id: serverJobId,
+              dl_mb: dlMb, total_mb: totalMb, speed_mb: speedMb,
+              server_status: s.status,
+              server_pct: s.progress_pct ?? 0,
+              // Live transcription position, so the UI can show a real number
+              // while the server works through the audio.
+              transcribe_sec: s.transcribe_sec ?? 0,
+              transcribe_total_sec: s.transcribe_total_sec ?? 0,
+              transcribe_segments: s.transcribe_segments ?? 0,
+            },
+          });
+        }
         if (s.status === "done") {
           // Prefix output_files URLs with srv so browser can reach them via proxy
           const serverOutputFiles = (s.output_files ?? []).map((f: Record<string, unknown>) => ({

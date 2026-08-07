@@ -27,15 +27,23 @@ export function useJobs() {
   useEffect(() => {
     fetchJobs();
     if (!user) return;
+    // Progress writes arrive as a stream of individual events; coalesce them so
+    // a running job costs one list query per window rather than one per write.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefetch = () => {
+      if (timer) return;
+      timer = setTimeout(() => { timer = null; fetchJobs(); }, 500);
+    };
     const channel = supabase
       .channel(`jobs_center_${user.id}_${Math.random().toString(36).slice(2, 10)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "youtube_jobs", filter: `user_id=eq.${user.id}` },
-        () => fetchJobs(),
+        scheduleRefetch,
       )
       .subscribe();
     return () => {
+      if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
     };
   }, [user, fetchJobs]);

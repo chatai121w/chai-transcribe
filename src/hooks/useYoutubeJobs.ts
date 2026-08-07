@@ -138,16 +138,24 @@ export function useYoutubeJobs() {
   useEffect(() => {
     fetchJobs();
     if (!user) return;
+    // A running job writes progress every couple of seconds, and each write
+    // arrives as its own event. Refetching the whole list per event means many
+    // hundred-row queries to redraw one number, so events are coalesced into a
+    // single refetch on a short trailing window.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefetch = () => {
+      if (timer) return;
+      timer = setTimeout(() => { timer = null; fetchJobs(); }, 500);
+    };
     const channel = supabase
       // Unique per mount: a fixed name collides with the previous mount's
       // channel while it is still tearing down, and the new subscription dies
       // silently — the list then never updates again until a full reload.
       .channel(`yt_jobs_${user.id}_${Math.random().toString(36).slice(2, 10)}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "youtube_jobs", filter: `user_id=eq.${user.id}` }, () => {
-        fetchJobs();
-      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "youtube_jobs", filter: `user_id=eq.${user.id}` }, scheduleRefetch)
       .subscribe();
     return () => {
+      if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
     };
   }, [user, fetchJobs]);

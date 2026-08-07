@@ -29,7 +29,7 @@ import { getServerUrl } from "@/lib/serverConfig";
 import { useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useJobs } from "@/hooks/useJobs";
+import { useJob } from "@/hooks/useJobs";
 import { JobCard } from "@/components/jobs/JobCard";
 import { WaveformPlayer } from "@/components/WaveformPlayer";
 
@@ -110,12 +110,15 @@ export default function YouTubePage() {
   const pendingHandoffRef = useRef<string | null>(null);
   const { jobs, loading, probeUrl, deleteJob } = useYoutubeJobs();
   const { user } = useAuth();
-  const { jobs: centralJobs } = useJobs();
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  // One row, not the whole list: this page only ever renders the job it just
+  // started, and subscribing to the list here meant every progress write
+  // refetched a hundred rows that nothing on screen reads.
+  const { job: centralJob } = useJob(activeJobId);
   // The row returned by startYoutubeJob, held so the progress readout has
   // something to render before the realtime subscription delivers the same row.
   const [seedJob, setSeedJob] = useState<JobRecord | null>(null);
-  const activeJob = centralJobs.find((j) => j.id === activeJobId)
+  const activeJob = (centralJob?.id === activeJobId ? centralJob : null)
     ?? (seedJob?.id === activeJobId ? seedJob : null);
 
   const handleProbe = async () => {
