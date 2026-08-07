@@ -29,7 +29,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor, MoreHorizontal, LocateFixed } from "lucide-react";
+import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor, MoreHorizontal, LocateFixed, Columns2, Square } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -913,6 +913,55 @@ export const SyncMirrorLayout = ({
     return {}; // line — no per-word style
   };
 
+  // ── Single vs. two-column view ─────────────────────────────────────────────
+  // The mirror renders every word twice. When the second column is not being
+  // used for comparison, dropping it halves the document — which is both the
+  // render cost and the browser layout cost.
+  const [singleColumn, setSingleColumn] = useState(() => {
+    try { return localStorage.getItem('sync_mirror_single_column_v1') === '1'; } catch { return false; }
+  });
+  const toggleSingleColumn = useCallback(() => {
+    setSingleColumn((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('sync_mirror_single_column_v1', next ? '1' : '0'); } catch { /* unavailable */ }
+      return next;
+    });
+  }, []);
+
+  // ── Progressive first paint ────────────────────────────────────────────────
+  // Building every word at once blocks for seconds on a long transcript, and it
+  // happens again on every remount — leaving the page and coming back. The
+  // words are laid down in batches across frames instead: the opening is
+  // readable almost immediately and the rest fills in behind it. Once complete
+  // this stops entirely and costs nothing.
+  const FIRST_BATCH = 800;
+  const BATCH_STEP = 2000;
+  const totalWords = displayTimings.length;
+  const [renderBudget, setRenderBudget] = useState(FIRST_BATCH);
+
+  // A new transcript starts the fill over.
+  useEffect(() => { setRenderBudget(FIRST_BATCH); }, [totalWords]);
+
+  useEffect(() => {
+    if (renderBudget >= totalWords) return;
+    // Yield to the browser between batches so input and painting stay live.
+    const id = window.setTimeout(
+      () => setRenderBudget((b) => Math.min(totalWords, b + BATCH_STEP)),
+      16,
+    );
+    return () => window.clearTimeout(id);
+  }, [renderBudget, totalWords]);
+
+  // Never let the playing word fall outside what has been built.
+  useEffect(() => {
+    if (activeIdx < 0 || renderBudget >= totalWords) return;
+    if (activeIdx + 200 > renderBudget) {
+      setRenderBudget(Math.min(totalWords, activeIdx + 200 + BATCH_STEP));
+    }
+  }, [activeIdx, renderBudget, totalWords]);
+
+  const isFilling = renderBudget < totalWords;
+
   // ── Active-word decoration, applied straight to the DOM ────────────────────
   // Marking the playing word through React meant every word change re-rendered
   // the whole transcript — thirteen thousand spans rebuilt to move one
@@ -1092,13 +1141,20 @@ export const SyncMirrorLayout = ({
   const wordRows = useMemo(() => {
     const src = compareMode ? frozenLines : lines;
     let offset = 0;
+    let budget = renderBudget;
     return src.map((line, li) => {
-      const node = renderLine(line, offset, li, "left");
+      // Only the words within the current budget are built. The rest arrive in
+      // the following frames, so opening a long transcript fills in instead of
+      // blocking on one enormous render.
+      const slice = budget >= line.length ? line : line.slice(0, Math.max(0, budget));
+      budget -= line.length;
+      const node = renderLine(slice, offset, li, "left");
       offset += line.length;
       return node;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    renderBudget,
     compareMode, frozenLines, lines,
     rightWordHighlightOn, leftWordHighlightOn,
     // The marking hook hands back a fresh object every render, so depending on
@@ -1322,6 +1378,25 @@ export const SyncMirrorLayout = ({
           <span className={cn("text-xs font-semibold", compareMode ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
             {compareMode ? "גרסה קפואה להשוואה" : "תמלול מסונכרן"}
           </span>
+          <button
+            type="button"
+            onClick={toggleSingleColumn}
+            className="shrink-0 h-5 px-1.5 rounded border border-border/60 text-[10px] text-muted-foreground hover:bg-muted flex items-center gap-1"
+            title={singleColumn
+              ? 'עמודה אחת — לחץ למעבר לשתי עמודות'
+              : 'שתי עמודות — לחץ למעבר לעמודה אחת (חצי מהאלמנטים, מהיר יותר)'}
+          >
+            {singleColumn ? <Square className="w-3 h-3" /> : <Columns2 className="w-3 h-3" />}
+            {singleColumn ? 'עמודה' : 'שתיים'}
+          </button>
+          {isFilling && (
+            <span
+              className="shrink-0 text-[10px] text-muted-foreground tabular-nums"
+              title="הטקסט נטען בהדרגה כדי שהמסך יישאר מגיב"
+            >
+              טוען {Math.round((renderBudget / Math.max(1, totalWords)) * 100)}%
+            </span>
+          )}
           <div className="ms-auto flex items-center gap-1">
             {/* Highlight style picker */}
             <Popover>
@@ -1840,6 +1915,7 @@ export const SyncMirrorLayout = ({
         className="flex flex-col lg:flex-row flex-1 min-h-0 overflow-y-auto"
       >
         {/* ── RIGHT column — full mirror, fully editable (unless locked) ── */}
+        {!singleColumn && (
         <div
           ref={rightColRef}
           style={{ '--pane-basis': `${rightPct}%` } as React.CSSProperties}
@@ -1893,7 +1969,10 @@ export const SyncMirrorLayout = ({
           </div>
         </div>
 
+)}
+
         {/* ── Draggable column divider — drag to resize, double-click to reset to auto ── */}
+        {!singleColumn && (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -1928,10 +2007,12 @@ export const SyncMirrorLayout = ({
           <div className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 h-8 w-1 rounded-full bg-foreground/20 group-hover/divider:bg-primary/80 transition-colors" />
         </div>
 
+)}
+
         {/* ── LEFT column: עריכה מסונכרנת (editable) ── */}
         <div
           ref={leftColRef}
-          style={{ '--pane-basis': `${leftPct}%` } as React.CSSProperties}
+          style={{ '--pane-basis': singleColumn ? '100%' : `${leftPct}%` } as React.CSSProperties}
           className={cn(
             "min-w-0 w-full lg:w-auto lg:[flex:0_0_var(--pane-basis)] flex flex-col relative transition-opacity",
             lockedPane === 'left' && "opacity-90 bg-muted/30",
