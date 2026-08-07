@@ -167,12 +167,14 @@ export function FloatingPlayerPortal({ children, onClose, title = '🎵 נגן �
         </div>
       </div>
 
-      {/* Content */}
-      {!pos.minimized && (
-        <div className="flex-1 overflow-auto min-h-0" ref={contentRef}>
-          {children}
-        </div>
-      )}
+      {/* Content — stays mounted while minimized so the <audio> element (and
+          therefore playback) survives; only its visibility is toggled. */}
+      <div
+        className={cn("flex-1 overflow-auto min-h-0", pos.minimized && "hidden")}
+        ref={contentRef}
+      >
+        {children}
+      </div>
 
       {/* Resize handle — bottom right */}
       {!pos.minimized && (

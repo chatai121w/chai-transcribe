@@ -2139,7 +2139,17 @@ const TextEditor = () => {
               </Suspense>
             ) : (
               <Suspense fallback={null}>
-              <div className="rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden">
+              <div className="relative rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden">
+                {/* Quick access to floating mode, right on the player itself */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute top-2 left-2 z-10 h-7 w-7 rounded-md border border-border/50 bg-background/80 backdrop-blur-sm shadow-sm hover:bg-primary/10"
+                  onClick={togglePlayerFloating}
+                  title="נגן צף (Ctrl+Shift+F)"
+                >
+                  <PictureInPicture2 className="w-3.5 h-3.5" />
+                </Button>
                 <SyncAudioPlayer
                   ref={playerRef}
                   audioUrl={audioUrl}
