@@ -507,7 +507,7 @@ const Dashboard = () => {
             <Card>
               <CardContent className="p-5 text-center md:py-6">
                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-2">
-                  <Cloud className="w-5 h-5 text-primary" />
+                  <Cloud className="w-5 h-5 text-muted-foreground" />
                 </div>
                 <div className="text-2xl font-bold">
                   <Badge variant="secondary" className="text-xs">מסונכרן</Badge>
