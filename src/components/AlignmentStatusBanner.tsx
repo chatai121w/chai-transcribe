@@ -9,6 +9,8 @@ interface AlignmentStatusBannerProps {
   hasText: boolean;
   wordCount: number;
   coverage?: number;
+  /** 0–100 while segments stream in; undefined before the first segment. */
+  progress?: number;
   onRetry?: () => void;
 }
 
@@ -18,7 +20,7 @@ interface AlignmentStatusBannerProps {
  * runs in the background.
  */
 export function AlignmentStatusBanner({
-  status, hasTimings, hasAudio, hasText, wordCount, coverage, onRetry,
+  status, hasTimings, hasAudio, hasText, wordCount, coverage, progress, onRetry,
 }: AlignmentStatusBannerProps) {
   const [elapsed, setElapsed] = useState(0);
   const [showDone, setShowDone] = useState(false);
@@ -44,22 +46,34 @@ export function AlignmentStatusBanner({
   if (status === 'aligning') {
     const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
     const ss = String(elapsed % 60).padStart(2, '0');
+    const hasProgress = progress !== undefined && progress > 0;
     return (
       <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-primary/30 bg-primary/5 text-sm" dir="rtl">
         <Loader2 className="w-4 h-4 text-primary animate-spin shrink-0" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <span className="font-medium">🎯 מסנכרן תזמוני מילים לאודיו...</span>
+            <span className="font-medium">
+              🎯 מסנכרן תזמוני מילים לאודיו{hasProgress ? ` — ${progress}%` : '...'}
+            </span>
             <span className="text-xs text-muted-foreground font-mono tabular-nums">{mm}:{ss}</span>
           </div>
           <div className="relative h-1.5 mt-1.5 rounded-full bg-muted overflow-hidden">
-            <div
-              className="absolute top-0 h-full w-1/3 bg-primary/60 rounded-full"
-              style={{ animation: 'transcription-scan 1.6s ease-in-out infinite' }}
-            />
+            {hasProgress ? (
+              <div
+                className="absolute top-0 right-0 h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
+                style={{ width: `${Math.max(progress, 2)}%` }}
+              />
+            ) : (
+              <div
+                className="absolute top-0 h-full w-1/3 bg-primary/60 rounded-full"
+                style={{ animation: 'transcription-scan 1.6s ease-in-out infinite' }}
+              />
+            )}
           </div>
           <p className="text-[11px] text-muted-foreground mt-1">
-            המעקב אחר הטקסט יופעל אוטומטית בסיום — אפשר להמשיך לערוך בינתיים
+            {hasTimings
+              ? `המעקב כבר פעיל על ${wordCount.toLocaleString('he-IL')} המילים הראשונות — ההמשך נטען ברקע`
+              : 'המעקב אחר הטקסט יופעל אוטומטית בסיום — אפשר להמשיך לערוך בינתיים'}
           </p>
         </div>
       </div>

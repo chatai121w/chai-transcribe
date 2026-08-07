@@ -270,6 +270,7 @@ const TextEditor = () => {
     status: 'idle' | 'aligning' | 'aligned' | 'partial' | 'error';
     coverage?: number;
     confidence?: number;
+    progress?: number;
   }>({ status: 'idle' });
   const alignmentAbortRef = useRef<AbortController | null>(null);
   const [transcriptId, setTranscriptId] = useState<string | null>(null);
@@ -1355,14 +1356,82 @@ const TextEditor = () => {
       formData.append('approximate_timings', JSON.stringify(approximateTimings));
     }
 
+    // Progressive application: each aligned segment is final for its own audio
+    // window, so we surface the covered prefix immediately instead of making the
+    // user wait for the whole recording. The tail stays untimed until it arrives.
+    const referenceWords = referenceText.split(/\s+/).filter(Boolean);
+    const streamedRaw: WordTiming[] = [];
+    const applyProgressive = (coveredUntil: number) => {
+      if (!streamedRaw.length) return;
+      if (latestTextRef.current.trim() !== referenceText) return;
+      const mapped = alignEditedToWhisper(referenceWords, streamedRaw);
+      const prefix: WordTiming[] = [];
+      for (const item of mapped) {
+        if (item.start > coveredUntil + 0.25) break;
+        prefix.push(item);
+      }
+      if (!prefix.length) return;
+      wordTimingsRevisionRef.current += 1;
+      wordTimingsRef.current = prefix;
+      setWordTimings(prefix);
+      setSyncEnabled(true);
+    };
+
     try {
-      const response = await fetch(`${getServerUrl()}/align-text`, {
+      let result: Record<string, unknown> | null = null;
+
+      // Preferred path: SSE stream — word tracking lights up segment by segment.
+      const streamResponse = await fetch(`${getServerUrl()}/align-text-stream`, {
         method: 'POST',
         body: formData,
         signal: controller.signal,
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result?.error || `Alignment failed (${response.status})`);
+      }).catch(() => null);
+
+      if (streamResponse?.ok && streamResponse.body) {
+        const reader = streamResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let streamError: string | null = null;
+
+        while (!result && !streamError) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            let event: Record<string, unknown>;
+            try {
+              event = JSON.parse(line.slice(6));
+            } catch { continue; }
+
+            if (event.type === 'segment') {
+              const segTimings = Array.isArray(event.wordTimings) ? event.wordTimings as WordTiming[] : [];
+              streamedRaw.push(...segTimings);
+              const coveredUntil = segTimings.at(-1)?.end ?? 0;
+              applyProgressive(coveredUntil);
+              setForcedAlignmentState({ status: 'aligning', progress: Number(event.progress) || 0 });
+            } else if (event.type === 'done') {
+              result = event;
+            } else if (event.type === 'error') {
+              streamError = String(event.error || 'Alignment failed');
+            }
+          }
+        }
+        if (streamError) throw new Error(streamError);
+      }
+
+      // Fallback: older server without the streaming endpoint.
+      if (!result) {
+        const response = await fetch(`${getServerUrl()}/align-text`, {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        });
+        result = await response.json();
+        if (!response.ok) throw new Error((result?.error as string) || `Alignment failed (${response.status})`);
+      }
 
       if (latestTextRef.current.trim() !== referenceText) {
         setForcedAlignmentState({ status: 'partial' });
@@ -2045,6 +2114,7 @@ const TextEditor = () => {
               hasText={Boolean(text.trim())}
               wordCount={wordTimings.length}
               coverage={forcedAlignmentState.coverage}
+              progress={forcedAlignmentState.progress}
               onRetry={handleForcedAlignment}
             />
 

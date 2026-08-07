@@ -3572,6 +3572,132 @@ def align_text_to_audio():
             pass
 
 
+@app.route("/align-text-stream", methods=["POST"])
+def align_text_to_audio_stream():
+    """Force-align corrected text to audio, streaming per-segment word timings via SSE.
+
+    Uses the exact same segmentation and alignment math as /align-text — segments
+    are aligned one-by-one and emitted as soon as each is ready, so the client can
+    enable word tracking progressively on long recordings. The final 'done' event
+    carries the same quality metrics as the synchronous endpoint.
+    Events: status (stage), segment (index/total/wordTimings/progress), done, error.
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+
+    text = (request.form.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "No reference text provided"}), 400
+
+    language = (request.form.get("language") or "he").strip() or "he"
+    try:
+        approximate_timings = json.loads(request.form.get("approximate_timings") or "null")
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid approximate_timings JSON"}), 400
+
+    audio_file = request.files["file"]
+    suffix = _safe_suffix(audio_file.filename)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        audio_file.save(tmp)
+        tmp_path = tmp.name
+
+    def generate():
+        started = time.time()
+        previous_model_id = _current_model_id
+        align_model = None
+        approx = approximate_timings
+        try:
+            import whisperx  # type: ignore
+
+            device = "cuda" if (_has_torch and torch.cuda.is_available()) else "cpu"
+            audio = whisperx.load_audio(tmp_path)
+            duration = max(0.1, len(audio) / 16000.0)
+            alignment_source = "provided-timings"
+            evidence_coverage = 1.0
+            if not (isinstance(approx, list) and len(approx) == len(text.split())):
+                yield f"data: {json.dumps({'type': 'status', 'stage': 'bootstrap', 'message': 'Locating text in audio...'})}\n\n"
+                bootstrap_model_id = previous_model_id or _default_model_for(language)
+                approx, evidence_coverage = _bootstrap_alignment_timings(
+                    tmp_path, text, language, bootstrap_model_id, duration
+                )
+                alignment_source = "local-whisper-bootstrap"
+
+            _evict_all_whisper_models()
+            _cleanup_gpu_memory()
+            segments = _alignment_segments(text, approx, duration)
+            if not segments:
+                yield f"data: {json.dumps({'type': 'error', 'error': 'Reference text has no alignable words'})}\n\n"
+                return
+
+            yield f"data: {json.dumps({'type': 'status', 'stage': 'align', 'totalSegments': len(segments), 'audioDuration': round(duration, 3)})}\n\n"
+            align_model, align_meta = whisperx.load_align_model(
+                language_code=language,
+                device=device,
+            )
+
+            word_timings = []
+            for seg_index, segment in enumerate(segments):
+                aligned = whisperx.align(
+                    [segment],
+                    align_model,
+                    align_meta,
+                    tmp_path,
+                    device,
+                    return_char_alignments=False,
+                )
+                seg_timings = []
+                for item in aligned.get("word_segments", []) or []:
+                    word = str(item.get("word") or "").strip()
+                    start = item.get("start")
+                    end = item.get("end")
+                    if not word or not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+                        continue
+                    if end < start:
+                        continue
+                    seg_timings.append({
+                        "word": word,
+                        "start": round(float(start), 3),
+                        "end": round(float(end), 3),
+                        "probability": round(float(item.get("score", 0.0) or 0.0), 4),
+                    })
+                word_timings.extend(seg_timings)
+                progress = round((seg_index + 1) / len(segments) * 100)
+                yield f"data: {json.dumps({'type': 'segment', 'index': seg_index, 'total': len(segments), 'progress': progress, 'wordTimings': seg_timings})}\n\n"
+
+            monotonic = all(
+                word_timings[index]["start"] >= word_timings[index - 1]["start"]
+                for index in range(1, len(word_timings))
+            )
+            input_word_count = len(text.split())
+            coverage = min(1.0, len(word_timings) / max(1, input_word_count))
+            scores = [item["probability"] for item in word_timings if item["probability"] > 0]
+            mean_score = sum(scores) / len(scores) if scores else 0.0
+
+            yield f"data: {json.dumps({'type': 'done', 'wordTimings': word_timings, 'inputWordCount': input_word_count, 'alignedWordCount': len(word_timings), 'coverage': round(coverage, 4), 'evidenceCoverage': round(evidence_coverage, 4), 'meanConfidence': round(mean_score, 4), 'monotonic': monotonic, 'language': language, 'audioDuration': round(duration, 3), 'method': 'whisperx-forced-alignment', 'alignmentSource': alignment_source, 'processingTime': round(time.time() - started, 2)})}\n\n"
+        except ImportError:
+            yield f"data: {json.dumps({'type': 'error', 'error': 'WhisperX is not installed', 'install': 'pip install whisperx==3.8.6'})}\n\n"
+        except Exception as exc:
+            _log.error(f"Streaming forced alignment failed: {exc}\n{_tb_module.format_exc()}")
+            yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+        finally:
+            align_model = None
+            _cleanup_gpu_memory()
+            if previous_model_id:
+                try:
+                    load_model(previous_model_id)
+                except Exception as restore_exc:
+                    _log.warning(f"Could not restore Whisper model after alignment: {restore_exc}")
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    return Response(generate(), mimetype="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    })
+
+
 def _load_pyannote_pipeline(model_id, hf_token):
     from pyannote.audio import Pipeline as PyannotePipeline
     try:
