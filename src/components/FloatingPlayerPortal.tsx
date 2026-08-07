@@ -18,6 +18,9 @@ const STORAGE_KEY = "floating_player_pos_v1";
 
 interface Pos { x: number; y: number; w: number; h: number; minimized: boolean }
 
+/** Compass directions of a resize grab: any combination of edges. */
+type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
 const VIEWPORT_GAP = 12;
 const TITLE_BAR_HEIGHT = 42;
 const MIN_PANEL_WIDTH = 320;
@@ -66,7 +69,11 @@ function clamp(val: number, min: number, max: number) {
 export function FloatingPlayerPortal({ children, onClose, title = '🎵 נגן צף', storageKey = STORAGE_KEY, defaultWidth = 480, defaultHeight = 300, contentRef }: FloatingPlayerPortalProps) {
   const [pos, setPos] = useState<Pos>(() => loadPos(storageKey, defaultWidth, defaultHeight));
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
-  const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null);
+  const resizeRef = useRef<{
+    dir: ResizeDir;
+    startX: number; startY: number;
+    origX: number; origY: number; origW: number; origH: number;
+  } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   // persist position
@@ -104,27 +111,64 @@ export function FloatingPlayerPortal({ children, onClose, title = '🎵 נגן �
 
   const onDragEnd = useCallback(() => { dragRef.current = null; }, []);
 
-  // --- Resize ---
-  const onResizeStart = useCallback((e: React.PointerEvent) => {
+  // --- Resize (any edge or corner) ---
+  const onResizeStart = useCallback((dir: ResizeDir) => (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    resizeRef.current = { startX: e.clientX, startY: e.clientY, origW: pos.w, origH: pos.h };
+    resizeRef.current = {
+      dir,
+      startX: e.clientX, startY: e.clientY,
+      origX: pos.x, origY: pos.y, origW: pos.w, origH: pos.h,
+    };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [pos.w, pos.h]);
+  }, [pos.x, pos.y, pos.w, pos.h]);
 
   const onResizeMove = useCallback((e: React.PointerEvent) => {
     const resize = resizeRef.current;
     if (!resize) return;
     const dx = e.clientX - resize.startX;
     const dy = e.clientY - resize.startY;
-    setPos(p => ({
-      ...p,
-      w: clamp(resize.origW + dx, Math.min(MIN_PANEL_WIDTH, window.innerWidth - VIEWPORT_GAP * 2), window.innerWidth - p.x - VIEWPORT_GAP),
-      h: clamp(resize.origH + dy, Math.min(MIN_PANEL_HEIGHT, window.innerHeight - VIEWPORT_GAP * 2), window.innerHeight - p.y - VIEWPORT_GAP),
-    }));
+    const { dir, origX, origY, origW, origH } = resize;
+
+    const minW = Math.min(MIN_PANEL_WIDTH, window.innerWidth - VIEWPORT_GAP * 2);
+    const minH = Math.min(MIN_PANEL_HEIGHT, window.innerHeight - VIEWPORT_GAP * 2);
+
+    let { x, y, w, h } = { x: origX, y: origY, w: origW, h: origH };
+
+    if (dir.includes('e')) {
+      w = clamp(origW + dx, minW, window.innerWidth - origX - VIEWPORT_GAP);
+    }
+    if (dir.includes('w')) {
+      // Dragging the left edge moves the origin and grows the panel leftwards.
+      const right = origX + origW;
+      w = clamp(origW - dx, minW, right - VIEWPORT_GAP);
+      x = right - w;
+    }
+    if (dir.includes('s')) {
+      h = clamp(origH + dy, minH, window.innerHeight - origY - VIEWPORT_GAP);
+    }
+    if (dir.includes('n')) {
+      const bottom = origY + origH;
+      h = clamp(origH - dy, minH, bottom - VIEWPORT_GAP);
+      y = bottom - h;
+    }
+
+    setPos(p => ({ ...p, x, y, w, h }));
   }, []);
 
   const onResizeEnd = useCallback(() => { resizeRef.current = null; }, []);
+
+  /** Grab areas for every edge and corner of the panel. */
+  const resizeHandles: Array<{ dir: ResizeDir; className: string; cursor: string }> = [
+    { dir: 'n',  className: 'top-0 left-3 right-3 h-1.5',      cursor: 'ns-resize' },
+    { dir: 's',  className: 'bottom-0 left-3 right-3 h-1.5',   cursor: 'ns-resize' },
+    { dir: 'w',  className: 'left-0 top-3 bottom-3 w-1.5',     cursor: 'ew-resize' },
+    { dir: 'e',  className: 'right-0 top-3 bottom-3 w-1.5',    cursor: 'ew-resize' },
+    { dir: 'nw', className: 'top-0 left-0 w-3 h-3',            cursor: 'nwse-resize' },
+    { dir: 'ne', className: 'top-0 right-0 w-3 h-3',           cursor: 'nesw-resize' },
+    { dir: 'sw', className: 'bottom-0 left-0 w-3 h-3',         cursor: 'nesw-resize' },
+    { dir: 'se', className: 'bottom-0 right-0 w-3 h-3',        cursor: 'nwse-resize' },
+  ];
 
   const toggleMinimize = useCallback(() => {
     setPos(p => ({ ...p, minimized: !p.minimized }));
@@ -176,19 +220,27 @@ export function FloatingPlayerPortal({ children, onClose, title = '🎵 נגן �
         {children}
       </div>
 
-      {/* Resize handle — bottom right */}
+      {/* Resize grips — every edge and corner */}
       {!pos.minimized && (
-        <div
-          className="absolute bottom-0 left-0 w-4 h-4 cursor-nwse-resize"
-          style={{ transform: "scaleX(-1)" }}
-          onPointerDown={onResizeStart}
-          onPointerMove={onResizeMove}
-          onPointerUp={onResizeEnd}
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" className="text-muted-foreground/50">
-            <path d="M14 16L16 14M10 16L16 10M6 16L16 6" stroke="currentColor" strokeWidth="1.5" />
-          </svg>
-        </div>
+        <>
+          {resizeHandles.map(({ dir, className, cursor }) => (
+            <div
+              key={dir}
+              className={cn("absolute z-20 touch-none", className)}
+              style={{ cursor }}
+              onPointerDown={onResizeStart(dir)}
+              onPointerMove={onResizeMove}
+              onPointerUp={onResizeEnd}
+              onPointerCancel={onResizeEnd}
+            />
+          ))}
+          {/* Visible affordance on the bottom-left corner */}
+          <div className="pointer-events-none absolute bottom-0 left-0 p-0.5 opacity-50">
+            <svg width="14" height="14" viewBox="0 0 16 16" className="text-muted-foreground" style={{ transform: "scaleX(-1)" }}>
+              <path d="M14 16L16 14M10 16L16 10M6 16L16 6" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          </div>
+        </>
       )}
     </div>,
     document.body,
