@@ -1312,6 +1312,11 @@ const TextEditor = () => {
     return alignEditedToWhisper(words, wordTimings);
   }, [wordTimings]);
 
+  // Auto forced-alignment: when the editor has audio + text but no word timings
+  // (e.g. Gemini/cloud engines that return text only), compute timings in the
+  // background via the local server so word tracking works without a manual click.
+  const autoAlignAttemptedRef = useRef<string | null>(null);
+
   const handleSyncToPlayer = useCallback((editedText: string) => {
     const newTimings = buildSyncedTimings(editedText);
     if (!newTimings) {
@@ -1439,6 +1444,31 @@ const TextEditor = () => {
   }, [audioBlob, audioFileName, buildSyncedTimings, updateTranscript]);
 
   useEffect(() => () => alignmentAbortRef.current?.abort(), []);
+
+  // Trigger the auto-alignment once per audio+transcript combination. Runs only
+  // when there is audio and text but zero word timings, the local server is
+  // reachable, and no alignment is already in flight.
+  useEffect(() => {
+    if (!audioBlob || !text.trim() || wordTimings.length > 0) return;
+    if (forcedAlignmentState.status !== 'idle') return;
+    const attemptKey = `${transcriptIdRef.current || audioFileName || 'audio'}:${audioBlob.size}`;
+    if (autoAlignAttemptedRef.current === attemptKey) return;
+    autoAlignAttemptedRef.current = attemptKey;
+
+    let cancelled = false;
+    const healthCtrl = new AbortController();
+    const healthTimer = setTimeout(() => healthCtrl.abort(), 3000);
+    fetch(`${getServerUrl()}/health`, { signal: healthCtrl.signal })
+      .then((res) => {
+        if (cancelled || !res.ok) return;
+        debugLog.info('TextEditor', 'אין תזמוני מילים — מפעיל יישור מדויק אוטומטי');
+        toast({ title: '🎯 מסנכרן טקסט לאודיו...', description: 'מחשב תזמוני מילים ברקע — המעקב יופעל בסיום' });
+        void handleForcedAlignment();
+      })
+      .catch(() => { /* local server unavailable — skip silently */ })
+      .finally(() => clearTimeout(healthTimer));
+    return () => { cancelled = true; healthCtrl.abort(); };
+  }, [audioBlob, text, wordTimings.length, forcedAlignmentState.status, audioFileName, handleForcedAlignment]);
 
   const handleSaveAndReplaceOriginal = useCallback(async (
     editedText: string,

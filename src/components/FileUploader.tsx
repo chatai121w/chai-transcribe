@@ -12,6 +12,7 @@ import type { TranscriptionJob } from "@/hooks/useTranscriptionJobs";
 import { useCloudTranscripts, type CloudTranscript } from "@/hooks/useCloudTranscripts";
 import { useFolderTree } from "@/hooks/useFolderTree";
 import { db, isDbAvailable } from "@/lib/localDb";
+import { TranscriptionProgressPanel } from "@/components/TranscriptionProgressPanel";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
@@ -118,6 +119,13 @@ interface FileUploaderProps {
   onSubmitBackgroundJob?: (file: File) => Promise<string | null>;
   jobs?: TranscriptionJob[];
   maxFileSizeMB?: number;
+  // Rich progress panel props (replaces the old simple bar)
+  serverPhase?: string;
+  serverAudioDur?: number;
+  serverAudioProcessed?: number;
+  transcribeElapsed?: number;
+  elapsedSeconds?: number;
+  onCancelTranscription?: () => void;
 }
 
 export const FileUploader = ({
@@ -125,6 +133,8 @@ export const FileUploader = ({
   isAuthenticated, isCloudEngine,
   onSubmitBatch, onSaveTranscript, onRetryJob, onSubmitBackgroundJob,
   jobs = [], maxFileSizeMB = 500,
+  serverPhase, serverAudioDur, serverAudioProcessed,
+  transcribeElapsed, elapsedSeconds, onCancelTranscription,
 }: FileUploaderProps) => {
   const meta = engine ? ENGINE_META[engine] : null;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -428,9 +438,21 @@ export const FileUploader = ({
           </div>
         </div>
 
-        {/* Progress bar with elapsed time */}
+        {/* Rich transcription progress panel */}
         {isLoading && (
-          <UploadProgressBar progress={progress} fileName={selectedFile?.name} fileSize={selectedFile?.size} statusText={statusText} />
+          <TranscriptionProgressPanel
+            engine={engine}
+            progress={progress}
+            statusText={statusText}
+            serverPhase={serverPhase}
+            serverAudioDur={serverAudioDur}
+            serverAudioProcessed={serverAudioProcessed}
+            transcribeElapsed={transcribeElapsed}
+            elapsedSeconds={elapsedSeconds}
+            fileName={selectedFile?.name}
+            fileSize={selectedFile?.size}
+            onCancel={onCancelTranscription}
+          />
         )}
 
         {/* Action buttons row */}
