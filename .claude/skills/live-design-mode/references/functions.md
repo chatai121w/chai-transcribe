@@ -22,8 +22,9 @@ The only file with no React in it. Everything here is pure except the DOM writes
 ```
 
 `createdAt` is not decoration — it is the conflict resolution key for cloud sync.
-`scope` is stored but never read when generating CSS; it exists for display and for
-future logic.
+`scope` records which of the three breadths the user chose; the selector it produced
+is already baked into `selector`, so nothing needs to re-derive it when generating
+CSS.
 
 ### `computeSelector(el): string`
 
@@ -57,8 +58,34 @@ Filters applied, and why:
   "same kind of thing" selector, which is the whole point.
 
 Returns just the tag when nothing survives filtering. That is very broad — styling
-`div` this way hits every div on the page — and is worth guarding against if you
-extend this.
+`div` this way hits every div on the page. `computeGlobalSelector` guards against
+this case explicitly; this function still does not, so an element carrying only
+layout utilities produces a page-wide rule under class scope.
+
+### `computeGlobalSelector(el): string`
+
+Builds the **broadest** selector: everything of this kind, anywhere.
+
+The distinction from `computeClassSelector` is variants. Class scope pins the whole
+class signature, so it only matches elements styled exactly the same way; this one
+drops to the element's kind, so styling one primary button reaches every button.
+
+- **Semantic tag** (`button`, `a`, `input`, headings, `table`, `nav`, …) → the bare
+  tag. These tags already say what the element is, so the tag alone is a meaningful
+  "all of these" selector.
+- **Generic container** (`div`, `span`, …) → tag plus one identifying class, chosen
+  as the first class that survives filtering out `hover:`/`focus:` variants,
+  arbitrary-value classes over 40 characters, and layout utilities (spacing, sizing,
+  flex/grid, positioning, z-index, overflow…). Layout classes describe arrangement,
+  not identity, and would produce selectors that group unrelated elements.
+- **Nothing identifying left** → falls back to `computeClassSelector`. Emitting a
+  bare `div` would match most of the page, which is never what the user meant.
+
+### `countMatches(selector): number`
+
+`document.querySelectorAll(selector).length`, with invalid selectors returning 0
+rather than throwing. Used to label the scope buttons with how many elements each
+choice will actually affect.
 
 ### `describeElement(el): string`
 
@@ -238,19 +265,35 @@ falling back to the element's bounding rect. Deliberately excludes `editorSize` 
 its dependencies — including it would make the panel jump every time the user
 resizes it.
 
-### `applyScope(scope)`
+### `selectorForScope(el, scope)`
 
-Commits. Chooses the selector:
+The single place that decides what each scope targets:
 
 ```js
-scope === 'element' ? computeSelector(el) : computeClassSelector(el)
+element -> computeSelector(el)
+class   -> computeClassSelector(el)
+global  -> computeGlobalSelector(el)
 ```
 
-then calls `addOverride`, harvests colours into favourites, clears the preview and
-`liveChanges`, and deselects.
+Both the counts shown on the buttons and the rule that actually gets saved go
+through this, so what the user is told and what is committed cannot drift apart.
+That drift is exactly how the earlier class/global bug survived unnoticed.
 
-Note that `'class'` and `'global'` produce an identical selector — see
-`known-issues.md`.
+### `applyScope(scope)`
+
+Commits: resolves the selector via `selectorForScope`, calls `addOverride`, harvests
+colours into favourites, clears the preview and `liveChanges`, and deselects.
+
+### `scopeCounts`
+
+Three `countMatches` calls, recomputed each render while an element is selected, and
+rendered onto the scope buttons. Not memoized on purpose — it is three cheap queries
+on a panel that only exists during a selection, and the DOM can change underneath a
+cached value.
+
+These counts exist because the live preview uses the class selector while `global`
+can be broader. Without them a global commit can widen the effect past what was
+previewed, and the user would only discover it afterwards.
 
 ### `handleEyeDropper(property)`
 

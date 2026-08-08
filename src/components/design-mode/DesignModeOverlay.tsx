@@ -5,6 +5,8 @@ import { useDesignMode } from './DesignModeProvider';
 import {
   computeSelector,
   computeClassSelector,
+  computeGlobalSelector,
+  countMatches,
   describeElement,
   type OverrideScope,
 } from '@/lib/designOverrides';
@@ -124,6 +126,20 @@ const EDITABLE_FIELDS: { property: string; label: string; type: 'color' | 'text'
   { property: 'border-radius', label: 'עיגול פינות', type: 'text', placeholder: '8px' },
   { property: 'padding', label: 'ריווח פנימי', type: 'text', placeholder: '8px 12px' },
 ];
+
+/**
+ * One place that decides what each scope targets, so the counts on the buttons and
+ * the rule that actually gets saved can never disagree.
+ *
+ *  element — this one element
+ *  class   — everything sharing its full class signature (same look)
+ *  global  — everything of its kind, including variants
+ */
+function selectorForScope(el: Element, scope: OverrideScope): string {
+  if (scope === 'element') return computeSelector(el);
+  if (scope === 'global') return computeGlobalSelector(el);
+  return computeClassSelector(el);
+}
 
 export function DesignModeOverlay() {
   const { enabled, setEnabled, overrides, addOverride, undoLast, clearAll } = useDesignMode();
@@ -347,6 +363,17 @@ export function DesignModeOverlay() {
 
   const hasChanges = Object.keys(liveChanges).length > 0;
 
+  // Recomputed per render rather than memoized: it is three querySelectorAll calls
+  // on a panel that only exists while something is selected, and the DOM can change
+  // underneath a stale count.
+  const scopeCounts: Record<OverrideScope, number> = selectedEl
+    ? {
+        element: countMatches(selectorForScope(selectedEl, 'element')),
+        class: countMatches(selectorForScope(selectedEl, 'class')),
+        global: countMatches(selectorForScope(selectedEl, 'global')),
+      }
+    : { element: 0, class: 0, global: 0 };
+
   /** Clear live preview and close the editor panel. */
   const closeEditor = () => {
     if (previewStyleRef.current) previewStyleRef.current.textContent = '';
@@ -356,9 +383,7 @@ export function DesignModeOverlay() {
 
   const applyScope = (scope: OverrideScope) => {
     if (!selectedEl || !hasChanges) return;
-    const selector = scope === 'element'
-      ? computeSelector(selectedEl)
-      : computeClassSelector(selectedEl);
+    const selector = selectorForScope(selectedEl, scope);
 
     addOverride({
       scope,
@@ -760,30 +785,28 @@ export function DesignModeOverlay() {
                   שנה ערך למעלה — תראה תצוגה מקדימה מיידית בעמוד
                 </p>
               )}
-              <Button
-                className="w-full justify-start text-right"
-                variant="outline"
-                disabled={!hasChanges}
-                onClick={() => applyScope('element')}
-              >
-                🎯 שמור רק על האלמנט הזה
-              </Button>
-              <Button
-                className="w-full justify-start text-right"
-                variant="outline"
-                disabled={!hasChanges}
-                onClick={() => applyScope('class')}
-              >
-                🧩 שמור על כל האלמנטים מהסוג הזה
-              </Button>
-              <Button
-                className="w-full justify-start text-right"
-                variant="outline"
-                disabled={!hasChanges}
-                onClick={() => applyScope('global')}
-              >
-                🌐 שמור על כל המופעים בכל האתר
-              </Button>
+              {/* Each scope reports how many elements it will actually hit, so a
+                  wider choice than expected is visible before it is committed
+                  rather than after. */}
+              {([
+                { scope: 'element' as const, icon: '🎯', label: 'שמור רק על האלמנט הזה' },
+                { scope: 'class' as const, icon: '🧩', label: 'שמור על כל האלמנטים מהסוג הזה' },
+                { scope: 'global' as const, icon: '🌐', label: 'שמור על כל המופעים בכל האתר' },
+              ]).map(({ scope, icon, label }) => (
+                <Button
+                  key={scope}
+                  className="w-full justify-between text-right"
+                  variant="outline"
+                  disabled={!hasChanges}
+                  onClick={() => applyScope(scope)}
+                  title={scopeCounts[scope] ? `${scopeCounts[scope]} אלמנטים בעמוד` : undefined}
+                >
+                  <span className="text-[10px] text-muted-foreground tabular-nums">
+                    {scopeCounts[scope] > 0 ? `${scopeCounts[scope]} אלמנטים` : ''}
+                  </span>
+                  <span>{icon} {label}</span>
+                </Button>
+              ))}
               {hasChanges && (
                 <div className="flex justify-end pt-0.5">
                   <Button variant="ghost" size="sm" onClick={closeEditor}>בטל שינויים</Button>

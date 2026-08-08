@@ -1,11 +1,12 @@
 # Known issues and intentional oddities
 
 Read this before "fixing" something that looks wrong. Most of the surprising
-behaviour here is deliberate; one item is a real defect.
+behaviour here is deliberate. The two entries marked *Fixed* describe defects that
+were real and are now closed — kept because both are easy to reintroduce.
 
-## Real defect: "global" and "class" scopes are identical
+## Fixed: "global" and "class" scopes were identical
 
-`applyScope` picks the selector like this:
+`applyScope` used to pick the selector like this:
 
 ```js
 const selector = scope === 'element'
@@ -13,24 +14,33 @@ const selector = scope === 'element'
   : computeClassSelector(selectedEl);
 ```
 
-Both `'class'` and `'global'` fall into the same branch, so the two buttons —
-*"שמור על כל האלמנטים מהסוג הזה"* and *"שמור על כל המופעים בכל האתר"* — produce
-byte-identical CSS. The stored `scope` field differs, but nothing reads it when
-generating the stylesheet.
+Both `'class'` and `'global'` fell into the same branch, so the two buttons produced
+byte-identical CSS while the UI promised a distinction. The stored `scope` field
+differed, but nothing read it when generating the stylesheet.
 
-In practice the class selector is already site-wide, so "global" is not *wrong* — it
-just is not distinct, and the UI promises a distinction it does not deliver.
+Now each scope has its own meaning, resolved in one place by `selectorForScope`:
 
-If this is worth fixing, the honest options are:
+| Scope | Selector | Reaches |
+|---|---|---|
+| element | `computeSelector` | exactly this element |
+| class | `computeClassSelector` | everything with the same full class signature |
+| global | `computeGlobalSelector` | everything of this kind, including variants |
 
-- **Make global broader** — emit the tag alone, or the single most semantic class,
-  so it genuinely reaches more elements than the class scope.
-- **Collapse the UI** — drop one button and describe the remaining behaviour
-  accurately.
+The distinction that makes `global` worth having is **variants**. Class scope pins
+the whole signature, so it only matches elements styled exactly the same way; global
+scope drops to the element's kind, so styling one primary button reaches every
+button. Measured on a real page: element 1, class 1, global 58.
 
-Do not "fix" it by making class *narrower*. Class scope is what users reach for when
-they want "all the buttons like this one", and narrowing it would break existing
-saved overrides that rely on the current breadth.
+`computeGlobalSelector` emits the bare tag only for tags that already say what the
+element is — `button`, `a`, `input`, headings, and so on. For a generic container it
+attaches one identifying class, and if the element has nothing but layout utilities
+it falls back to the class signature rather than emitting a bare `div`, which would
+match most of the page.
+
+The buttons now also show how many elements each scope currently matches. That
+matters because the live preview uses the class selector, so a global commit can
+widen the effect past what was previewed — the count makes that visible before the
+click rather than after.
 
 ## Intentional: preview is always broader than element scope
 

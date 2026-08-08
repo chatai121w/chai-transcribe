@@ -53,6 +53,56 @@ export function computeClassSelector(el: Element): string {
   return tag + cls.map(c => `.${CSS.escape(c)}`).join('');
 }
 
+/**
+ * Tags that already identify what an element *is*. For these, the tag alone is a
+ * meaningful "everything of this kind" selector.
+ */
+const SEMANTIC_TAGS = new Set([
+  'button', 'a', 'input', 'textarea', 'select', 'label', 'table', 'th', 'td',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'nav', 'header',
+  'footer', 'aside', 'section', 'article', 'form', 'fieldset', 'legend',
+  'summary', 'details', 'dialog', 'img', 'svg', 'code', 'pre', 'blockquote',
+]);
+
+/** Utility classes that describe layout or spacing rather than identity. */
+const LAYOUT_CLASS = /^(flex|grid|block|inline|hidden|absolute|relative|fixed|sticky|static|[mp][trblxy]?-|gap-|space-|w-|h-|min-|max-|top-|left-|right-|bottom-|inset-|z-|order-|col-|row-|justify-|items-|self-|content-|place-|overflow-|shrink|grow|basis-|truncate|whitespace-|break-)/;
+
+/**
+ * Broadest selector: "everything of this kind, anywhere".
+ *
+ * Distinct from computeClassSelector, which pins the element's whole class
+ * signature and therefore only matches elements styled exactly the same way. This
+ * one reaches variants too — every button rather than every button that happens to
+ * share six utility classes.
+ *
+ * Generic containers get one identifying class attached, because a bare `div`
+ * selector would match essentially the whole page.
+ */
+export function computeGlobalSelector(el: Element): string {
+  const tag = el.tagName.toLowerCase();
+  if (SEMANTIC_TAGS.has(tag)) return tag;
+
+  const classes = (el.getAttribute('class') || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter(c => !c.startsWith('hover:') && !c.startsWith('focus:') && c.length < 40)
+    .filter(c => !LAYOUT_CLASS.test(c));
+
+  // No identity to hold on to — fall back to the exact signature rather than
+  // emitting a bare tag that would repaint the entire page.
+  if (classes.length === 0) return computeClassSelector(el);
+  return `${tag}.${CSS.escape(classes[0])}`;
+}
+
+/** How many elements a selector currently matches — used to label the scope buttons. */
+export function countMatches(selector: string): number {
+  try {
+    return document.querySelectorAll(selector).length;
+  } catch {
+    return 0;
+  }
+}
+
 /** Short human label for an element. */
 export function describeElement(el: Element): string {
   const tag = el.tagName.toLowerCase();

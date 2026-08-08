@@ -41,9 +41,9 @@ detailed per-function reference.
 merge and precedence rules, and the last-write-wins logic. Read before touching
 anything that persists.
 
-`references/known-issues.md` — behaviours that look like bugs, one that is a bug,
-and the reasoning behind the ones that are intentional. Read before "fixing"
-something that seems wrong.
+`references/known-issues.md` — behaviours that look like bugs, the two real defects
+that were found and closed, and the reasoning behind the ones that are intentional.
+Read before "fixing" something that seems wrong.
 
 ## The shape of the system
 
@@ -103,13 +103,22 @@ lose to the component's own classes.
 
 ## When changing selector logic
 
-`computeSelector` and `computeClassSelector` decide what a saved override actually
-targets, and their output is written into storage. Changing them does not migrate
+The selector functions decide what a saved override actually targets, and their
+output is written into storage. Changing them does not migrate
 existing overrides — old rules keep their old selectors and may stop matching. If a
 change is unavoidable, treat it as a storage migration, not a refactor.
 
-The two functions embody different intentions: `computeSelector` walks up to six
-ancestors building an `nth-child` path, stopping early at any `id` or `data-testid`
-— it is precise but brittle against DOM reordering. `computeClassSelector` takes the
-tag plus up to six of its classes — it is stable but deliberately broad, and will
-match every element that shares those classes.
+Three functions, three intentions, one resolver:
+
+- `computeSelector` walks up to six ancestors building an `nth-child` path, stopping
+  early at any `id` or `data-testid` — precise, but brittle against DOM reordering.
+- `computeClassSelector` takes the tag plus up to six classes — stable, and matches
+  every element sharing that whole signature.
+- `computeGlobalSelector` drops to the element's kind — the bare tag when the tag is
+  already meaningful, tag plus one identifying class for generic containers — so it
+  reaches variants the class signature would miss.
+
+`selectorForScope` in the overlay is the only place that maps a scope to one of
+these. Both the match counts shown on the buttons and the rule that gets saved go
+through it, which is what keeps the promise on the button and the CSS in the
+stylesheet from drifting apart.
