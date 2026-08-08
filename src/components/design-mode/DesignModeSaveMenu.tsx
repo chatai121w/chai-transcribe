@@ -164,7 +164,7 @@ export function DesignModeSaveMenu() {
           <ChevronDown className="h-3 w-3" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[240px]">
+      <DropdownMenuContent data-design-mode-ui align="end" className="min-w-[240px]">
         <DropdownMenuLabel className="text-right text-[11px] text-muted-foreground">
           ערכה פעילה: {activeTheme.nameHe}
         </DropdownMenuLabel>

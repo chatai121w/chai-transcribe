@@ -258,7 +258,11 @@ export function DesignModeOverlay() {
 
     const isOwnUi = (target: EventTarget | null): boolean => {
       if (!(target instanceof Element)) return true;
-      return !!target.closest('[data-design-mode-ui]');
+      // Own overlay UI, plus any Radix portal content it opens (dropdowns,
+      // popovers, dialogs, tooltips) — those render outside the overlay root.
+      return !!target.closest(
+        '[data-design-mode-ui],[data-radix-popper-content-wrapper],[role="menu"],[role="dialog"],[data-radix-portal]'
+      );
     };
 
     const onMove = (e: MouseEvent) => {
