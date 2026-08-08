@@ -13,7 +13,10 @@ description: >
   reappeared, or that styling leaked onto elements they did not intend. Consult it
   before editing any of those files: the system has several non-obvious invariants
   (event capture ordering, portal detection, selector stability, override merge order)
-  that are easy to break silently.
+  that are easy to break silently. Use it as well when the goal is to *build* such a
+  system somewhere else — an in-app visual editor, click-to-style, a WYSIWYG theme
+  editor, live CSS editing, or an element picker — since references/porting.md carries
+  a framework-agnostic core implementation and the pitfalls that reimplementations hit.
 ---
 
 # Live Design Mode
@@ -44,6 +47,11 @@ anything that persists.
 `references/known-issues.md` — behaviours that look like bugs, the two real defects
 that were found and closed, and the reasoning behind the ones that are intentional.
 Read before "fixing" something that seems wrong.
+
+`references/porting.md` — how to build this system in another project: the ~150-line
+core, what is essential versus polish, a staged build order, and the pitfalls that
+bite reimplementations. Read this when the goal is a new implementation rather than a
+change to this one.
 
 ## The shape of the system
 
