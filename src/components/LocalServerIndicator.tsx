@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Server, Loader2, Power } from "lucide-react";
-import { getServerUrl } from "@/lib/serverConfig";
+import { fetchLocalServer, getServerUrl } from "@/lib/serverConfig";
+import { startLocalTranscriptionServer } from "@/lib/localServerLauncher";
 import { toast } from "@/hooks/use-toast";
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
@@ -9,7 +10,7 @@ import {
 type ServerState = 'checking' | 'up' | 'down' | 'starting';
 
 const POLL_UP_MS = 30_000;
-const POLL_DOWN_MS = 8_000;
+const POLL_DOWN_MS = 60_000;
 
 /**
  * Always-visible state of the local transcription server, with a one-click
@@ -29,7 +30,7 @@ export function LocalServerIndicator() {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 4000);
     try {
-      const res = await fetch(`${getServerUrl()}/health`, { signal: ctrl.signal });
+      const res = await fetchLocalServer(`${getServerUrl()}/health`, { signal: ctrl.signal });
       const data = await res.json();
       if (data?.status === 'ok') {
         setGpu(data.gpu ?? null);
@@ -62,20 +63,25 @@ export function LocalServerIndicator() {
     return () => { cancelled = true; clearTimeout(timer); };
   }, [check]);
 
+  useEffect(() => {
+    const handlePortChange = () => { void check(); };
+    window.addEventListener('local-server-port-change', handlePortChange);
+    return () => window.removeEventListener('local-server-port-change', handlePortChange);
+  }, [check]);
+
   const handleStart = useCallback(async () => {
     if (state === 'starting' || state === 'up') return;
     setState('starting');
     startingSince.current = Date.now();
     try {
-      const res = await fetch('/__api/start-server', { method: 'POST' });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'ההפעלה נכשלה');
+      const data = await startLocalTranscriptionServer();
       toast({
         title: '🚀 מפעיל את שרת התמלול',
         description: data.message === 'already running'
           ? `השרת כבר רץ בפורט ${data.port}`
-          : 'טוען את המודל — ייקח כדקה',
+          : `השרת עולה בפורט ${data.port} וטוען את המודל`,
       });
+      window.setTimeout(() => { void check(); }, 1500);
     } catch (e) {
       setState('down');
       startingSince.current = 0;
@@ -85,7 +91,7 @@ export function LocalServerIndicator() {
         variant: 'destructive',
       });
     }
-  }, [state]);
+  }, [check, state]);
 
   // Nothing to say while the first check is still in flight, and nothing worth
   // showing when everything is fine and the server is simply up.

@@ -25,10 +25,12 @@ param(
 
 $ErrorActionPreference = "Continue"
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "port-utils.ps1")
 $logDir      = Join-Path $projectRoot "logs"
 $watchdogLog = Join-Path $logDir "watchdog.log"
 $serverLog   = Join-Path $logDir "whisper-server.log"
 $serverErr   = Join-Path $logDir "whisper-server.err.log"
+$portState   = Join-Path $logDir "whisper-port.json"
 
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 
@@ -54,6 +56,33 @@ function Test-ServerHealthy {
     } catch {
         return $false
     }
+}
+
+function Find-RunningWhisperPort {
+    foreach ($candidate in 3000..3019) {
+        try {
+            $r = Invoke-RestMethod -Uri "http://127.0.0.1:$candidate/health" -TimeoutSec 1 -ErrorAction Stop
+            if ($r.status -eq "ok") { return $candidate }
+        } catch { }
+    }
+    return $null
+}
+
+function Save-SelectedPort {
+    @{ port = $Port; updatedAt = (Get-Date).ToUniversalTime().ToString('o') } |
+        ConvertTo-Json | Set-Content -LiteralPath $portState -Encoding UTF8
+}
+
+function Resolve-WhisperPort {
+    $runningPort = Find-RunningWhisperPort
+    if ($null -ne $runningPort) {
+        $script:Port = [int]$runningPort
+    } elseif (-not (Test-LocalPortAvailable -Port $Port)) {
+        $oldPort = $Port
+        $script:Port = Resolve-AvailablePort -PreferredPort 3000 -MaxAttempts 20
+        Write-WatchdogLog "Port $oldPort is occupied by another application; switching Whisper to $Port" "WARN"
+    }
+    Save-SelectedPort
 }
 
 function Get-ServerProcess {
@@ -90,10 +119,17 @@ function Start-WhisperServer {
     return $true
 }
 
+Resolve-WhisperPort
 Write-WatchdogLog "Watchdog started — checking port $Port every ${IntervalSeconds}s"
 
 $startedAt = $null
 while ($true) {
+    $runningElsewhere = Find-RunningWhisperPort
+    if ($null -ne $runningElsewhere -and $runningElsewhere -ne $Port) {
+        $script:Port = [int]$runningElsewhere
+        Save-SelectedPort
+        Write-WatchdogLog "Discovered Whisper on port $Port"
+    }
     if (Test-ServerHealthy) {
         if ($null -ne $startedAt) {
             Write-WatchdogLog "Server is healthy again"
@@ -111,6 +147,9 @@ while ($true) {
             if (Start-WhisperServer) { $startedAt = Get-Date }
         } else {
             if ($null -eq $startedAt) { Write-WatchdogLog "Server is down" "WARN" }
+            if (-not (Test-LocalPortAvailable -Port $Port)) {
+                Resolve-WhisperPort
+            }
             if (Start-WhisperServer) { $startedAt = Get-Date }
         }
     }

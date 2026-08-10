@@ -50,6 +50,7 @@ CORS(app)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WHISPER_SERVER_SCRIPT = PROJECT_ROOT / "server" / "transcribe_server.py"
 WHISPER_PORT = 3000
+WHISPER_PORT_RANGE = range(3000, 3020)
 WHISPER_PROCESS = None
 
 
@@ -62,19 +63,59 @@ def find_python():
     return None
 
 
-def is_whisper_running():
-    """Check if whisper server is responding on its port."""
+def _check_whisper_port(port):
+    """Check whether one port hosts this project's Whisper API."""
     import urllib.request
     try:
         req = urllib.request.Request(
-            f"http://localhost:{WHISPER_PORT}/health",
+            f"http://127.0.0.1:{port}/health",
             method="GET"
         )
-        with urllib.request.urlopen(req, timeout=3) as resp:
+        with urllib.request.urlopen(req, timeout=0.6) as resp:
             data = json.loads(resp.read())
-            return True, data
+            return data.get("status") == "ok", data
     except Exception:
         return False, None
+
+
+def is_whisper_running():
+    """Find an existing Whisper server, including one moved off port 3000."""
+    global WHISPER_PORT
+    ok, data = _check_whisper_port(WHISPER_PORT)
+    if ok:
+        return True, data
+    ports = [port for port in WHISPER_PORT_RANGE if port != WHISPER_PORT]
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        results = list(executor.map(_check_whisper_port, ports))
+    for port, (ok, data) in zip(ports, results):
+        if ok:
+            WHISPER_PORT = port
+            return True, data
+    return False, None
+
+
+def find_available_port(preferred=3000, attempts=20):
+    """Return a loopback port that is free on both IPv4 and IPv6."""
+    import socket
+    for port in range(preferred, preferred + attempts):
+        sockets = []
+        try:
+            for family, address in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+                sock = socket.socket(family, socket.SOCK_STREAM)
+                sockets.append(sock)
+                if sys.platform == "win32":
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                if family == socket.AF_INET6:
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                sock.bind((address, port))
+            return port
+        except OSError:
+            pass
+        finally:
+            for sock in sockets:
+                sock.close()
+    raise RuntimeError(f"No available Whisper port found from {preferred} through {preferred + attempts - 1}")
 
 
 def is_ollama_running():
@@ -142,10 +183,17 @@ def start_all():
     Responds immediately to avoid browser timeout (PNA preflight + AbortSignal).
     Heavy checks run in background thread."""
     import threading
-    global WHISPER_PROCESS
+    global WHISPER_PROCESS, WHISPER_PORT
+
+    running, _ = is_whisper_running()
+    if not running:
+        try:
+            WHISPER_PORT = find_available_port(3000, len(WHISPER_PORT_RANGE))
+        except RuntimeError as error:
+            return jsonify({"ok": False, "error": str(error)}), 503
 
     def _do_start():
-        global WHISPER_PROCESS
+        global WHISPER_PROCESS, WHISPER_PORT
         start_ollama()
         running, _ = is_whisper_running()
         if running:
@@ -166,8 +214,8 @@ def start_all():
 
     # Fire and forget — respond instantly
     threading.Thread(target=_do_start, daemon=True).start()
-    return jsonify({"ok": True, "results": {
-        "whisper": {"ok": True, "message": "starting"},
+    return jsonify({"ok": True, "port": WHISPER_PORT, "results": {
+        "whisper": {"ok": True, "message": "already running" if running else "starting", "port": WHISPER_PORT},
         "ollama": {"ok": True, "message": "starting"},
     }})
 

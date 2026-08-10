@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { debugLog } from '@/lib/debugLogger';
 import { getApiKey } from '@/lib/keyCrypto';
-import { normalizeServerUrl, getServerUrl, DEFAULT_SERVER_URL } from '@/lib/serverConfig';
+import { fetchLocalServer, isLoopbackUrl, normalizeServerUrl } from '@/lib/serverConfig';
+import { getLauncherHealth } from '@/lib/localServerLauncher';
 
 export interface WordTiming {
   word: string;
@@ -148,18 +149,6 @@ export const useLocalServer = () => {
     const decrypted = getApiKey('whisper_server_url');
     const configured = normalizeServerUrl(decrypted || localStorage.getItem('whisper_server_url'));
 
-    // On hosted HTTPS pages, direct localhost calls can be blocked by browser PNA/CORS.
-    // Prefer same-origin proxy path when user configured loopback URL.
-    if (typeof window !== 'undefined') {
-      const host = window.location.hostname;
-      const isLocalPage = host === 'localhost' || host === '127.0.0.1';
-      const isHostedHttps = window.location.protocol === 'https:' && !isLocalPage;
-      const isLoopbackTarget = configured.includes('localhost:3000') || configured.includes('127.0.0.1:3000');
-      if (isHostedHttps && isLoopbackTarget) {
-        return DEFAULT_SERVER_URL;
-      }
-    }
-
     return configured;
   };
 
@@ -194,7 +183,7 @@ export const useLocalServer = () => {
     const baseUrl = getBaseUrl();
     const url = `${baseUrl}/health`;
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      const res = await fetchLocalServer(url, { signal: AbortSignal.timeout(3000) });
       if (res.ok) {
         const data = await res.json();
         applyConnectedStatus(data as ServerStatus);
@@ -212,19 +201,13 @@ export const useLocalServer = () => {
       const host = window.location.hostname;
       const isLocalPage = host === 'localhost' || host === '127.0.0.1';
       if (isLocalPage) return false;
-      return baseUrl.includes('localhost:3000') || baseUrl.includes('127.0.0.1:3000');
+      return isLoopbackUrl(baseUrl);
     })();
 
     if (shouldTryLauncherHealth) {
       try {
-        const launcherRes = await fetch('http://localhost:8764/health', {
-          signal: AbortSignal.timeout(15000),
-          headers: { 'Accept': 'application/json' },
-        });
-        if (launcherRes.ok) {
-          const launcher = await launcherRes.json() as {
-            whisper?: { running?: boolean };
-          };
+        const launcher = await getLauncherHealth() as { whisper?: { running?: boolean } } | null;
+        if (launcher) {
           if (launcher.whisper?.running) {
             const fallbackStatus: ServerStatus = {
               status: 'ok',
@@ -334,7 +317,7 @@ export const useLocalServer = () => {
 
       setProgress(30);
 
-      const res = await fetch(`${getBaseUrl()}/transcribe`, {
+      const res = await fetchLocalServer(`${getBaseUrl()}/transcribe`, {
         method: 'POST',
         headers: getApiHeaders(),
         body: form,
@@ -369,7 +352,7 @@ export const useLocalServer = () => {
     try {
       const form = new FormData();
       form.append('file', file, file.name);
-      const res = await fetch(`${getBaseUrl()}/stage-audio`, {
+      const res = await fetchLocalServer(`${getBaseUrl()}/stage-audio`, {
         method: 'POST',
         headers: getApiHeaders(),
         body: form,
@@ -463,7 +446,7 @@ export const useLocalServer = () => {
       abortRef.current = new AbortController();
       setPhase('transcribing');
 
-      const res = await fetch(`${getBaseUrl()}/transcribe-stream`, {
+      const res = await fetchLocalServer(`${getBaseUrl()}/transcribe-stream`, {
         method: 'POST',
         headers: getApiHeaders(),
         body: form,
@@ -656,7 +639,7 @@ export const useLocalServer = () => {
       abortRef.current = new AbortController();
       const streamUrl = `${getBaseUrl()}/transcribe-stream`;
 
-      const res = await fetch(streamUrl, {
+      const res = await fetchLocalServer(streamUrl, {
         method: 'POST',
         headers: getApiHeaders(),
         body: form,
@@ -829,7 +812,7 @@ export const useLocalServer = () => {
   };
 
   const loadModel = async (modelId: string) => {
-    const res = await fetch(`${getBaseUrl()}/load-model`, {
+    const res = await fetchLocalServer(`${getBaseUrl()}/load-model`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getApiHeaders() },
       body: JSON.stringify({ model: modelId }),
@@ -842,7 +825,7 @@ export const useLocalServer = () => {
   };
 
   const downloadModel = async (modelId: string) => {
-    const res = await fetch(`${getBaseUrl()}/download-model`, {
+    const res = await fetchLocalServer(`${getBaseUrl()}/download-model`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getApiHeaders() },
       body: JSON.stringify({ model: modelId }),
@@ -855,7 +838,7 @@ export const useLocalServer = () => {
   };
 
   const checkModelUpdates = async (modelIds: string[]): Promise<ModelUpdateInfo[]> => {
-    const res = await fetch(`${getBaseUrl()}/model-updates`, {
+    const res = await fetchLocalServer(`${getBaseUrl()}/model-updates`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getApiHeaders() },
       body: JSON.stringify({ models: modelIds }),
@@ -871,7 +854,7 @@ export const useLocalServer = () => {
 
   const shutdownServer = useCallback(async () => {
     try {
-      await fetch(`${getBaseUrl()}/shutdown`, { method: 'POST', headers: getApiHeaders(), signal: AbortSignal.timeout(3000) });
+      await fetchLocalServer(`${getBaseUrl()}/shutdown`, { method: 'POST', headers: getApiHeaders(), signal: AbortSignal.timeout(3000) });
     } catch {
       // Expected — server dies before responding
     }
@@ -881,7 +864,7 @@ export const useLocalServer = () => {
 
   const warmupServer = useCallback(async () => {
     try {
-      const res = await fetch(`${getBaseUrl()}/warmup`, { method: 'POST', headers: getApiHeaders(), signal: AbortSignal.timeout(30000) });
+      const res = await fetchLocalServer(`${getBaseUrl()}/warmup`, { method: 'POST', headers: getApiHeaders(), signal: AbortSignal.timeout(30000) });
       if (res.ok) {
         const data = await res.json();
         return data.warmup_time as number;
@@ -905,7 +888,7 @@ export const useLocalServer = () => {
     preloadAbortRef.current = new AbortController();
 
     try {
-      const res = await fetch(`${getBaseUrl()}/preload-stream`, {
+      const res = await fetchLocalServer(`${getBaseUrl()}/preload-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getApiHeaders() },
         body: JSON.stringify({ model, compute_type: ct }),
@@ -978,7 +961,7 @@ export const useLocalServer = () => {
 
   const cancelPreload = useCallback(async () => {
     try {
-      await fetch(`${getBaseUrl()}/cancel-model-load`, {
+      await fetchLocalServer(`${getBaseUrl()}/cancel-model-load`, {
         method: 'POST',
         headers: getApiHeaders(),
         signal: AbortSignal.timeout(5000),

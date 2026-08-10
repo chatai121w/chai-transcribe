@@ -38,11 +38,15 @@ if (-not (Test-Path $venvPython)) {
 }
 
 $launcherScript = Join-Path $projectRoot "server\launcher_tray.py"
+$startupFolder = [Environment]::GetFolderPath('Startup')
+$shortcutPath = Join-Path $startupFolder "SmartTranscriber.lnk"
+$taskRegistered = $false
 
 # --- Remove ---
 if ($Remove) {
     Write-Host "Removing launcher from startup..." -ForegroundColor Yellow
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    if (Test-Path $shortcutPath) { Remove-Item $shortcutPath -Force }
     Write-Host "[V] Removed!" -ForegroundColor Green
     exit 0
 }
@@ -90,16 +94,31 @@ if ($AutoStart) {
         -StartWhenAvailable `
         -ExecutionTimeLimit ([TimeSpan]::Zero)
 
-    Register-ScheduledTask `
-        -TaskName $taskName `
-        -Action $action `
-        -Trigger $trigger `
-        -Settings $settings `
-        -Description "Smart Hebrew Transcriber - Tray launcher (port 8764)" `
-        -RunLevel Limited `
-        -Force | Out-Null
-
-    Write-Host "      [V] Registered as startup task!" -ForegroundColor Green
+    try {
+        Register-ScheduledTask `
+            -TaskName $taskName `
+            -Action $action `
+            -Trigger $trigger `
+            -Settings $settings `
+            -Description "Smart Hebrew Transcriber - Tray launcher (ports 8764-8773)" `
+            -RunLevel Limited `
+            -Force `
+            -ErrorAction Stop | Out-Null
+        $taskRegistered = $true
+        if (Test-Path $shortcutPath) { Remove-Item $shortcutPath -Force }
+        Write-Host "      [V] Registered as startup task!" -ForegroundColor Green
+    } catch {
+        # Per-user Startup does not require administrator privileges.
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $exePath
+        $shortcut.Arguments = "`"$launcherScript`""
+        $shortcut.WorkingDirectory = $projectRoot
+        $shortcut.WindowStyle = 7
+        $shortcut.Description = "Smart Hebrew Transcriber - Local Launcher"
+        $shortcut.Save()
+        Write-Host "      [V] Registered in the current user's Startup folder (no admin required)." -ForegroundColor Green
+    }
 } else {
     Write-Host "[2/2] Skipping startup registration (use -AutoStart to enable)" -ForegroundColor Gray
 }
@@ -115,10 +134,10 @@ Write-Host "  To remove:         .\scripts\install-launcher.ps1 -Remove" -Foregr
 Write-Host ""
 
 # --- Run now ---
-if ($Run) {
+if ($Run -and -not $AutoStart) {
     Write-Host "Starting tray launcher..." -ForegroundColor Cyan
     $exePath = if (Test-Path $venvPythonW) { $venvPythonW } else { $venvPython }
-    Start-Process -FilePath $exePath -ArgumentList "`"$launcherScript`"" -WorkingDirectory $projectRoot
+    Start-Process -FilePath $exePath -ArgumentList "`"$launcherScript`"" -WorkingDirectory $projectRoot -WindowStyle Hidden
     Write-Host "[V] Tray launcher started! Look for the icon in the system tray." -ForegroundColor Green
 }
 
@@ -127,11 +146,22 @@ if ($AutoStart) {
     Write-Host ""
     Write-Host "Starting launcher now..." -ForegroundColor Yellow
     try {
-        Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+        if ($taskRegistered) {
+            Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+        } else {
+            Start-Process -FilePath $exePath -ArgumentList "`"$launcherScript`"" -WorkingDirectory $projectRoot -WindowStyle Hidden
+        }
         Start-Sleep -Seconds 2
         try {
-            $r = Invoke-RestMethod -Uri "http://localhost:8764/health" -TimeoutSec 3
-            Write-Host "[V] Launcher running! Status:" -ForegroundColor Green
+            $r = $null
+            foreach ($candidate in 8764..8773) {
+                try {
+                    $r = Invoke-RestMethod -Uri "http://127.0.0.1:$candidate/health" -TimeoutSec 1 -ErrorAction Stop
+                    if ($r.launcher) { break }
+                } catch { }
+            }
+            if (-not $r) { throw 'Launcher health endpoint not found' }
+            Write-Host "[V] Launcher running on port $($r.launcher_port)! Status:" -ForegroundColor Green
             Write-Host "    Whisper: $($r.whisper.running)" -ForegroundColor Gray
             Write-Host "    Ollama:  $($r.ollama.running)" -ForegroundColor Gray
         } catch {
@@ -139,29 +169,6 @@ if ($AutoStart) {
         }
     } catch {
         Write-Host "[!] Could not start task: $_" -ForegroundColor Yellow
-    }
-}
-
-# --- Create startup shortcut (.bat in shell:startup) ---
-$startupFolder = [Environment]::GetFolderPath('Startup')
-$batSource = Join-Path $projectRoot "start-launcher.bat"
-$shortcutPath = Join-Path $startupFolder "SmartTranscriber.lnk"
-
-if ($AutoStart -and (Test-Path $batSource)) {
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = $batSource
-    $shortcut.WorkingDirectory = $projectRoot
-    $shortcut.WindowStyle = 7  # Minimized
-    $shortcut.Description = "Smart Hebrew Transcriber - Tray Launcher"
-    $shortcut.Save()
-    Write-Host "[V] Startup shortcut created: $shortcutPath" -ForegroundColor Green
-}
-
-if ($Remove) {
-    if (Test-Path $shortcutPath) {
-        Remove-Item $shortcutPath -Force
-        Write-Host "[V] Startup shortcut removed" -ForegroundColor Green
     }
 }
 

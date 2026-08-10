@@ -50,6 +50,7 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WHISPER_SERVER_SCRIPT = PROJECT_ROOT / "server" / "transcribe_server.py"
 WHISPER_PORT = 3000
+WHISPER_PORT_RANGE = range(3000, 3020)
 VITE_PORT = 8080
 LAUNCHER_PORT = 8764
 TASK_NAME = "SmartTranscriberLauncher"
@@ -68,6 +69,7 @@ cloudflare_running   = False
 voice_hotkey_running = False
 voice_cmd_running    = False
 cloudflare_url: str | None = None  # public trycloudflare.com URL
+_instance_mutex = None
 
 # ─── Cloudflare constants ─────────────────────────────────
 CLOUDFLARED_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "cloudflared" / "cloudflared.exe"
@@ -88,16 +90,50 @@ def find_python():
     return None
 
 
-def check_whisper():
-    """Check if whisper server is responding."""
+def acquire_single_instance():
+    """Prevent startup/task races from creating multiple tray launchers."""
+    global _instance_mutex
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.CreateMutexW(None, False, "Local\\ChaiTranscribeLauncher")
+    if not handle:
+        return False
+    if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        kernel32.CloseHandle(handle)
+        return False
+    _instance_mutex = handle
+    return True
+
+
+def _check_whisper_port(port):
+    """Check whether one port hosts this project's Whisper API."""
     import urllib.request
     try:
-        req = urllib.request.Request(f"http://localhost:{WHISPER_PORT}/health", method="GET")
-        with urllib.request.urlopen(req, timeout=3) as resp:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/health", method="GET")
+        with urllib.request.urlopen(req, timeout=0.6) as resp:
             data = json.loads(resp.read())
-            return True, data
+            return data.get("status") == "ok", data
     except Exception:
         return False, None
+
+
+def check_whisper():
+    """Find an existing Whisper server, including one moved off port 3000."""
+    global WHISPER_PORT
+    ok, data = _check_whisper_port(WHISPER_PORT)
+    if ok:
+        return True, data
+    ports = [port for port in WHISPER_PORT_RANGE if port != WHISPER_PORT]
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        results = list(executor.map(_check_whisper_port, ports))
+    for port, (ok, data) in zip(ports, results):
+        if ok:
+            WHISPER_PORT = port
+            return True, data
+    return False, None
 
 
 def check_ollama():
@@ -105,7 +141,7 @@ def check_ollama():
     import urllib.request
     try:
         req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=3) as resp:
+        with urllib.request.urlopen(req, timeout=1) as resp:
             data = json.loads(resp.read())
             return True, len(data.get("models", []))
     except Exception:
@@ -117,7 +153,7 @@ def check_vite():
     import urllib.request
     try:
         req = urllib.request.Request(f"http://localhost:{VITE_PORT}/", method="GET")
-        with urllib.request.urlopen(req, timeout=3) as resp:
+        with urllib.request.urlopen(req, timeout=1) as resp:
             body = resp.read(256_000).decode("utf-8", errors="ignore")
             return "Smart Hebrew Transcriber" in body or "smart-hebrew-transcriber" in body
     except Exception:
@@ -200,13 +236,14 @@ def stop_ollama():
 
 def start_whisper():
     """Start CUDA whisper server."""
-    global whisper_process
+    global whisper_process, WHISPER_PORT
     running, data = check_whisper()
     if running:
         return True, "already running", data
     python_path = find_python()
     if not python_path:
         return False, "No venv found", None
+    WHISPER_PORT = find_available_port(3000, len(WHISPER_PORT_RANGE))
     # Use server's built-in DEFAULT_MODEL (large-v3-turbo) — don't hardcode a model that may not exist
     cmd = [python_path, str(WHISPER_SERVER_SCRIPT), "--port", str(WHISPER_PORT)]
     try:
@@ -215,7 +252,7 @@ def start_whisper():
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
-        return True, "starting", None
+        return True, "starting", {"port": WHISPER_PORT}
     except Exception as e:
         return False, str(e), None
 
@@ -738,12 +775,18 @@ CORS(app)
 
 @app.route("/health", methods=["GET"])
 def health():
-    w_ok, w_data = check_whisper()
-    o_ok, o_models = check_ollama()
-    v_ok = check_vite()
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        whisper_future = executor.submit(check_whisper)
+        ollama_future = executor.submit(check_ollama)
+        vite_future = executor.submit(check_vite)
+        w_ok, w_data = whisper_future.result(timeout=3)
+        o_ok, o_models = ollama_future.result(timeout=3)
+        v_ok = vite_future.result(timeout=3)
     return jsonify({
         "status": "ok",
         "launcher": True,
+        "launcher_port": LAUNCHER_PORT,
         "tray": True,
         "whisper": {"running": w_ok, "port": WHISPER_PORT, "gpu": w_data.get("gpu") if w_data else None},
         "ollama": {"running": o_ok, "models": o_models},
@@ -760,7 +803,7 @@ def api_start():
         results["ollama"] = {"ok": ok_o, "message": msg_o}
     if target in ("all", "whisper", "cuda"):
         ok_w, msg_w, data_w = start_whisper()
-        results["whisper"] = {"ok": ok_w, "message": msg_w}
+        results["whisper"] = {"ok": ok_w, "message": msg_w, "port": WHISPER_PORT}
         if data_w:
             results["whisper"]["gpu"] = data_w.get("gpu")
     if target in ("all", "vite"):
@@ -833,12 +876,16 @@ def run_flask():
 # ─── Main ───────────────────────────────────────────────
 
 def main():
-    global _tray_icon
+    global _tray_icon, LAUNCHER_PORT
 
-    # Prevent duplicate instances
+    if not acquire_single_instance():
+        print("Chai Transcribe launcher is already running. Exiting duplicate instance.")
+        return
+
+    # Keep the launcher reachable even when another application owns 8764.
     if is_port_in_use(LAUNCHER_PORT):
-        print(f"Port {LAUNCHER_PORT} already in use — another launcher is running. Exiting.")
-        sys.exit(0)
+        LAUNCHER_PORT = find_available_port(LAUNCHER_PORT, 10)
+        print(f"Launcher port 8764 is occupied — using {LAUNCHER_PORT}.")
 
     print(f"Starting Smart Transcriber Tray (API on port {LAUNCHER_PORT})...")
 
@@ -846,17 +893,12 @@ def main():
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
 
-    # Auto-boot essential services (CUDA + Ollama only)
-    # Others can be started manually from the tray menu
+    # Read status only. The watchdog may already supervise Whisper, and the
+    # website/tray start action remains the single explicit launch path.
     global whisper_running, ollama_running, vite_running, cloudflare_running
     global voice_hotkey_running, voice_cmd_running
     whisper_running, _ = check_whisper()
     ollama_running, _ = check_ollama()
-    if not whisper_running:
-        start_whisper()
-    if not ollama_running:
-        start_ollama()
-    # Just check status for the rest (don't auto-start)
     vite_running = check_vite()
     cloudflare_running = check_cloudflare()
     voice_hotkey_running = check_voice_hotkey()

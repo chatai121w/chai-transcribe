@@ -146,7 +146,7 @@ async function mockLauncherStart(page: import('@playwright/test').Page, onStart:
   });
   await page.route('**/localhost:8764/start', (route) => {
     onStart();
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, results: { whisper: { message: 'started' } } }) });
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, results: { whisper: { message: 'started', port: 3000 } } }) });
   });
 }
 

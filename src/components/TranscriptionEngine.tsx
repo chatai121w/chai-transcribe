@@ -12,6 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
 import { Globe, Cpu, Zap, Chrome, Mic, Waves, Server, Power, PowerOff, Loader2, CheckCircle2, XCircle, Copy, Rabbit, Turtle, Settings, ChevronDown, Flame, Download, Sparkles, Link2, KeyRound, Cloud, Monitor, Target, AlertTriangle, BrainCircuit, Square } from "lucide-react";
 import { useLocalServer } from "@/hooks/useLocalServer";
+import { startLocalTranscriptionServer } from "@/lib/localServerLauncher";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
@@ -176,39 +177,19 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
   const handleStartServer = useCallback(async () => {
     setIsStarting(true);
     try {
-      const res = await fetch('/__api/start-server', { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) {
-        toast({
-          title: "🚀 השרת מופעל!",
-          description: data.message === 'already running'
-            ? `השרת כבר רץ בפורט ${data.port}, ממתין לחיבור...`
-            : `השרת עולה בפורט ${data.port}, ממתין לחיבור...`,
-        });
-        startPolling(3000, 120000);
-      } else {
-        throw new Error(data.error || 'Failed to start');
-      }
-    } catch (err: any) {
-      // Fallback: try launcher service on 8764
-      try {
-        const launcherRes = await fetch('http://localhost:8764/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target: 'whisper' }), signal: AbortSignal.timeout(15000) });
-        const launcherData = await launcherRes.json();
-        if (launcherData.ok) {
-          toast({
-            title: "🚀 השרת מופעל!",
-            description: launcherData.results?.whisper?.message === 'already running' ? 'השרת כבר רץ, ממתין לחיבור...' : 'שרת CUDA + Ollama עולים...',
-          });
-          startPolling(3000, 120000);
-          setTimeout(() => setIsStarting(false), 120000);
-          return;
-        }
-      } catch {
-        // launcher not available either
-      }
+      const data = await startLocalTranscriptionServer();
+      toast({
+        title: "🚀 השרת מופעל!",
+        description: data.message === 'already running'
+          ? `השרת כבר רץ בפורט ${data.port}, ממתין לחיבור...`
+          : `השרת עולה בפורט ${data.port}, ממתין לחיבור...`,
+      });
+      startPolling(3000, 120000);
+      setTimeout(() => setIsStarting(false), 120000);
+    } catch (err) {
       toast({
         title: "שגיאה בהפעלת השרת",
-        description: "לא ניתן להפעיל. הפעל ידנית בטרמינל.",
+        description: err instanceof Error ? err.message : "לא ניתן להפעיל את השרת המקומי.",
         variant: "destructive",
       });
       setIsStarting(false);
@@ -446,59 +427,13 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                   הגדר כתובת שרת
                 </Button>
               ) : isNonLocalHost ? (
-                /* On hosted Lovable site — try launcher (8764) first, then direct check */
                 <Button
                   size="sm"
                   variant="default"
                   className="gap-1.5 text-xs h-7"
-                  onClick={async (e) => {
+                  onClick={(e) => {
                     e.preventDefault();
-                    if (window.location.protocol === 'https:') {
-                      toast({
-                        title: '🔒 הדפדפן חוסם גישה ל-localhost',
-                        description: 'באתר מאובטח (HTTPS) יש להגדיר כתובת שרת מרוחקת או להריץ את האפליקציה מקומית.',
-                        variant: 'destructive',
-                      });
-                      setAdvancedOpen(true);
-                      return;
-                    }
-                    setIsStarting(true);
-                    // 1. Try the launcher service (port 8764) — has PNA + CORS headers
-                    try {
-                      const launcherRes = await fetch('http://localhost:8764/start', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ target: 'whisper' }),
-                        signal: AbortSignal.timeout(15000),
-                      });
-                      const launcherData = await launcherRes.json();
-                      if (launcherData.ok) {
-                        toast({
-                          title: '🚀 השרת מופעל!',
-                          description: launcherData.results?.whisper?.message === 'already running'
-                            ? 'השרת כבר רץ, ממתין לחיבור...'
-                            : 'שרת CUDA עולה, ממתין לחיבור...',
-                        });
-                        startPolling(3000, 120000);
-                        setTimeout(() => setIsStarting(false), 120000);
-                        return;
-                      }
-                    } catch {
-                      // Launcher not reachable — try direct connection check
-                    }
-                    // 2. Fallback: just check if server is already running
-                    const ok = await checkConnection();
-                    if (ok) {
-                      toast({ title: '🟢 מחובר!', description: 'שרת CUDA זוהה בפורט המקומי שנבחר אוטומטית' });
-                      startPolling(10000);
-                    } else {
-                      toast({
-                        title: '🔴 שרת לא נגיש',
-                        description: 'הפעל את שרת ה-CUDA מה-tray או בטרמינל, ואז לחץ שוב.',
-                        variant: 'destructive',
-                      });
-                    }
-                    setIsStarting(false);
+                    void handleStartServer();
                   }}
                 >
                   {isStarting ? (
