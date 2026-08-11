@@ -13,6 +13,7 @@ import {
   Youtube, Loader2, Download, FileText, Music, Video as VideoIcon,
   AlertTriangle, Search, History, Trash2, ExternalLink, Captions,
   RotateCcw, ChevronDown, ChevronUp, ShieldCheck, FlaskConical, Gauge,
+  ArrowRight,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -304,14 +305,27 @@ export default function YouTubePage() {
 
   return (
     <div className="container mx-auto px-4 py-6 max-w-5xl" dir="rtl">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-12 h-12 rounded-xl bg-red-500/10 flex items-center justify-center">
-          <Youtube className="w-7 h-7 text-red-500" />
+      <div className="mb-6 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-red-500/10">
+            <Youtube className="h-7 w-7 text-red-500" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold">תמלול והורדה מ-YouTube</h1>
+            <p className="text-sm text-muted-foreground">הורד אודיו, וידאו, או תמלל ישירות מקישור</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold">תמלול והורדה מ-YouTube</h1>
-          <p className="text-sm text-muted-foreground">הורד אודיו, וידאו, או תמלל ישירות מקישור</p>
-        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="shrink-0"
+          aria-label="חזרה לעמוד הקודם"
+          title="חזרה לעמוד הקודם"
+          onClick={() => window.history.length > 1 ? navigate(-1) : navigate("/")}
+        >
+          <ArrowRight className="h-5 w-5" />
+        </Button>
       </div>
 
       <Tabs defaultValue="new">
