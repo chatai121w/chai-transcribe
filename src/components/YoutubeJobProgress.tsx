@@ -101,15 +101,15 @@ export function YoutubeJobProgress({ job }: YoutubeJobProgressProps) {
   })();
 
   return (
-    <Card className="p-4" dir="rtl">
-      <div className="flex items-center justify-between gap-3 mb-2">
+    <Card className="p-4 text-right" dir="rtl">
+      <div className="flex items-center justify-start gap-3 mb-2">
         <div className="flex items-center gap-2 min-w-0">
           {isError ? <AlertTriangle className="w-4 h-4 text-destructive shrink-0" />
             : isDone ? <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
             : <Loader2 className="w-4 h-4 text-primary animate-spin shrink-0" />}
           <span className="font-medium text-sm truncate">{stageLabel}</span>
         </div>
-        <div className="flex items-baseline gap-1 shrink-0">
+        <div className="flex items-baseline gap-1 shrink-0" dir="ltr">
           <span className={`text-2xl font-bold tabular-nums leading-none ${isError ? 'text-destructive' : 'text-primary'}`}>
             {overall}
           </span>
@@ -129,7 +129,7 @@ export function YoutubeJobProgress({ job }: YoutubeJobProgressProps) {
         </div>
       </div>
 
-      <p className="text-xs text-muted-foreground mt-1.5">{detail}</p>
+      <p className="text-xs text-muted-foreground mt-1.5 text-right">{detail}</p>
       {meta.performance_profile && (
         <p className="text-[10px] text-muted-foreground mt-1">
           פרופיל: {meta.performance_profile === 'safe-accelerated' ? 'האצה בטוחה (ניסיוני)' : 'יציב'}
@@ -137,7 +137,7 @@ export function YoutubeJobProgress({ job }: YoutubeJobProgressProps) {
       )}
 
       {/* Stage chain */}
-      <div className="flex flex-wrap items-center gap-1.5 mt-3">
+      <div className="flex flex-wrap items-center justify-start gap-1.5 mt-3" dir="rtl">
         {STAGE_LABELS.map(({ key, label, icon }) => {
           const stage = byKey(key);
           if (!stage || stage.status === 'skipped') return null;

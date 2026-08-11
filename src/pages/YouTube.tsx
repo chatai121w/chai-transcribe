@@ -38,6 +38,7 @@ import {
   type YoutubePerformanceMetrics,
   type YoutubePerformanceProfile,
 } from "@/lib/youtubePerformance";
+import { loadYoutubeEditorPayload, type YoutubeOutputFile } from "@/lib/youtubeEditorImport";
 
 /** Engines offered for YouTube transcription — same set as the main page. */
 type YtEngine = 'local-server' | 'groq' | 'openai' | 'gemini' | 'google' | 'assemblyai' | 'deepgram' | 'local';
@@ -244,42 +245,21 @@ export default function YouTubePage() {
    * Load a finished job straight into the text editor: audio in the player,
    * transcript in the editor, word timings wiring the two together.
    */
-  const openInEditor = async (job: { output_files?: Array<{ kind?: string; url?: string; filename?: string }> | null } | null) => {
+  const openInEditor = async (job: { output_files?: YoutubeOutputFile[] | null } | null) => {
     if (!job) return;
-    const outputs = (job.output_files ?? []) as Array<{ kind?: string; url?: string; filename?: string }>;
-    const audio = outputs.find(f => f.kind === 'audio');
-    const json = outputs.find(f => f.kind === 'json');
-    const txt = outputs.find(f => f.kind === 'txt');
-    if (!audio?.url || (!json?.url && !txt?.url)) {
-      toast({ title: 'חסרים קבצים', description: 'צריך אודיו ותמלול כדי לפתוח בעורך', variant: 'destructive' });
-      return;
-    }
-
     setOpeningEditor(true);
     try {
-      let text = '';
-      let wordTimings: Array<{ word: string; start: number; end: number; probability?: number }> = [];
-
-      if (json?.url) {
-        const data = await (await fetch(json.url)).json();
-        text = (data.segments ?? []).map((s: { text: string }) => (s.text || '').trim()).filter(Boolean).join(' ');
-        wordTimings = Array.isArray(data.wordTimings) ? data.wordTimings : [];
-      }
-      if (!text && txt?.url) text = await (await fetch(txt.url)).text();
-      if (!text.trim()) throw new Error('התמלול ריק');
-
-      const blob = await (await fetch(audio.url)).blob();
-      const name = audio.filename || 'youtube-audio';
+      const { text, wordTimings, audioBlob, audioFileName } = await loadYoutubeEditorPayload(job.output_files ?? []);
       // Persist for recovery, exactly like a normal transcription would.
       try {
-        await db.audioBlobs.put({ id: 'last_audio', blob, type: blob.type, name, saved_at: Date.now() });
+        await db.audioBlobs.put({ id: 'last_audio', blob: audioBlob, type: audioBlob.type, name: audioFileName, saved_at: Date.now() });
       } catch { /* Dexie unavailable */ }
 
       navigate('/text-editor', {
         state: {
           text,
-          audioUrl: URL.createObjectURL(blob),
-          audioFileName: name,
+          audioUrl: URL.createObjectURL(audioBlob),
+          audioFileName,
           wordTimings,
         },
       });
@@ -531,13 +511,13 @@ export default function YouTubePage() {
           {submitting && !activeJob && (
             <div className="space-y-2">
               <div className="text-sm font-semibold text-muted-foreground">התקדמות המשימה</div>
-              <Card className="p-4" dir="rtl">
-                <div className="flex items-center justify-between gap-3 mb-2">
+              <Card className="p-4 text-right" dir="rtl">
+                <div className="flex items-center justify-start gap-3 mb-2">
                   <div className="flex items-center gap-2">
                     <Loader2 className="w-4 h-4 text-primary animate-spin" />
                     <span className="font-medium text-sm">פותח משימה...</span>
                   </div>
-                  <div className="flex items-baseline gap-1">
+                  <div className="flex items-baseline gap-1" dir="ltr">
                     <span className="text-2xl font-bold tabular-nums leading-none text-primary">0</span>
                     <span className="text-sm text-muted-foreground">%</span>
                   </div>
@@ -574,7 +554,12 @@ export default function YouTubePage() {
                     {/* One click: audio in the player, transcript in the editor, linked */}
                     {audioFile && hasTranscript && (
                       <Button
-                        onClick={() => openInEditor(activeJob)}
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void openInEditor(activeJob);
+                        }}
                         disabled={openingEditor}
                         size="lg"
                         className="w-full gap-2"
@@ -813,20 +798,20 @@ function JobRow({ job, onDelete, onOpenEditor, openingEditor, comparison }: {
 
           {isActive && (
             <div className="mt-2">
-              <div className="flex items-center gap-2">
-                <Progress value={job.progress_pct} className="h-1.5 flex-1" />
-                <span className="text-xs font-semibold tabular-nums text-primary shrink-0">{job.progress_pct}%</span>
+              <div className="flex items-center gap-2 text-right" dir="rtl">
+                <span className="text-xs font-semibold tabular-nums text-primary shrink-0" dir="ltr">{job.progress_pct}%</span>
+                <Progress value={job.progress_pct} dir="rtl" className="h-1.5 flex-1" />
               </div>
             </div>
           )}
           {showDlStats && (
-            <div className="flex gap-3 mt-1 text-xs text-muted-foreground font-mono">
-              <span>⬇ {(dlMeta!.dl_mb ?? 0).toFixed(1)} MB</span>
+            <div className="flex flex-wrap justify-start gap-3 mt-1 text-xs text-muted-foreground font-mono text-right" dir="rtl">
+              <span dir="ltr">⬇ {(dlMeta!.dl_mb ?? 0).toFixed(1)} MB</span>
               {(dlMeta!.total_mb ?? 0) > 0 && (
-                <span className="text-muted-foreground/60">/ {(dlMeta!.total_mb!).toFixed(1)} MB</span>
+                <span className="text-muted-foreground/60" dir="ltr">/ {(dlMeta!.total_mb!).toFixed(1)} MB</span>
               )}
               {(dlMeta!.speed_mb ?? 0) > 0 && (
-                <span className="text-blue-500">{(dlMeta!.speed_mb!).toFixed(2)} MB/s</span>
+                <span className="text-blue-500" dir="ltr">{(dlMeta!.speed_mb!).toFixed(2)} MB/s</span>
               )}
             </div>
           )}
@@ -889,8 +874,13 @@ function JobRow({ job, onDelete, onOpenEditor, openingEditor, comparison }: {
             ))}
             {canOpenEditor && (
               <Button
+                type="button"
                 size="sm" className="h-7 text-xs gap-1"
-                onClick={() => onOpenEditor(job)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onOpenEditor(job);
+                }}
                 disabled={openingEditor}
               >
                 {openingEditor ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
