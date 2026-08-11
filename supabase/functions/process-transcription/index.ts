@@ -145,6 +145,7 @@ const ENGINE_UPLOAD_LIMITS: Record<string, number> = {
   groq: 24 * MB,
   openai: 24 * MB,
   google: 9 * MB,
+  gemini: 18 * MB,
   deepgram: STORAGE_LIMIT,
   assemblyai: STORAGE_LIMIT,
 };
@@ -229,7 +230,7 @@ async function transcribeBlob(
       const fd = new FormData();
       fd.append('file', blob, safeFileName);
       fd.append('model', 'whisper-1');
-      fd.append('language', language || 'he');
+      if (language && language !== 'auto') fd.append('language', language);
       fd.append('response_format', 'text');
 
       const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -260,10 +261,13 @@ async function transcribeBlob(
     const { result, usedKey } = await runWithPool(pool, { provider: 'deepgram', chunkLabel }, async (apiKey) => {
       const arrayBuffer = await blob.arrayBuffer();
       const langMap: Record<string, string> = { 'he': 'he', 'yi': 'he', 'en': 'en', 'auto': 'multi' };
-      const dgLang = langMap[language] || 'multi';
+      const dgLang = langMap[language] || language;
+      const dgLanguageQuery = language === 'auto'
+        ? 'detect_language=true'
+        : `language=${encodeURIComponent(dgLang)}`;
 
       const response = await fetch(
-        `https://api.deepgram.com/v1/listen?language=${dgLang}&model=nova-2&smart_format=true`,
+        `https://api.deepgram.com/v1/listen?${dgLanguageQuery}&model=nova-2&smart_format=true`,
         {
           method: 'POST',
           headers: { 'Authorization': `Token ${apiKey}`, 'Content-Type': blob.type || 'audio/webm' },
@@ -309,7 +313,10 @@ async function transcribeBlob(
       const txRes = await fetch('https://api.assemblyai.com/v2/transcript', {
         method: 'POST',
         headers: { 'authorization': apiKey, 'content-type': 'application/json' },
-        body: JSON.stringify({ audio_url: upload_url, language_code: language === 'auto' ? null : language }),
+        body: JSON.stringify({
+          audio_url: upload_url,
+          ...(language === 'auto' ? { language_detection: true } : { language_code: language }),
+        }),
       });
       if (!txRes.ok) {
         const errorText = await txRes.text();
@@ -351,11 +358,22 @@ async function transcribeBlob(
       };
       const audioConfig = encodingMap[ext] || { encoding: 'WEBM_OPUS', sampleRateHertz: 48000 };
 
+      const googleLanguageMap: Record<string, string> = {
+        he: 'he-IL', yi: 'yi', en: 'en-US', fr: 'fr-FR', ar: 'ar-IL', es: 'es-ES',
+        de: 'de-DE', it: 'it-IT', pt: 'pt-PT', ru: 'ru-RU', uk: 'uk-UA',
+        pl: 'pl-PL', nl: 'nl-NL', tr: 'tr-TR',
+      };
+      const googleAuto = language === 'auto';
       const response = await fetch(`https://speech.googleapis.com/v1/speech:recognize?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          config: { ...audioConfig, languageCode: 'he-IL', enableAutomaticPunctuation: true },
+          config: {
+            ...audioConfig,
+            languageCode: googleAuto ? 'he-IL' : (googleLanguageMap[language] || language),
+            ...(googleAuto ? { alternativeLanguageCodes: ['en-US', 'fr-FR', 'ar-IL'] } : {}),
+            enableAutomaticPunctuation: true,
+          },
           audio: { content: base64Audio },
         }),
       });
@@ -373,6 +391,57 @@ async function transcribeBlob(
       return text;
     });
     return { text: result, usedKey, provider: 'google' };
+  } else if (engine === 'gemini') {
+    const pool = buildPool(
+      userApiKeys?.google_key || Deno.env.get('GOOGLE_API_KEY'),
+      userApiKeys?.google_keys_pool
+    );
+    if (pool.length === 0) throw new Error('Google AI API key is not configured for Gemini.');
+
+    const languageNames: Record<string, string> = {
+      he: 'Hebrew', yi: 'Yiddish', en: 'English', fr: 'French', ar: 'Arabic',
+      es: 'Spanish', de: 'German', it: 'Italian', pt: 'Portuguese', ru: 'Russian',
+      uk: 'Ukrainian', pl: 'Polish', nl: 'Dutch', tr: 'Turkish',
+    };
+    const languageInstruction = language === 'auto'
+      ? 'Detect the spoken language and transcribe in that same language.'
+      : `The spoken language is ${languageNames[language] || language}. Transcribe only in that language.`;
+    const prompt = `Transcribe the attached audio accurately, word for word. ${languageInstruction} Return only the transcript, without introductions, explanations, headings, or quotation marks.`;
+    const audioBase64 = arrayBufferToBase64(await blob.arrayBuffer());
+
+    const { result, usedKey } = await runWithPool(pool, { provider: 'gemini', chunkLabel }, async (apiKey) => {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [
+              { text: prompt },
+              { inlineData: { mimeType: blob.type || 'audio/mpeg', data: audioBase64 } },
+            ] }],
+            generationConfig: { temperature: 0 },
+          }),
+        }
+      );
+      const data = await response.json();
+      if (!response.ok) {
+        const errorText = JSON.stringify(data);
+        const err = new Error(`Gemini API error: ${response.status} - ${errorText.slice(0, 200)}`);
+        (err as any).status = response.status;
+        if (response.status === 429) {
+          (err as any).retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'), errorText);
+        }
+        throw err;
+      }
+      const text = (data.candidates?.[0]?.content?.parts ?? [])
+        .map((part: { text?: string }) => part.text || '')
+        .join('')
+        .trim();
+      if (!text) throw new Error('Gemini returned an empty transcript.');
+      return text;
+    });
+    return { text: result, usedKey, provider: 'gemini' };
   }
 
   throw new Error(`Unsupported engine: ${engine}`);
@@ -474,7 +543,7 @@ serve(async (req) => {
     const r = await transcribeBlob(
       fileData,
       engine,
-      job.language || 'he',
+      job.language || 'auto',
       job.file_name || 'audio.webm',
       userApiKeys,
       'whole file',

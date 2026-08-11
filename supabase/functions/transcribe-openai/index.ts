@@ -17,12 +17,15 @@ serve(async (req) => {
     let OPENAI_API_KEY: string | undefined;
     let fileBlob: Blob | undefined;
     let fileName = 'audio.mp3';
+    let language: string | undefined;
 
     if (contentType.includes('multipart/form-data')) {
       // Multipart from browser (preferred - supports real upload progress client-side)
       const form = await req.formData();
       const apiKey = form.get('apiKey');
       if (typeof apiKey === 'string') OPENAI_API_KEY = apiKey;
+      const lang = form.get('language');
+      if (typeof lang === 'string' && lang !== 'auto') language = lang;
       const file = form.get('file');
       if (file instanceof Blob) {
         fileBlob = file;
@@ -34,9 +37,10 @@ serve(async (req) => {
       if (!fileBlob) throw new Error('file is required in multipart form');
     } else {
       // Backward compatible JSON with base64
-      const { audio, fileName: jsonName, apiKey } = await req.json();
+      const { audio, fileName: jsonName, apiKey, language: jsonLanguage } = await req.json();
       if (!audio) throw new Error('No audio data provided');
       OPENAI_API_KEY = apiKey || Deno.env.get('OPENAI_API_KEY');
+      if (jsonLanguage && jsonLanguage !== 'auto') language = jsonLanguage;
       const binaryAudio = Uint8Array.from(atob(audio), c => c.charCodeAt(0));
       fileBlob = new Blob([binaryAudio], { type: 'application/octet-stream' });
       fileName = jsonName || fileName;
@@ -50,7 +54,7 @@ serve(async (req) => {
     const fd = new FormData();
     fd.append('file', fileBlob!, fileName);
     fd.append('model', 'whisper-1');
-    fd.append('language', 'he');
+    if (language) fd.append('language', language);
     fd.append('response_format', 'verbose_json');
     fd.append('timestamp_granularities[]', 'word');
 
@@ -90,7 +94,7 @@ serve(async (req) => {
       end: w.end,
     }));
 
-    return new Response(JSON.stringify({ text: result.text, wordTimings }), {
+    return new Response(JSON.stringify({ text: result.text, wordTimings, language: result.language || language }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error) {

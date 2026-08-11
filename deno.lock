@@ -82,6 +82,7 @@
         "npm:@tauri-apps/plugin-dialog@^2.7.0",
         "npm:@tauri-apps/plugin-http@^2.5.8",
         "npm:@tauri-apps/plugin-shell@^2.3.5",
+        "npm:@testing-library/dom@^10.4.1",
         "npm:@testing-library/jest-dom@^6.9.1",
         "npm:@testing-library/react@^16.3.2",
         "npm:@testing-library/user-event@^14.6.1",
@@ -131,12 +132,13 @@
         "npm:tailwindcss@^3.4.17",
         "npm:terser@^5.46.1",
         "npm:tone@^15.1.22",
+        "npm:tsx@^4.20.6",
         "npm:typescript-eslint@^8.38.0",
         "npm:typescript@^5.8.3",
         "npm:vaul@^1.1.2",
         "npm:vite-plugin-compression@~0.5.1",
         "npm:vite@^5.4.19",
-        "npm:vitest@^4.1.2",
+        "npm:vitest@^2.1.9",
         "npm:wavesurfer.js@^7.12.6",
         "npm:zod@^3.25.76"
       ]

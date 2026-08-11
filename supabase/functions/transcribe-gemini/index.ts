@@ -35,13 +35,14 @@ function resolveGatewayModel(m: string): string {
 
 
 const buildPrompt = (lang: string) => {
-  const langHint = lang === "he"
-    ? "השפה היא עברית."
-    : lang === "en"
-    ? "The language is English."
-    : lang === "yi"
-    ? "השפה היא יידיש."
-    : "זהה אוטומטית את השפה.";
+  const languageNames: Record<string, string> = {
+    he: "Hebrew", yi: "Yiddish", en: "English", fr: "French", ar: "Arabic",
+    es: "Spanish", de: "German", it: "Italian", pt: "Portuguese", ru: "Russian",
+    uk: "Ukrainian", pl: "Polish", nl: "Dutch", tr: "Turkish",
+  };
+  const langHint = lang === "auto"
+    ? "זהה אוטומטית את שפת הדיבור ותמלל באותה שפה."
+    : `The spoken language is ${languageNames[lang] || lang}. Transcribe only in that language.`;
   return `אתה מתמלל מקצועי. תמלל את קובץ האודיו המצורף במדויק, מילה במילה. ${langHint}\nהחזר אך ורק את הטקסט המתומלל, ללא הקדמות, הסברים, כותרות או סימני ציטוט.`;
 };
 

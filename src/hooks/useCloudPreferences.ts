@@ -35,6 +35,7 @@ export interface UserPreferences {
   cuda_paragraph_threshold: number;
   cuda_preload_mode: string;   // 'preload' | 'direct'
   cuda_cloud_save: string;     // 'immediate' | 'text-only' | 'skip'
+  youtube_save_to_cloud: boolean; // preserve YouTube audio + transcript across devices
   personal_pronunciation_enabled: boolean;
   loshon_kodesh_enabled: boolean;         // Loshon Kodesh transcription mode
   active_pronunciation_profile: string;   // active pronunciation profile ID ('' = none)
@@ -72,6 +73,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   cuda_paragraph_threshold: 0,
   cuda_preload_mode: 'preload',
   cuda_cloud_save: 'immediate',
+  youtube_save_to_cloud: true,
   personal_pronunciation_enabled: false,
   loshon_kodesh_enabled: false,
   active_pronunciation_profile: '',

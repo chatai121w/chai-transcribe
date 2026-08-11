@@ -10,6 +10,7 @@ export interface QueueItem {
   addedAt: number;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   error?: string;
+  language?: string;
 }
 
 const DB_NAME = 'transcriber_queue';
@@ -99,7 +100,7 @@ export function useLocalTranscriptionQueue() {
     });
   }, []);
 
-  const addToQueue = useCallback(async (file: File, audioUrl: string): Promise<string> => {
+  const addToQueue = useCallback(async (file: File, audioUrl: string, language = 'auto'): Promise<string> => {
     const id = `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const item: QueueItem = {
       id,
@@ -108,6 +109,7 @@ export function useLocalTranscriptionQueue() {
       audioUrl,
       addedAt: Date.now(),
       status: 'pending',
+      language,
     };
 
     // Store file blob and metadata in IndexedDB

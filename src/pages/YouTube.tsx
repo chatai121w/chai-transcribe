@@ -39,6 +39,12 @@ import {
   type YoutubePerformanceProfile,
 } from "@/lib/youtubePerformance";
 import { loadYoutubeEditorPayload, type YoutubeOutputFile } from "@/lib/youtubeEditorImport";
+import { TranscriptionLanguageControl } from "@/components/TranscriptionLanguageControl";
+import {
+  normalizeSourceLanguage,
+  resolveCudaModel,
+  type SourceLanguage,
+} from "@/lib/transcriptionLanguages";
 
 /** Engines offered for YouTube transcription — same set as the main page. */
 type YtEngine = 'local-server' | 'groq' | 'openai' | 'gemini' | 'google' | 'assemblyai' | 'deepgram' | 'local';
@@ -110,7 +116,6 @@ export default function YouTubePage() {
   const [mode, setMode] = useState<YtMode>("transcribe");
   const [audioFormat, setAudioFormat] = useState<"best" | "mp3" | "wav">("best");
   const [videoQuality, setVideoQuality] = useState<"360" | "720" | "1080">("720");
-  const [saveToCloud, setSaveToCloud] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [engine, setEngine] = useState<YtEngine>("local-server");
   const [performanceProfile, setPerformanceProfile] = useState<YoutubePerformanceProfile>("stable");
@@ -118,7 +123,10 @@ export default function YouTubePage() {
   const [handingOff, setHandingOff] = useState(false);
   const [openingEditor, setOpeningEditor] = useState(false);
   const navigate = useNavigate();
-  const { updatePreference } = useCloudPreferences();
+  const { preferences, updatePreference } = useCloudPreferences();
+  const sourceLanguage = normalizeSourceLanguage(preferences.source_language);
+  const saveToCloud = preferences.youtube_save_to_cloud;
+  const setSourceLanguage = (language: SourceLanguage) => updatePreference('source_language', language);
 
   // Health of the local transcription server — drives the readiness strip and
   // decides whether the server-side engine can be offered at all.
@@ -177,10 +185,13 @@ export default function YouTubePage() {
     setSubmitting(true);
     try {
       const effectiveMode: YtMode = wantsCloudEngine && mode === 'transcribe' ? 'audio' : mode;
-      if (wantsCloudEngine) {
-        // Applied before the handoff so the transcription page starts on it.
+      if (mode === 'transcribe' || mode === 'full') {
+        // Persisted before starting so a resumed/handoff job keeps the same engine.
         await updatePreference('engine', engine);
       }
+      const cudaModel = engine === 'local-server'
+        ? resolveCudaModel(sourceLanguage, localStorage.getItem('preferred_local_model'))
+        : undefined;
       const job = await startYoutubeJob({
         userId: user.id,
         url: url.trim(),
@@ -189,6 +200,9 @@ export default function YouTubePage() {
         videoQuality,
         saveToCloud: probe?.backend === "local" ? saveToCloud : false,
         performanceProfile,
+        engine,
+        language: sourceLanguage,
+        model: cudaModel,
         knownInfo: {
           title: probe.title,
           thumbnail: probe.thumbnail,
@@ -412,7 +426,7 @@ export default function YouTubePage() {
                   <Switch
                     id="save-cloud"
                     checked={saveToCloud}
-                    onCheckedChange={setSaveToCloud}
+                    onCheckedChange={(checked) => updatePreference('youtube_save_to_cloud', checked)}
                   />
                 </div>
               )}
@@ -447,6 +461,13 @@ export default function YouTubePage() {
                       ? 'התמלול ירוץ על השרת המקומי — הכל בתוך המשימה הזו.'
                       : 'האודיו יורד כאן, ואז עובר אוטומטית לתמלול במנוע שנבחר.'}
                   </p>
+                  <div className="mt-3 rounded-md border border-border/60 p-3">
+                    <TranscriptionLanguageControl
+                      value={sourceLanguage}
+                      onChange={setSourceLanguage}
+                      compact
+                    />
+                  </div>
                 </div>
               )}
 
@@ -594,7 +615,7 @@ export default function YouTubePage() {
                         <span className="text-sm font-semibold">נגן אודיו</span>
                       </div>
                       <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
-                        <a href={audioFile.url} download={audioFile.filename}>
+                        <a href={`${audioFile.url}${audioFile.url.includes('?') ? '&' : '?'}download=1`} download={audioFile.filename}>
                           <Download className="w-3 h-3 ml-1" />הורד
                         </a>
                       </Button>
@@ -866,7 +887,7 @@ function JobRow({ job, onDelete, onOpenEditor, openingEditor, comparison }: {
           <div className="flex gap-1 mt-2 flex-wrap items-center">
             {outs.map((f, i) => (
               <Button key={i} variant="outline" size="sm" className="h-7 text-xs" asChild>
-                <a href={f.url} target="_blank" rel="noreferrer" download={f.filename}>
+                <a href={`${f.url}${f.url.includes('?') ? '&' : '?'}download=1`} target="_blank" rel="noreferrer" download={f.filename}>
                   <Download className="w-3 h-3 ml-1" />
                   {f.kind.toUpperCase()}
                 </a>

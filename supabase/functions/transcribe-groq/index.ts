@@ -42,7 +42,7 @@ serve(async (req) => {
     let GROQ_API_KEY: string | undefined;
     let fileBlob: Blob | undefined;
     let fileName = 'audio.webm';
-    let language = 'he';
+    let language: string | undefined;
     let modelOverride: string | undefined;
     let hotwords = '';
 
@@ -113,7 +113,7 @@ serve(async (req) => {
           const fd = new FormData();
           fd.append('file', typedBlob, safeFileName);
           fd.append('model', model);
-          fd.append('language', language);
+          if (language) fd.append('language', language);
           fd.append('response_format', 'verbose_json');
           fd.append('timestamp_granularities[]', 'word');
           fd.append('temperature', '0');

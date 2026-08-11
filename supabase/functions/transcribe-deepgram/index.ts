@@ -32,11 +32,14 @@ serve(async (req) => {
       'auto': 'multi', // Deepgram's multi-language model
     };
 
-    const deepgramLanguage = languageMap[language] || 'multi';
+    const deepgramLanguage = languageMap[language] || language;
+    const languageQuery = language === 'auto'
+      ? 'detect_language=true'
+      : `language=${encodeURIComponent(deepgramLanguage)}`;
 
     // Call Deepgram API
     const response = await fetch(
-      `https://api.deepgram.com/v1/listen?language=${deepgramLanguage}&model=nova-2&smart_format=true`,
+      `https://api.deepgram.com/v1/listen?${languageQuery}&model=nova-2&smart_format=true`,
       {
         method: 'POST',
         headers: {
@@ -67,7 +70,11 @@ serve(async (req) => {
     }));
 
     return new Response(
-      JSON.stringify({ text, wordTimings }),
+      JSON.stringify({
+        text,
+        wordTimings,
+        language: result.results?.channels?.[0]?.detected_language || (language === 'auto' ? undefined : language),
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 

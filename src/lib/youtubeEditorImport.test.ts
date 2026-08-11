@@ -49,4 +49,26 @@ describe("YouTube editor import", () => {
 
     await expect(loadYoutubeEditorPayload(outputs, fetcher)).rejects.toThrow("קובץ התמלול לא נטען מהשרת (404)");
   });
+
+  it("falls back to cloud artifacts when local YouTube files are unavailable", async () => {
+    const cloudOutputs = [
+      { kind: "audio", url: "http://127.0.0.1:3000/missing-audio", artifactPath: "u/j/audio/source.m4a", filename: "source.m4a" },
+      { kind: "json", url: "http://127.0.0.1:3000/missing-json", artifactPath: "u/j/transcripts/transcript.json", filename: "transcript.json" },
+    ];
+    const fetcher = vi.fn(async () => new Response("missing", { status: 404 }));
+    const artifactLoader = vi.fn(async (path: string) => {
+      if (path.endsWith("transcript.json")) {
+        return new Blob([JSON.stringify({
+          segments: [{ text: "נטען מהענן" }],
+          wordTimings: [{ word: "נטען", start: 0, end: 0.4 }],
+        })], { type: "application/json" });
+      }
+      return new Blob(["cloud-audio"], { type: "audio/mp4" });
+    });
+
+    const result = await loadYoutubeEditorPayload(cloudOutputs, fetcher, artifactLoader);
+    expect(result.text).toBe("נטען מהענן");
+    expect(result.audioBlob.type).toBe("audio/mp4");
+    expect(artifactLoader).toHaveBeenCalledTimes(2);
+  });
 });

@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { audio, fileName, apiKey } = await req.json();
+    const { audio, fileName, apiKey, language = 'auto' } = await req.json();
 
     if (!audio) {
       throw new Error('No audio data provided');
@@ -40,11 +40,18 @@ serve(async (req) => {
     };
     const audioConfig = encodingMap[ext] || { encoding: 'WEBM_OPUS', sampleRateHertz: 48000 };
 
+    const languageMap: Record<string, string> = {
+      he: 'he-IL', yi: 'yi', en: 'en-US', fr: 'fr-FR', ar: 'ar-IL',
+      es: 'es-ES', de: 'de-DE', it: 'it-IT', pt: 'pt-PT', ru: 'ru-RU',
+      uk: 'uk-UA', pl: 'pl-PL', nl: 'nl-NL', tr: 'tr-TR',
+    };
+    const isAuto = language === 'auto';
     const requestBody = {
       config: {
         encoding: audioConfig.encoding,
         sampleRateHertz: audioConfig.sampleRateHertz,
-        languageCode: 'he-IL',
+        languageCode: isAuto ? 'he-IL' : (languageMap[language] || language),
+        ...(isAuto ? { alternativeLanguageCodes: ['en-US', 'fr-FR', 'ar-IL'] } : {}),
         enableAutomaticPunctuation: true,
       },
       audio: {
@@ -95,7 +102,7 @@ serve(async (req) => {
     console.log('Google transcription completed successfully, length:', transcription.length);
 
     return new Response(
-      JSON.stringify({ text: transcription }),
+      JSON.stringify({ text: transcription, language: isAuto ? undefined : language }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 

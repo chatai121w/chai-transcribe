@@ -45,6 +45,12 @@ import { addRecentFile } from "@/components/RecentFiles";
 import { applyTranscriptionKnowledge } from '@/lib/transcriptionKnowledge';
 import { buildTranscriptionHotwords } from '@/lib/transcriptionHotwords';
 import { getExpectedProcessingSeconds, asymptoticProgress, formatProcessingStatus } from '@/lib/cloudProgressEstimator';
+import {
+  normalizeSourceLanguage,
+  resolveCudaModel,
+  shouldUseHebrewKnowledge,
+  type SourceLanguage,
+} from '@/lib/transcriptionLanguages';
 
 // Lazy-loaded heavy components
 const LiveTranscriber = lazy(() => import("@/components/LiveTranscriber").then(m => ({ default: m.LiveTranscriber })));
@@ -83,7 +89,6 @@ const TRANSCRIPTION_WIDGETS: WidgetDefinition[] = [
 ];
 
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
-type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
 
 const Index = () => {
   const navigate = useNavigate();
@@ -95,7 +100,7 @@ const Index = () => {
   // Cloud-synced preferences
   const { preferences, updatePreference, isLoaded: prefsLoaded } = useCloudPreferences();
   const engine = preferences.engine as Engine;
-  const sourceLanguage = preferences.source_language as SourceLanguage;
+  const sourceLanguage = normalizeSourceLanguage(preferences.source_language);
   const fontSize = preferences.font_size;
   const fontFamily = preferences.font_family;
   const textColor = preferences.text_color;
@@ -384,7 +389,10 @@ const Index = () => {
         );
         const outcome = await Promise.race([
           bgTask.run(`local-server \u2014 ${next.fileName}`, async () => {
-            return await transcribeWithLocalServer(file, next.audioUrl, undefined, { fromQueue: true });
+            return await transcribeWithLocalServer(file, next.audioUrl, undefined, {
+              fromQueue: true,
+              language: normalizeSourceLanguage(next.language),
+            });
           }),
           timeoutPromise,
         ]);
@@ -416,9 +424,18 @@ const Index = () => {
   const lastSavedTranscriptIdRef = useRef<string | null>(null);
 
   // Save to cloud history (respects cloud save mode for CUDA engine)
-  const saveToHistory = async (text: string, engineUsed: string, skipCloud?: boolean, timings?: Array<{word: string, start: number, end: number, probability?: number}>, audioFile?: File, folder?: string, textOnly = false) => {
-    const knowledge = applyTranscriptionKnowledge(text, engineUsed);
-    const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
+  const saveToHistory = async (text: string, engineUsed: string, skipCloud?: boolean, timings?: Array<{word: string, start: number, end: number, probability?: number}>, audioFile?: File, folder?: string, textOnly = false, detectedLanguage?: string) => {
+    const useHebrewKnowledge = shouldUseHebrewKnowledge(sourceLanguage, detectedLanguage);
+    const knowledge = useHebrewKnowledge
+      ? applyTranscriptionKnowledge(text, engineUsed)
+      : {
+          text,
+          totalApplied: 0,
+          deterministicApplied: 0,
+          learnedApplied: [],
+          counts: { definitive: 0, learned: 0, profile: 0, vocabulary: 0, loshonKodesh: 0 },
+        };
+    const lkActive = useHebrewKnowledge && (isLoshonKodeshEnabled() || isProfileLoshonKodesh());
     let finalText = knowledge.text;
     // Layer 2: optional AI fix when auto-mode is on
     if (lkActive && isLkAiEnabled() && isLkAiAuto()) {
@@ -448,7 +465,7 @@ const Index = () => {
     // Record that the active profile was used for this audio file (powers
     // future filename-based profile suggestions).
     const usedFilename = audioFile?.name || currentFileRef.current?.name;
-    if (usedFilename) recordProfileUsage(usedFilename);
+    if (useHebrewKnowledge && usedFilename) recordProfileUsage(usedFilename);
 
     if (skipCloud) {
       // Save only to localStorage, skip cloud upload entirely
@@ -885,7 +902,6 @@ const Index = () => {
         form.append('fileName', file.name);
         form.append('apiKey', keyPool[idx]);
         form.append('language', sourceLanguage);
-        form.append('targetLanguage', 'he');
 
         debugLog.info('OpenAI', `Uploading via XHR with key #${idx + 1}/${keyPool.length}`);
         const result = await xhrInvoke('transcribe-openai', form, (p) => setUploadProgress(p));
@@ -1006,7 +1022,6 @@ const Index = () => {
         form.append('fileName', file.name);
         form.append('apiKey', groqKey);
         form.append('language', sourceLanguage);
-        form.append('targetLanguage', 'he');
 
         debugLog.info('Groq', `Uploading via XHR with key #${idx + 1}/${keyPool.length}`);
         const result = await xhrInvoke('transcribe-groq', form, (p) => setUploadProgress(p));
@@ -1157,7 +1172,6 @@ const Index = () => {
             fileName: file.name,
             apiKey: keyPool[idx],
             language: sourceLanguage,
-            targetLanguage: 'he'
           }
         });
 
@@ -1290,7 +1304,7 @@ const Index = () => {
     file: File,
     fileAudioUrl?: string,
     resumeFrom?: { startFrom: number; existingText: string; existingWords: Array<{word: string, start: number, end: number}> },
-    opts?: { fromQueue?: boolean },
+    opts?: { fromQueue?: boolean; language?: SourceLanguage },
   ): Promise<'done' | 'queued'> => {
     // Fresh connection check before transcription (serverConnected state may be stale)
     const isUp = await checkConnection();
@@ -1301,7 +1315,7 @@ const Index = () => {
         return 'queued';
       }
       // Add to persistent queue (survives refresh)
-      const queueId = await localQueue.addToQueue(file, fileAudioUrl || '');
+      const queueId = await localQueue.addToQueue(file, fileAudioUrl || '', opts?.language || sourceLanguage);
       startPolling(2000);
       toast({
         title: "📋 נוסף לתור התמלולים",
@@ -1315,7 +1329,7 @@ const Index = () => {
     let activeQueueId: string | null = null;
     if (!opts?.fromQueue) {
       try {
-        activeQueueId = await localQueue.addToQueue(file, fileAudioUrl || '');
+        activeQueueId = await localQueue.addToQueue(file, fileAudioUrl || '', opts?.language || sourceLanguage);
         await localQueue.updateItemStatus(activeQueueId, 'processing');
       } catch (qErr) {
         debugLog.warn('Queue', 'Failed to register file in status panel', qErr);
@@ -1324,8 +1338,8 @@ const Index = () => {
     }
 
     try {
-      const preferredModel = localStorage.getItem('preferred_local_model') || undefined;
-      const lang = sourceLanguage === 'auto' ? 'auto' : sourceLanguage;
+      const lang = opts?.language || sourceLanguage;
+      const preferredModel = resolveCudaModel(lang, localStorage.getItem('preferred_local_model'));
       setTranscript('');
       setWordTimings([]);
       setLastStats(null);
@@ -1333,11 +1347,11 @@ const Index = () => {
 
       // Build CUDA options from cloud preferences
       const profileInitPrompt = getProfileInitialPrompt();
-      const profileForcesLk = isProfileLoshonKodesh();
-      const lkOn = isLoshonKodeshEnabled() || profileForcesLk;
+      const profileForcesLk = lang === 'he' && isProfileLoshonKodesh();
+      const lkOn = lang === 'he' && (isLoshonKodeshEnabled() || profileForcesLk);
       // When LK is on, merge user-edited LK hotwords + prefer LK prompt
       const mergedCudaHotwords = buildTranscriptionHotwords({
-        manual: preferences.cuda_hotwords || '',
+        manual: lang === 'he' ? (preferences.cuda_hotwords || '') : '',
         context: file.name,
         loshonKodesh: lkOn,
       });
@@ -1348,10 +1362,12 @@ const Index = () => {
         beamSize: preferences.cuda_beam_size || undefined,
         noConditionOnPrevious: preferences.cuda_no_condition_prev,
         vadAggressive: preferences.cuda_vad_aggressive,
-        hotwords: mergedCudaHotwords,
+        hotwords: lang === 'he' ? mergedCudaHotwords : undefined,
         paragraphThreshold: preferences.cuda_paragraph_threshold || undefined,
         loshonKodesh: lkOn,
-        initialPrompt: lkOn ? (getLoshonKodeshPrompt() || profileInitPrompt || undefined) : (profileInitPrompt || undefined),
+        initialPrompt: lang === 'he'
+          ? (lkOn ? (getLoshonKodeshPrompt() || profileInitPrompt || undefined) : (profileInitPrompt || undefined))
+          : undefined,
       };
 
       // Use parallel mode (stage audio + preload model simultaneously) when model isn't ready
@@ -1369,27 +1385,18 @@ const Index = () => {
         debugLog.info('CUDA Stream', `${partial.progress}% — ${partial.wordTimings.length} מילים`);
       }, resumeFrom, cudaOptions);
 
-      const isHebrewDominant = (txt: string) => {
-        const letters = txt.replace(/\s+/g, '');
-        if (!letters.length) return false;
-        const heCount = (txt.match(/[\u0590-\u05FF]/g) || []).length;
-        return heCount / letters.length >= 0.35;
-      };
       const hasHeavyRepetition = (txt: string) => /\b(\S+)(?:\s+\1){6,}\b/.test(txt);
 
       const suspiciousAutoOutput =
         !resumeFrom &&
         lang === 'auto' &&
-        (
-          (result.language && result.language !== 'he' && !isHebrewDominant(result.text)) ||
-          hasHeavyRepetition(result.text)
-        );
+        hasHeavyRepetition(result.text);
 
       if (suspiciousAutoOutput) {
-        debugLog.warn('CUDA Server', `Suspicious auto-language output (detected=${result.language}) — retrying with forced he`);
+        debugLog.warn('CUDA Server', `Repetitive auto-language output (detected=${result.language}) — retrying accurately without changing language`);
         toast({
           title: 'זוהה תמלול חשוד',
-          description: 'מבצע ניסיון נוסף עם עברית כפויה ואיכות גבוהה',
+          description: 'מבצע ניסיון נוסף באותה שפה ובאיכות גבוהה',
         });
 
         const retryOptions: CudaOptions = {
@@ -1400,7 +1407,7 @@ const Index = () => {
           vadAggressive: false,
         };
 
-        const retryResult = await transcribeFn(file, preferredModel, 'he', undefined, undefined, retryOptions);
+        const retryResult = await transcribeFn(file, preferredModel, 'auto', undefined, undefined, retryOptions);
         if (retryResult.text && retryResult.text.length > result.text.length * 0.5) {
           result = retryResult;
         }
@@ -1414,13 +1421,14 @@ const Index = () => {
       // Cloud save mode: 'immediate' (default), 'text-only' (no audio upload), 'skip' (local only)
       const cloudSaveMode = preferences.cuda_cloud_save || 'immediate';
       const engineLabel = `Local CUDA (${result.model || 'server'})`;
+      const effectiveLanguage = result.language || lang;
       let finalText: string;
       if (cloudSaveMode === 'skip') {
-        finalText = await saveToHistory(result.text, engineLabel, true, timings);  // localStorage only
+        finalText = await saveToHistory(result.text, engineLabel, true, timings, undefined, undefined, false, effectiveLanguage);  // localStorage only
       } else if (cloudSaveMode === 'text-only') {
-        finalText = await saveToHistory(result.text, engineLabel, false, timings, undefined, undefined, true);
+        finalText = await saveToHistory(result.text, engineLabel, false, timings, undefined, undefined, true, effectiveLanguage);
       } else {
-        finalText = await saveToHistory(result.text, engineLabel, undefined, timings);  // full: text + audio to cloud
+        finalText = await saveToHistory(result.text, engineLabel, undefined, timings, undefined, undefined, false, effectiveLanguage);  // full: text + audio to cloud
       }
 
       clearPartial();
@@ -1965,7 +1973,7 @@ const Index = () => {
       for (let offset = 0; offset < keyPool.length; offset++) {
         const idx = (safeStartIndex + offset) % keyPool.length;
         const { data, error } = await supabase.functions.invoke('transcribe-google', {
-          body: { audio: base64, fileName: file.name, apiKey: keyPool[idx], language: sourceLanguage, targetLanguage: 'he' }
+          body: { audio: base64, fileName: file.name, apiKey: keyPool[idx], language: sourceLanguage }
         });
         if (!error && data?.text) {
           setProviderActiveKey('google', keyPool, idx);
@@ -1998,7 +2006,6 @@ const Index = () => {
         form.append('fileName', file.name);
         form.append('apiKey', keyPool[idx]);
         form.append('language', sourceLanguage);
-        if (provider === 'openai' || provider === 'groq') form.append('targetLanguage', 'he');
 
         const { data, error } = await xhrInvoke(engineMap[provider], form, onProgress);
         if (!error && data?.text) {
@@ -2545,7 +2552,7 @@ const Index = () => {
         <LiveTranscriber
           serverConnected={serverConnected}
           onTranscriptComplete={async (result: LiveTranscriptResult) => {
-            const { text, audioBlob, wordTimings, folder, durationSec, engineLabel } = result;
+            const { text, audioBlob, wordTimings, folder, durationSec, engineLabel, language } = result;
             setTranscriptFromEngine(text);
             const historyEngineLabel = `Live (${engineLabel})`;
             const audioFile = audioBlob
@@ -2564,7 +2571,7 @@ const Index = () => {
               } catch { /* Dexie not available */ }
             }
             const liveAudioUrl = audioBlob ? URL.createObjectURL(audioBlob) : undefined;
-            saveToHistory(text, historyEngineLabel, undefined, wordTimings, audioFile, folder).then((finalText) => {
+            saveToHistory(text, historyEngineLabel, undefined, wordTimings, audioFile, folder, false, language).then((finalText) => {
               setTimeout(() => navigate('/text-editor', { state: { text: finalText, audioUrl: liveAudioUrl, wordTimings, transcriptId: lastSavedTranscriptIdRef.current } }), 1000);
             });
             addAnalyticsRecord({

@@ -22,10 +22,11 @@ import { GeminiModelSelect, loadGeminiModel } from "@/components/GeminiModelSele
 import { GeminiHealthCheck } from "@/components/GeminiHealthCheck";
 import { GeminiBadge } from "@/components/GeminiBadge";
 import { GeminiUsageDialog } from "@/components/GeminiUsageDialog";
+import { TranscriptionLanguageControl } from "@/components/TranscriptionLanguageControl";
+import { resolveCudaModel, type SourceLanguage } from "@/lib/transcriptionLanguages";
 
 
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
-type SourceLanguage = 'auto' | 'he' | 'yi' | 'en';
 
 interface TranscriptionEngineProps {
   selected: Engine;
@@ -164,7 +165,8 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
   // Auto-preload model when connected + preload mode
   useEffect(() => {
     if (selected === 'local-server' && isConnected && preloadMode === 'preload' && !modelReady && !modelLoading) {
-      preloadModelStream(undefined, undefined, (msg) => setPreloadMsg(msg)).then((r) => {
+      const modelForLanguage = resolveCudaModel(sourceLanguage, localStorage.getItem('preferred_local_model'));
+      preloadModelStream(modelForLanguage, undefined, (msg) => setPreloadMsg(msg)).then((r) => {
         if (r.ready) {
           toast({ title: '✅ המודל מוכן!', description: r.elapsed ? `נטען ב-${r.elapsed}s` : 'המודל טעון ומוכן לתמלול' });
         }
@@ -172,7 +174,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
       }).catch(() => setPreloadMsg(''));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, isConnected, preloadMode]);
+  }, [selected, isConnected, preloadMode, sourceLanguage]);
 
   const handleStartServer = useCallback(async () => {
     setIsStarting(true);
@@ -872,21 +874,10 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
       )}
 
       <div className="border-t pt-4 mt-4">
-        <Label className="text-sm font-semibold mb-2 block text-right">שפת מקור (קלט)</Label>
-        <Select value={sourceLanguage} onValueChange={onSourceLanguageChange}>
-          <SelectTrigger className="w-full text-right" dir="rtl">
-            <SelectValue placeholder="בחר שפת מקור" />
-          </SelectTrigger>
-          <SelectContent dir="rtl">
-            <SelectItem value="auto">זיהוי אוטומטי</SelectItem>
-            <SelectItem value="he">עברית 🇮🇱</SelectItem>
-            <SelectItem value="yi">יידיש 🕍</SelectItem>
-            <SelectItem value="en">אנגלית 🇺🇸</SelectItem>
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground mt-2 text-right">
-          התמלול יהיה תמיד בעברית, ללא קשר לשפת המקור
-        </p>
+        <TranscriptionLanguageControl
+          value={sourceLanguage}
+          onChange={onSourceLanguageChange}
+        />
       </div>
     </Card>
   );

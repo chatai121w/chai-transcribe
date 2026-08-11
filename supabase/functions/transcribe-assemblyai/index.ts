@@ -45,7 +45,9 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         audio_url: upload_url,
-        language_code: language === 'auto' ? null : (language === 'he' ? 'he' : language),
+        ...(language === 'auto'
+          ? { language_detection: true }
+          : { language_code: language }),
       }),
     });
 
@@ -77,7 +79,7 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ text: transcript.text }),
+      JSON.stringify({ text: transcript.text, language: transcript.language_code || (language === 'auto' ? undefined : language) }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 

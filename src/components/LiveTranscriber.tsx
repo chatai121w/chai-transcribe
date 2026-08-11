@@ -23,6 +23,11 @@ import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { isLoshonKodeshEnabled } from "@/lib/loshonKodesh";
 import { buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
 import { LiveChunkQueue, type LiveChunkJob } from "@/lib/liveChunkQueue";
+import {
+  getBrowserLanguage,
+  normalizeSourceLanguage,
+  resolveCudaModel,
+} from "@/lib/transcriptionLanguages";
 
 export type LiveMode = "browser" | "cuda" | "groq" | "openai" | "deepgram" | "assemblyai" | "google";
 
@@ -72,6 +77,7 @@ export interface LiveTranscriptResult {
   durationSec?: number;
   fileName?: string;
   format?: string;
+  language?: string;
 }
 
 interface LiveTranscriberProps {
@@ -82,6 +88,7 @@ interface LiveTranscriberProps {
 export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveTranscriberProps) => {
   const { keys: apiKeys } = useCloudApiKeys();
   const { preferences, updatePreference, isLoaded: prefsLoaded } = useCloudPreferences();
+  const sourceLanguage = normalizeSourceLanguage(preferences.source_language);
   const [isListening, setIsListening] = useState(false);
   const isListeningRef = useRef(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -175,6 +182,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const queueRef = useRef<LiveChunkQueue | null>(null);
   const audioLevelSamplesRef = useRef<number[]>([]);
   const finalTextRef = useRef("");
+  const detectedLanguageRef = useRef<string | undefined>(undefined);
 
   // Groq word-timestamp accumulation
   const cumulativeAudioSecRef = useRef(0);
@@ -260,7 +268,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "he-IL";
+    recognition.lang = getBrowserLanguage(sourceLanguage) || navigator.language || "en-US";
 
     recognition.onresult = (event: any) => {
       let interim = "";
@@ -321,6 +329,9 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
   const getBaseUrl = () => getServerUrl();
 
   const getLiveBiasOptions = useCallback(() => {
+    if (sourceLanguage !== "he") {
+      return { hotwords: "", initialPrompt: "", loshonKodesh: false };
+    }
     const profileHotwords = buildProfileHotwords();
     const profilePrompt = getProfileInitialPrompt();
     const profileForcesLk = isProfileLoshonKodesh();
@@ -333,7 +344,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       initialPrompt: profilePrompt,
       loshonKodesh: isLoshonKodeshEnabled() || profileForcesLk,
     };
-  }, [preferences.cuda_hotwords]);
+  }, [preferences.cuda_hotwords, sourceLanguage]);
 
   const sendChunk = useCallback(async (job: LiveChunkJob): Promise<"done" | "retry"> => {
     const { blob, offsetSec, averageLevel } = job;
@@ -353,7 +364,10 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     try {
       const formData = new FormData();
       formData.append("file", blob, "chunk.webm");
-      formData.append("language", "he");
+      const chunkLanguage = sourceLanguage === "auto"
+        ? (detectedLanguageRef.current || "auto")
+        : sourceLanguage;
+      formData.append("language", chunkLanguage);
       const bias = getLiveBiasOptions();
       if (bias.hotwords) formData.append("hotwords", bias.hotwords);
       if (bias.initialPrompt) formData.append("initial_prompt", bias.initialPrompt);
@@ -398,7 +412,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
             binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
           }
           response = await supabase.functions.invoke("transcribe-google", {
-            body: { audio: btoa(binary), fileName: "chunk.webm", apiKey, language: "he", targetLanguage: "he" },
+            body: { audio: btoa(binary), fileName: "chunk.webm", apiKey, language: sourceLanguage },
           });
         } else {
           formData.append("apiKey", apiKey);
@@ -423,6 +437,8 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         data = response.data;
         ok = true;
       } else {
+        const cudaModel = resolveCudaModel(sourceLanguage, localStorage.getItem("preferred_local_model"));
+        if (cudaModel) formData.append("model", cudaModel);
         const res = await fetch(`${getBaseUrl()}/transcribe-live`, {
           method: "POST",
           body: formData,
@@ -454,6 +470,9 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
       if (ok && data) {
         consecutiveErrorsRef.current = 0;
+        if (typeof data.language === "string" && data.language) {
+          detectedLanguageRef.current = data.language;
+        }
         const text = data.text?.trim();
         const latencyMs = Math.round(performance.now() - sendStart);
         const newWords = text ? text.split(/\s+/).length : 0;
@@ -498,7 +517,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       }
       return consecutiveErrorsRef.current >= MAX_CONSECUTIVE_ERRORS ? "done" : "retry";
     }
-  }, [appendDedupText, mode, apiKeys, getLiveBiasOptions]);
+  }, [appendDedupText, mode, apiKeys, getLiveBiasOptions, sourceLanguage]);
 
   const ensureQueue = useCallback(() => {
     if (!queueRef.current) {
@@ -537,7 +556,9 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
       const formData = new FormData();
       formData.append("file", fullBlob, "live-final.webm");
-      formData.append("language", "he");
+      formData.append("language", sourceLanguage);
+      const cudaModel = resolveCudaModel(sourceLanguage, localStorage.getItem("preferred_local_model"));
+      if (cudaModel) formData.append("model", cudaModel);
       formData.append("final", "1");
       const bias = getLiveBiasOptions();
       if (bias.hotwords) formData.append("hotwords", bias.hotwords);
@@ -552,6 +573,9 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
 
       if (!res.ok) return null;
       const data = await res.json();
+      if (typeof data.language === "string" && data.language) {
+        detectedLanguageRef.current = data.language;
+      }
       const refinedText = data.text?.trim();
       // Capture word timings from the refine pass
       if (data.wordTimings && Array.isArray(data.wordTimings)) {
@@ -569,7 +593,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       setIsRefining(false);
       setInterimText("");
     }
-  }, [getLiveBiasOptions]);
+  }, [getLiveBiasOptions, sourceLanguage]);
 
   // Re-transcribe the entire recording via Groq edge function as one unit.
   // Used when fullRetranscribe is ON and mode=groq.
@@ -591,7 +615,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       const fd = new FormData();
       fd.append("file", fullBlob, "live-full.webm");
       fd.append("apiKey", groqKey);
-      fd.append("language", "he");
+      fd.append("language", sourceLanguage);
       fd.append("model", "whisper-large-v3");
       const bias = getLiveBiasOptions();
       if (bias.hotwords) fd.append("hotwords", bias.hotwords);
@@ -615,7 +639,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       setIsRefining(false);
       setInterimText("");
     }
-  }, [apiKeys.groq_key, apiKeys.groq_keys_pool, getLiveBiasOptions]);
+  }, [apiKeys.groq_key, apiKeys.groq_keys_pool, getLiveBiasOptions, sourceLanguage]);
 
   const runGeminiFinalPass = useCallback(async (audioBlob: Blob): Promise<string | null> => {
     setIsRefining(true);
@@ -628,7 +652,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       const form = new FormData();
       form.append("file", audioBlob, "live-final.webm");
       form.append("model", model);
-      form.append("language", "he");
+      form.append("language", sourceLanguage);
       if (personalKey) form.append("apiKey", personalKey);
       const { data, error } = await supabase.functions.invoke("transcribe-gemini", { body: form });
       if (error) throw error;
@@ -644,7 +668,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       setIsRefining(false);
       setInterimText("");
     }
-  }, []);
+  }, [sourceLanguage]);
 
   const startCuda = useCallback(async () => {
     try {
@@ -665,6 +689,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
         chunksCaptured: 0, chunksProcessed: 0, chunksQueued: 0, chunksDropped: 0,
         totalLatencyMs: 0, wordsTranscribed: 0, errorsCount: 0, silenceSkips: 0,
       });
+      detectedLanguageRef.current = undefined;
 
       // Recording timer
       startTimeRef.current = Date.now();
@@ -1020,6 +1045,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
           durationSec: duration,
           fileName: fileName.trim() || undefined,
           format: saveFormat,
+          language: sourceLanguage === "auto" ? detectedLanguageRef.current : sourceLanguage,
         });
       }
     } else {
@@ -1033,10 +1059,11 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
           folder: selectedFolder || undefined,
           fileName: fileName.trim() || undefined,
           format: saveFormat,
+          language: sourceLanguage === "auto" ? undefined : sourceLanguage,
         });
       }
     }
-  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, runGroqFullRetranscribe, runGeminiFinalPass, stopCudaCleanup, stopBrowser, flushCloudTail, flushArchiveRecording]);
+  }, [appendDedupText, fileName, mode, saveFormat, selectedFolder, onTranscriptComplete, runFinalRefinePass, runGroqFullRetranscribe, runGeminiFinalPass, stopCudaCleanup, stopBrowser, flushCloudTail, flushArchiveRecording, sourceLanguage]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(finalText);
@@ -1087,6 +1114,7 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
       folder: selectedFolder || undefined,
       fileName: fileName.trim() || undefined,
       format: saveFormat,
+      language: sourceLanguage === "auto" ? detectedLanguageRef.current : sourceLanguage,
     });
     toast({ title: "✅ תמלול נשמר", description: "ניתן להמשיך להקליט" });
   };

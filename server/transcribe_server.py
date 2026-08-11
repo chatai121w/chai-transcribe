@@ -2100,6 +2100,7 @@ def transcribe_live():
         return jsonify({
             "text": text,
             "wordTimings": word_timings,
+            "language": info.language,
             "processing_time": round(elapsed, 3),
             "audio_duration": round(info.duration, 2),
             "lock_wait_ms": round((time.time() - live_lock_wait) * 1000, 1),
@@ -2260,6 +2261,9 @@ def _yt_run_job(job_id: str, params: dict):
     job_dir.mkdir(parents=True, exist_ok=True)
     url = params["url"]
     mode = params.get("mode", "audio")
+    language = (params.get("language") or "auto").strip().lower()
+    if language != "auto" and not re.fullmatch(r"[a-z]{2}", language):
+        language = "auto"
     audio_format = params.get("audio_format", "best")
     video_quality = params.get("video_quality", "720")
     performance_profile = params.get("performance_profile", "stable")
@@ -2286,7 +2290,7 @@ def _yt_run_job(job_id: str, params: dict):
         need_audio = mode in ("audio", "transcribe", "full")
         need_video = mode in ("video", "full")
         needs_transcription = mode in ("transcribe", "full")
-        target_model = (_current_model_id or DEFAULT_MODEL) if needs_transcription else None
+        target_model = (params.get("model") or _default_model_for(language)) if needs_transcription else None
         resolved_target = MODEL_REGISTRY.get(target_model, target_model) if target_model else None
         model_was_cached = bool(
             resolved_target and any(key.startswith(resolved_target + "::") for key in _model_cache)
@@ -2419,11 +2423,11 @@ def _yt_run_job(job_id: str, params: dict):
                 pipeline = BatchedInferencePipeline(model=m)
                 segs_gen, info_ = pipeline.transcribe(
                     str(audio_file),
-                    language="he",
+                    language=language if language != "auto" else None,
                     beam_size=3,
                     word_timestamps=True,
                     batch_size=auto_batch_size(),
-                    initial_prompt="תמלול שיחה בעברית.",
+                    initial_prompt="תמלול שיחה בעברית." if language == "he" else None,
                 )
                 total_sec_ = float(getattr(info_, "duration", 0) or 0)
                 collected = []
@@ -2635,7 +2639,11 @@ def yt_job_file(job_id, name):
     fpath = _YT_ROOT / job_id / safe
     if not fpath.is_file():
         return jsonify({"error": "File not found"}), 404
-    return send_file(str(fpath), as_attachment=True, download_name=safe)
+    # Editor/player fetches must remain in-app. Only explicit download links
+    # request an attachment; otherwise browser download managers intercept the
+    # fetch and the editor never receives the audio blob.
+    as_download = request.args.get("download") == "1"
+    return send_file(str(fpath), as_attachment=as_download, download_name=safe)
 
 
 @app.route("/youtube-transcribe", methods=["POST"])

@@ -26,6 +26,9 @@ export interface StartYoutubeParams {
   /** If true, upload transcript files (txt/srt/json) to Supabase Storage after local server finishes */
   saveToCloud?: boolean;
   performanceProfile?: YoutubePerformanceProfile;
+  engine?: string;
+  language?: string;
+  model?: string;
   /**
    * Result of the probe the caller already ran. Supplying it skips the probe
    * here, so the job row — and with it the progress readout — exists the moment
@@ -139,6 +142,9 @@ export async function startYoutubeJob(params: StartYoutubeParams): Promise<JobRe
       videoQuality: params.videoQuality,
       saveToCloud: params.saveToCloud ?? false,
       performanceProfile: params.performanceProfile ?? "stable",
+      engine: params.engine,
+      language: params.language ?? "auto",
+      model: params.model,
     },
   });
 
@@ -193,6 +199,9 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
     videoQuality?: string;
     saveToCloud?: boolean;
     performanceProfile?: YoutubePerformanceProfile;
+    engine?: string;
+    language?: string;
+    model?: string;
   };
 
   // ── stage: download ──
@@ -214,6 +223,8 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
           audio_format: resume.audioFormat ?? "best",
           video_quality: resume.videoQuality ?? "720",
           performance_profile: resume.performanceProfile ?? "stable",
+          language: resume.language ?? "auto",
+          model: resume.model,
         }),
       });
       if (!startRes.ok) {
@@ -396,27 +407,32 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
         return;
       }
     } else if (resume.saveToCloud) {
-      // Local backend + saveToCloud: upload txt/srt/json transcripts to pipeline-artifacts
+      // Local backend + saveToCloud: preserve both source audio and transcript
+      // artifacts so another device can reopen the complete editor session.
       await updateStage(jobId, "upload_audio", { status: "running", percent: 10 });
       try {
         const serverOutputFiles = (job.output_files ?? []) as Array<{ kind: string; url: string; filename: string }>;
-        const transcriptFiles = serverOutputFiles.filter((f) =>
-          ["txt", "srt", "json"].includes(f.kind)
+        const cloudFiles = serverOutputFiles.filter((f) =>
+          ["audio", "txt", "srt", "json"].includes(f.kind)
         );
-        if (transcriptFiles.length === 0) {
+        if (cloudFiles.length === 0) {
           await updateStage(jobId, "upload_audio", { status: "skipped" });
         } else {
           const uploadedPaths: Record<string, string> = {};
           const srv = localServer();
-          for (let i = 0; i < transcriptFiles.length; i++) {
-            const f = transcriptFiles[i];
+          for (let i = 0; i < cloudFiles.length; i++) {
+            const f = cloudFiles[i];
             await updateStage(jobId, "upload_audio", {
-              percent: Math.round(10 + (i / transcriptFiles.length) * 85),
+              percent: Math.round(10 + (i / cloudFiles.length) * 85),
             });
-            const res = await fetchLocalServer(f.url.startsWith("/") ? f.url : `${srv}${f.url}`);
+            const fileUrl = /^https?:\/\//i.test(f.url)
+              ? f.url
+              : `${srv}${f.url.startsWith("/") ? f.url : `/${f.url}`}`;
+            const res = await fetchLocalServer(fileUrl);
             if (!res.ok) continue;
             const blob = await res.blob();
-            const path = await uploadArtifact(job.user_id, job.id, "transcripts", f.filename, blob);
+            const stage = f.kind === "audio" ? "audio" : "transcripts";
+            const path = await uploadArtifact(job.user_id, job.id, stage, f.filename, blob);
             uploadedPaths[f.kind] = path;
           }
           await updateStage(jobId, "upload_audio", {
@@ -424,6 +440,11 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
             percent: 100,
             meta: { uploaded_paths: uploadedPaths },
           });
+          const cloudBackedOutputs = serverOutputFiles.map((file) => ({
+            ...file,
+            ...(uploadedPaths[file.kind] ? { artifactPath: uploadedPaths[file.kind] } : {}),
+          }));
+          await patchJob(jobId, { output_files: cloudBackedOutputs as never } as Partial<JobRecord>);
         }
       } catch (e) {
         await updateStage(jobId, "upload_audio", {
@@ -460,7 +481,7 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
 
     await updateStage(jobId, "transcribe", { status: "running", percent: 5 });
 
-    const preferredEngine = await getPreferredYoutubeEngine(job.user_id);
+    const preferredEngine = resume.engine || await getPreferredYoutubeEngine(job.user_id);
 
     const { data: storedAudio, error: storeError } = await supabase.functions.invoke("youtube-cobalt", {
       body: {
@@ -490,7 +511,7 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
         engine,
         file_name: storedAudio.fileName ?? `${job.title || "youtube"}.webm`,
         file_path: storedAudio.path,
-        language: "he",
+        language: resume.language ?? "auto",
         progress: 20,
         total_chunks: 1,
         completed_chunks: 0,

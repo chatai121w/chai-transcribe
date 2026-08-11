@@ -78,7 +78,7 @@ export function JobCard({ job }: { job: JobRecord }) {
         <div className="flex gap-1 flex-wrap">
           {job.output_files.map((f, i) => (
             <Button key={i} variant="outline" size="sm" className="h-7 text-xs" asChild>
-              <a href={f.url} target="_blank" rel="noreferrer" download={f.filename}>
+              <a href={`${f.url}${f.url.includes('?') ? '&' : '?'}download=1`} target="_blank" rel="noreferrer" download={f.filename}>
                 <Download className="w-3 h-3 ml-1" />
                 {(f.kind || "file").toUpperCase()}
               </a>
