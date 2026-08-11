@@ -12,7 +12,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Youtube, Loader2, Download, FileText, Music, Video as VideoIcon,
   AlertTriangle, Search, History, Trash2, ExternalLink, Captions,
-  RotateCcw, ChevronDown, ChevronUp,
+  RotateCcw, ChevronDown, ChevronUp, ShieldCheck, FlaskConical, Gauge,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -32,6 +32,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useJob } from "@/hooks/useJobs";
 import { JobCard } from "@/components/jobs/JobCard";
 import { WaveformPlayer } from "@/components/WaveformPlayer";
+import {
+  compareYoutubePerformance,
+  type YoutubePerformanceComparison,
+  type YoutubePerformanceMetrics,
+  type YoutubePerformanceProfile,
+} from "@/lib/youtubePerformance";
 
 /** Engines offered for YouTube transcription — same set as the main page. */
 type YtEngine = 'local-server' | 'groq' | 'openai' | 'gemini' | 'google' | 'assemblyai' | 'deepgram' | 'local';
@@ -77,6 +83,25 @@ function jobFailure(job: YoutubeJob): { message: string; stage?: string } | null
   return { message: message ?? 'המשימה נכשלה', stage: failedStage?.label ?? failedStage?.key };
 }
 
+function jobPerformanceMetrics(job: YoutubeJob): YoutubePerformanceMetrics | null {
+  const metrics = job.stages?.find((stage) => stage.key === "download")?.meta?.metrics;
+  return metrics && typeof metrics === "object" ? metrics as YoutubePerformanceMetrics : null;
+}
+
+function performanceComparison(job: YoutubeJob, jobs: YoutubeJob[]): YoutubePerformanceComparison | null {
+  const candidate = jobPerformanceMetrics(job);
+  if (!candidate || candidate.profile !== "safe-accelerated") return null;
+  const baseline = jobs
+    .filter((other) => other.id !== job.id && other.url === job.url && other.status === "done")
+    .map(jobPerformanceMetrics)
+    .find((metrics) => metrics?.profile === "stable"
+      && (!candidate.model || !metrics.model || metrics.model === candidate.model)
+      && (typeof candidate.model_was_cached !== "boolean"
+        || typeof metrics.model_was_cached !== "boolean"
+        || candidate.model_was_cached === metrics.model_was_cached));
+  return compareYoutubePerformance(candidate, baseline);
+}
+
 export default function YouTubePage() {
   const [url, setUrl] = useState("");
   const [probing, setProbing] = useState(false);
@@ -87,6 +112,7 @@ export default function YouTubePage() {
   const [saveToCloud, setSaveToCloud] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [engine, setEngine] = useState<YtEngine>("local-server");
+  const [performanceProfile, setPerformanceProfile] = useState<YoutubePerformanceProfile>("stable");
   const [serverOk, setServerOk] = useState<boolean | null>(null);
   const [handingOff, setHandingOff] = useState(false);
   const [openingEditor, setOpeningEditor] = useState(false);
@@ -161,6 +187,7 @@ export default function YouTubePage() {
         audioFormat,
         videoQuality,
         saveToCloud: probe?.backend === "local" ? saveToCloud : false,
+        performanceProfile,
         knownInfo: {
           title: probe.title,
           thumbnail: probe.thumbnail,
@@ -443,6 +470,35 @@ export default function YouTubePage() {
                 </div>
               )}
 
+              {probe?.backend === "local" && engine === "local-server" && (mode === "transcribe" || mode === "full") && (
+                <div className="mt-4 rounded-lg border p-3">
+                  <Label className="text-sm font-semibold mb-2 block">פרופיל ביצועים</Label>
+                  <RadioGroup
+                    value={performanceProfile}
+                    onValueChange={(value) => setPerformanceProfile(value as YoutubePerformanceProfile)}
+                    className="grid gap-2 sm:grid-cols-2"
+                  >
+                    <PerformanceOption
+                      value="stable"
+                      current={performanceProfile}
+                      icon={<ShieldCheck className="w-4 h-4" />}
+                      title="יציב"
+                      description="ברירת המחדל הקיימת, ללא שינוי במסלול העיבוד"
+                    />
+                    <PerformanceOption
+                      value="safe-accelerated"
+                      current={performanceProfile}
+                      icon={<FlaskConical className="w-4 h-4" />}
+                      title="האצה בטוחה (ניסיוני)"
+                      description="טעינת המודל במקביל להורדה ו-8 מקטעי הורדה"
+                    />
+                  </RadioGroup>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    המודל ופרמטרי הזיהוי אינם משתנים. לאחר הרצה יוצגו זמן כולל, RTF והשוואת hash מול הרצה יציבה של אותו סרטון.
+                  </p>
+                </div>
+              )}
+
               {/* Readiness strip */}
               <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
                 <span className="text-xs font-medium text-muted-foreground">מצב מערכת:</span>
@@ -618,6 +674,7 @@ export default function YouTubePage() {
                         onDelete={deleteJob}
                         onOpenEditor={openInEditor}
                         openingEditor={openingEditor}
+                        comparison={performanceComparison(job, jobs)}
                       />
                     ))}
                   </div>
@@ -669,11 +726,31 @@ function FormatChip({ value, current, label }: { value: string; current: string;
   );
 }
 
-function JobRow({ job, onDelete, onOpenEditor, openingEditor }: {
+function PerformanceOption({ value, current, icon, title, description }: {
+  value: YoutubePerformanceProfile;
+  current: YoutubePerformanceProfile;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  const active = current === value;
+  return (
+    <label className={`flex cursor-pointer items-start gap-2 rounded-md border p-2.5 ${active ? "border-primary bg-primary/5" : "border-border"}`}>
+      <RadioGroupItem value={value} className="mt-0.5" />
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 text-sm font-medium">{icon}{title}</div>
+        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+      </div>
+    </label>
+  );
+}
+
+function JobRow({ job, onDelete, onOpenEditor, openingEditor, comparison }: {
   job: YoutubeJob;
   onDelete: (id: string) => void;
   onOpenEditor: (job: { output_files?: Array<{ kind?: string; url?: string; filename?: string }> | null }) => void;
   openingEditor: boolean;
+  comparison: YoutubePerformanceComparison | null;
 }) {
   const statusLabel: Record<string, string> = {
     pending: "ממתין", downloading: "מוריד", extracting: "מחלץ", converting: "ממיר",
@@ -699,6 +776,7 @@ function JobRow({ job, onDelete, onOpenEditor, openingEditor }: {
   const hasTranscript = outs.some((f) => f.kind === "json" || f.kind === "txt");
   const canOpenEditor = Boolean(audioFile && hasTranscript);
   const canPlay = Boolean(audioFile || videoFile);
+  const metrics = jobPerformanceMetrics(job);
 
   const retry = async () => {
     setRetrying(true);
@@ -749,6 +827,29 @@ function JobRow({ job, onDelete, onOpenEditor, openingEditor }: {
               )}
               {(dlMeta!.speed_mb ?? 0) > 0 && (
                 <span className="text-blue-500">{(dlMeta!.speed_mb!).toFixed(2)} MB/s</span>
+              )}
+            </div>
+          )}
+
+          {metrics && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-2 text-xs">
+              <span className="inline-flex items-center gap-1 font-medium">
+                {metrics.profile === "stable" ? <ShieldCheck className="w-3.5 h-3.5" /> : <FlaskConical className="w-3.5 h-3.5" />}
+                {metrics.profile === "stable" ? "יציב" : "ניסיוני"}
+              </span>
+              {metrics.total_sec != null && <span className="tabular-nums">זמן כולל: {metrics.total_sec.toFixed(1)} שנ׳</span>}
+              {metrics.rtf != null && <span className="inline-flex items-center gap-1 tabular-nums"><Gauge className="w-3.5 h-3.5" />RTF {metrics.rtf.toFixed(3)}</span>}
+              {comparison && (
+                <span className={`font-medium ${
+                  comparison.verdict === "improved" ? "text-green-700 dark:text-green-300"
+                    : comparison.verdict === "regression" ? "text-destructive"
+                    : "text-muted-foreground"
+                }`}>
+                  {comparison.speedImprovementPct != null
+                    ? `${comparison.speedImprovementPct >= 0 ? "+" : ""}${comparison.speedImprovementPct.toFixed(1)}% מול בסיס`
+                    : comparison.reason}
+                  {comparison.transcriptIdentical === true ? " · תמלול זהה" : ""}
+                </span>
               )}
             </div>
           )}

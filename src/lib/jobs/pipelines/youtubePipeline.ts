@@ -12,6 +12,7 @@ import { createJob, patchJob, updateStage, nextResumableStage, fetchJob } from "
 import { uploadArtifact, downloadArtifact } from "../artifactStorage";
 import type { JobRecord } from "../types";
 import { db } from "@/lib/localDb";
+import type { YoutubePerformanceProfile } from "@/lib/youtubePerformance";
 
 const YT_REGEX = /^https?:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/|live\/)|youtu\.be\/)[\w-]+/;
 export const isValidYoutubeUrl = (u: string) => YT_REGEX.test(u.trim());
@@ -24,6 +25,7 @@ export interface StartYoutubeParams {
   videoQuality?: "360" | "720" | "1080";
   /** If true, upload transcript files (txt/srt/json) to Supabase Storage after local server finishes */
   saveToCloud?: boolean;
+  performanceProfile?: YoutubePerformanceProfile;
   /**
    * Result of the probe the caller already ran. Supplying it skips the probe
    * here, so the job row — and with it the progress readout — exists the moment
@@ -131,7 +133,13 @@ export async function startYoutubeJob(params: StartYoutubeParams): Promise<JobRe
     durationSec: info.duration ?? null,
     mode: params.mode,
     backend: info.backend,
-    resumeToken: { mode: params.mode, audioFormat: params.audioFormat, videoQuality: params.videoQuality, saveToCloud: params.saveToCloud ?? false },
+    resumeToken: {
+      mode: params.mode,
+      audioFormat: params.audioFormat,
+      videoQuality: params.videoQuality,
+      saveToCloud: params.saveToCloud ?? false,
+      performanceProfile: params.performanceProfile ?? "stable",
+    },
   });
 
   void runYoutubePipeline(job.id).catch(async (e) => {
@@ -179,7 +187,13 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
   }
 
   const backend = (job.stages.find((s) => s.key === "probe")?.meta?.backend as string) ?? job.backend ?? "cobalt";
-  const resume = (job.resume_token ?? {}) as { mode?: string; audioFormat?: string; videoQuality?: string; saveToCloud?: boolean };
+  const resume = (job.resume_token ?? {}) as {
+    mode?: string;
+    audioFormat?: string;
+    videoQuality?: string;
+    saveToCloud?: boolean;
+    performanceProfile?: YoutubePerformanceProfile;
+  };
 
   // ── stage: download ──
   if (job.stages.find((s) => s.key === "download")?.status !== "done") {
@@ -199,6 +213,7 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
           mode: resume.mode ?? job.mode,
           audio_format: resume.audioFormat ?? "best",
           video_quality: resume.videoQuality ?? "720",
+          performance_profile: resume.performanceProfile ?? "stable",
         }),
       });
       if (!startRes.ok) {
@@ -223,6 +238,7 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
       // number. So a poll is only persisted when it actually says something new.
       let lastPct = -1;
       let lastServerStatus: string | null = null;
+      let lastPhase: string | null = null;
       let lastWriteAt = 0;
       // Still write occasionally while nothing changes, so updated_at keeps
       // moving and a stalled job stays distinguishable from a quiet one.
@@ -242,10 +258,11 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
 
         const pct = Math.min(95, s.progress_pct ?? 0);
         const isTerminal = s.status === "done" || s.status === "error";
-        const changed = pct !== lastPct || s.status !== lastServerStatus;
+        const changed = pct !== lastPct || s.status !== lastServerStatus || s.phase !== lastPhase;
         if (changed || isTerminal || Date.now() - lastWriteAt >= HEARTBEAT_MS) {
           lastPct = pct;
           lastServerStatus = s.status;
+          lastPhase = s.phase ?? null;
           lastWriteAt = Date.now();
           await updateStage(jobId, "download", {
             percent: pct,
@@ -254,6 +271,16 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
               dl_mb: dlMb, total_mb: totalMb, speed_mb: speedMb,
               server_status: s.status,
               server_pct: s.progress_pct ?? 0,
+              phase: s.phase,
+              phase_started_at: s.phase_started_at,
+              performance_profile: s.performance_profile,
+              fragment_workers: s.fragment_workers,
+              model_prewarm_status: s.model_prewarm_status,
+              model_prewarm_sec: s.model_prewarm_sec,
+              download_sec: s.download_sec,
+              model_ready_sec: s.model_ready_sec,
+              first_segment_sec: s.first_segment_sec,
+              metrics: s.metrics,
               // Live transcription position, so the UI can show a real number
               // while the server works through the audio.
               transcribe_sec: s.transcribe_sec ?? 0,
@@ -273,13 +300,38 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
           );
           await updateStage(jobId, "download", {
             status: "done",
-            meta: { server_job_id: serverJobId, outputs: serverOutputFiles, dl_mb: dlMb, total_mb: totalMb },
+            percent: 100,
+            meta: {
+              server_job_id: serverJobId,
+              outputs: serverOutputFiles,
+              dl_mb: dlMb,
+              total_mb: totalMb,
+              server_status: s.status,
+              server_pct: 100,
+              phase: s.phase,
+              phase_started_at: s.phase_started_at,
+              performance_profile: s.performance_profile,
+              fragment_workers: s.fragment_workers,
+              model_prewarm_status: s.model_prewarm_status,
+              model_prewarm_sec: s.model_prewarm_sec,
+              download_sec: s.download_sec,
+              model_ready_sec: s.model_ready_sec,
+              first_segment_sec: s.first_segment_sec,
+              transcribe_sec: s.transcribe_sec ?? 0,
+              transcribe_total_sec: s.transcribe_total_sec ?? 0,
+              transcribe_segments: s.transcribe_segments ?? 0,
+              metrics: s.metrics,
+            },
           });
           // Mirror output_files back to job for visibility
           await patchJob(jobId, { output_files: serverOutputFiles as never } as Partial<JobRecord>);
           // Mark transcribe stage done/skipped based on whether the server actually transcribed
           if (hasTranscript) {
-            await updateStage(jobId, "transcribe", { status: "done", percent: 100 });
+            await updateStage(jobId, "transcribe", {
+              status: "done",
+              percent: 100,
+              meta: { metrics: s.metrics, performance_profile: s.performance_profile },
+            });
           }
           done = true;
         } else if (s.status === "error") {

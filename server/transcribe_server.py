@@ -2241,34 +2241,84 @@ def _yt_audio_fmt_args(audio_format: str) -> list:
         return ["-f", "bestaudio", "--extract-audio", "--audio-format", audio_format, "--audio-quality", "0"]
     return ["-f", "bestaudio"]
 
-# Speed + reliability flags shared by all yt-dlp invocations
-_YT_SPEED_FLAGS = [
-    "--concurrent-fragments", "4",  # parallel fragment download
-    "--buffer-size", "65536",       # 64KB read buffer
-    "--retries", "10",              # retry failed downloads
-    "--fragment-retries", "10",     # retry failed fragments
-    "--continue",                   # resume interrupted downloads
-    "--newline",                    # one progress line per newline (for parsing)
-]
+def _yt_speed_flags(concurrent_fragments: int = 4) -> list:
+    """Speed flags with a conservative, bounded fragment count."""
+    fragments = max(1, min(8, int(concurrent_fragments or 4)))
+    return [
+        "--concurrent-fragments", str(fragments),
+        "--buffer-size", "65536",       # 64KB read buffer
+        "--retries", "10",              # retry failed downloads
+        "--fragment-retries", "10",     # retry failed fragments
+        "--continue",                    # resume interrupted downloads
+        "--newline",                     # one progress line per newline (for parsing)
+    ]
 
 def _yt_run_job(job_id: str, params: dict):
-    import subprocess, shutil, json as _json
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import subprocess, shutil, json as _json, hashlib
+    from concurrent.futures import ThreadPoolExecutor
     job_dir = _YT_ROOT / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     url = params["url"]
     mode = params.get("mode", "audio")
     audio_format = params.get("audio_format", "best")
     video_quality = params.get("video_quality", "720")
+    performance_profile = params.get("performance_profile", "stable")
+    if performance_profile not in ("stable", "safe-accelerated"):
+        performance_profile = "stable"
+    accelerated = performance_profile == "safe-accelerated"
+    fragment_workers = 8 if accelerated else 4
+    job_started = time.perf_counter()
+    prewarm_executor = None
+    prewarm_future = None
     outputs: list = []
 
     try:
-        _yt_update(job_id, status="downloading", progress_pct=10)
+        _yt_update(
+            job_id,
+            status="downloading",
+            phase="download",
+            phase_started_at=time.time(),
+            progress_pct=8,
+            performance_profile=performance_profile,
+            fragment_workers=fragment_workers,
+        )
 
-        def _download_audio(prog_range=(10, 48)):
+        need_audio = mode in ("audio", "transcribe", "full")
+        need_video = mode in ("video", "full")
+        needs_transcription = mode in ("transcribe", "full")
+        target_model = (_current_model_id or DEFAULT_MODEL) if needs_transcription else None
+        resolved_target = MODEL_REGISTRY.get(target_model, target_model) if target_model else None
+        model_was_cached = bool(
+            resolved_target and any(key.startswith(resolved_target + "::") for key in _model_cache)
+        )
+
+        # Safe acceleration: overlap model loading with network download. The
+        # same model and inference parameters are used, and the transcription
+        # lock prevents a second GPU inference from competing for memory.
+        if accelerated and needs_transcription:
+            resolved_prewarm = resolved_target
+
+            def _prewarm_model():
+                started = time.perf_counter()
+                _yt_update(job_id, model_prewarm_status="running")
+                with _transcribe_lock:
+                    warmed = load_model(resolved_prewarm)
+                _yt_update(
+                    job_id,
+                    model_prewarm_status="done",
+                    model_prewarm_sec=round(time.perf_counter() - started, 3),
+                )
+                return warmed
+
+            prewarm_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="yt-prewarm")
+            prewarm_future = prewarm_executor.submit(_prewarm_model)
+
+        download_started = time.perf_counter()
+
+        def _download_audio(prog_range=(8, 46)):
             tmpl = str(job_dir / "audio.%(ext)s")
             cmd = (["yt-dlp", "--no-playlist", "-o", tmpl]
-                   + _YT_SPEED_FLAGS
+                   + _yt_speed_flags(fragment_workers)
                    + _yt_audio_fmt_args(audio_format)
                    + [url])
             _run_ytdlp(cmd, job_id, track_key="audio", timeout=900,
@@ -2279,21 +2329,17 @@ def _yt_run_job(job_id: str, params: dict):
                 raise RuntimeError("Audio file not produced")
             return af
 
-        def _download_video(prog_range=(10, 48)):
+        def _download_video(prog_range=(8, 46)):
             tmpl = str(job_dir / "video.%(ext)s")
             fmt = f"bestvideo[height<={video_quality}]+bestaudio/best[height<={video_quality}]"
             cmd = (["yt-dlp", "--no-playlist", "-f", fmt,
                     "--merge-output-format", "mp4", "-o", tmpl]
-                   + _YT_SPEED_FLAGS
+                   + _yt_speed_flags(fragment_workers)
                    + [url])
             _run_ytdlp(cmd, job_id, track_key="video", timeout=1800,
                        progress_range=prog_range)
             return next((p for p in job_dir.iterdir()
                          if p.name.startswith("video.") and not p.suffix == ".part"), None)
-
-        # AUDIO branch (audio/transcribe/full)
-        need_audio = mode in ("audio", "transcribe", "full")
-        need_video = mode in ("video", "full")
 
         audio_file = None
         video_file = None
@@ -2301,8 +2347,8 @@ def _yt_run_job(job_id: str, params: dict):
         if need_audio and need_video:
             # Download audio + video in parallel; split overall progress range
             with ThreadPoolExecutor(max_workers=2) as ex:
-                fut_audio = ex.submit(_download_audio, (10, 30))
-                fut_video = ex.submit(_download_video, (30, 48))
+                fut_audio = ex.submit(_download_audio, (8, 28))
+                fut_video = ex.submit(_download_video, (28, 46))
                 audio_file = fut_audio.result()
                 video_file = fut_video.result()
         elif need_audio:
@@ -2324,23 +2370,49 @@ def _yt_run_job(job_id: str, params: dict):
                 "filename": video_file.name,
                 "size": video_file.stat().st_size,
             })
-        _yt_update(job_id, progress_pct=50, output_files=outputs)
+        download_sec = time.perf_counter() - download_started
+        _yt_update(
+            job_id,
+            status="preparing_audio" if needs_transcription else "finalizing",
+            phase="prepare_audio" if needs_transcription else "finalize",
+            phase_started_at=time.time(),
+            progress_pct=48 if needs_transcription else 96,
+            download_sec=round(download_sec, 3),
+            output_files=outputs,
+        )
 
         # TRANSCRIBE branch
-        if mode in ("transcribe", "full"):
-            _yt_update(job_id, status="transcribing", progress_pct=50)
+        if needs_transcription:
             audio_file = next((p for p in job_dir.iterdir() if p.name.startswith("audio.")), None)
             if not audio_file:
                 raise RuntimeError("No audio to transcribe")
-            target_model = _current_model_id or DEFAULT_MODEL
-            resolved = MODEL_REGISTRY.get(target_model, target_model)
-            model = load_model(resolved)
+            resolved = resolved_target
+            model_started = time.perf_counter()
+            _yt_update(job_id, status="loading_model", phase="load_model", phase_started_at=time.time(), progress_pct=50)
+            if prewarm_future is not None:
+                try:
+                    model = prewarm_future.result()
+                except Exception as prewarm_error:
+                    _yt_update(job_id, model_prewarm_status="fallback", model_prewarm_error=str(prewarm_error)[:240])
+                    model = load_model(resolved)
+            else:
+                model = load_model(resolved)
+            model_ready_sec = time.perf_counter() - model_started
+            _yt_update(
+                job_id,
+                status="preparing_audio",
+                phase="prepare_audio",
+                phase_started_at=time.time(),
+                progress_pct=53,
+                model_ready_sec=round(model_ready_sec, 3),
+            )
+            transcribe_started = time.perf_counter()
 
             def _run_yt_transcribe(m):
                 """Transcribe, reporting a real percentage as segments arrive.
 
                 The generator is consumed here rather than materialized in one
-                call, so the job advances continuously across 50→95 instead of
+                call, so the job advances continuously across 55→94 instead of
                 parking on a fixed number for the whole transcription.
                 """
                 from faster_whisper import BatchedInferencePipeline
@@ -2355,11 +2427,23 @@ def _yt_run_job(job_id: str, params: dict):
                 )
                 total_sec_ = float(getattr(info_, "duration", 0) or 0)
                 collected = []
-                last_pct = 50
+                last_pct = 55
+                first_segment_at = None
+                _yt_update(
+                    job_id,
+                    status="transcribing",
+                    phase="transcribe",
+                    phase_started_at=time.time(),
+                    progress_pct=55,
+                    transcribe_total_sec=round(total_sec_, 1),
+                )
                 for seg in segs_gen:
+                    if first_segment_at is None:
+                        first_segment_at = time.perf_counter()
+                        _yt_update(job_id, first_segment_sec=round(first_segment_at - transcribe_started, 3))
                     collected.append(seg)
                     if total_sec_ > 0:
-                        pct = 50 + int(min(1.0, max(0.0, seg.end / total_sec_)) * 45)
+                        pct = 55 + int(min(1.0, max(0.0, seg.end / total_sec_)) * 39)
                         if pct > last_pct:
                             last_pct = pct
                             _yt_update(
@@ -2379,7 +2463,7 @@ def _yt_run_job(job_id: str, params: dict):
                     segments, info = _run_yt_transcribe(model)
                 except Exception as fa_err:
                     if "flash attention" in str(fa_err).lower():
-                        _yt_update(job_id, progress_pct=50, transcribe_segments=0)
+                        _yt_update(job_id, progress_pct=53, transcribe_segments=0)
                         model = _reload_model_without_flash(resolved)
                         segments, info = _run_yt_transcribe(model)
                     else:
@@ -2391,6 +2475,7 @@ def _yt_run_job(job_id: str, params: dict):
                 " ".join(s.text.strip() for s in segments if s.text.strip()),
                 encoding="utf-8",
             )
+            transcript_text = txt_path.read_text(encoding="utf-8")
             # Write SRT
             def _ts(t):
                 h = int(t // 3600); m = int((t % 3600) // 60); s = t % 60
@@ -2426,11 +2511,45 @@ def _yt_run_job(job_id: str, params: dict):
                     "filename": name,
                     "size": (job_dir / name).stat().st_size,
                 })
-            _yt_update(job_id, progress_pct=95, output_files=outputs)
+            transcribe_sec = time.perf_counter() - transcribe_started
+            audio_duration = float(getattr(info, "duration", 0) or 0)
+            metrics = {
+                "profile": performance_profile,
+                "model": resolved,
+                "model_was_cached": model_was_cached,
+                "audio_duration_sec": round(audio_duration, 3),
+                "download_sec": round(download_sec, 3),
+                "model_ready_sec": round(model_ready_sec, 3),
+                "transcribe_sec": round(transcribe_sec, 3),
+                "rtf": round(transcribe_sec / audio_duration, 5) if audio_duration > 0 else None,
+                "segments": len(segments),
+                "words": len(transcript_text.split()),
+                "transcript_sha256": hashlib.sha256(transcript_text.encode("utf-8")).hexdigest(),
+                "fragment_workers": fragment_workers,
+            }
+            _yt_update(
+                job_id,
+                status="finalizing",
+                phase="finalize",
+                phase_started_at=time.time(),
+                progress_pct=97,
+                metrics=metrics,
+                output_files=outputs,
+            )
 
-        _yt_update(job_id, status="done", progress_pct=100, output_files=outputs)
+        total_sec = time.perf_counter() - job_started
+        with _YT_JOBS_LOCK:
+            current_metrics = dict((_YT_JOBS.get(job_id) or {}).get("metrics") or {})
+        current_metrics["total_sec"] = round(total_sec, 3)
+        current_metrics.setdefault("profile", performance_profile)
+        current_metrics.setdefault("download_sec", round(download_sec, 3))
+        current_metrics.setdefault("fragment_workers", fragment_workers)
+        _yt_update(job_id, status="done", phase="done", phase_started_at=time.time(), progress_pct=100, metrics=current_metrics, output_files=outputs)
     except Exception as exc:
         _yt_update(job_id, status="error", error=str(exc))
+    finally:
+        if prewarm_executor is not None:
+            prewarm_executor.shutdown(wait=False, cancel_futures=True)
 
 
 @app.route("/yt/info", methods=["POST"])
@@ -2477,6 +2596,9 @@ def yt_job_start():
         return jsonify({"error": "Invalid YouTube URL"}), 400
     if mode not in ("audio", "video", "transcribe", "full"):
         return jsonify({"error": "Invalid mode"}), 400
+    performance_profile = data.get("performance_profile", "stable")
+    if performance_profile not in ("stable", "safe-accelerated"):
+        return jsonify({"error": "Invalid performance profile"}), 400
     if not _yt_has_ytdlp():
         return jsonify({"error": "yt-dlp not installed"}), 500
 
@@ -2484,6 +2606,8 @@ def yt_job_start():
     with _YT_JOBS_LOCK:
         _YT_JOBS[job_id] = {
             "id": job_id, "status": "pending", "progress_pct": 0,
+            "phase": "queued", "phase_started_at": time.time(),
+            "performance_profile": performance_profile,
             "output_files": [], "error": None,
             # real-time download metrics (updated during download)
             "audio_pct": 0, "audio_dl_mb": 0, "audio_total_mb": 0, "audio_speed_mb": 0,

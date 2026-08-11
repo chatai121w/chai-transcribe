@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { CheckCircle2, Loader2, AlertTriangle, Download, FileAudio, Cloud, Search, Circle } from "lucide-react";
 import { computeOverall, type JobRecord } from "@/lib/jobs/types";
+import { useEffect, useState } from "react";
 
 interface YoutubeJobProgressProps {
   job: JobRecord;
@@ -38,12 +39,22 @@ export function YoutubeJobProgress({ job }: YoutubeJobProgressProps) {
   const download = byKey('download');
   const meta = (download?.meta ?? {}) as {
     server_status?: string; server_pct?: number;
+    phase?: string; phase_started_at?: number;
+    performance_profile?: string;
+    model_prewarm_status?: string; model_prewarm_sec?: number;
     dl_mb?: number; total_mb?: number; speed_mb?: number;
     transcribe_sec?: number; transcribe_total_sec?: number; transcribe_segments?: number;
   };
 
   const isError = job.status === 'error' || stages.some(s => s.status === 'failed');
   const isDone = job.status === 'done';
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (isDone || isError) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [isDone, isError]);
 
   // The local server drives most of the work and reports a single 0–100 that
   // already spans download and transcription; prefer it when present.
@@ -52,9 +63,15 @@ export function YoutubeJobProgress({ job }: YoutubeJobProgressProps) {
 
   const serverStatus = meta.server_status;
   const transcribing = serverStatus === 'transcribing';
+  const phaseElapsed = meta.phase_started_at
+    ? Math.max(0, now / 1000 - Number(meta.phase_started_at))
+    : null;
   const stageLabel = isError ? 'שגיאה'
     : isDone ? 'הושלם'
     : transcribing ? 'מתמלל'
+    : serverStatus === 'loading_model' ? 'טוען מודל תמלול'
+    : serverStatus === 'preparing_audio' ? 'מכין אודיו וזיהוי דיבור'
+    : serverStatus === 'finalizing' ? 'שומר תוצאות'
     : serverStatus === 'downloading' ? 'מוריד'
     : STAGE_LABELS.find(s => byKey(s.key)?.status === 'running')?.label
       ?? 'מתחיל...';
@@ -66,11 +83,21 @@ export function YoutubeJobProgress({ job }: YoutubeJobProgressProps) {
       return `${fmtClock(meta.transcribe_sec ?? 0)} / ${fmtClock(meta.transcribe_total_sec ?? 0)} מהאודיו`
         + (meta.transcribe_segments ? ` · ${meta.transcribe_segments} מקטעים` : '');
     }
+    if (serverStatus === 'loading_model') {
+      return `טעינת המודל המקומי${phaseElapsed != null ? ` · ${fmtClock(phaseElapsed)}` : ''}`;
+    }
+    if (serverStatus === 'preparing_audio') {
+      return `ניתוח האודיו לפני התמלול${phaseElapsed != null ? ` · ${fmtClock(phaseElapsed)}` : ''}`;
+    }
+    if (serverStatus === 'finalizing') {
+      return `כתיבת TXT, SRT ו-JSON${phaseElapsed != null ? ` · ${fmtClock(phaseElapsed)}` : ''}`;
+    }
     if ((meta.total_mb ?? 0) > 0) {
       return `${(meta.dl_mb ?? 0).toFixed(1)} / ${(meta.total_mb ?? 0).toFixed(1)} MB`
-        + ((meta.speed_mb ?? 0) > 0 ? ` · ${(meta.speed_mb ?? 0).toFixed(1)} MB/s` : '');
+        + ((meta.speed_mb ?? 0) > 0 ? ` · ${(meta.speed_mb ?? 0).toFixed(1)} MB/s` : '')
+        + (meta.model_prewarm_status === 'running' ? ' · המודל נטען במקביל' : '');
     }
-    return 'מכין...';
+    return phaseElapsed != null ? `זמן בשלב: ${fmtClock(phaseElapsed)}` : 'מכין...';
   })();
 
   return (
@@ -103,6 +130,11 @@ export function YoutubeJobProgress({ job }: YoutubeJobProgressProps) {
       </div>
 
       <p className="text-xs text-muted-foreground mt-1.5">{detail}</p>
+      {meta.performance_profile && (
+        <p className="text-[10px] text-muted-foreground mt-1">
+          פרופיל: {meta.performance_profile === 'safe-accelerated' ? 'האצה בטוחה (ניסיוני)' : 'יציב'}
+        </p>
+      )}
 
       {/* Stage chain */}
       <div className="flex flex-wrap items-center gap-1.5 mt-3">
