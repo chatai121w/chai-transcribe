@@ -9,7 +9,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { getServerUrl } from "@/lib/serverConfig";
+import { fetchLocalServer } from "@/lib/serverConfig";
+import { resolveLocalServerUrl } from "@/lib/localServerLauncher";
 
 export type YtMode = "transcribe" | "audio" | "video" | "full";
 export type YtStatus = "pending" | "downloading" | "extracting" | "converting" | "transcribing" | "finalizing" | "done" | "error" | "cancelled";
@@ -76,7 +77,7 @@ export const isValidYoutubeUrl = (u: string) => YT_REGEX.test(u.trim());
 async function probeLocal(url: string, serverUrl: string | null): Promise<YtProbeResult | null> {
   if (!serverUrl) return null;
   try {
-    const res = await fetch(`${serverUrl}/yt/info`, {
+    const res = await fetchLocalServer(`${serverUrl}/yt/info`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url }),
@@ -162,7 +163,7 @@ export function useYoutubeJobs() {
 
   const probeUrl = useCallback(async (url: string): Promise<YtProbeResult> => {
     if (!isValidYoutubeUrl(url)) throw new Error("קישור YouTube לא תקין");
-    const serverUrl = ((): string | null => { try { return getServerUrl(); } catch { return null; } })();
+    const serverUrl = await resolveLocalServerUrl().catch(() => null);
     const local = await probeLocal(url, serverUrl);
     if (local) return local;
     return await probeCobalt(url);

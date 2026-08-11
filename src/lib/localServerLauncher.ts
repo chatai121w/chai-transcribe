@@ -1,4 +1,4 @@
-import { fetchLocalServer, setDiscoveredServerPort } from '@/lib/serverConfig';
+import { fetchLocalServer, getServerUrl, isLoopbackUrl, setDiscoveredServerPort } from '@/lib/serverConfig';
 
 const LAUNCHER_PORT_KEY = 'local_launcher_port';
 const DEFAULT_LAUNCHER_PORT = 8764;
@@ -123,4 +123,20 @@ export async function getLauncherHealth(): Promise<any | null> {
   if (preferred) return preferred;
   const fallbacks = await Promise.all(ports.slice(1).map(tryPort));
   return fallbacks.find(Boolean) || null;
+}
+
+/**
+ * Return a current local-server URL before a feature starts a local request.
+ * Hosted pages can retain yesterday's dynamic port in localStorage, so ask the
+ * launcher to rediscover Whisper before using that machine-specific URL.
+ */
+export async function resolveLocalServerUrl(): Promise<string> {
+  const configured = getServerUrl();
+  if (typeof window === 'undefined') return configured;
+  const isLocalPage = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  if (!isLocalPage && isLoopbackUrl(configured)) {
+    await getLauncherHealth();
+    return getServerUrl();
+  }
+  return configured;
 }

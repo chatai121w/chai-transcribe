@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { startLocalTranscriptionServer } from './localServerLauncher';
+import { resolveLocalServerUrl, startLocalTranscriptionServer } from './localServerLauncher';
 
 describe('local server launcher', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     localStorage.clear();
   });
 
@@ -26,5 +27,20 @@ describe('local server launcher', () => {
     ));
 
     await expect(startLocalTranscriptionServer()).rejects.toThrow('תשובה לא תקינה');
+  });
+
+  it('refreshes a stale local port from the launcher on a hosted page', async () => {
+    localStorage.setItem('whisper_discovered_server_url', 'http://127.0.0.1:3001');
+    vi.stubGlobal('window', {
+      location: { hostname: 'chai-transcribe.lovable.app' },
+      dispatchEvent: vi.fn(),
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ ok: true, whisper: { running: true, port: 3002 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+
+    await expect(resolveLocalServerUrl()).resolves.toBe('http://127.0.0.1:3002');
+    expect(localStorage.getItem('whisper_discovered_server_url')).toBe('http://127.0.0.1:3002');
   });
 });

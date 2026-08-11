@@ -6,7 +6,8 @@
  * fall back to the youtube-cobalt edge function (which can route to a self-host).
  */
 import { supabase } from "@/integrations/supabase/client";
-import { getServerUrl } from "@/lib/serverConfig";
+import { fetchLocalServer, getServerUrl } from "@/lib/serverConfig";
+import { resolveLocalServerUrl } from "@/lib/localServerLauncher";
 import { createJob, patchJob, updateStage, nextResumableStage, fetchJob } from "../jobOrchestrator";
 import { uploadArtifact, downloadArtifact } from "../artifactStorage";
 import type { JobRecord } from "../types";
@@ -40,10 +41,10 @@ function localServer(): string | null {
 }
 
 async function probeLocal(url: string) {
-  const srv = localServer();
+  const srv = await resolveLocalServerUrl().catch(() => localServer());
   if (!srv) return null;
   try {
-    const res = await fetch(`${srv}/yt/info`, {
+    const res = await fetchLocalServer(`${srv}/yt/info`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url }),
@@ -185,12 +186,12 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
     await updateStage(jobId, "download", { status: "running", percent: 5 });
 
     if (backend === "local") {
-      const srv = localServer();
+      const srv = await resolveLocalServerUrl().catch(() => localServer());
       if (!srv) {
         await updateStage(jobId, "download", { status: "failed", error: "שרת מקומי לא זמין" });
         return;
       }
-      const startRes = await fetch(`${srv}/yt/job`, {
+      const startRes = await fetchLocalServer(`${srv}/yt/job`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -228,7 +229,7 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
       const HEARTBEAT_MS = 20_000;
       while (!done) {
         await new Promise((r) => setTimeout(r, 2000));
-        const sRes = await fetch(`${srv}/yt/status/${serverJobId}`);
+        const sRes = await fetchLocalServer(`${srv}/yt/status/${serverJobId}`);
         if (!sRes.ok) {
           await updateStage(jobId, "download", { status: "failed", error: `status ${sRes.status}` });
           return;
@@ -360,7 +361,7 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
             await updateStage(jobId, "upload_audio", {
               percent: Math.round(10 + (i / transcriptFiles.length) * 85),
             });
-            const res = await fetch(f.url.startsWith("/") ? f.url : `${srv}${f.url}`);
+            const res = await fetchLocalServer(f.url.startsWith("/") ? f.url : `${srv}${f.url}`);
             if (!res.ok) continue;
             const blob = await res.blob();
             const path = await uploadArtifact(job.user_id, job.id, "transcripts", f.filename, blob);
