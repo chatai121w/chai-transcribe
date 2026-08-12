@@ -28,9 +28,18 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
+    "targets": ["nsis"],
     "resources": {
-      "../server/transcribe_server.py": "resources/transcribe_server.py"
+      "../server/transcribe_server.py": "resources/server/transcribe_server.py",
+      "../server/transcript_quality.py": "resources/server/transcript_quality.py",
+      "../server/config.py": "resources/server/config.py",
+      "../server/gpu_utils.py": "resources/server/gpu_utils.py",
+      "../server/ai_enhance.py": "resources/server/ai_enhance.py",
+      "../server/harmony_engine.py": "resources/server/harmony_engine.py",
+      "../server/nikud_engine.py": "resources/server/nikud_engine.py",
+      "../server/training_routes.py": "resources/server/training_routes.py",
+      "../server/train_lora.py": "resources/server/train_lora.py",
+      "../server/lk_data.db": "resources/server/lk_data.db"
     },
     "icon": [
       "icons/32x32.png",
@@ -41,7 +50,7 @@
     ],
     "windows": {
       "nsis": {
-        "installMode": "perMachine",
+        "installMode": "currentUser",
         "languages": ["Hebrew", "English"]
       }
     }

@@ -41,7 +41,7 @@ if sys.platform == "win32":
 # Add NVIDIA cuBLAS DLL directory so CTranslate2 can find cublas64_12.dll
 if sys.platform == "win32":
     _dll_dirs_added = []
-    for _pkg in ('nvidia.cublas', 'nvidia.cusparse', 'nvidia.cusparselt'):
+    for _pkg in ('nvidia.cublas', 'nvidia.cudnn', 'nvidia.cusparse', 'nvidia.cusparselt'):
         try:
             _mod = __import__(_pkg, fromlist=[''])
             _dll_dir = str(Path(_mod.__path__[0]) / "bin")

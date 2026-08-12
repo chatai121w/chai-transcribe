@@ -25,6 +25,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "desktop:validate": "npx tsc --noEmit && cargo test --manifest-path src-tauri/Cargo.toml && npm run build",
+    "desktop:build": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-tauri-installer.ps1",
     "dev:win": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/start-vite.ps1"
   },
   "dependencies": {

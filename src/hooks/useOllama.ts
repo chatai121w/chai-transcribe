@@ -363,7 +363,7 @@ export function useOllama() {
       });
     });
     abortRef.current?.abort();
-  }, []);
+  }, [upsertPullJob]);
 
   const deleteModel = useCallback(async (modelName: string) => {
     const baseUrl = getOllamaUrl();
@@ -427,16 +427,20 @@ export function useOllama() {
 
     /** Run a single chat request. Returns the model output. */
     const runOnce = async (sysPrompt: string, temperature: number): Promise<string> => {
+      const isTranslateGemma = model === 'translategemma' || model.startsWith('translategemma:');
+      const messages = isTranslateGemma
+        ? [{ role: 'user', content: `${sysPrompt}\n\n\n${text}` }]
+        : [
+            { role: 'system', content: sysPrompt },
+            { role: 'user', content: text },
+          ];
       // OpenAI-compatible endpoint first (newer Ollama versions)
       const r1 = await fetch(`${baseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model,
-          messages: [
-            { role: 'system', content: sysPrompt },
-            { role: 'user', content: text },
-          ],
+          messages,
           stream: false,
           temperature,
         }),
@@ -452,10 +456,7 @@ export function useOllama() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model,
-          messages: [
-            { role: 'system', content: sysPrompt },
-            { role: 'user', content: text },
-          ],
+          messages,
           stream: false,
           options: { temperature, repeat_penalty: 1.15 },
         }),
@@ -472,7 +473,8 @@ export function useOllama() {
 
     // Lower temperature when Hebrew guard is on — reduces drift to other languages.
     const guardOn = isHebrewOnlyEnabled() && action !== 'translate';
-    const initialTemp = guardOn ? 0.2 : 0.7;
+    const translateGemma = model === 'translategemma' || model.startsWith('translategemma:');
+    const initialTemp = translateGemma ? 0.1 : guardOn ? 0.2 : 0.7;
     let result = await runOnce(systemPrompt, initialTemp);
 
     // Auto-retry once if the result contains foreign script while guard is on.

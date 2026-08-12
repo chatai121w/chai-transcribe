@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 
 import { getServerUrl } from "@/lib/serverConfig";
+import { isTauri } from "@/lib/tauri";
+import { DesktopComponentManager } from "@/components/DesktopComponentManager";
 const SERVER_URL = getServerUrl();
 
 interface ScanResult {
@@ -65,7 +67,7 @@ interface TabStatus {
   verify: "idle" | "testing" | "ok" | "error";
 }
 
-const Setup = () => {
+const BrowserSetup = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>("scan");
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
@@ -734,5 +736,11 @@ const Setup = () => {
     </div>
   );
 };
+
+const Setup = () => (
+  isTauri()
+    ? <div className="min-h-screen bg-background px-4"><DesktopComponentManager /></div>
+    : <BrowserSetup />
+);
 
 export default Setup;

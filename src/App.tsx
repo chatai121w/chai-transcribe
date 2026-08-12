@@ -91,6 +91,7 @@ const VoiceCommandAdmin = lazyWithLog('VoiceCommandAdmin', () => import("./pages
 const SystemDashboard   = lazyWithLog('SystemDashboard',   () => import("./pages/SystemDashboard"));
 const LashoKodesh       = lazyWithLog('LashoKodesh',       () => import("./pages/LashoKodesh"));
 const PersonalLearning = lazyWithLog('PersonalLearning', () => import("./pages/PersonalLearning"));
+const Translation = lazyWithLog('Translation', () => import("./pages/Translation"));
 const CompareReport     = lazyWithLog('CompareReport',     () => import("./pages/CompareReport"));
 const ComparisonsHub    = lazyWithLog('ComparisonsHub',    () => import("./pages/ComparisonsHub"));
 const AsrTraining       = lazyWithLog('AsrTraining',       () => import("./pages/AsrTraining"));
@@ -297,6 +298,7 @@ const App = () => {
                 <Route path="/lashon-kodesh" element={<ProtectedRoute><LashoKodesh /></ProtectedRoute>} />
                 <Route path="/loshon-kodesh-rules" element={<Navigate to="/lashon-kodesh?tab=settings" replace />} />
                 <Route path="/personal-learning" element={<ProtectedRoute><PersonalLearning /></ProtectedRoute>} />
+                <Route path="/translation" element={<ProtectedRoute><Translation /></ProtectedRoute>} />
                 <Route path="/asr-training" element={<Navigate to="/compare?tab=ground-truth" replace />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>

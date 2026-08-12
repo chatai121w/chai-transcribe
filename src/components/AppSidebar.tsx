@@ -37,6 +37,7 @@ import {
   Palette,
   GraduationCap,
   BookOpen,
+  Languages,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -68,6 +69,7 @@ const navItems: NavItem[] = [
   { label: "ניקוי קול", icon: Wand2, path: "/audio-clean" },
   { label: "תיקיות", icon: FolderOpen, path: "/folders" },
   { label: "עורך טקסט", icon: FileText, path: "/text-editor" },
+  { label: "תרגום", icon: Languages, path: "/translation" },
   { label: "מילון ולמידה אישית", icon: BookOpen, path: "/personal-learning" },
   { label: "זיהוי דוברים", icon: Users, path: "/diarization" },
   { label: "השוואות", icon: GitCompareArrows, path: "/compare" },
