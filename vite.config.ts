@@ -51,6 +51,46 @@ function isWhisperServer(port: number): Promise<boolean> {
   });
 }
 
+function isOllamaServer(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const request = http.get({ host: '127.0.0.1', port: 11434, path: '/api/tags', timeout: 1000 }, (response) => {
+      response.resume();
+      resolve(response.statusCode === 200);
+    });
+    request.once('timeout', () => { request.destroy(); resolve(false); });
+    request.once('error', () => resolve(false));
+  });
+}
+
+function findOllamaExecutable(): string {
+  const executable = process.platform === 'win32' ? 'ollama.exe' : 'ollama';
+  const candidates = [
+    process.platform === 'win32' && process.env.LOCALAPPDATA
+      ? path.join(process.env.LOCALAPPDATA, 'Programs', 'Ollama', executable)
+      : '',
+    executable,
+  ].filter(Boolean);
+  return candidates.find((candidate) => candidate === executable || fs.existsSync(candidate)) || executable;
+}
+
+async function startOllamaServer(): Promise<'started' | 'already running'> {
+  if (await isOllamaServer()) return 'already running';
+
+  const child = spawn(findOllamaExecutable(), ['serve'], {
+    env: { ...process.env, OLLAMA_ORIGINS: '*' },
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  child.unref();
+
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (await isOllamaServer()) return 'started';
+  }
+  throw new Error('Ollama לא עלה בזמן. ודא שהוא מותקן ונסה שוב.');
+}
+
 async function resolveWhisperPort(): Promise<{ port: number; alreadyRunning: boolean }> {
   for (const port of WHISPER_PORTS) {
     if (await isWhisperServer(port)) return { port, alreadyRunning: true };
@@ -94,6 +134,18 @@ function whisperServerLauncher(): Plugin {
       server.middlewares.use(async (req, res, next) => {
         if (req.url?.startsWith('/whisper')) {
           proxyWhisperRequest(req, res);
+          return;
+        }
+
+        if (req.method === 'POST' && req.url === '/__api/start-ollama') {
+          try {
+            const message = await startOllamaServer();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, running: true, message }));
+          } catch (err: unknown) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : 'Ollama start failed' }));
+          }
           return;
         }
 

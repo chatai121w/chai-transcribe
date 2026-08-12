@@ -34,7 +34,6 @@ import {
   Youtube,
   Bot,
   ScrollText,
-  Palette,
   GraduationCap,
   BookOpen,
   Languages,
@@ -45,7 +44,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useTheme } from "@/hooks/useTheme";
+import { ThemeQuickPicker } from "@/components/ThemeQuickPicker";
 
 const SIDEBAR_WIDTH = 260;
 const TRIGGER_ZONE = 16;
@@ -131,8 +130,7 @@ const AppSidebar = () => {
     setLocalFolders(updated);
     saveLocalFolders(updated);
   };
-  const { preferences, updatePreference, updatePreferences } = useCloudPreferences();
-  const { activeThemeId, allThemes, setTheme } = useTheme();
+  const { preferences, updatePreference } = useCloudPreferences();
   const [isPinnedPreference, setIsPinned] = useState(preferences.sidebar_pinned);
   const lastPinnedRef = useRef(preferences.sidebar_pinned);
 
@@ -267,21 +265,6 @@ const AppSidebar = () => {
     user?.email?.split("@")[0] ||
     "";
 
-  const cycleTheme = () => {
-    if (allThemes.length === 0) return;
-    const currentIndex = allThemes.findIndex((theme) => theme.id === activeThemeId);
-    const nextTheme = allThemes[(currentIndex + 1) % allThemes.length] || allThemes[0];
-    setTheme(nextTheme.id);
-    updatePreferences({
-      theme: nextTheme.id,
-      custom_themes: localStorage.getItem('app_custom_themes') || '[]',
-    });
-    toast({
-      title: 'ערכת נושא הוחלפה',
-      description: nextTheme.nameHe,
-    });
-  };
-
   const isActive = (path: string) => location.pathname === path;
 
   return (
@@ -342,18 +325,12 @@ const AppSidebar = () => {
             ניווט
           </h2>
           <div className="flex items-center gap-1">
-            <button
-              onClick={cycleTheme}
-              onContextMenu={(e) => {
-                e.preventDefault();
+            <ThemeQuickPicker
+              onManage={() => {
                 navigate('/settings#themes-section');
                 if (!isPinned) setIsOpen(false);
               }}
-              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="החלף ערכת נושא • קליק ימני לעריכת ערכות"
-            >
-              <Palette className="w-4 h-4" />
-            </button>
+            />
             {!isMobile && (
               <button
                 onClick={() => setIsPinned((p) => !p)}

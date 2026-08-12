@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolveLocalServerUrl, startLocalTranscriptionServer } from './localServerLauncher';
+import { resolveLocalServerUrl, startLocalOllama, startLocalTranscriptionServer } from './localServerLauncher';
 
 describe('local server launcher', () => {
   afterEach(() => {
@@ -27,6 +27,16 @@ describe('local server launcher', () => {
     ));
 
     await expect(startLocalTranscriptionServer()).rejects.toThrow('תשובה לא תקינה');
+  });
+
+  it('starts only Ollama through the local Vite endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ ok: true, running: true, message: 'started' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+
+    await expect(startLocalOllama()).resolves.toMatchObject({ ok: true, message: 'started' });
+    expect(fetchMock).toHaveBeenCalledWith('/__api/start-ollama', { method: 'POST' });
   });
 
   it('refreshes a stale local port from the launcher on a hosted page', async () => {

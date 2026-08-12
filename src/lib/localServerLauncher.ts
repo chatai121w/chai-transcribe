@@ -12,6 +12,12 @@ export interface LocalServerStartResult {
   launcherPort?: number;
 }
 
+export interface LocalOllamaStartResult {
+  ok: boolean;
+  message: string;
+  launcherPort?: number;
+}
+
 function isLocalFrontend(): boolean {
   return typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
 }
@@ -98,6 +104,47 @@ async function startViaLauncher(): Promise<LocalServerStartResult> {
 
 export async function startLocalTranscriptionServer(): Promise<LocalServerStartResult> {
   return isLocalFrontend() ? startViaVite() : startViaLauncher();
+}
+
+async function startOllamaViaVite(): Promise<LocalOllamaStartResult> {
+  const response = await fetch('/__api/start-ollama', { method: 'POST' });
+  const data = await readJson(response);
+  if (!response.ok || !data?.ok) throw new Error(data?.error || 'הפעלת Ollama נכשלה');
+  return { ok: true, message: data.message || 'started' };
+}
+
+async function startOllamaViaLauncher(): Promise<LocalOllamaStartResult> {
+  const tryPort = async (port: number) => {
+    try {
+      const response = await fetchLocalServer(`http://127.0.0.1:${port}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ target: 'ollama' }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) return null;
+      const data = await readJson(response);
+      const result = data?.results?.ollama;
+      if (!data?.ok || !result?.ok) return null;
+      localStorage.setItem(LAUNCHER_PORT_KEY, String(port));
+      return { ok: true, message: result.message || 'started', launcherPort: port } satisfies LocalOllamaStartResult;
+    } catch {
+      return null;
+    }
+  };
+
+  const ports = launcherPorts();
+  const preferred = await tryPort(ports[0]);
+  if (preferred) return preferred;
+  const fallbacks = await Promise.all(ports.slice(1).map(tryPort));
+  const match = fallbacks.find(Boolean);
+  if (match) return match;
+  throw new Error('Chai Launcher אינו פועל או שהדפדפן חסם גישה לרשת המקומית. הפעל את Chai Launcher ואשר הרשאת רשת מקומית.');
+}
+
+/** Start the local Ollama service without starting Whisper or another server. */
+export async function startLocalOllama(): Promise<LocalOllamaStartResult> {
+  return isLocalFrontend() ? startOllamaViaVite() : startOllamaViaLauncher();
 }
 
 export async function getLauncherHealth(): Promise<any | null> {

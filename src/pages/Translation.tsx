@@ -6,10 +6,14 @@ import {
   Download,
   FileText,
   FolderOpen,
+  HardDrive,
   Languages,
   Laptop,
   Loader2,
+  RefreshCw,
   Save,
+  Server,
+  Settings2,
   Square,
   Trash2,
   Upload,
@@ -20,13 +24,17 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { CustomProvidersDialog } from '@/components/CustomProvidersDialog';
+import { OllamaManager } from '@/components/OllamaManager';
 import { toast } from '@/hooks/use-toast';
 import { useCloudTranscripts } from '@/hooks/useCloudTranscripts';
 import { useOllama } from '@/hooks/useOllama';
 import { editTranscriptCloud } from '@/utils/editTranscriptApi';
+import { startLocalOllama } from '@/lib/localServerLauncher';
 import {
   chatWithProvider,
   encodeProviderModel,
@@ -107,6 +115,8 @@ export default function Translation() {
   const [licenseAccepted, setLicenseAccepted] = useState(false);
   const [isBenchmarking, setIsBenchmarking] = useState(false);
   const [benchmarkResult, setBenchmarkResult] = useState<TranslationBenchmarkResult | null>(loadTranslationBenchmark);
+  const [modelManagerOpen, setModelManagerOpen] = useState(false);
+  const [isStartingOllama, setIsStartingOllama] = useState(false);
 
   useEffect(() => subscribeProviders(() => setProviderRevision(value => value + 1)), []);
 
@@ -136,11 +146,31 @@ export default function Translation() {
   })), [ollama.models]);
 
   const engines = useMemo(() => [...CLOUD_ENGINES, ...ollamaEngines, ...customEngines], [ollamaEngines, customEngines]);
+  const localCustomEngines = useMemo(() => customEngines.filter(option => option.local), [customEngines]);
+  const cloudCustomEngines = useMemo(() => customEngines.filter(option => !option.local), [customEngines]);
   const translateGemma = ollama.models.find(model => isTranslateGemmaModel(model.name));
   const translateGemmaJob = ollama.pullJobs[TRANSLATEGEMMA_MODEL];
   const translateGemmaPulling = ['starting', 'pulling', 'retrying'].includes(translateGemmaJob?.status || '');
   const selectedOllamaModel = engine.startsWith('ollama:') ? engine.slice('ollama:'.length) : '';
   const selectedTranslateGemma = isTranslateGemmaModel(selectedOllamaModel);
+
+  const startOllama = async () => {
+    setIsStartingOllama(true);
+    try {
+      await startLocalOllama();
+      let connected = false;
+      for (let attempt = 0; attempt < 12 && !connected; attempt += 1) {
+        connected = await ollama.checkConnection();
+        if (!connected) await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      if (!connected) throw new Error('Ollama הופעל, אך הדפדפן עדיין לא הצליח לקרוא את רשימת המודלים. בדוק הרשאת רשת מקומית או CORS.');
+      toast({ title: 'Ollama מחובר', description: 'רשימת המודלים המקומיים נטענה וניתן לבחור מנוע.' });
+    } catch (error) {
+      toast({ title: 'הפעלת Ollama נכשלה', description: error instanceof Error ? error.message : 'שגיאת חיבור', variant: 'destructive' });
+    } finally {
+      setIsStartingOllama(false);
+    }
+  };
 
   const folderOptions = useMemo(() => {
     const folders = new Map<string, string>();
@@ -396,10 +426,60 @@ export default function Translation() {
             <Select value={engine} onValueChange={setEngine}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent dir="rtl" className="max-h-80">
-                {engines.map(option => <SelectItem key={option.value} value={option.value}>{option.label} · {option.detail}</SelectItem>)}
+                <SelectGroup>
+                  <SelectLabel>מנועי ענן</SelectLabel>
+                  {CLOUD_ENGINES.map(option => <SelectItem key={option.value} value={option.value}>{option.label} · {option.detail}</SelectItem>)}
+                  {cloudCustomEngines.map(option => <SelectItem key={option.value} value={option.value}>{option.label} · {option.detail}</SelectItem>)}
+                </SelectGroup>
+                <SelectSeparator />
+                <SelectGroup>
+                  <SelectLabel>Ollama מקומי ופרטי ({ollamaEngines.length})</SelectLabel>
+                  {ollamaEngines.length > 0
+                    ? ollamaEngines.map(option => <SelectItem key={option.value} value={option.value}>{option.label} · {option.detail}</SelectItem>)
+                    : <SelectItem value="ollama-unavailable" disabled>{ollama.isConnected ? 'אין מודלים מותקנים' : 'Ollama אינו מחובר'}</SelectItem>}
+                </SelectGroup>
+                {localCustomEngines.length > 0 && (
+                  <>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel>שרתים מקומיים תואמי OpenAI</SelectLabel>
+                      {localCustomEngines.map(option => <SelectItem key={option.value} value={option.value}>{option.label} · {option.detail}</SelectItem>)}
+                    </SelectGroup>
+                  </>
+                )}
               </SelectContent>
             </Select>
-            {!ollama.isConnected && <p className="text-xs text-muted-foreground">מנועים מקומיים יופיעו אוטומטית כאשר Ollama מחובר. אין הורדת מודל אוטומטית.</p>}
+            <div className={`rounded-md border p-3 ${ollama.isConnected ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-amber-500/40 bg-amber-500/5'}`}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Server className={`h-5 w-5 shrink-0 ${ollama.isConnected ? 'text-emerald-600' : 'text-amber-600'}`} />
+                  <div>
+                    <p className="text-sm font-semibold">{ollama.isConnected ? `Ollama מחובר · ${ollama.models.length} מודלים מותקנים` : 'Ollama אינו מחובר'}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {ollama.isConnected ? 'המנועים המותקנים זמינים בבורר שמעל.' : 'Ollama מותקן במחשב אך השירות צריך לפעול כדי לטעון ולבחור מודלים.'}
+                    </p>
+                    {ollama.connectionError && !ollama.isConnected && <p className="mt-1 text-xs text-destructive">{ollama.connectionError}</p>}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {!ollama.isConnected && (
+                    <Button type="button" size="sm" onClick={() => void startOllama()} disabled={isStartingOllama || ollama.isChecking}>
+                      {isStartingOllama ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Server className="ml-2 h-4 w-4" />}
+                      {isStartingOllama ? 'מפעיל ומתחבר...' : 'הפעל Ollama'}
+                    </Button>
+                  )}
+                  <Button type="button" size="sm" variant="outline" onClick={() => void ollama.checkConnection()} disabled={ollama.isChecking || isStartingOllama}>
+                    <RefreshCw className={`ml-2 h-4 w-4 ${ollama.isChecking ? 'animate-spin' : ''}`} /> רענן
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setModelManagerOpen(true)}>
+                    <HardDrive className="ml-2 h-4 w-4" /> מודלים והורדות
+                  </Button>
+                  <CustomProvidersDialog trigger={
+                    <Button type="button" size="sm" variant="outline"><Settings2 className="ml-2 h-4 w-4" /> שרת מקומי נוסף</Button>
+                  } />
+                </div>
+              </div>
+            </div>
             {selectedTranslateGemma && sourceLanguage === 'auto' && (
               <p className="text-xs font-medium text-destructive">יש לבחור שפת מקור ידנית עבור TranslateGemma.</p>
             )}
@@ -490,6 +570,19 @@ export default function Translation() {
 
         <p className="flex items-center gap-2 text-sm text-muted-foreground"><CheckCircle2 className="h-4 w-4" /> המודל אינו נהפך לברירת מחדל אוטומטית. לאחר ההתקנה ניתן להשוות אותו מול Gemini ולבחור ידנית.</p>
       </section>
+
+      <Dialog open={modelManagerOpen} onOpenChange={(open) => {
+        setModelManagerOpen(open);
+        if (!open) void ollama.checkConnection();
+      }}>
+        <DialogContent dir="rtl" className="max-h-[92vh] max-w-6xl overflow-y-auto p-3 sm:p-5">
+          <DialogHeader className="px-1">
+            <DialogTitle>מודלים מקומיים והורדות</DialogTitle>
+            <DialogDescription>זהו מנהל Ollama המשותף לכל המערכת. מודל שמותקן כאן יופיע גם בבורר מנוע התרגום.</DialogDescription>
+          </DialogHeader>
+          <OllamaManager />
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
