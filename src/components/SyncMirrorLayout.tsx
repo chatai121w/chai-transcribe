@@ -29,7 +29,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor, MoreHorizontal, LocateFixed, Columns2, Square } from "lucide-react";
+import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, GitCompareArrows, FolderInput, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor, MoreHorizontal, LocateFixed, Columns2, Square } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -62,6 +62,8 @@ interface SyncMirrorLayoutProps {
   onSearchMatchCount?: (count: number) => void;
   onSaveReplace?: () => void;
   onDuplicateSave?: (newName: string) => void;
+  onAssignFolder?: () => void;
+  onSendToCompare?: () => void;
   learningProfiles?: Array<{ id: string; name: string }>;
   learningEnabled?: boolean;
   onSaveLearning?: (payload: {
@@ -182,6 +184,8 @@ export const SyncMirrorLayout = ({
   onSearchMatchCount,
   onSaveReplace,
   onDuplicateSave,
+  onAssignFolder,
+  onSendToCompare,
   learningProfiles = [],
   learningEnabled = true,
   onSaveLearning,
@@ -1606,6 +1610,36 @@ export const SyncMirrorLayout = ({
               >
                 <Save className="w-2.5 h-2.5" />
                 שמור
+              </Button>
+            )}
+
+            {onAssignFolder && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="pointer-events-auto h-6 gap-1 px-2 text-[10px]"
+                onClick={onAssignFolder}
+                title="סווג את התמלול לתיקייה קיימת או חדשה"
+                data-testid="assign-transcript-folder"
+              >
+                <FolderInput className="h-3 w-3" />
+                תיקייה
+              </Button>
+            )}
+
+            {onSendToCompare && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="pointer-events-auto h-6 gap-1 px-2 text-[10px]"
+                onClick={onSendToCompare}
+                title="העבר את התמלול למסך השוואת גרסאות"
+                data-testid="send-transcript-to-compare"
+              >
+                <GitCompareArrows className="h-3 w-3" />
+                השוואה
               </Button>
             )}
 

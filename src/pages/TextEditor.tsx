@@ -6,6 +6,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
 import { SyncMirrorLayout } from "@/components/SyncMirrorLayout";
+import { TranscriptFolderDialog } from "@/components/TranscriptFolderDialog";
+import { ComparisonLibraryPicker } from "@/components/ComparisonLibraryPicker";
 import { debugLog } from "@/lib/debugLogger";
 import { AlignmentStatusBanner } from "@/components/AlignmentStatusBanner";
 import type { TextVersion } from "@/components/TextEditHistory";
@@ -459,6 +461,8 @@ const TextEditor = () => {
     try { localStorage.setItem('ai_polish_enabled', aiPolishEnabled ? '1' : '0'); } catch {}
   }, [aiPolishEnabled]);
   const [comparePreselect, setComparePreselect] = useState<{ leftId: string; rightId: string } | null>(null);
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [comparisonLibraryVersions, setComparisonLibraryVersions] = useState<TextVersion[]>([]);
   const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
   const sendTextToLoshonKodesh = useCallback((opts?: { jump?: boolean }) => {
     const t = (text || "").trim();
@@ -969,6 +973,24 @@ const TextEditor = () => {
     return null;
   }, [transcriptId, text, saveTranscript, location.state]);
 
+  const assignCurrentTranscriptToFolder = useCallback(async (folderId: string | null, folderName: string) => {
+    const id = transcriptIdRef.current || transcriptId || await ensureCloudTranscript();
+    if (!id) throw new Error("לא ניתן לשמור את התמלול לפני השיוך");
+    await updateTranscript(id, { folder_id: folderId, folder: folderName });
+    toast({
+      title: folderId ? "התמלול שויך לתיקייה" : "שיוך התיקייה הוסר",
+      description: folderName || "ללא תיקייה",
+    });
+  }, [ensureCloudTranscript, transcriptId, updateTranscript]);
+
+  const openCurrentTranscriptInCompare = useCallback(async () => {
+    const id = transcriptIdRef.current || transcriptId || await ensureCloudTranscript();
+    if (!id) return;
+    setCompareSubTab("versions");
+    setActiveTab("compare");
+    toast({ title: "התמלול הועבר להשוואה", description: "בחר גרסה נוספת מהרשימה או מעץ התיקיות." });
+  }, [ensureCloudTranscript, transcriptId]);
+
   const handleSaveVersion = async (text: string, source: string, engineLabel: string, actionLabel: string) => {
     // Save version to cloud WITHOUT replacing the main text
     let id = transcriptId;
@@ -1048,6 +1070,10 @@ const TextEditor = () => {
       });
     }
 
+    for (const libraryVersion of comparisonLibraryVersions) {
+      byId.set(libraryVersion.id, libraryVersion);
+    }
+
     // A transcription engine run creates a transcript record of its own. Include
     // sibling runs made from the same uploaded audio so Gemini/Groq/local results
     // can be compared without manually converting them into editor versions.
@@ -1094,7 +1120,22 @@ const TextEditor = () => {
             customPrompt: joinVersionLabels(version.customPrompt, `${count} הרצות עם טקסט זהה`),
           };
     });
-  }, [versions, cloudVersions, transcripts, transcriptId, text]);
+  }, [versions, cloudVersions, transcripts, transcriptId, text, comparisonLibraryVersions]);
+
+  const compareLibraryPair = useCallback((base: (typeof transcripts)[number], newer: (typeof transcripts)[number]) => {
+    const toLibraryVersion = (item: (typeof transcripts)[number]): TextVersion => ({
+      id: `library-${item.id}`,
+      text: item.edited_text?.trim() || item.text,
+      timestamp: new Date(item.updated_at || item.created_at),
+      source: 'original',
+      customPrompt: joinVersionLabels(item.title, item.engine, item.folder || undefined),
+    });
+    const baseVersion = toLibraryVersion(base);
+    const newerVersion = toLibraryVersion(newer);
+    setComparisonLibraryVersions([baseVersion, newerVersion]);
+    setComparePreselect({ leftId: baseVersion.id, rightId: newerVersion.id });
+    toast({ title: "שני תמלולים נטענו להשוואה" });
+  }, []);
 
   const sendVersionToCompare = useCallback((versionId: string) => {
     const original = compareVersions.find(v => v.source === 'original') || compareVersions[0];
@@ -2387,6 +2428,8 @@ const TextEditor = () => {
                   onSearchMatchCount={setTranscriptMatchCount}
                   onSaveReplace={() => handleSaveAndReplaceOriginal(text, 'manual', 'עורך טקסט', 'שמירה מהעורך')}
                   onDuplicateSave={(newName) => handleDuplicateAndSave(text, 'manual', 'עורך טקסט', 'שכפול מהעורך', newName)}
+                  onAssignFolder={() => setFolderDialogOpen(true)}
+                  onSendToCompare={() => { void openCurrentTranscriptInCompare(); }}
                   learningProfiles={learningProfiles}
                   learningEnabled={true}
                   onSaveLearning={handleSaveLearningToProfile}
@@ -2488,6 +2531,12 @@ const TextEditor = () => {
                     {showCompareAi ? "הסתר עריכת AI" : "עריכת AI במסך ההשוואה"}
                   </Button>
                 </div>
+
+                <ComparisonLibraryPicker
+                  transcripts={transcripts}
+                  initialTranscriptId={transcriptIdRef.current || transcriptId}
+                  onCompare={compareLibraryPair}
+                />
 
                 {compareVersions.length >= 2 ? (
                   <LazyErrorBoundary label="השוואה מתקדמת"><AdvancedDiffView 
@@ -2599,6 +2648,12 @@ const TextEditor = () => {
         </Tabs>
 
         <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+        <TranscriptFolderDialog
+          open={folderDialogOpen}
+          onOpenChange={setFolderDialogOpen}
+          currentFolderId={transcripts.find((item) => item.id === (transcriptIdRef.current || transcriptId))?.folder_id || null}
+          onAssign={assignCurrentTranscriptToFolder}
+        />
         <DriveFolderPicker
           open={drivePickerOpen}
           onOpenChange={setDrivePickerOpen}
