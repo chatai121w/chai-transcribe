@@ -88,7 +88,7 @@ serve(async (req) => {
 
     let systemPrompt = '';
 
-    if (action === 'custom' && customPrompt) {
+    if ((action === 'custom' || action === 'translate') && customPrompt) {
       systemPrompt = customPrompt;
     } else if (action === 'tone') {
       systemPrompt = TONE_PROMPTS[toneStyle || 'formal'] || TONE_PROMPTS.formal;

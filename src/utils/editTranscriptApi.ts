@@ -27,7 +27,8 @@ interface EditTranscriptParams {
  * Edge function = fallback if DB proxy fails (no API key, etc).
  */
 export async function editTranscriptCloud(params: EditTranscriptParams): Promise<string> {
-  let { text, action, model, customPrompt, toneStyle, targetLanguage } = params;
+  const { text, model, toneStyle, targetLanguage } = params;
+  let { action, customPrompt } = params;
 
   // ── Hebrew-only output guard: convert to action='custom' with prefixed prompt ──
   const hebrewPrefix = buildHebrewGuardPrefix(action);
@@ -45,7 +46,7 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
   // ── Personal Gemini path: try user's key first, fall back to Lovable on exhaustion ──
   if (isPersonalGeminiEnabled() && isGeminiModel(model || getPersonalGeminiModel())) {
     let systemPrompt = '';
-    if (action === 'custom' && customPrompt) systemPrompt = customPrompt;
+    if ((action === 'custom' || action === 'translate') && customPrompt) systemPrompt = customPrompt;
     else if (action === 'tone') systemPrompt = TONE_PROMPTS[toneStyle || 'formal'] || TONE_PROMPTS.formal;
     else systemPrompt = (ACTION_PROMPTS as Record<string, string>)[action] || ACTION_PROMPTS.improve;
     if (targetLanguage) systemPrompt += `\nהחזר את הטקסט בשפה: ${targetLanguage}`;
@@ -72,13 +73,17 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
 
 
   const routeModel = model || 'gemini-2.5-flash';
+  // The deployed DB proxy already honors custom prompts reliably. Keep the
+  // public action as "translate" (so the Hebrew guard stays disabled), but
+  // route the proxy call through its custom-prompt branch.
+  const proxyAction = action === 'translate' && customPrompt ? 'custom' : action;
 
   // ── Try DB proxy first (latest code, no deployment needed) ──
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.rpc as any)('edit_transcript_proxy', {
       p_text: text,
-      p_action: action,
+      p_action: proxyAction,
       p_model: routeModel,
       p_custom_prompt: customPrompt || null,
       p_tone_style: toneStyle || null,

@@ -409,6 +409,8 @@ export function useOllama() {
       systemPrompt = customPrompt;
     } else if (action === 'tone') {
       systemPrompt = TONE_PROMPTS[toneStyle || 'formal'] || TONE_PROMPTS.formal;
+    } else if (action === 'translate' && customPrompt) {
+      systemPrompt = customPrompt;
     } else if (action === 'translate') {
       const lang = targetLanguage || 'אנגלית';
       if (lang === 'עברית') {

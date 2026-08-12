@@ -45,11 +45,13 @@ import {
 } from '@/lib/customProviders';
 import {
   buildTranslateGemmaPrompt,
+  buildStrictTranslationRetryPrompt,
   buildTranslationPrompt,
   characterNgramFScore,
   extractTextFromImportedFile,
   getTranslationLanguage,
   isTranslateGemmaModel,
+  isLikelyWrongTranslationLanguage,
   LOCAL_TRANSLATION_SMOKE_CASES,
   splitTranslationText,
   TRANSLATEGEMMA_MODEL,
@@ -111,6 +113,7 @@ export default function Translation() {
   const [glossary, setGlossary] = useState('');
   const [result, setResult] = useState('');
   const [progress, setProgress] = useState(0);
+  const [progressDetail, setProgressDetail] = useState('');
   const [isTranslating, setIsTranslating] = useState(false);
   const [licenseAccepted, setLicenseAccepted] = useState(false);
   const [isBenchmarking, setIsBenchmarking] = useState(false);
@@ -219,15 +222,28 @@ export default function Translation() {
   };
 
   const translateChunk = async (text: string, prompt: string): Promise<string> => {
+    const target = getTranslationLanguage(targetLanguage);
     if (engine.startsWith('ollama:')) {
-      return ollama.editText({ text, action: 'custom', model: engine.slice('ollama:'.length), customPrompt: prompt });
+      return ollama.editText({
+        text,
+        action: 'translate',
+        model: engine.slice('ollama:'.length),
+        customPrompt: prompt,
+        targetLanguage: `${target.modelLabel} (${target.code})`,
+      });
     }
     const parsed = parseProviderModel(engine);
     if (parsed) {
       return chatWithProvider({ ...parsed, systemPrompt: prompt, userText: text, temperature: 0.1 });
     }
     const model = engine.replace(/^cloud:/, '');
-    return editTranscriptCloud({ text, action: 'custom', customPrompt: prompt, model });
+    return editTranscriptCloud({
+      text,
+      action: 'translate',
+      customPrompt: prompt,
+      targetLanguage: `${target.modelLabel} (${target.code})`,
+      model,
+    });
   };
 
   const runTranslation = async () => {
@@ -244,25 +260,46 @@ export default function Translation() {
       return;
     }
 
-    const chunks = splitTranslationText(sourceText);
+    const chunks = splitTranslationText(sourceText, 6000);
     const prompt = selectedTranslateGemma
       ? buildTranslateGemmaPrompt({ sourceCode: sourceLanguage, targetCode: targetLanguage, preserveStructure, glossary })
       : buildTranslationPrompt({ sourceCode: sourceLanguage, targetCode: targetLanguage, preserveStructure, glossary });
     setIsTranslating(true);
-    setProgress(0);
+    setProgress(3);
+    setProgressDetail(`מכין ${chunks.length} מקטעים`);
     setResult('');
     try {
-      const translated: string[] = [];
-      for (let index = 0; index < chunks.length; index += 1) {
-        translated.push((await translateChunk(chunks[index], prompt)).trim());
-        setProgress(Math.round(((index + 1) / chunks.length) * 100));
-      }
+      const translated = new Array<string>(chunks.length);
+      let nextIndex = 0;
+      let completed = 0;
+      const workerCount = engine.startsWith('ollama:') ? 1 : Math.min(2, chunks.length);
+      const workers = Array.from({ length: workerCount }, async () => {
+        while (nextIndex < chunks.length) {
+          const index = nextIndex++;
+          let output = (await translateChunk(chunks[index], prompt)).trim();
+          if (isLikelyWrongTranslationLanguage(output, targetLanguage)) {
+            const retryPrompt = selectedTranslateGemma
+              ? `${prompt}\n\nThe previous response used the wrong language. Return ${getTranslationLanguage(targetLanguage).modelLabel} (${targetLanguage}) only, with no explanation.`
+              : buildStrictTranslationRetryPrompt({ sourceCode: sourceLanguage, targetCode: targetLanguage, preserveStructure, glossary });
+            output = (await translateChunk(chunks[index], retryPrompt)).trim();
+          }
+          if (isLikelyWrongTranslationLanguage(output, targetLanguage)) {
+            throw new Error(`המנוע החזיר טקסט בשפה שגויה במקום ${getTranslationLanguage(targetLanguage).label}. נסה מנוע אחר או בחר שפת מקור ידנית.`);
+          }
+          translated[index] = output;
+          completed += 1;
+          setProgress(Math.round(5 + (completed / chunks.length) * 95));
+          setProgressDetail(`הושלמו ${completed} מתוך ${chunks.length} מקטעים`);
+        }
+      });
+      await Promise.all(workers);
       setResult(translated.join('\n\n'));
       toast({ title: 'התרגום הושלם', description: `${chunks.length} מקטעים תורגמו ללא השמטה` });
     } catch (error) {
       toast({ title: 'התרגום נכשל', description: error instanceof Error ? error.message : 'שגיאת מנוע', variant: 'destructive' });
     } finally {
       setIsTranslating(false);
+      setProgressDetail('');
     }
   };
 
@@ -302,9 +339,10 @@ export default function Translation() {
         });
         const output = await ollama.editText({
           text: testCase.source,
-          action: 'custom',
+          action: 'translate',
           model: translateGemma.name,
           customPrompt: prompt,
+          targetLanguage: `${getTranslationLanguage(testCase.targetCode).modelLabel} (${testCase.targetCode})`,
         });
         scores.push(characterNgramFScore(testCase.reference, output));
       }
@@ -493,7 +531,7 @@ export default function Translation() {
           <Button className="w-full" size="lg" disabled={isTranslating || !sourceText.trim()} onClick={() => void runTranslation()}>
             <Languages className="ml-2 h-5 w-5" /> {isTranslating ? `מתרגם ${progress}%` : 'תרגם'}
           </Button>
-          {isTranslating && <Progress value={progress} className="h-2" />}
+          {isTranslating && <div className="space-y-1"><Progress value={progress} className="h-2" /><p className="text-xs text-muted-foreground">{progressDetail}</p></div>}
 
           <Textarea dir={getTranslationLanguage(targetLanguage).direction} value={result} onChange={event => setResult(event.target.value)} placeholder="התרגום יופיע כאן" className="min-h-[250px] resize-y text-base leading-7" />
           <div className="flex flex-wrap gap-2">

@@ -43,14 +43,43 @@ export function buildTranslationPrompt(args: {
     : '';
 
   return [
-    'You are a precise professional translator.',
+    'TRANSLATION TASK. You are a precise professional translator.',
     source,
-    `Translate into ${target.label} (${target.code}).`,
+    `TARGET LANGUAGE: ${target.modelLabel} (${target.code}).`,
+    `Translate the entire source text into ${target.modelLabel}. Every normal sentence in the answer must be written in ${target.modelLabel}.`,
     structure,
     'Preserve names, citations, religious terminology, and meaning. Do not summarize, omit, explain, or add content.',
     glossary,
     'Return only the translated text.',
   ].filter(Boolean).join('\n');
+}
+
+export function buildStrictTranslationRetryPrompt(args: {
+  sourceCode: string;
+  targetCode: string;
+  preserveStructure: boolean;
+  glossary?: string;
+}): string {
+  const target = getTranslationLanguage(args.targetCode);
+  return [
+    buildTranslationPrompt(args),
+    '',
+    'THE PREVIOUS RESPONSE USED THE WRONG LANGUAGE OR EXPLAINED THE SOURCE.',
+    `Rewrite it now using ${target.modelLabel} (${target.code}) only.`,
+    'Do not discuss the text. Do not describe the translation. Do not repeat the source language except for proper names that cannot be translated.',
+  ].join('\n');
+}
+
+/** Detect a clear script mismatch without rejecting occasional names or citations. */
+export function isLikelyWrongTranslationLanguage(output: string, targetCode: string): boolean {
+  const hebrewLetters = (output.match(/[\u0590-\u05FF]/g) || []).length;
+  const latinLetters = (output.match(/[A-Za-zÀ-ÖØ-öø-ÿ]/g) || []).length;
+  const scriptLetters = hebrewLetters + latinLetters;
+  if (scriptLetters < 20) return false;
+  const targetUsesHebrewScript = targetCode === 'he' || targetCode === 'yi';
+  return targetUsesHebrewScript
+    ? latinLetters / scriptLetters > 0.65
+    : hebrewLetters / scriptLetters > 0.55;
 }
 
 /** TranslateGemma requires explicit ISO language codes and two blank lines before the source text. */

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildTranslateGemmaPrompt,
+  buildStrictTranslationRetryPrompt,
   buildTranslationPrompt,
   characterNgramFScore,
   extractTextFromImportedFile,
+  isLikelyWrongTranslationLanguage,
   splitTranslationText,
   TRANSLATION_LANGUAGES,
 } from './translation';
@@ -23,9 +25,27 @@ describe('translation helpers', () => {
       preserveStructure: true,
       glossary: 'בבא בתרא = Bava Batra',
     });
-    expect(prompt).toContain('יידיש');
+    expect(prompt).toContain('Yiddish (yi)');
     expect(prompt).toContain('Bava Batra');
     expect(prompt).toContain('Return only the translated text');
+  });
+
+  it('forces the requested target language on retry', () => {
+    const prompt = buildStrictTranslationRetryPrompt({
+      sourceCode: 'he',
+      targetCode: 'en',
+      preserveStructure: true,
+    });
+    expect(prompt).toContain('TARGET LANGUAGE: English (en)');
+    expect(prompt).toContain('WRONG LANGUAGE');
+    expect(prompt).toContain('English (en) only');
+  });
+
+  it('detects a Hebrew response when English was requested', () => {
+    expect(isLikelyWrongTranslationLanguage('זהו הסבר בעברית במקום תרגום לאנגלית והוא אינו תקין בכלל.', 'en')).toBe(true);
+    expect(isLikelyWrongTranslationLanguage('This is the complete English translation of the requested source text.', 'en')).toBe(false);
+    expect(isLikelyWrongTranslationLanguage('This mentions Bava Batra and Rabbi Akiva in English.', 'he')).toBe(true);
+    expect(isLikelyWrongTranslationLanguage('זהו תרגום עברי מלא הכולל את השם Bava Batra.', 'he')).toBe(false);
   });
 
   it('imports text from common transcript JSON shapes', () => {
