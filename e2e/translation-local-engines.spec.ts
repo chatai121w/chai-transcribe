@@ -141,4 +141,19 @@ test.describe('תרגום בענן', () => {
       expect(request.p_custom_prompt).not.toContain('OUTPUT LANGUAGE: HEBREW ONLY');
     }
   });
+
+  test('מסווג את המקור ואת התרגום בנפרד דרך דיאלוג התיקיות המשותף', async ({ page }) => {
+    await page.goto('/translation');
+
+    await page.locator('textarea').first().fill('טקסט מקור שנועד לסיווג עצמאי בתיקייה.');
+    await page.getByTestId('classify-translation-source').click();
+    await expect(page.getByRole('heading', { name: 'סיווג המקור לתיקייה' })).toBeVisible();
+    await expect(page.getByText('המקור והתרגום נשמרים בנפרד.')).toBeVisible();
+    await page.getByTestId('transcript-folder-dialog').getByRole('button', { name: 'סגור', exact: true }).click();
+
+    await page.locator('textarea').nth(2).fill('Translated text stored independently.');
+    await page.getByTestId('classify-translation-result').click();
+    await expect(page.getByRole('heading', { name: 'סיווג התרגום לתיקייה' })).toBeVisible();
+    await expect(page.getByTestId('transcript-folder-dialog')).toBeVisible();
+  });
 });

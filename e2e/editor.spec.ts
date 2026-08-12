@@ -447,6 +447,31 @@ test.describe('עורך AI ו-Ollama', () => {
     }
   });
 
+  test('תצוגה רחבה ומזעור מנועים להורדה נשמרים אחרי ריענון', async ({ page }) => {
+    const emptyOllama = JSON.stringify({ models: [] });
+    await page.route('http://localhost:11434/api/tags', route => route.fulfill({ status: 200, contentType: 'application/json', body: emptyOllama }));
+    await page.route('http://127.0.0.1:11434/api/tags', route => route.fulfill({ status: 200, contentType: 'application/json', body: emptyOllama }));
+    await seedEditor(page, 'טקסט לבדיקה');
+    await page.goto('/text-editor');
+    await page.getByRole('tab', { name: /עריכה עם AI|AI/i }).first().click();
+
+    const wideView = page.getByTestId('ai-actions-wide-view');
+    await expect(wideView).toBeVisible();
+    await wideView.click();
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('ai_editor_view_mode'))).toBe('wide');
+
+    const downloadToggle = page.getByTestId('toggle-recommended-model-downloads');
+    await expect(downloadToggle).toHaveAttribute('aria-expanded', 'true');
+    await downloadToggle.click();
+    await expect(downloadToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('ai_editor_show_recommended_downloads'))).toBe('false');
+
+    await page.reload();
+    await page.getByRole('tab', { name: /עריכה עם AI|AI/i }).first().click();
+    await expect(page.getByTestId('toggle-recommended-model-downloads')).toHaveAttribute('aria-expanded', 'false');
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('ai_editor_view_mode'))).toBe('wide');
+  });
+
   test('טאב Ollama נפתח ומציג ניהול מודלים', async ({ page }) => {
     await page.goto('/text-editor');
     const ollamaTab = page.getByText('Ollama').first();

@@ -172,7 +172,6 @@ function useSetting<T>(key: string, def: T): [T, (v: T) => void] {
 // ─── Main Component ──────────────────────────────────────────────────────────
 export default function SystemDashboard() {
   const { user } = useAuth();
-  if (!user) return <Navigate to="/login" replace />;
 
   const [status, setStatus]             = useState<SystemStatus>(INITIAL_STATUS);
   const [whisperHealth, setWhisperHealth] = useState<WhisperHealth | null>(null);
@@ -324,6 +323,8 @@ export default function SystemDashboard() {
   const vramPct = whisperHealth?.vram_used_mb && whisperHealth?.vram_total_mb
     ? Math.round((whisperHealth.vram_used_mb / whisperHealth.vram_total_mb) * 100)
     : null;
+
+  if (!user) return <Navigate to="/login" replace />;
 
   // ─────────────────────────────────────────────────────────────────────────
   return (

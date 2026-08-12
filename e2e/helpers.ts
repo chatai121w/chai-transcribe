@@ -333,11 +333,11 @@ export function createTestAudioBuffer(): Buffer {
 export const test = base.extend<{
   authenticatedPage: Page;
 }>({
-  authenticatedPage: async ({ page }, use) => {
+  authenticatedPage: async ({ page }, provide) => {
     await mockSupabase(page);
     await injectAuthSession(page);
     await mockLocalServer(page);
-    await use(page);
+    await provide(page);
   },
 });
 

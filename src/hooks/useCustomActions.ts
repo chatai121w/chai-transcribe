@@ -21,7 +21,7 @@ export interface CustomAction {
 const STORAGE_KEY = 'ai_editor_custom_actions_v1';
 const VIEW_MODE_KEY = 'ai_editor_view_mode';
 
-export type ViewMode = 'grid' | 'compact' | 'list' | 'masonry';
+export type ViewMode = 'grid' | 'compact' | 'list' | 'masonry' | 'wide';
 
 // ── Built-in defaults ──────────────────────────────────────
 

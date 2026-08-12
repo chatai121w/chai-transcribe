@@ -4342,8 +4342,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                       <X className="w-3 h-3 no-theme-icon" />
                     </Button>
                   </div>
-                  {true && (
-                    <div className="space-y-3">
+                  <div className="space-y-3">
                       {/* Import / Record buttons */}
                       <div className="flex items-center gap-2 flex-wrap">
                         <input
@@ -4465,8 +4464,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                           ייבא קובץ אודיו או הקלט את הקול שלך. ההקלטה תסתנכרן אוטומטית עם השיר.
                         </p>
                       )}
-                    </div>
-                  )}
+                  </div>
                 </div>)}
 
                 <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-md p-2 flex items-start gap-1.5">

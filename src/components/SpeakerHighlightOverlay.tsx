@@ -57,7 +57,7 @@ export function SpeakerHighlightOverlay({ text, transcriptId }: SpeakerHighlight
     
     // Strategy: split current text into words, match segment words to text words
     const textWords = text.split(/(\s+)/); // preserve whitespace
-    let result: { text: string; speaker: string | null }[] = [];
+    const result: { text: string; speaker: string | null }[] = [];
     
     // Create a combined text from segments for matching
     const segTexts = segments.map(s => ({
@@ -66,7 +66,7 @@ export function SpeakerHighlightOverlay({ text, transcriptId }: SpeakerHighlight
     }));
 
     // Simple approach: try to find each segment's words sequentially in the text
-    let textPos = 0; // character position in original text
+    const textPos = 0; // character position in original text
     let lastMatchEnd = 0;
 
     for (const seg of segTexts) {

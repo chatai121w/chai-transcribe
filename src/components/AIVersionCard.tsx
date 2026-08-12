@@ -34,10 +34,10 @@ export function AIVersionCard({ version, selected, onSelectChange, onOpen, onDel
     if (!version.ai_usage_event_id) return;
     (async () => {
       const { data } = await (supabase
-        .from("ai_usage_events" as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+        .from("ai_usage_events" as any)
         .select("*")
         .eq("id", version.ai_usage_event_id)
-        .maybeSingle() as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+        .maybeSingle() as any);
       if (!cancelled && data) setUsage(data as AIUsageRow);
     })();
     return () => { cancelled = true; };

@@ -251,7 +251,6 @@ const MeetingRecorder = () => {
       recognitionRef.current = null;
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rec: SpeechRecognition = new (SR as any)();
     rec.lang = "he-IL";
     rec.continuous = true;

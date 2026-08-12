@@ -5,6 +5,7 @@ import {
   Copy,
   Download,
   FileText,
+  FolderInput,
   FolderOpen,
   HardDrive,
   Languages,
@@ -30,6 +31,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CustomProvidersDialog } from '@/components/CustomProvidersDialog';
 import { OllamaManager } from '@/components/OllamaManager';
+import { TranscriptFolderDialog } from '@/components/TranscriptFolderDialog';
 import { toast } from '@/hooks/use-toast';
 import { useCloudTranscripts } from '@/hooks/useCloudTranscripts';
 import { useOllama } from '@/hooks/useOllama';
@@ -79,6 +81,8 @@ type TranslationBenchmarkResult = {
   testedAt: string;
 };
 
+type FolderDialogTarget = 'source' | 'translation';
+
 function loadTranslationBenchmark(): TranslationBenchmarkResult | null {
   try {
     const stored = localStorage.getItem(TRANSLATION_BENCHMARK_STORAGE_KEY);
@@ -104,6 +108,10 @@ export default function Translation() {
   const [sourceTranscriptId, setSourceTranscriptId] = useState<string | null>(null);
   const [sourceFolderId, setSourceFolderId] = useState<string | null>(null);
   const [sourceFolderName, setSourceFolderName] = useState('');
+  const [resultTranscriptId, setResultTranscriptId] = useState<string | null>(null);
+  const [resultFolderId, setResultFolderId] = useState<string | null>(null);
+  const [resultFolderName, setResultFolderName] = useState('');
+  const [folderDialogTarget, setFolderDialogTarget] = useState<FolderDialogTarget | null>(null);
   const [search, setSearch] = useState('');
   const [folderFilter, setFolderFilter] = useState('all');
   const [sourceLanguage, setSourceLanguage] = useState('auto');
@@ -202,6 +210,9 @@ export default function Translation() {
     setSourceFolderId(transcript.folder_id || null);
     setSourceFolderName(transcript.folder || '');
     setResult('');
+    setResultTranscriptId(null);
+    setResultFolderId(null);
+    setResultFolderName('');
   };
 
   const importFile = async (file?: File) => {
@@ -216,6 +227,9 @@ export default function Translation() {
       setSourceFolderId(null);
       setSourceFolderName('');
       setResult('');
+      setResultTranscriptId(null);
+      setResultFolderId(null);
+      setResultFolderName('');
     } catch (error) {
       toast({ title: 'ייבוא הקובץ נכשל', description: error instanceof Error ? error.message : 'קובץ לא תקין', variant: 'destructive' });
     }
@@ -268,6 +282,7 @@ export default function Translation() {
     setProgress(3);
     setProgressDetail(`מכין ${chunks.length} מקטעים`);
     setResult('');
+    setResultTranscriptId(null);
     try {
       const translated = new Array<string>(chunks.length);
       let nextIndex = 0;
@@ -358,8 +373,36 @@ export default function Translation() {
     }
   };
 
-  const saveResult = async () => {
-    if (!result.trim()) return;
+  const ensureSourceSaved = async (folderId = sourceFolderId, folderName = sourceFolderName) => {
+    if (!sourceText.trim()) return null;
+    if (sourceTranscriptId) {
+      await updateTranscript(sourceTranscriptId, { folder_id: folderId, folder: folderName });
+      return sourceTranscriptId;
+    }
+    const saved = await saveTranscript(
+      sourceText,
+      'translation-source',
+      sourceTitle || 'מקור לתרגום',
+      undefined,
+      null,
+      folderName,
+    );
+    if (!saved) return null;
+    await updateTranscript(saved.id, { folder_id: folderId, folder: folderName });
+    setSourceTranscriptId(saved.id);
+    return saved.id;
+  };
+
+  const ensureResultSaved = async (folderId = resultFolderId, folderName = resultFolderName) => {
+    if (!result.trim()) return null;
+    if (resultTranscriptId) {
+      await updateTranscript(resultTranscriptId, {
+        text: result,
+        folder_id: folderId,
+        folder: folderName,
+      });
+      return resultTranscriptId;
+    }
     const language = getTranslationLanguage(targetLanguage);
     const selectedEngine = engines.find(item => item.value === engine)?.label || engine;
     const saved = await saveTranscript(
@@ -368,10 +411,35 @@ export default function Translation() {
       `${sourceTitle || 'תרגום'} · ${language.label}`,
       undefined,
       null,
-      sourceFolderName,
+      folderName,
     );
-    if (saved && sourceFolderId) await updateTranscript(saved.id, { folder_id: sourceFolderId, folder: sourceFolderName });
-    if (saved) toast({ title: 'התרגום נשמר', description: saved.local_only ? 'נשמר במכשיר' : 'נשמר במאגר המסונכרן' });
+    if (!saved) return null;
+    await updateTranscript(saved.id, { folder_id: folderId, folder: folderName });
+    setResultTranscriptId(saved.id);
+    return saved.id;
+  };
+
+  const saveResult = async () => {
+    const id = await ensureResultSaved();
+    if (id) toast({ title: 'התרגום נשמר', description: 'התרגום זמין כעת במאגר ובמערכת התיקיות' });
+  };
+
+  const assignFolder = async (folderId: string | null, folderName: string) => {
+    if (folderDialogTarget === 'source') {
+      const id = await ensureSourceSaved(folderId, folderName);
+      if (!id) throw new Error('לא ניתן לשמור את טקסט המקור');
+      setSourceFolderId(folderId);
+      setSourceFolderName(folderName);
+      toast({ title: folderId ? 'המקור סווג לתיקייה' : 'שיוך המקור הוסר' });
+      return;
+    }
+    if (folderDialogTarget === 'translation') {
+      const id = await ensureResultSaved(folderId, folderName);
+      if (!id) throw new Error('לא ניתן לשמור את התרגום');
+      setResultFolderId(folderId);
+      setResultFolderName(folderName);
+      toast({ title: folderId ? 'התרגום סווג לתיקייה' : 'שיוך התרגום הוסר' });
+    }
   };
 
   const downloadResult = () => {
@@ -438,7 +506,13 @@ export default function Translation() {
           </Tabs>
 
           <Textarea dir="auto" value={sourceText} onChange={event => { setSourceText(event.target.value); setSourceTranscriptId(null); }} placeholder="הטקסט לתרגום יופיע כאן" className="min-h-[320px] resize-y text-base leading-7" />
-          <div className="text-xs text-muted-foreground">{sourceText.length.toLocaleString('he-IL')} תווים · {sourceText.trim() ? sourceText.trim().split(/\s+/).length.toLocaleString('he-IL') : 0} מילים</div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs text-muted-foreground">{sourceText.length.toLocaleString('he-IL')} תווים · {sourceText.trim() ? sourceText.trim().split(/\s+/).length.toLocaleString('he-IL') : 0} מילים</div>
+            <Button type="button" variant="outline" size="sm" disabled={!sourceText.trim()} onClick={() => setFolderDialogTarget('source')} data-testid="classify-translation-source">
+              <FolderInput className="ml-2 h-4 w-4" />
+              {sourceFolderName ? `מקור: ${sourceFolderName}` : 'סווג מקור לתיקייה'}
+            </Button>
+          </div>
         </Card>
 
         <Card className="space-y-4 rounded-md p-4">
@@ -536,6 +610,10 @@ export default function Translation() {
           <Textarea dir={getTranslationLanguage(targetLanguage).direction} value={result} onChange={event => setResult(event.target.value)} placeholder="התרגום יופיע כאן" className="min-h-[250px] resize-y text-base leading-7" />
           <div className="flex flex-wrap gap-2">
             <Button disabled={!result.trim()} onClick={() => void saveResult()}><Save className="ml-2 h-4 w-4" /> שמור במאגר</Button>
+            <Button type="button" variant="outline" disabled={!result.trim()} onClick={() => setFolderDialogTarget('translation')} data-testid="classify-translation-result">
+              <FolderInput className="ml-2 h-4 w-4" />
+              {resultFolderName ? `תרגום: ${resultFolderName}` : 'סווג תרגום לתיקייה'}
+            </Button>
             <Button variant="outline" disabled={!result.trim()} onClick={() => void navigator.clipboard.writeText(result)}><Copy className="ml-2 h-4 w-4" /> העתק</Button>
             <Button variant="outline" disabled={!result.trim()} onClick={downloadResult}><Download className="ml-2 h-4 w-4" /> הורד TXT</Button>
           </div>
@@ -621,6 +699,15 @@ export default function Translation() {
           <OllamaManager />
         </DialogContent>
       </Dialog>
+
+      <TranscriptFolderDialog
+        open={folderDialogTarget !== null}
+        onOpenChange={(open) => { if (!open) setFolderDialogTarget(null); }}
+        currentFolderId={folderDialogTarget === 'source' ? sourceFolderId : resultFolderId}
+        title={folderDialogTarget === 'source' ? 'סיווג המקור לתיקייה' : 'סיווג התרגום לתיקייה'}
+        description="בחר תיקייה קיימת או צור תיקייה חדשה. המקור והתרגום נשמרים בנפרד."
+        onAssign={assignFolder}
+      />
     </main>
   );
 }

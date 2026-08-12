@@ -110,7 +110,6 @@ function TranscriptTitleEditor({
   updateTranscript,
 }: {
   transcriptId: string | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   transcripts: any[];
   updateTranscript: (id: string, updates: { title?: string }) => Promise<unknown>;
 }) {

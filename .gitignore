@@ -11,12 +11,19 @@ node_modules
 dist
 dist-ssr
 *.local
+vite.config.ts.timestamp-*.mjs
+
+# npm/package-lock.json is the canonical package manager for this project.
+bun.lock
+bun.lockb
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+.claude/launch.json
 .idea
 .DS_Store
+*.lnk
 *.suo
 *.ntvs*
 *.njsproj

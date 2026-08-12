@@ -59,10 +59,10 @@ export const useCloudVersions = (transcriptId: string | null) => {
 
       // 2) Cloud
       const { data, error } = await (supabase
-        .from('transcript_versions' as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+        .from('transcript_versions' as any)
         .select('*')
         .eq('transcript_id', transcriptId)
-        .order('version_number', { ascending: true }) as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+        .order('version_number', { ascending: true }) as any);
 
       if (error) throw error;
       const cloud = (data || []) as CloudVersion[];
@@ -119,8 +119,8 @@ export const useCloudVersions = (transcriptId: string | null) => {
     if (!user) return null;
     try {
       const since = new Date(Date.now() - 30_000).toISOString();
-      let q = (supabase
-        .from('ai_usage_events' as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+      const q = (supabase
+        .from('ai_usage_events' as any)
         .select('id, model, feature, created_at')
         .eq('user_id', user.id)
         .gte('created_at', since)
@@ -211,10 +211,10 @@ export const useCloudVersions = (transcriptId: string | null) => {
       };
 
       const { data, error } = await (supabase
-        .from('transcript_versions' as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+        .from('transcript_versions' as any)
         .insert(insertPayload)
         .select()
-        .single() as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+        .single() as any);
 
       if (error) throw error;
       const cloudVersion = data as CloudVersion;
@@ -252,9 +252,9 @@ export const useCloudVersions = (transcriptId: string | null) => {
     if (audioFilePath !== undefined) patch.audio_file_path = audioFilePath;
     try {
       const { error } = await (supabase
-        .from('transcript_versions' as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+        .from('transcript_versions' as any)
         .update(patch)
-        .in('id', versionIds) as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+        .in('id', versionIds) as any);
       if (error) throw error;
       setVersions(prev => prev.map(v => versionIds.includes(v.id)
         ? { ...v, folder_id: folderId, audio_file_path: audioFilePath ?? v.audio_file_path }
@@ -280,7 +280,7 @@ export const useCloudVersions = (transcriptId: string | null) => {
   const deleteVersion = useCallback(async (id: string): Promise<void> => {
     setVersions(prev => prev.filter(v => v.id !== id));
     try {
-      await (supabase.from('transcript_versions' as any).delete().eq('id', id) as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+      await (supabase.from('transcript_versions' as any).delete().eq('id', id) as any);
       if (await isDbAvailable()) await db.versions.delete(id);
     } catch (err) {
       debugLog.error('Versions', 'Failed to delete version', err instanceof Error ? err.message : String(err));
@@ -292,9 +292,9 @@ export const useCloudVersions = (transcriptId: string | null) => {
     setVersions(prev => prev.map(v => v.id === id ? { ...v, action_label: label } : v));
     try {
       const { error } = await (supabase
-        .from('transcript_versions' as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+        .from('transcript_versions' as any)
         .update({ action_label: label })
-        .eq('id', id) as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+        .eq('id', id) as any);
       if (error) throw error;
       if (await isDbAvailable()) {
         const existing = await db.versions.get(id);

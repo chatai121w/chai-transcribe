@@ -13,6 +13,8 @@ interface TranscriptFolderDialogProps {
   onOpenChange: (open: boolean) => void;
   currentFolderId?: string | null;
   onAssign: (folderId: string | null, folderName: string) => Promise<void> | void;
+  title?: string;
+  description?: string;
 }
 
 function flattenTree(nodes: FolderTreeNode[]): FolderTreeNode[] {
@@ -24,6 +26,8 @@ export function TranscriptFolderDialog({
   onOpenChange,
   currentFolderId = null,
   onAssign,
+  title = "סיווג התמלול לתיקייה",
+  description = "אפשר להמשיך לעבוד בעורך בזמן שהחלון פתוח.",
 }: TranscriptFolderDialogProps) {
   const { tree, createFolder, getPath, loading } = useFolderTree();
   const folders = useMemo(() => flattenTree(tree), [tree]);
@@ -78,8 +82,8 @@ export function TranscriptFolderDialog({
         data-testid="transcript-folder-dialog"
       >
         <DialogHeader className="border-b px-5 py-4">
-          <DialogTitle>סיווג התמלול לתיקייה</DialogTitle>
-          <p className="text-xs text-muted-foreground">אפשר להמשיך לעבוד בעורך בזמן שהחלון פתוח.</p>
+          <DialogTitle>{title}</DialogTitle>
+          <p className="text-xs text-muted-foreground">{description}</p>
         </DialogHeader>
 
         <div className="space-y-3 px-5 py-4">

@@ -80,7 +80,6 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
 
   // ── Try DB proxy first (latest code, no deployment needed) ──
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.rpc as any)('edit_transcript_proxy', {
       p_text: text,
       p_action: proxyAction,

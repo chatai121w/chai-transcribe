@@ -19,7 +19,7 @@ import {
   Languages, Users, List, Heading, Maximize2, Minimize2, ChevronUp, ChevronDown,
   CheckCheck, Volume2, AlignJustify, Quote, Cpu, Save, Gauge, Trophy,
   Eye, EyeOff, GitCompareArrows, Download, PlayCircle, StopCircle, RotateCcw, Trash2,
-  Pencil, Plus, LayoutGrid, LayoutList, Rows3, RotateCw, ShieldCheck, Star, Settings, GripVertical, Filter, ArrowUpDown, Plug,
+  Pencil, Plus, LayoutGrid, LayoutList, Rows3, Columns3, RotateCw, ShieldCheck, Star, Settings, GripVertical, Filter, ArrowUpDown, Plug,
   type LucideIcon
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
@@ -585,6 +585,12 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
   useEffect(() => {
     try { localStorage.setItem('ai_editor_show_source', String(showSourceEditor)); } catch { /* noop */ }
   }, [showSourceEditor]);
+  const [showRecommendedDownloads, setShowRecommendedDownloads] = useState<boolean>(() => {
+    try { return localStorage.getItem('ai_editor_show_recommended_downloads') !== 'false'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('ai_editor_show_recommended_downloads', String(showRecommendedDownloads)); } catch { /* noop */ }
+  }, [showRecommendedDownloads]);
 
   const [isEditing1, setIsEditing1] = useState(false);
   const [isEditing2, setIsEditing2] = useState(false);
@@ -2233,11 +2239,26 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
 
       {missingRecommended.length > 0 && ollama.isConnected && (
         <div className="mb-4 rounded-lg border p-3 bg-muted/20">
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <Label className="text-sm font-semibold">מנועים מומלצים לעברית שעדיין לא מותקנים</Label>
-            <Badge variant="outline" className="text-xs">{missingRecommended.length} חסרים</Badge>
+          <div className={cn("flex items-center justify-between gap-2", showRecommendedDownloads && "mb-2")}>
+            <div className="flex min-w-0 items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 shrink-0 p-0"
+                onClick={() => setShowRecommendedDownloads(value => !value)}
+                title={showRecommendedDownloads ? 'מזער מנועים להורדה' : 'הרחב מנועים להורדה'}
+                aria-expanded={showRecommendedDownloads}
+                data-testid="toggle-recommended-model-downloads"
+              >
+                {showRecommendedDownloads ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+              <Label className="truncate text-sm font-semibold">מנועים מומלצים לעברית שעדיין לא מותקנים</Label>
+            </div>
+            <Badge variant="outline" className="shrink-0 text-xs">{missingRecommended.length} חסרים</Badge>
           </div>
-          <div className="flex flex-wrap gap-2 mb-2">
+          {showRecommendedDownloads && <>
+          <div className="mb-2 flex flex-wrap gap-2">
             <Button
               size="sm"
               variant="outline"
@@ -2323,6 +2344,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
               );
             })}
           </div>
+          </>}
         </div>
       )}
 
@@ -2355,6 +2377,13 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
               onClick={() => customActions.setViewMode('masonry')}
               title="תצוגת אבנים"
             ><AlignJustify className="w-3.5 h-3.5" /></Button>
+            <Button
+              variant={customActions.viewMode === 'wide' ? 'default' : 'ghost'}
+              size="sm" className="h-7 w-7 p-0"
+              onClick={() => customActions.setViewMode('wide')}
+              title="תצוגה רחבה"
+              data-testid="ai-actions-wide-view"
+            ><Columns3 className="w-3.5 h-3.5" /></Button>
           </div>
           <div className="flex items-center gap-1">
             <Button
@@ -2380,13 +2409,15 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
         </div>
 
         {/* Dynamic action categories */}
+        <div className={customActions.viewMode === 'wide' ? 'grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4' : 'contents'}>
         {customActions.groupedActions.map(group => (
-          <div key={group.category}>
+          <div key={group.category} className={customActions.viewMode === 'wide' ? 'min-w-0 rounded-md border bg-background/80 p-3' : undefined}>
             <Label className="text-xs text-muted-foreground mb-1.5 block">{group.label}</Label>
             <div className={
               customActions.viewMode === 'grid' ? 'flex flex-wrap gap-1.5' :
               customActions.viewMode === 'list' ? 'flex flex-col gap-1' :
               customActions.viewMode === 'masonry' ? 'columns-2 md:columns-3 xl:columns-4 gap-2 space-y-2' :
+              customActions.viewMode === 'wide' ? 'grid grid-cols-1 gap-1.5 2xl:grid-cols-2' :
               'flex flex-wrap gap-0.5'
             }>
               {group.actions.map(action => {
@@ -2431,13 +2462,13 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
                           <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-destructive" onClick={() => customActions.deleteAction(action.id)}><Trash2 className="w-2.5 h-2.5" /></Button>
                         </div>
                       </>
-                    ) : customActions.viewMode === 'masonry' ? (
+                    ) : customActions.viewMode === 'masonry' || customActions.viewMode === 'wide' ? (
                       <>
                         <Button
                           variant={lastAction === action.id ? "default" : "secondary"}
                           size="sm"
                           disabled={isLoading || noText}
-                          className="text-xs w-full justify-start px-3 py-2 h-auto whitespace-normal"
+                          className="h-auto w-full justify-start whitespace-normal px-3 py-2 text-xs"
                           onClick={() => selectAction(action.id as EditAction)}
                         >
                           <IconComp className="w-3 h-3 ml-1 mt-0.5 flex-shrink-0" />
@@ -2473,6 +2504,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
             </div>
           </div>
         ))}
+        </div>
 
         {/* Special: translate + tone (always shown in special category) */}
         <div>
