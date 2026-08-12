@@ -7,7 +7,6 @@ import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
 import { SyncMirrorLayout } from "@/components/SyncMirrorLayout";
 import { TranscriptFolderDialog } from "@/components/TranscriptFolderDialog";
-import { ComparisonLibraryPicker } from "@/components/ComparisonLibraryPicker";
 import { debugLog } from "@/lib/debugLogger";
 import { AlignmentStatusBanner } from "@/components/AlignmentStatusBanner";
 import type { TextVersion } from "@/components/TextEditHistory";
@@ -1122,20 +1121,24 @@ const TextEditor = () => {
     });
   }, [versions, cloudVersions, transcripts, transcriptId, text, comparisonLibraryVersions]);
 
-  const compareLibraryPair = useCallback((base: (typeof transcripts)[number], newer: (typeof transcripts)[number]) => {
-    const toLibraryVersion = (item: (typeof transcripts)[number]): TextVersion => ({
+  const selectLibraryTranscriptForCompare = useCallback((side: 'base' | 'new', item: (typeof transcripts)[number]) => {
+    const libraryVersion: TextVersion = {
       id: `library-${item.id}`,
       text: item.edited_text?.trim() || item.text,
       timestamp: new Date(item.updated_at || item.created_at),
       source: 'original',
       customPrompt: joinVersionLabels(item.title, item.engine, item.folder || undefined),
-    });
-    const baseVersion = toLibraryVersion(base);
-    const newerVersion = toLibraryVersion(newer);
-    setComparisonLibraryVersions([baseVersion, newerVersion]);
-    setComparePreselect({ leftId: baseVersion.id, rightId: newerVersion.id });
-    toast({ title: "שני תמלולים נטענו להשוואה" });
-  }, []);
+    };
+    setComparisonLibraryVersions((previous) => [
+      ...previous.filter((version) => version.id !== libraryVersion.id),
+      libraryVersion,
+    ]);
+    setComparePreselect((previous) => ({
+      leftId: side === 'base' ? libraryVersion.id : previous?.leftId || compareVersions[0]?.id || libraryVersion.id,
+      rightId: side === 'new' ? libraryVersion.id : previous?.rightId || compareVersions[compareVersions.length - 1]?.id || libraryVersion.id,
+    }));
+    toast({ title: side === 'base' ? "גרסת הבסיס נבחרה" : "הגרסה החדשה נבחרה", description: item.title || item.engine });
+  }, [compareVersions]);
 
   const sendVersionToCompare = useCallback((versionId: string) => {
     const original = compareVersions.find(v => v.source === 'original') || compareVersions[0];
@@ -2532,13 +2535,7 @@ const TextEditor = () => {
                   </Button>
                 </div>
 
-                <ComparisonLibraryPicker
-                  transcripts={transcripts}
-                  initialTranscriptId={transcriptIdRef.current || transcriptId}
-                  onCompare={compareLibraryPair}
-                />
-
-                {compareVersions.length >= 2 ? (
+                {compareVersions.length >= 1 ? (
                   <LazyErrorBoundary label="השוואה מתקדמת"><AdvancedDiffView 
                     versions={compareVersions}
                     fontSize={fontSize}
@@ -2552,10 +2549,12 @@ const TextEditor = () => {
                     }}
                     onSendToAiEditor={sendVersionToAiEditor}
                     preferenceStorageKey={transcriptIdRef.current || transcriptId || "current"}
+                    transcripts={transcripts}
+                    onSelectLibraryTranscript={selectLibraryTranscriptForCompare}
                   /></LazyErrorBoundary>
                 ) : (
                   <div className="text-center py-6 text-muted-foreground text-sm">
-                    יש צורך בלפחות שתי גרסאות כדי להשוות
+                    לא נמצא תמלול להשוואה. טען או צור תמלול תחילה.
                   </div>
                 )}
 

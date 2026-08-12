@@ -6,8 +6,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowRightLeft, Copy, ArrowUp, ArrowDown, Layers, Star, Trash2, RotateCcw, ListChecks, X } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, Copy, ArrowUp, ArrowDown, Layers, Star, Trash2, RotateCcw, ListChecks, X } from "lucide-react";
 import { TextVersion } from "@/components/TextEditHistory";
+import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
+import { ComparisonSourceDialog } from "@/components/ComparisonSourceDialog";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +25,8 @@ interface AdvancedDiffViewProps {
   /** Optional: send the selected version into the AI editor as input */
   onSendToAiEditor?: (versionId: string) => void;
   preferenceStorageKey?: string;
+  transcripts?: CloudTranscript[];
+  onSelectLibraryTranscript?: (side: "base" | "new", transcript: CloudTranscript) => void;
 }
 
 type VersionFilter = "all" | "ai" | "manual" | "original" | "cloud" | "local";
@@ -260,6 +264,8 @@ export const AdvancedDiffView = ({
   preselectedRightId,
   onSendToAiEditor,
   preferenceStorageKey = "advanced-diff",
+  transcripts = [],
+  onSelectLibraryTranscript,
 }: AdvancedDiffViewProps) => {
   const favoritesKey = `compare_favorites_v1:${preferenceStorageKey}`;
   const hiddenKey = `compare_hidden_v1:${preferenceStorageKey}`;
@@ -274,6 +280,7 @@ export const AdvancedDiffView = ({
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(() => readPreferenceSet(favoritesKey));
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => readPreferenceSet(hiddenKey));
   const [multiSelectOpen, setMultiSelectOpen] = useState(false);
+  const [sourceDialogSide, setSourceDialogSide] = useState<"base" | "new" | null>(null);
   const [selectedForRemoval, setSelectedForRemoval] = useState<Set<string>>(new Set());
   const defaultLeftId = useMemo(() => versions.find(v => v.source === 'original')?.id || versions[0]?.id || '', [versions]);
   const defaultRightId = useMemo(() => {
@@ -669,16 +676,22 @@ export const AdvancedDiffView = ({
               </div>
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="shrink-0 text-xs">בסיס</Badge>
-            <Select value={leftId} onValueChange={selectLeftVersion}>
-              <SelectTrigger className="text-xs h-8" dir="rtl"><SelectValue /></SelectTrigger>
-              <SelectContent dir="rtl">
-                {selectableVersions.map(v => (
-                  <SelectItem key={v.id} value={v.id} className="text-xs">{getLabel(v)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex min-w-0 flex-col gap-2 rounded-md border border-rose-200/70 bg-rose-500/[0.03] p-3 dark:border-rose-900/60">
+            <div className="flex items-center justify-between gap-2">
+              <Badge variant="outline" className="shrink-0 text-xs">בסיס</Badge>
+              <span className="text-[11px] text-muted-foreground">המקור שמולו משווים</span>
+            </div>
+            <div className="flex min-w-0 items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 min-w-0 flex-1 justify-between gap-3 px-3 text-right text-xs"
+              onClick={() => setSourceDialogSide("base")}
+              data-testid="choose-comparison-base"
+            >
+              <span className="min-w-0 flex-1 truncate">{leftVersion ? getLabel(leftVersion) : "בחר מקור להשוואה"}</span>
+              <ChevronDown className="h-4 w-4 shrink-0" />
+            </Button>
             {leftId && renderVersionActions(leftId)}
             {onSendToAiEditor && leftId && (
               <Button
@@ -691,17 +704,24 @@ export const AdvancedDiffView = ({
                 שלח ל-AI
               </Button>
             )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="default" className="shrink-0 text-xs">חדש</Badge>
-            <Select value={rightId} onValueChange={selectRightVersion}>
-              <SelectTrigger className="text-xs h-8" dir="rtl"><SelectValue /></SelectTrigger>
-              <SelectContent dir="rtl">
-                {selectableVersions.map(v => (
-                  <SelectItem key={v.id} value={v.id} className="text-xs">{getLabel(v)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex min-w-0 flex-col gap-2 rounded-md border border-emerald-200/70 bg-emerald-500/[0.03] p-3 dark:border-emerald-900/60">
+            <div className="flex items-center justify-between gap-2">
+              <Badge variant="default" className="shrink-0 text-xs">חדש</Badge>
+              <span className="text-[11px] text-muted-foreground">הגרסה שנבדקת מול הבסיס</span>
+            </div>
+            <div className="flex min-w-0 items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 min-w-0 flex-1 justify-between gap-3 px-3 text-right text-xs"
+              onClick={() => setSourceDialogSide("new")}
+              data-testid="choose-comparison-new"
+            >
+              <span className="min-w-0 flex-1 truncate">{rightVersion ? getLabel(rightVersion) : "בחר מקור להשוואה"}</span>
+              <ChevronDown className="h-4 w-4 shrink-0" />
+            </Button>
             {rightId && renderVersionActions(rightId)}
             {onSendToAiEditor && rightId && (
               <Button
@@ -714,6 +734,7 @@ export const AdvancedDiffView = ({
                 שלח ל-AI
               </Button>
             )}
+            </div>
           </div>
         </div>
 
@@ -746,6 +767,23 @@ export const AdvancedDiffView = ({
           )}
         </div>
       </Card>
+
+      <ComparisonSourceDialog
+        open={sourceDialogSide !== null}
+        side={sourceDialogSide || "base"}
+        versions={selectableVersions}
+        transcripts={transcripts}
+        selectedVersionId={sourceDialogSide === "new" ? rightId : leftId}
+        getVersionLabel={getLabel}
+        onOpenChange={(open) => { if (!open) setSourceDialogSide(null); }}
+        onSelectVersion={(versionId) => {
+          if (sourceDialogSide === "new") selectRightVersion(versionId);
+          else selectLeftVersion(versionId);
+        }}
+        onSelectTranscript={(transcript) => {
+          onSelectLibraryTranscript?.(sourceDialogSide || "base", transcript);
+        }}
+      />
 
       {/* Side by side view — word-level highlights only */}
       {viewMode === 'side-by-side' && (

@@ -32,21 +32,58 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
   });
 
   test('בחירת תמלולים מתוך העץ טוענת זוג אמיתי להשוואה', async ({ page }) => {
+    const folder = {
+      id: 'folder-lessons',
+      user_id: 'test-user-00000000-0000-0000-0000-000000000001',
+      parent_id: null,
+      name: 'שיעורים מסווגים',
+      color: null,
+      emoji: '🎙️',
+      pinned: false,
+      position: 0,
+      drive_folder_id: null,
+      drive_folder_name: null,
+      drive_synced_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const comparisonTranscript = {
+      ...MOCK_TRANSCRIPTS[1],
+      id: 'tr-003',
+      title: 'תמלול בדיקה 3',
+      text: 'נוסח שלישי ושונה שנבחר מתוך התיקייה להשוואה',
+      created_at: new Date(Date.now() + 1_000).toISOString(),
+    };
+    const categorizedTranscripts = [...MOCK_TRANSCRIPTS, comparisonTranscript].map((transcript) => ({
+      ...transcript,
+      folder_id: folder.id,
+      folder: folder.name,
+    }));
+    await page.route('**/rest/v1/folders**', (route) => route.fulfill({ status: 200, json: [folder] }));
+    await page.route('**/rest/v1/transcripts**', (route) => route.fulfill({ status: 200, json: categorizedTranscripts }));
+
     await page.goto('/text-editor');
     await page.getByTestId('send-transcript-to-compare').click();
 
-    const libraryButton = page.getByRole('button', { name: 'בחר מתיקיות ותמלולים' });
-    await expect(libraryButton).toBeVisible({ timeout: 15_000 });
-    await libraryButton.click();
+    const baseChooser = page.getByTestId('choose-comparison-base');
+    const newChooser = page.getByTestId('choose-comparison-new');
+    await expect(baseChooser).toBeVisible({ timeout: 15_000 });
+    await expect(newChooser).toBeVisible();
+    await expect(page.getByRole('button', { name: 'בחר מתיקיות ותמלולים' })).toHaveCount(0);
 
-    const firstRow = page.getByText(MOCK_TRANSCRIPTS[0].title).locator('..').locator('..');
-    const secondRow = page.getByText(MOCK_TRANSCRIPTS[1].title).locator('..').locator('..');
-    await firstRow.getByRole('button', { name: 'בסיס' }).click();
-    await secondRow.getByRole('button', { name: 'חדש' }).click();
-    await page.getByRole('button', { name: 'השווה נבחרים' }).click();
+    await baseChooser.click();
+    const dialog = page.getByTestId('comparison-source-dialog');
+    await expect(dialog.getByRole('heading', { name: 'בחירת גרסת בסיס' })).toBeVisible();
+    await dialog.getByRole('button', { name: /שיעורים מסווגים/ }).click();
+    await dialog.getByRole('button', { name: new RegExp(MOCK_TRANSCRIPTS[0].title) }).click();
+    await expect(baseChooser).toContainText(MOCK_TRANSCRIPTS[0].title);
 
-    await expect(page.getByText('שני תמלולים נטענו להשוואה')).toBeVisible();
-    await expect(page.getByText(/תמלול בדיקה 1/).first()).toBeVisible();
-    await expect(page.getByText(/תמלול בדיקה 2/).first()).toBeVisible();
+    await newChooser.click();
+    await expect(dialog.getByRole('heading', { name: 'בחירת גרסה חדשה' })).toBeVisible();
+    await dialog.getByRole('button', { name: new RegExp(comparisonTranscript.title) }).click();
+
+    await expect(baseChooser).toContainText(MOCK_TRANSCRIPTS[0].title);
+    await expect(newChooser).toContainText(comparisonTranscript.title);
+    await expect(page.getByText('הגרסה החדשה נבחרה')).toBeVisible();
   });
 });
