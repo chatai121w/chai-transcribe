@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useDroppable, useDraggable } from '@dnd-kit/core';
-import { Folder, FileAudio, FileText, Star, MoreHorizontal, Pin, Pencil, Play, Check, X } from 'lucide-react';
+import { Folder, FileAudio, FileText, Star, MoreHorizontal, Pin, Pencil, Play, Check, X, FilePenLine, WandSparkles, GitCompareArrows } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import type { FolderNode } from '@/hooks/useFolderTree';
 import type { CloudTranscript } from '@/hooks/useCloudTranscripts';
 import { cn } from '@/lib/utils';
@@ -52,6 +53,7 @@ type Item =
   | { kind: 'transcript'; data: CloudTranscript };
 
 export type FileGridViewMode = 'grid' | 'list' | 'table';
+export type TranscriptOpenTarget = 'editor' | 'ai' | 'compare';
 
 interface Props {
   items: Item[];
@@ -60,7 +62,7 @@ interface Props {
   selectionMode?: boolean;
   onSelect: (id: string, kind: 'folder' | 'transcript', mod: { shift: boolean; ctrl: boolean }) => void;
   onOpenFolder: (id: string) => void;
-  onOpenTranscript: (id: string) => void;
+  onOpenTranscript: (transcript: CloudTranscript, target?: TranscriptOpenTarget) => void;
   onDeleteTranscript: (id: string) => void;
   onRenameTranscript: (t: CloudTranscript, title: string) => Promise<void>;
   onPlayTranscript: (t: CloudTranscript) => void;
@@ -70,6 +72,46 @@ interface Props {
   onDropLocalItemToFolder?: (targetFolderId: string | null, item: { kind: 'folder' | 'transcript'; id: string; name?: string }) => void;
   cutIds: Set<string>;
 }
+
+const TranscriptQuickActions = ({
+  transcript,
+  onOpen,
+  children,
+}: {
+  transcript: CloudTranscript;
+  onOpen: (transcript: CloudTranscript, target?: TranscriptOpenTarget) => void;
+  children: ReactNode;
+}) => (
+  <HoverCard openDelay={220} closeDelay={180}>
+    <HoverCardTrigger asChild>{children}</HoverCardTrigger>
+    <HoverCardContent
+      side="top"
+      align="center"
+      sideOffset={8}
+      dir="rtl"
+      data-testid={`file-quick-actions-${transcript.id}`}
+      className="w-60 p-2 shadow-lg"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <div className="mb-1 truncate px-2 py-1 text-right text-xs font-semibold text-muted-foreground">
+        {transcript.title || 'ללא שם'}
+      </div>
+      <Button type="button" variant="ghost" className="h-9 w-full justify-start gap-2" data-testid={`file-open-editor-${transcript.id}`} onClick={() => onOpen(transcript, 'editor')}>
+        <FilePenLine className="h-4 w-4" />
+        פתח בעורך הטקסט
+      </Button>
+      <Button type="button" variant="ghost" className="h-9 w-full justify-start gap-2" data-testid={`file-open-ai-${transcript.id}`} onClick={() => onOpen(transcript, 'ai')}>
+        <WandSparkles className="h-4 w-4" />
+        פתח בעריכה עם AI
+      </Button>
+      <Button type="button" variant="ghost" className="h-9 w-full justify-start gap-2" data-testid={`file-open-compare-${transcript.id}`} onClick={() => onOpen(transcript, 'compare')}>
+        <GitCompareArrows className="h-4 w-4" />
+        פתח במערכת ההשוואה
+      </Button>
+    </HoverCardContent>
+  </HoverCard>
+);
 
 const EditableTranscriptTitle = ({ t, onRename }: { t: CloudTranscript; onRename: (t: CloudTranscript, title: string) => Promise<void> }) => {
   const [editing, setEditing] = useState(false);
@@ -237,18 +279,19 @@ const FolderCard = ({ f, isSel, isSnap, onClick, isCut, onPin, onDelete, onDropL
   );
 };
 
-const TranscriptCard = ({ t, isSel, isCut, onClick, onDelete, onFav, onRename, onPlay, selectionMode }: any) => {
+const TranscriptCard = ({ t, isSel, isCut, onClick, onOpenTranscript, onDelete, onFav, onRename, onPlay, selectionMode }: any) => {
   const { setNodeRef: dragRef, listeners, attributes } = useDraggable({ id: `drag-tr-${t.id}`, data: { kind: 'transcript', id: t.id } });
   const isAudio = !!t.audio_file_path || t.engine === 'audio-cut';
   return (
-    <div
-      onClick={onClick}
-      className={cn(
-        'group relative flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/60 cursor-pointer transition',
-        isSel && 'ring-2 ring-yellow-500 bg-yellow-500/10',
-        isCut && 'opacity-50',
-      )}
-    >
+    <TranscriptQuickActions transcript={t} onOpen={onOpenTranscript}>
+      <div
+        onClick={onClick}
+        className={cn(
+          'group relative flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/60 cursor-pointer transition',
+          isSel && 'ring-2 ring-yellow-500 bg-yellow-500/10',
+          isCut && 'opacity-50',
+        )}
+      >
       {selectionMode && <Checkbox checked={isSel} aria-label={`בחר תמלול ${t.title || 'ללא שם'}`} className="pointer-events-none shrink-0" />}
       <div
         ref={dragRef}
@@ -294,15 +337,19 @@ const TranscriptCard = ({ t, isSel, isCut, onClick, onDelete, onFav, onRename, o
       </button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="icon" variant="ghost" className="h-7 w-7 opacity-0 group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
+          <Button size="icon" variant="ghost" className="h-7 w-7 opacity-70 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100" onClick={(e) => e.stopPropagation()} aria-label="פעולות קובץ">
             <MoreHorizontal className="w-4 h-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => onOpenTranscript(t, 'editor')}><FilePenLine className="ml-2 h-4 w-4" />פתח בעורך הטקסט</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onOpenTranscript(t, 'ai')}><WandSparkles className="ml-2 h-4 w-4" />פתח בעריכה עם AI</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onOpenTranscript(t, 'compare')}><GitCompareArrows className="ml-2 h-4 w-4" />פתח במערכת ההשוואה</DropdownMenuItem>
           <DropdownMenuItem className="text-destructive" onClick={onDelete}>מחק תמלול</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+      </div>
+    </TranscriptQuickActions>
   );
 };
 
@@ -385,15 +432,16 @@ const TranscriptTableRow = ({ t, isSel, isCut, onSelectRow, onOpenTranscript, on
   const { setNodeRef: dragRef, listeners, attributes } = useDraggable({ id: `drag-table-tr-${t.id}`, data: { kind: 'transcript', id: t.id } });
   const isAudio = !!t.audio_file_path || t.engine === 'audio-cut';
   return (
-    <div
-      onClick={onSelectRow}
-      onDoubleClick={() => onOpenTranscript(t.id)}
-      className={cn(
-        'grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto] items-center gap-2 px-2 py-2 text-xs text-right border-t border-border/40 hover:bg-muted/50 cursor-pointer',
-        isSel && 'bg-yellow-500/10',
-        isCut && 'opacity-50',
-      )}
-    >
+    <TranscriptQuickActions transcript={t} onOpen={onOpenTranscript}>
+      <div
+        onClick={onSelectRow}
+        onDoubleClick={() => onOpenTranscript(t, 'editor')}
+        className={cn(
+          'grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto] items-center gap-2 px-2 py-2 text-xs text-right border-t border-border/40 hover:bg-muted/50 cursor-pointer',
+          isSel && 'bg-yellow-500/10',
+          isCut && 'opacity-50',
+        )}
+      >
       <div
         ref={dragRef}
         {...listeners}
@@ -433,16 +481,20 @@ const TranscriptTableRow = ({ t, isSel, isCut, onSelectRow, onOpenTranscript, on
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={(e) => e.stopPropagation()} aria-label="פעולות קובץ">
               <MoreHorizontal className="w-4 h-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onOpenTranscript(t, 'editor')}><FilePenLine className="ml-2 h-4 w-4" />פתח בעורך הטקסט</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onOpenTranscript(t, 'ai')}><WandSparkles className="ml-2 h-4 w-4" />פתח בעריכה עם AI</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onOpenTranscript(t, 'compare')}><GitCompareArrows className="ml-2 h-4 w-4" />פתח במערכת ההשוואה</DropdownMenuItem>
             <DropdownMenuItem className="text-destructive" onClick={onDelete}>מחק תמלול</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-    </div>
+      </div>
+    </TranscriptQuickActions>
   );
 };
 
@@ -555,13 +607,14 @@ export const FileGrid = ({ items, viewMode = 'grid', selected, selectionMode = f
             isCut={cutIds.has(t.id)}
             selectionMode={selectionMode}
             onClick={(e: React.MouseEvent) => {
-              if (e.detail === 2) onOpenTranscript(t.id);
+              if (e.detail === 2) onOpenTranscript(t, 'editor');
               else onSelect(t.id, 'transcript', { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
             }}
             onDelete={() => onDeleteTranscript(t.id)}
             onFav={() => onToggleFavorite(t)}
             onRename={onRenameTranscript}
             onPlay={() => onPlayTranscript(t)}
+            onOpenTranscript={onOpenTranscript}
           />
         );
       })}

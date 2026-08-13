@@ -677,6 +677,11 @@ const TextEditor = () => {
     if (location.state?.openFloatingPlayer) {
       setActiveTab('player');
       setIsPlayerFloating(true);
+    } else {
+      const requestedTab = location.state?.initialTab as string | undefined;
+      if (requestedTab === 'player' || requestedTab === 'ai' || requestedTab === 'compare') {
+        setActiveTab(requestedTab);
+      }
     }
 
     if (location.state?.audioUrl) {

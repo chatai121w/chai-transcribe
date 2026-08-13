@@ -12,7 +12,7 @@ import { Search, Plus, Copy, Scissors, Clipboard, Trash2, Pin, Cloud, Loader2, X
 import { useFolderTree, type FolderNode } from '@/hooks/useFolderTree';
 import { useCloudTranscripts, type CloudTranscript } from '@/hooks/useCloudTranscripts';
 import { FolderTree } from './FolderTree';
-import { FileGrid, type FileGridViewMode } from './FileGrid';
+import { FileGrid, type FileGridViewMode, type TranscriptOpenTarget } from './FileGrid';
 import { Breadcrumbs } from './Breadcrumbs';
 import { fileClipboard } from '@/lib/clipboard';
 import { GoogleDriveBrowser, uploadToDrive, type LocalDragItem } from '@/components/GoogleDriveBrowser';
@@ -410,6 +410,33 @@ export const FileManager = () => {
       },
     });
 
+  }, [navigate]);
+
+  const handleOpenTranscript = useCallback(async (
+    transcript: CloudTranscript,
+    target: TranscriptOpenTarget = 'editor',
+  ) => {
+    let localAudioUrl: string | undefined;
+    if (!transcript.audio_file_path) {
+      const localTranscript = await db.transcripts.get(transcript.id);
+      if (localTranscript?.audio_blob) {
+        if (activeLocalAudioUrl) URL.revokeObjectURL(activeLocalAudioUrl);
+        activeLocalAudioUrl = URL.createObjectURL(localTranscript.audio_blob);
+        localAudioUrl = activeLocalAudioUrl;
+      }
+    }
+
+    navigate('/text-editor', {
+      state: {
+        text: transcript.edited_text || transcript.text || '',
+        transcriptId: transcript.id,
+        audioFilePath: transcript.audio_file_path,
+        audioUrl: localAudioUrl,
+        audioFileName: transcript.title || 'תמלול',
+        wordTimings: transcript.word_timings || undefined,
+        initialTab: target === 'ai' ? 'ai' : target === 'compare' ? 'compare' : 'player',
+      },
+    });
   }, [navigate]);
 
   const handleLinkDrive = async (driveFolder: { id: string | null; name: string }) => {
@@ -858,7 +885,7 @@ export const FileManager = () => {
                 cutIds={cutIds}
                 onSelect={onSelect}
                 onOpenFolder={setCurrentFolderId}
-                onOpenTranscript={(id) => navigate(`/editor/${id}`)}
+                onOpenTranscript={(transcript, target) => void handleOpenTranscript(transcript, target)}
                 onDeleteTranscript={async (id) => { if (confirm('למחוק תמלול זה?')) await deleteTranscript(id); }}
                 onRenameTranscript={handleRenameTranscript}
                 onPlayTranscript={handlePlayTranscript}
