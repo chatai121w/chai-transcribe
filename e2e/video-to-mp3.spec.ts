@@ -137,6 +137,44 @@ test.describe('ממיר וידאו ואודיו', () => {
     await expect(page.getByText('2/2 קטעים')).toBeVisible();
   });
 
+  test('העורך החזותי מנגן, מסמן כמה אזורים ומחליף את מדיניות הפלט', async ({ page }) => {
+    await page.goto('/video-to-mp3?tab=cut', { waitUntil: 'domcontentloaded' });
+    await page.locator('input[type="file"][accept="audio/*,video/*"]').setInputFiles({
+      name: 'visual-cut.wav',
+      mimeType: 'audio/wav',
+      buffer: createToneWavBuffer(8),
+    });
+
+    const editor = page.getByTestId('visual-audio-editor');
+    await expect(editor).toBeVisible({ timeout: 15000 });
+    await expect(editor.getByText('חיתוך חזותי על צורת הגל')).toBeVisible();
+    const completedPanel = page.getByRole('dialog', { name: 'קבצים שהושלמו' });
+    if (await completedPanel.isVisible()) {
+      await completedPanel.getByRole('button', { name: 'מזער' }).click();
+    }
+
+    const waveform = page.getByTestId('waveform-selection-area');
+    await expect(waveform.locator('canvas').first()).toBeVisible({ timeout: 15000 });
+    const box = await waveform.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) return;
+
+    const addAtCursor = editor.getByRole('button', { name: 'הוסף באזור הסמן' });
+    await page.mouse.click(box.x + box.width * 0.12, box.y + box.height * 0.45);
+    await addAtCursor.click();
+    await page.mouse.click(box.x + box.width * 0.62, box.y + box.height * 0.45);
+    await addAtCursor.click();
+
+    await expect(editor.getByText('2 אזורים מסומנים')).toBeVisible();
+    await editor.getByRole('radio', { name: /הסר את המסומן/ }).click();
+    await expect(editor.getByRole('radio', { name: /הסר את המסומן/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(editor.getByText(/3 קטעים יופקו/)).toBeVisible();
+
+    await editor.getByRole('radio', { name: /פצל ושמור את הכול/ }).click();
+    await expect(editor.getByText(/5 קטעים יופקו/)).toBeVisible();
+    await expect(page.getByRole('button', { name: /חתוך 5 קטעים/ })).toBeEnabled();
+  });
+
   test('תגית מנוע מוכן/טוען מוצגת', async ({ page }) => {
     // Should show either "מוכן" or "טוען מנוע" badge
     const readyOrLoading = page.getByText(/מוכן|טוען מנוע/);

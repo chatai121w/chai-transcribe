@@ -19,7 +19,7 @@ import {
   Languages, Users, List, Heading, Maximize2, Minimize2, ChevronUp, ChevronDown,
   CheckCheck, Volume2, AlignJustify, Quote, Cpu, Save, Gauge, Trophy,
   Eye, EyeOff, GitCompareArrows, Download, PlayCircle, StopCircle, RotateCcw, Trash2,
-  Pencil, Plus, LayoutGrid, LayoutList, Rows3, Columns3, RotateCw, ShieldCheck, Star, Settings, GripVertical, Filter, ArrowUpDown, Plug,
+  Pencil, Plus, LayoutGrid, LayoutList, Rows3, Columns3, RotateCw, ShieldCheck, Star, Settings, GripVertical, Filter, ArrowUpDown, Plug, Clock3,
   type LucideIcon
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
@@ -38,6 +38,9 @@ import { CustomProvidersDialog } from "@/components/CustomProvidersDialog";
 import { buildHebrewGuardPrefix } from "@/lib/hebrewGuard";
 import { useOllama, isOllamaModel, getOllamaModelName, getOllamaUrl } from "@/hooks/useOllama";
 import { useAIEditQueue } from "@/hooks/useAIEditQueue";
+import { chunkTextForAI } from "@/lib/heavyProcessingClient";
+import { canChunkAIEdit, formatMeasuredDuration, type AIEditProgressSnapshot } from "@/lib/aiEditProgress";
+import { AIEditProgressPanel } from "@/components/AIEditProgressPanel";
 import { getGpuShareMode, setGpuShareMode, subscribeGpuShareMode, type GpuShareMode } from "@/lib/gpuShareMode";
 import {
   isHebrewOnlyEnabled, setHebrewOnlyEnabled,
@@ -46,7 +49,7 @@ import {
   type AllowedLang,
 } from "@/lib/hebrewGuard";
 import { useCustomActions, type CustomAction } from "@/hooks/useCustomActions";
-import type { AIEditJob } from "@/lib/aiEditQueue";
+import type { AIEditJob, EditAction } from "@/lib/aiEditQueue";
 import type { TextVersion } from "@/components/TextEditHistory";
 import DiffMatchPatch from "diff-match-patch";
 
@@ -63,6 +66,14 @@ interface AIEditorDualProps {
   originalText?: string;
   /** Optional: pre-selected source version id (e.g. when sent from compare view) */
   initialSourceId?: string;
+}
+
+interface AIEditExtras {
+  customPrompt?: string;
+  toneStyle?: string;
+  targetLanguage?: string;
+  /** Preserve the semantic action for safe chunking when its prompt was customized. */
+  progressAction?: EditAction;
 }
 
 const CLOUD_MODELS = [
@@ -428,10 +439,6 @@ function getIconComponent(name: string): LucideIcon {
 
 export const ICON_OPTIONS = Object.keys(ICON_MAP);
 
-type EditAction = 'improve' | 'grammar' | 'readable' | 'punctuation' | 'paragraphs' |
-  'bullets' | 'headings' | 'expand' | 'shorten' | 'summarize' |
-  'sources' | 'translate' | 'speakers' | 'tone' | 'custom';
-
 const TONE_OPTIONS = [
   { value: 'formal', label: 'רשמי' },
   { value: 'personal', label: 'אישי' },
@@ -602,6 +609,8 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
   const [mergedResult, setMergedResult] = useState("");
   const [latency1Ms, setLatency1Ms] = useState<number>(0);
   const [latency2Ms, setLatency2Ms] = useState<number>(0);
+  const [editProgress1, setEditProgress1] = useState<AIEditProgressSnapshot | null>(null);
+  const [editProgress2, setEditProgress2] = useState<AIEditProgressSnapshot | null>(null);
   const [benchmarkRounds, setBenchmarkRounds] = useState<'3' | '5' | '7'>('3');
   const [benchmarkAction, setBenchmarkAction] = useState<EditAction>('improve');
   const [benchmarkSummary, setBenchmarkSummary] = useState<BenchmarkSummary | null>(null);
@@ -622,7 +631,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
   const [historySearch, setHistorySearch] = useState('');
   const [historySort, setHistorySort] = useState<'newest' | 'oldest' | 'best_quality' | 'best_latency'>('newest');
   const [lastAction, setLastAction] = useState<EditAction | null>(null);
-  const [pendingExtras, setPendingExtras] = useState<{ customPrompt?: string; toneStyle?: string; targetLanguage?: string } | undefined>(undefined);
+  const [pendingExtras, setPendingExtras] = useState<AIEditExtras | undefined>(undefined);
   const [customPrompt, setCustomPrompt] = useState("");
   const [showCustomDialog, setShowCustomDialog] = useState(false);
   const [showDiffHighlight, setShowDiffHighlight] = useState(false);
@@ -833,49 +842,70 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
   const runEditOnce = async (
     action: EditAction,
     modelValue: string,
-    extra?: { customPrompt?: string; toneStyle?: string; targetLanguage?: string }
+    extra?: AIEditExtras,
+    inputText = text,
+    onProgress?: (progress: AIEditProgressSnapshot) => void,
   ): Promise<{ text: string; latencyMs: number }> => {
     const resolved = resolveModel(modelValue, action);
     const startedAt = performance.now();
-    let resultText: string;
+    const chunks = canChunkAIEdit(extra?.progressAction ?? action)
+      ? await chunkTextForAI(inputText, 6000)
+      : [inputText];
+    const workUnits = chunks.length > 0 ? chunks : [inputText];
+    const progressStartedAt = Date.now();
+    const publishProgress = (completedUnits: number) => onProgress?.({
+      completedUnits,
+      totalUnits: workUnits.length,
+      startedAt: progressStartedAt,
+      updatedAt: Date.now(),
+      stage: workUnits.length > 1 ? 'עורך מקטעים' : 'עורך טקסט',
+    });
+    publishProgress(0);
 
-    // Custom OpenAI-compatible provider (LM Studio, Groq, DeepSeek, xAI, OpenRouter, etc.)
-    const parsed = parseProviderModel(resolved);
-    if (parsed) {
-      // Build the system prompt from action + Hebrew guard
-      let systemPrompt = '';
-      if (action === 'custom' && extra?.customPrompt) systemPrompt = extra.customPrompt;
-      else if (action === 'tone') systemPrompt = TONE_PROMPTS[extra?.toneStyle || 'formal'] || TONE_PROMPTS.formal;
-      else if (action === 'translate') systemPrompt = `אתה מתרגם מקצועי. תרגם את הטקסט הבא ל${extra?.targetLanguage || 'אנגלית'}. שמור על המשמעות והסגנון. החזר רק את התרגום.`;
-      else systemPrompt = (ACTION_PROMPTS as Record<string, string>)[action] || '';
-      const guardPrefix = buildHebrewGuardPrefix(action);
-      if (guardPrefix) systemPrompt = guardPrefix + '\n' + systemPrompt;
-      resultText = await chatWithProvider({
-        providerId: parsed.providerId,
-        modelId: parsed.modelId,
-        systemPrompt,
-        userText: text,
-        temperature: guardPrefix ? 0.2 : 0.7,
-      });
-    } else if (isOllamaModel(resolved)) {
-      resultText = await ollama.editText({
-        text,
-        action,
-        model: getOllamaModelName(resolved),
-        customPrompt: extra?.customPrompt,
-        toneStyle: extra?.toneStyle,
-        targetLanguage: extra?.targetLanguage,
-      });
-    } else {
-      resultText = await editTranscriptCloud({
-        text,
+    const runChunk = async (chunk: string): Promise<string> => {
+      const parsed = parseProviderModel(resolved);
+      if (parsed) {
+        let systemPrompt = '';
+        if (action === 'custom' && extra?.customPrompt) systemPrompt = extra.customPrompt;
+        else if (action === 'tone') systemPrompt = TONE_PROMPTS[extra?.toneStyle || 'formal'] || TONE_PROMPTS.formal;
+        else if (action === 'translate') systemPrompt = `אתה מתרגם מקצועי. תרגם את הטקסט הבא ל${extra?.targetLanguage || 'אנגלית'}. שמור על המשמעות והסגנון. החזר רק את התרגום.`;
+        else systemPrompt = (ACTION_PROMPTS as Record<string, string>)[action] || '';
+        const guardPrefix = buildHebrewGuardPrefix(action);
+        if (guardPrefix) systemPrompt = guardPrefix + '\n' + systemPrompt;
+        return chatWithProvider({
+          providerId: parsed.providerId,
+          modelId: parsed.modelId,
+          systemPrompt,
+          userText: chunk,
+          temperature: guardPrefix ? 0.2 : 0.7,
+        });
+      }
+      if (isOllamaModel(resolved)) {
+        return ollama.editText({
+          text: chunk,
+          action,
+          model: getOllamaModelName(resolved),
+          customPrompt: extra?.customPrompt,
+          toneStyle: extra?.toneStyle,
+          targetLanguage: extra?.targetLanguage,
+        });
+      }
+      return editTranscriptCloud({
+        text: chunk,
         action,
         model: getModelApi(resolved),
         customPrompt: extra?.customPrompt,
         toneStyle: extra?.toneStyle,
         targetLanguage: extra?.targetLanguage,
       });
+    };
+
+    const results: string[] = [];
+    for (let index = 0; index < workUnits.length; index += 1) {
+      results.push(await runChunk(workUnits[index]));
+      publishProgress(index + 1);
     }
+    const resultText = results.join('\n\n');
 
     return {
       text: resultText,
@@ -889,7 +919,8 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
     setLoading: (v: boolean) => void,
     setResult: (v: string) => void,
     setLatency?: (v: number) => void,
-    extra?: { customPrompt?: string; toneStyle?: string; targetLanguage?: string }
+    setProgress?: (v: AIEditProgressSnapshot | null) => void,
+    extra?: AIEditExtras
   ) => {
     if (!text.trim()) {
       toast({ title: "שגיאה", description: "אין טקסט לעריכה", variant: "destructive" });
@@ -900,7 +931,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
     try {
       const resolved = resolveModel(modelValue, action);
       const resolvedLabel = modelValue === '_auto' ? `${getModelLabel(resolved)} (אוטומטי)` : getModelLabel(modelValue);
-      const { text: resultText, latencyMs } = await runEditOnce(action, modelValue, extra);
+      const { text: resultText, latencyMs } = await runEditOnce(action, modelValue, extra, text, setProgress);
 
       if (resultText) {
         setLatency?.(latencyMs);
@@ -932,7 +963,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
     }
   };
 
-  const runBoth = (action: EditAction | string, extra?: { customPrompt?: string; toneStyle?: string; targetLanguage?: string }) => {
+  const runBoth = (action: EditAction | string, extra?: AIEditExtras) => {
     // For user-created custom actions, resolve to 'custom' action with the stored prompt
     let resolvedAction = action as EditAction;
     let resolvedExtra = extra;
@@ -946,7 +977,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
       const builtinAction = customActions.actions.find(a => a.id === action && a.builtin);
       if (builtinAction && storedPrompt && storedPrompt !== (ACTION_PROMPTS as Record<string, string>)[action]) {
         resolvedAction = 'custom' as EditAction;
-        resolvedExtra = { ...extra, customPrompt: storedPrompt };
+        resolvedExtra = { ...extra, customPrompt: storedPrompt, progressAction: action as EditAction };
       }
     }
     setLastAction(action as EditAction);
@@ -956,15 +987,17 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
     setResult2('');
     setLatency1Ms(0);
     setLatency2Ms(0);
+    setEditProgress1(null);
+    setEditProgress2(null);
     toast({ title: 'מפעיל שני מנועים יחד', description: `${getModelLabel(model1)} מול ${getModelLabel(model2)}` });
     void Promise.allSettled([
-      handleEdit(resolvedAction, model1, setIsEditing1, setResult1, setLatency1Ms, resolvedExtra),
-      handleEdit(resolvedAction, model2, setIsEditing2, setResult2, setLatency2Ms, resolvedExtra),
+      handleEdit(resolvedAction, model1, setIsEditing1, setResult1, setLatency1Ms, setEditProgress1, resolvedExtra),
+      handleEdit(resolvedAction, model2, setIsEditing2, setResult2, setLatency2Ms, setEditProgress2, resolvedExtra),
     ]).finally(() => setActiveRunCount(0));
   };
 
   /** Just select an action — does NOT run the engines. User triggers run via per-engine buttons. */
-  const selectAction = (action: EditAction | string, extras?: { customPrompt?: string; toneStyle?: string; targetLanguage?: string }) => {
+  const selectAction = (action: EditAction | string, extras?: AIEditExtras) => {
     setLastAction(action as EditAction);
     setPendingExtras(extras);
     const label = (() => {
@@ -984,7 +1017,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
       return;
     }
     let resolvedAction = action as EditAction;
-    let resolvedExtra: { customPrompt?: string; toneStyle?: string; targetLanguage?: string } | undefined = pendingExtras;
+    let resolvedExtra: AIEditExtras | undefined = pendingExtras;
     if (typeof action === 'string' && action.startsWith('custom_')) {
       const actionPrompt = customActions.getActionPrompt(action);
       resolvedAction = 'custom' as EditAction;
@@ -994,7 +1027,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
       const builtinAction = customActions.actions.find(a => a.id === action && a.builtin);
       if (builtinAction && storedPrompt && storedPrompt !== (ACTION_PROMPTS as Record<string, string>)[action as string]) {
         resolvedAction = 'custom' as EditAction;
-        resolvedExtra = { ...resolvedExtra, customPrompt: storedPrompt };
+        resolvedExtra = { ...resolvedExtra, customPrompt: storedPrompt, progressAction: action as EditAction };
       }
     }
     setLastAction(action as EditAction);
@@ -1002,14 +1035,16 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
     if (engineNum === 1) {
       setResult1('');
       setLatency1Ms(0);
+      setEditProgress1(null);
       toast({ title: 'מפעיל מנוע 1', description: getModelLabel(model1) });
-      void handleEdit(resolvedAction, model1, setIsEditing1, setResult1, setLatency1Ms, resolvedExtra)
+      void handleEdit(resolvedAction, model1, setIsEditing1, setResult1, setLatency1Ms, setEditProgress1, resolvedExtra)
         .finally(() => setActiveRunCount(0));
     } else {
       setResult2('');
       setLatency2Ms(0);
+      setEditProgress2(null);
       toast({ title: 'מפעיל מנוע 2', description: getModelLabel(model2) });
-      void handleEdit(resolvedAction, model2, setIsEditing2, setResult2, setLatency2Ms, resolvedExtra)
+      void handleEdit(resolvedAction, model2, setIsEditing2, setResult2, setLatency2Ms, setEditProgress2, resolvedExtra)
         .finally(() => setActiveRunCount(0));
     }
   };
@@ -1090,6 +1125,8 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
     setMergedResult('');
     setLatency1Ms(0);
     setLatency2Ms(0);
+    setEditProgress1(null);
+    setEditProgress2(null);
     setIsEditing1(true);
     toast({
       title: '🔗 Pipeline החל: טיוטא → ליטוש',
@@ -1098,7 +1135,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
     try {
       // Stage 1 — fast draft
       const draftStart = performance.now();
-      const draft = await runEditOnce(action, model1, pendingExtras);
+      const draft = await runEditOnce(action, model1, pendingExtras, text, setEditProgress1);
       const draftLatency = Math.round(performance.now() - draftStart);
       setResult1(draft.text);
       setLatency1Ms(draftLatency);
@@ -1112,19 +1149,14 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
         'תקן דקדוק, פיסוק, זרימה וניסוח. שמר על המשמעות המקורית.',
         'החזר אך ורק את הטקסט המלוטש, ללא הערות, ללא הסברים, ללא כותרות.',
       ].join('\n');
-      const polished = isOllamaModel(model2)
-        ? await ollama.editText({
-            text: draft.text,
-            action: 'custom',
-            model: getOllamaModelName(model2),
-            customPrompt: polishPrompt,
-          })
-        : await editTranscriptCloud({
-            text: draft.text,
-            action: 'custom',
-            model: getModelApi(model2),
-            customPrompt: polishPrompt,
-          });
+      const polishedRun = await runEditOnce(
+        'custom',
+        model2,
+        { customPrompt: polishPrompt },
+        draft.text,
+        setEditProgress2,
+      );
+      const polished = polishedRun.text;
       const polishLatency = Math.round(performance.now() - polishStart);
       setResult2(polished);
       setLatency2Ms(polishLatency);
@@ -1443,12 +1475,14 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
     : null;
 
   const EnginePanel = ({
-    num, modelValue, setModelValue, isEditingState, result, onApply, onSave, onSaveReplace, onDuplicateSave
+    num, modelValue, setModelValue, isEditingState, progress, latencyMs, result, onApply, onSave, onSaveReplace, onDuplicateSave
   }: {
     num: number;
     modelValue: string;
     setModelValue: (v: string) => void;
     isEditingState: boolean;
+    progress: AIEditProgressSnapshot | null;
+    latencyMs: number;
     result: string;
     onApply: () => void;
     onSave: () => void;
@@ -1466,7 +1500,7 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
     }
 
     return (
-    <div className="border rounded-lg p-4 space-y-3">
+    <div className="border rounded-lg p-4 space-y-3 text-right" dir="rtl">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1">
           <Label className="text-sm font-semibold">מנוע {num}</Label>
@@ -1758,14 +1792,29 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
       </div>
 
       {isEditingState && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground py-4 justify-center">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          מעבד עם {modelValue === '_auto' && lastAction ? `${getModelLabel(resolveModel(modelValue, lastAction))} (אוטומטי)` : getModelLabel(modelValue)}...
-        </div>
+        progress ? (
+          <AIEditProgressPanel
+            progress={progress}
+            engineLabel={modelValue === '_auto' && lastAction ? `${getModelLabel(resolveModel(modelValue, lastAction))} (אוטומטי)` : getModelLabel(modelValue)}
+          />
+        ) : (
+          <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground" dir="rtl">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            מכין את משימת העריכה...
+          </div>
+        )
       )}
 
       {result && !isEditingState && (
         <>
+          {latencyMs > 0 && (
+            <div className="flex justify-start" data-testid={`ai-edit-duration-${num}`}>
+              <Badge variant="outline" className="gap-1 tabular-nums">
+                <Clock3 className="h-3.5 w-3.5" />
+                הושלם בתוך {formatMeasuredDuration(Math.round(latencyMs / 1000))}
+              </Badge>
+            </div>
+          )}
           {showDiffHighlight && diffElements ? (
             <ScrollArea className="min-h-[200px] max-h-[400px] rounded-md border p-3 bg-accent/10">
               <pre className="whitespace-pre-wrap text-right" dir="rtl" style={{ fontFamily: 'inherit', fontSize: 'inherit', lineHeight: 'inherit' }}>
@@ -3153,6 +3202,8 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
           modelValue: model1,
           setModelValue: setModel1,
           isEditingState: isEditing1,
+          progress: editProgress1,
+          latencyMs: latency1Ms,
           result: result1,
           onApply: () => onTextChange(result1, `ai-${lastAction || 'improve'}`, `${getModelLabel(model1)}`),
           onSave: () => onSaveVersion?.(result1, `ai-${lastAction || 'improve'}`, getModelLabel(model1), lastAction || 'improve'),
@@ -3164,6 +3215,8 @@ const AIEditorDualInner = ({ text: propText, onTextChange, onSaveVersion, onSave
           modelValue: model2,
           setModelValue: setModel2,
           isEditingState: isEditing2,
+          progress: editProgress2,
+          latencyMs: latency2Ms,
           result: result2,
           onApply: () => onTextChange(result2, `ai-${lastAction || 'improve'}`, `${getModelLabel(model2)}`),
           onSave: () => onSaveVersion?.(result2, `ai-${lastAction || 'improve'}`, getModelLabel(model2), lastAction || 'improve'),

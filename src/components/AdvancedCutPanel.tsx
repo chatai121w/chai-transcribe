@@ -20,6 +20,9 @@ import {
   type CutResult,
 } from "@/lib/audioCutEngine";
 import { cutWithFallback, probeDurationFast, type CutTier } from "@/lib/tieredCutEngine";
+import { mergeAudioFiles } from "@/lib/audioMergeEngine";
+import type { AudioSelectionMode } from "@/lib/audioEditPlan";
+import VisualAudioCutEditor from "@/components/VisualAudioCutEditor";
 import {
   clearEnhanceQueueCompleted,
   getEnhanceQueueJobs,
@@ -87,6 +90,7 @@ import {
   FolderTree,
   Cloud,
   HardDrive,
+  Merge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -232,11 +236,22 @@ interface ManualSegmentRow {
   label: string;
 }
 
+function formatEditableTime(totalSec: number): string {
+  const safe = Math.max(0, totalSec);
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const seconds = safe % 60;
+  const secondsText = seconds.toFixed(2).replace(/\.00$/, "").padStart(2, "0");
+  return hours > 0
+    ? `${hours}:${minutes.toString().padStart(2, "0")}:${secondsText}`
+    : `${minutes}:${secondsText}`;
+}
+
 function createSegmentRow(startSec = 0, endSec = 0, label = ""): ManualSegmentRow {
   return {
     id: `seg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    startInput: startSec > 0 ? formatTime(startSec) : "0:00",
-    endInput: endSec > 0 ? formatTime(endSec) : "",
+    startInput: startSec > 0 ? formatEditableTime(startSec) : "0:00",
+    endInput: endSec > 0 ? formatEditableTime(endSec) : "",
     label,
   };
 }
@@ -544,6 +559,8 @@ function CutJobCard({
   onDeleteResult,
   onSaveResultToHistory,
   onSaveAllToFolder,
+  onMergeResults,
+  isMerging,
 }: {
   job: CutJob;
   convertedMap: Record<string, File>;
@@ -561,6 +578,8 @@ function CutJobCard({
   onDeleteResult: (jobId: string, segmentIndex: number) => void;
   onSaveResultToHistory: (result: CutResult, name: string, folder: string) => void;
   onSaveAllToFolder: (job: CutJob) => void;
+  onMergeResults: (job: CutJob, results: CutResult[]) => void;
+  isMerging: boolean;
 }) {
   const [expanded, setExpanded] = useState(job.status === "done");
   const [selectedSegments, setSelectedSegments] = useState<Set<number>>(new Set());
@@ -611,6 +630,7 @@ function CutJobCard({
                   <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
                     {{
                       "wav-slice": "WAV ישיר",
+                      "server-ffmpeg": "FFmpeg מקומי",
                       "ffmpeg-copy": "FFmpeg ללא קידוד",
                       "audio-buffer": "פיענוח מלא",
                     }[job.engine]}
@@ -763,6 +783,22 @@ function CutJobCard({
                   <FolderPlus className="h-4 w-4" />
                   שמור נבחרים בתיקייה
                 </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 gap-1.5"
+                  disabled={selectedSegments.size < 2 || isMerging}
+                  onClick={() => onMergeResults(
+                    job,
+                    job.results
+                      .filter((result) => selectedSegments.has(result.segmentIndex))
+                      .sort((a, b) => a.startSec - b.startSec),
+                  )}
+                >
+                  {isMerging ? <Loader2 className="h-4 w-4 animate-spin" /> : <Merge className="h-4 w-4" />}
+                  אחד נבחרים
+                </Button>
               </div>
             </div>
             {job.results.map((r) => {
@@ -854,6 +890,8 @@ export default function AdvancedCutPanel({
 
   // Mode
   const [cutMode, setCutMode] = useState<CutMode>("manual");
+  const [editorMode, setEditorMode] = useState<"visual" | CutMode>("visual");
+  const [visualSelectionMode, setVisualSelectionMode] = useState<AudioSelectionMode>("keep");
 
   // Manual mode rows
   const [manualRows, setManualRows] = useState<ManualSegmentRow[]>([createSegmentRow()]);
@@ -875,6 +913,7 @@ export default function AdvancedCutPanel({
   const [segConvertingSet, setSegConvertingSet] = useState<Record<string, boolean>>({});
   const [convertingAllJobs, setConvertingAllJobs] = useState<Record<string, boolean>>({});
   const [transcribingAllJobs, setTranscribingAllJobs] = useState<Record<string, boolean>>({});
+  const [mergingJobs, setMergingJobs] = useState<Record<string, boolean>>({});
 
   const { submitBatchJobs } = useTranscriptionJobs();
   const { preferences } = useCloudPreferences();
@@ -1099,15 +1138,50 @@ export default function AdvancedCutPanel({
   // Quick split helpers
   const quickSplitEqual = useCallback((count: number) => {
     if (!sourceDuration) return;
+    setEditorMode("count");
     setCutMode("count");
     setPartCount(String(count));
   }, [sourceDuration]);
 
   const quickSplitByMinutes = useCallback((minutes: number) => {
+    setEditorMode("time");
     setCutMode("time");
     setChunkMinutes(String(minutes));
     setChunkSeconds("0");
   }, []);
+
+  const handleVisualPlanChange = useCallback((segments: CutSegment[], selectionMode: AudioSelectionMode) => {
+    setVisualSelectionMode(selectionMode);
+    setCutMode("manual");
+    setManualRows(segments.length > 0
+      ? segments.map((segment) => createSegmentRow(segment.startSec, segment.endSec, segment.label))
+      : [createSegmentRow()]);
+  }, []);
+
+  const handleMergeResults = useCallback(async (job: CutJob, results: CutResult[]) => {
+    if (results.length < 2 || mergingJobs[job.id]) return;
+    setMergingJobs((current) => ({ ...current, [job.id]: true }));
+    try {
+      const mergedFile = await mergeAudioFiles(results.map((result) => result.file), `${job.sourceFileName.replace(/\.[^.]+$/, "")}-מאוחד`);
+      const mergedResult: CutResult = {
+        segmentIndex: Math.max(-1, ...job.results.map((result) => result.segmentIndex)) + 1,
+        file: mergedFile,
+        label: `מאוחד (${results.length} קטעים)`,
+        startSec: results[0].startSec,
+        endSec: results[results.length - 1].endSec,
+        durationSec: results.reduce((total, result) => total + result.durationSec, 0),
+        sizeBytes: mergedFile.size,
+      };
+      setCutJobs((current) => current.map((candidate) => candidate.id === job.id
+        ? { ...candidate, results: [...candidate.results, mergedResult], totalSegments: candidate.results.length + 1, completedSegments: candidate.results.length + 1 }
+        : candidate));
+      toast({ title: "האיחוד הושלם", description: `${results.length} קטעים אוחדו לפי סדר הזמן` });
+    } catch (error) {
+      toast({ title: "האיחוד נכשל", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
+    } finally {
+      setMergingJobs((current) => ({ ...current, [job.id]: false }));
+    }
+  }, [mergingJobs]);
 
   // Download all results from a job
   const handleDownloadAll = useCallback((job: CutJob) => {
@@ -1485,7 +1559,7 @@ export default function AdvancedCutPanel({
                 {[2, 3, 4, 5, 10].map((n) => (
                   <Button
                     key={n}
-                    variant={cutMode === "count" && partCount === String(n) ? "default" : "outline"}
+                    variant={editorMode === "count" && partCount === String(n) ? "default" : "outline"}
                     size="sm"
                     className="h-9 sm:h-7 text-xs px-3 sm:px-2.5 rounded-full"
                     onClick={() => quickSplitEqual(n)}
@@ -1497,7 +1571,7 @@ export default function AdvancedCutPanel({
                 {[1, 3, 5, 10, 15, 30].map((m) => (
                   <Button
                     key={m}
-                    variant={cutMode === "time" && chunkMinutes === String(m) && chunkSeconds === "0" ? "default" : "outline"}
+                    variant={editorMode === "time" && chunkMinutes === String(m) && chunkSeconds === "0" ? "default" : "outline"}
                     size="sm"
                     className="h-9 sm:h-7 text-xs px-3 sm:px-2.5 rounded-full"
                     onClick={() => quickSplitByMinutes(m)}
@@ -1511,17 +1585,21 @@ export default function AdvancedCutPanel({
               <div className="flex gap-1 border rounded-xl p-1 bg-muted/30">
                 {(
                   [
-                    { mode: "manual" as CutMode, icon: ListOrdered, label: "ידני" },
-                    { mode: "time" as CutMode, icon: Clock, label: "לפי זמן" },
-                    { mode: "count" as CutMode, icon: Hash, label: "לפי מספר" },
+                    { mode: "visual" as const, icon: Music, label: "חזותי מקצועי" },
+                    { mode: "manual" as const, icon: ListOrdered, label: "זמנים ידניים" },
+                    { mode: "time" as const, icon: Clock, label: "לפי זמן" },
+                    { mode: "count" as const, icon: Hash, label: "לפי מספר" },
                   ] as const
                 ).map(({ mode, icon: Icon, label }) => (
                   <button
                     key={mode}
-                    onClick={() => setCutMode(mode)}
+                    onClick={() => {
+                      setEditorMode(mode);
+                      if (mode !== "visual") setCutMode(mode);
+                    }}
                     className={cn(
                       "flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 sm:py-2 rounded-lg text-xs font-medium transition-all",
-                      cutMode === mode
+                      editorMode === mode
                         ? "bg-background shadow-sm text-primary ring-1 ring-primary/20"
                         : "text-muted-foreground hover:text-foreground hover:bg-background/50",
                     )}
@@ -1533,8 +1611,17 @@ export default function AdvancedCutPanel({
               </div>
 
               {/* Mode-specific config */}
+              {editorMode === "visual" && (
+                <VisualAudioCutEditor
+                  key={`${sourceFile.name}-${sourceFile.size}-${sourceFile.lastModified}`}
+                  file={sourceFile}
+                  durationSec={sourceDuration}
+                  onPlanChange={handleVisualPlanChange}
+                />
+              )}
+              {editorMode !== "visual" && (
               <div className="border rounded-xl p-3 sm:p-4 space-y-3 bg-muted/10">
-                {cutMode === "manual" && (
+                {editorMode === "manual" && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label className="text-xs font-medium">קטעים לחיתוך</Label>
@@ -1591,7 +1678,7 @@ export default function AdvancedCutPanel({
                   </div>
                 )}
 
-                {cutMode === "time" && (
+                {editorMode === "time" && (
                   <div className="space-y-3">
                     <Label className="text-xs font-medium">חלק כל:</Label>
                     <div className="flex items-center gap-2">
@@ -1636,7 +1723,7 @@ export default function AdvancedCutPanel({
                   </div>
                 )}
 
-                {cutMode === "count" && (
+                {editorMode === "count" && (
                   <div className="space-y-3">
                     <Label className="text-xs font-medium">מספר חלקים שווים:</Label>
                     <div className="flex items-center gap-3">
@@ -1668,6 +1755,7 @@ export default function AdvancedCutPanel({
                   </div>
                 )}
               </div>
+              )}
 
               {/* Segment preview */}
               <SegmentPreviewList
@@ -1689,6 +1777,7 @@ export default function AdvancedCutPanel({
                 </Button>
                 {previewSegments.length > 0 && (
                   <span className="text-xs text-muted-foreground text-center sm:text-right">
+                    {editorMode === "visual" && `מצב: ${{ keep: "שמור מסומן", remove: "הסר מסומן", split: "פצל הכול" }[visualSelectionMode]} · `}
                     WAV ישיר → FFmpeg מקומי → FFmpeg בדפדפן → פיענוח מלא כגיבוי
                   </span>
                 )}
@@ -1754,6 +1843,8 @@ export default function AdvancedCutPanel({
                     onDeleteResult={handleDeleteResult}
                     onSaveResultToHistory={handleSaveResultToHistory}
                     onSaveAllToFolder={setFolderJob}
+                    onMergeResults={handleMergeResults}
+                    isMerging={!!mergingJobs[job.id]}
                   />
                 ))}
               </div>

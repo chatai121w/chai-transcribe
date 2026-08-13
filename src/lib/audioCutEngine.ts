@@ -65,7 +65,7 @@ export interface CutJob {
   finishedAt?: number;
   durationSec?: number; // total audio duration
   /** Concrete engine selected by the unified tiered cutter. */
-  engine?: "wav-slice" | "ffmpeg-copy" | "audio-buffer";
+  engine?: "wav-slice" | "server-ffmpeg" | "ffmpeg-copy" | "audio-buffer";
 }
 
 export type CutJobCallback = (job: CutJob) => void;
@@ -92,7 +92,7 @@ interface PersistedCutJob {
   finishedAt?: number;
   durationSec?: number;
   error?: string;
-  engine?: "wav-slice" | "ffmpeg-copy" | "audio-buffer";
+  engine?: "wav-slice" | "server-ffmpeg" | "ffmpeg-copy" | "audio-buffer";
 }
 
 interface PersistedCutResult {

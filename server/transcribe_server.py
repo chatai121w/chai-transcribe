@@ -2908,6 +2908,69 @@ def cut_audio():
         _log.exception("cut-audio failed")
         return jsonify({"error": str(exc)}), 500
 
+
+@app.route("/merge-audio", methods=["POST"])
+def merge_audio():
+    """Concatenate audio clips in the exact order received using FFmpeg."""
+    if not _check_ffmpeg():
+        return jsonify({"error": "FFmpeg not available on server"}), 503
+
+    uploads = request.files.getlist("files")
+    if not 2 <= len(uploads) <= 200:
+        return jsonify({"error": "Provide between 2 and 200 audio clips"}), 400
+
+    import subprocess
+    import shutil
+
+    work_dir = tempfile.mkdtemp(prefix="chai-merge-")
+    try:
+        input_paths = []
+        for index, upload in enumerate(uploads):
+            suffix = Path(upload.filename or "clip.wav").suffix.lower()
+            if suffix not in _CONVERT_ALLOWED_SUFFIXES:
+                shutil.rmtree(work_dir, ignore_errors=True)
+                return jsonify({"error": f"Unsupported format: {suffix}"}), 415
+            input_path = os.path.join(work_dir, f"input-{index:03d}{suffix}")
+            upload.save(input_path)
+            input_paths.append(input_path)
+
+        requested_name = request.form.get("outputName") or "merged-audio"
+        output_name = re.sub(r"[^\w\-\u0590-\u05ff]+", "-", requested_name, flags=re.UNICODE).strip("-") or "merged-audio"
+        output_path = os.path.join(work_dir, output_name + ".m4a")
+        command = ["ffmpeg", "-y"]
+        for input_path in input_paths:
+            command.extend(["-i", input_path])
+        concat_inputs = "".join(f"[{index}:a:0]" for index in range(len(input_paths)))
+        command.extend([
+            "-filter_complex", f"{concat_inputs}concat=n={len(input_paths)}:v=0:a=1[outa]",
+            "-map", "[outa]", "-c:a", "aac", "-b:a", "192k", output_path,
+        ])
+        result = subprocess.run(command, capture_output=True, timeout=1800)
+        if result.returncode != 0 or not os.path.exists(output_path):
+            details = result.stderr.decode("utf-8", errors="replace")[-800:]
+            return jsonify({"error": "FFmpeg merge failed", "details": details}), 500
+
+        from flask import send_file, after_this_request
+
+        @after_this_request
+        def cleanup_merge(response):
+            shutil.rmtree(work_dir, ignore_errors=True)
+            return response
+
+        return send_file(
+            output_path,
+            mimetype="audio/mp4",
+            as_attachment=True,
+            download_name=output_name + ".m4a",
+        )
+    except subprocess.TimeoutExpired:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return jsonify({"error": "Merging timed out"}), 504
+    except Exception as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        _log.exception("merge-audio failed")
+        return jsonify({"error": str(exc)}), 500
+
 _CONVERT_OUTPUT_FORMATS = {
     "mp3": {
         "suffix": ".mp3",
@@ -4860,6 +4923,7 @@ def main():
     print("    POST /stage-audio       — Pre-upload audio (parallel with preload)")
     print("    POST /convert-mp3       — Convert audio/video to MP3/OPUS/AAC (server FFmpeg)")
     print("    POST /cut-audio         — Cut audio/video into multiple segments (server FFmpeg)")
+    print("    POST /merge-audio       — Merge audio clips in the requested order (server FFmpeg)")
     print("    POST /enhance-audio     — Enhance audio (AI/non-AI presets) to MP3/OPUS/AAC")
     print("    POST /harmonize         — Generate harmonies (basic/pro/studio)")
     print("    GET  /lk/dictionary     — Lashon Kodesh personal dictionary (list)")

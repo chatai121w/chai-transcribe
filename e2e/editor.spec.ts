@@ -447,6 +447,39 @@ test.describe('עורך AI ו-Ollama', () => {
     }
   });
 
+  test('התקדמות עריכת AI אינה ממציאה אחוזים ומוצגת ב-RTL', async ({ page }) => {
+    let completedRequests = 0;
+    await page.route('**/rest/v1/rpc/edit_transcript_proxy', async (route) => {
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      completedRequests += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ text: `תוצאה ערוכה ${completedRequests}` }),
+      });
+    });
+
+    await seedEditor(page, 'משפט עברי קצר שנועד לבדוק התקדמות אמיתית ללא אחוזים מומצאים.');
+    await page.goto('/text-editor');
+    await page.getByRole('tab', { name: /עריכה עם AI|AI/i }).first().click();
+
+    await page.getByText('דקדוק ואיות', { exact: true }).first().click();
+    await page.getByRole('button', { name: 'הפעל מנוע 1', exact: true }).click();
+
+    const progress = page.getByTestId('ai-edit-progress');
+    await expect(progress).toBeVisible();
+    await expect(progress).toHaveAttribute('dir', 'rtl');
+    await expect(progress.getByTestId('ai-edit-percent')).toHaveText('0%');
+    await expect(progress).toContainText('המנוע אינו מדווח אחוז ביניים אמין');
+
+    await expect(progress).toBeHidden({ timeout: 10000 });
+    expect(completedRequests).toBe(1);
+    const duration = page.getByTestId('ai-edit-duration-1');
+    await expect(duration).toBeVisible();
+    await expect(duration).toContainText('הושלם בתוך');
+    await expect(page.locator('textarea[dir="rtl"][readonly]').first()).toContainText('תוצאה ערוכה');
+  });
+
   test('תצוגה רחבה ומזעור מנועים להורדה נשמרים אחרי ריענון', async ({ page }) => {
     const emptyOllama = JSON.stringify({ models: [] });
     await page.route('http://localhost:11434/api/tags', route => route.fulfill({ status: 200, contentType: 'application/json', body: emptyOllama }));
