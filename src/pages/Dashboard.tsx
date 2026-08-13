@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { debugLog } from "@/lib/debugLogger";
+import { getTranscriptDisplay } from "@/lib/transcriptDisplay";
 import { FolderManager } from "@/components/FolderManager";
 import { RecentFilesWidget } from "@/components/RecentFiles";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -349,11 +350,11 @@ const Dashboard = () => {
     return normPreview === normTitle || normPreview.startsWith(normTitle);
   };
 
-  const getSafeTranscriptText = (transcript: { title?: string | null; text?: string | null; edited_text?: string | null }) => {
-    const content = (transcript.edited_text ?? transcript.text ?? "").trim();
-    const explicitTitle = transcript.title?.trim() || "";
-    const title = explicitTitle || content.substring(0, 50) || "ללא טקסט";
-    const preview = content || transcript.title?.trim() || "ללא טקסט";
+  const getSafeTranscriptText = (transcript: { title?: unknown; text?: unknown; edited_text?: unknown }) => {
+    const display = getTranscriptDisplay(transcript);
+    const title = display.title === 'ללא כותרת' ? 'ללא טקסט' : display.title;
+    const content = display.content;
+    const preview = content || title;
     const showPreview = content.length > 0 && !isDuplicatePreview(title, content);
     return { title, preview, showPreview };
   };

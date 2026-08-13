@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
+import { getTranscriptDisplay, safeTranscriptString } from "@/lib/transcriptDisplay";
 
 const CATEGORIES = [
   { value: "meeting", label: "ישיבה", icon: Briefcase },
@@ -102,7 +103,7 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
 
   // Merge transcript-derived folders + user-created custom folders
   const folders = useMemo(() => {
-    const fromTranscripts = transcripts.map(t => t.folder).filter(Boolean);
+    const fromTranscripts = transcripts.map(t => safeTranscriptString(t.folder)).filter(Boolean);
     const all = new Set([...fromTranscripts, ...customFolders]);
     return Array.from(all).sort((a, b) => a.localeCompare(b, 'he'));
   }, [transcripts, customFolders]);
@@ -122,9 +123,9 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter(t =>
-        (t.text ?? '').toLowerCase().includes(q) ||
-        t.title?.toLowerCase().includes(q) ||
-        t.engine.toLowerCase().includes(q) ||
+        safeTranscriptString(t.text).toLowerCase().includes(q) ||
+        safeTranscriptString(t.title).toLowerCase().includes(q) ||
+        safeTranscriptString(t.engine).toLowerCase().includes(q) ||
         t.tags?.some(tag => tag.toLowerCase().includes(q))
       );
     }
@@ -133,9 +134,9 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
       let cmp = 0;
       switch (sortKey) {
         case "date": cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime(); break;
-        case "title": cmp = (a.title || '').localeCompare(b.title || '', 'he'); break;
-        case "length": cmp = a.text.length - b.text.length; break;
-        case "engine": cmp = a.engine.localeCompare(b.engine); break;
+        case "title": cmp = safeTranscriptString(a.title).localeCompare(safeTranscriptString(b.title), 'he'); break;
+        case "length": cmp = safeTranscriptString(a.text).length - safeTranscriptString(b.text).length; break;
+        case "engine": cmp = safeTranscriptString(a.engine).localeCompare(safeTranscriptString(b.engine)); break;
       }
       return sortAsc ? cmp : -cmp;
     });
@@ -525,15 +526,17 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredTranscripts.map(t => (
+                  {filteredTranscripts.map(t => {
+                    const display = getTranscriptDisplay(t);
+                    return (
                     <tr key={t.id} className={`border-t hover:bg-accent/30 ${selectedIds.has(t.id) ? 'bg-primary/5' : ''}`}>
                       {selectionMode && (
                         <td className="px-3 py-2">
                           <Checkbox checked={selectedIds.has(t.id)} onCheckedChange={() => toggleSelect(t.id)} aria-label={`בחר ${t.title || 'תמלול'}`} />
                         </td>
                       )}
-                      <td className="px-3 py-2 text-right max-w-[280px] truncate">{t.title || t.text.substring(0, 55)}</td>
-                      <td className="px-3 py-2 text-right">{t.engine}</td>
+                      <td className="px-3 py-2 text-right max-w-[280px] truncate">{display.title}</td>
+                      <td className="px-3 py-2 text-right">{safeTranscriptString(t.engine) || 'ללא מנוע'}</td>
                       <td className="px-3 py-2 text-right">{t.folder || 'ללא'}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">{formatDate(t.created_at)}</td>
                       <td className="px-3 py-2 text-right">
@@ -547,7 +550,8 @@ export const FolderManager = ({ transcripts, onUpdate, onDelete, onGetAudioUrl }
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
               {filteredTranscripts.length === 0 && (
@@ -667,9 +671,9 @@ const TranscriptItem = ({
   const [playingAudio, setPlayingAudio] = useState<HTMLAudioElement | null>(null);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const [handlesOpen, setHandlesOpen] = useState(false);
-  const rawTitle = (t.title ?? '').trim();
-  const previewText = (t.text ?? '').trim();
-  const displayTitle = rawTitle || previewText.substring(0, 60) || 'ללא כותרת';
+  const transcriptDisplay = getTranscriptDisplay(t);
+  const previewText = transcriptDisplay.content;
+  const displayTitle = transcriptDisplay.title;
   const shouldShowPreview =
     viewMode !== 'rectangles' &&
     previewText.length > 0 &&
@@ -717,7 +721,7 @@ const TranscriptItem = ({
             <div className="space-y-2">
               <p className="text-sm font-semibold text-right">{displayTitle}</p>
               <p className="text-sm text-muted-foreground leading-7 whitespace-pre-wrap break-words text-right">
-                {(t.text ?? '').trim() || 'אין תוכן להצגה'}
+                {previewText || 'אין תוכן להצגה'}
               </p>
             </div>
 
