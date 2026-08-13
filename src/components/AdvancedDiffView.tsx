@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowRightLeft, ChevronDown, Copy, ArrowUp, ArrowDown, Layers, Star, Trash2, RotateCcw, ListChecks, X, Check, Pencil, Save, Undo2, ChevronRight, ChevronLeft } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, Copy, ArrowUp, ArrowDown, Layers, Star, Trash2, RotateCcw, ListChecks, X, Check, Pencil, Save, Undo2, ChevronRight, ChevronLeft, AlignJustify, Rows3 } from "lucide-react";
 import { TextVersion } from "@/components/TextEditHistory";
 import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
 import { ComparisonSourceDialog } from "@/components/ComparisonSourceDialog";
@@ -316,8 +316,23 @@ export const AdvancedDiffView = ({
       setRightDetached(true);
     }
   }, [preselectedLeftId, preselectedRightId, versions]);
-  const [viewMode, setViewMode] = useState<'side-by-side' | 'decision-side-by-side' | 'adjudicate' | 'unified' | 'stats'>('side-by-side');
+  const [viewMode, setViewMode] = useState<'side-by-side' | 'adjudicate' | 'unified' | 'stats'>('side-by-side');
+  const [comparisonLayout, setComparisonLayout] = useState<'continuous' | 'aligned'>(() => {
+    try {
+      return localStorage.getItem("comparison_adjudication_layout") === "aligned" ? "aligned" : "continuous";
+    } catch {
+      return "continuous";
+    }
+  });
   const [versionFilter, setVersionFilter] = useState<VersionFilter>("all");
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("comparison_adjudication_layout", comparisonLayout);
+    } catch {
+      // The layout still works when storage is unavailable.
+    }
+  }, [comparisonLayout]);
 
   const selectableVersions = useMemo(() => {
     const isCloudVersion = (v: TextVersion) => v.id.includes("-") && v.id.length >= 30;
@@ -693,8 +708,7 @@ export const AdvancedDiffView = ({
           
           <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)} className="w-auto" dir="rtl">
             <TabsList className="h-8">
-              <TabsTrigger value="side-by-side" className="text-xs px-2 h-7">צד-בצד</TabsTrigger>
-              <TabsTrigger value="decision-side-by-side" className="text-xs px-2 h-7">הכרעה צד-בצד</TabsTrigger>
+              <TabsTrigger value="side-by-side" className="text-xs px-2 h-7">השוואה והכרעה</TabsTrigger>
               <TabsTrigger value="adjudicate" className="text-xs px-2 h-7">הכרעה</TabsTrigger>
               <TabsTrigger value="unified" className="text-xs px-2 h-7">מאוחד</TabsTrigger>
               <TabsTrigger value="stats" className="text-xs px-2 h-7">סטטיסטיקות</TabsTrigger>
@@ -905,82 +919,38 @@ export const AdvancedDiffView = ({
         }}
       />
 
-      {/* Side by side view — word-level highlights only */}
       {viewMode === 'side-by-side' && (
-        <Card className="overflow-hidden">
-          {/* Column headers */}
-          <div className="grid grid-cols-2 border-b">
-            <div className="px-4 py-2 border-l bg-destructive/5 flex items-center justify-between">
-              <span className="text-sm font-medium">גרסת בסיס</span>
-              <span className="text-xs text-muted-foreground">{stats.lChars} תווים · {stats.lWords} מילים</span>
-            </div>
-            <div className="px-4 py-2 bg-green-500/5 flex items-center justify-between">
-              <span className="text-sm font-medium">גרסה חדשה</span>
-              <span className="text-xs text-muted-foreground">{stats.rChars} תווים · {stats.rWords} מילים</span>
-            </div>
-          </div>
-          <div className="border-b bg-muted/15 px-4 py-2 text-right text-xs text-muted-foreground">
-            לחץ פעמיים על מילה או קטע צבוע בצד שבו מופיע הנוסח הנכון כדי לפתוח את אפשרויות ההכרעה.
-          </div>
-          <ScrollArea className="h-[500px]">
-            <div className="grid grid-cols-2 items-stretch min-h-[500px]" dir="rtl" style={textStyle}>
-              {adjudicationUnits.map((unit) => {
-                if (unit.kind === "equal") {
-                  return (
-                    <Fragment key={unit.id}>
-                      <div className="border-l border-muted/20 px-4 py-1 text-right whitespace-pre-wrap break-words">{unit.leftText}</div>
-                      <div className="px-4 py-1 text-right whitespace-pre-wrap break-words">{unit.rightText}</div>
-                    </Fragment>
-                  );
-                }
-
-                const selected = resolutions[unit.id];
-                return (
-                  <Fragment key={unit.id}>
-                    <div className="border-l border-muted/20 px-2 py-1">
-                      <button
-                        type="button"
-                        className={cn(
-                          "w-full rounded bg-rose-500/20 px-2 py-1 text-right font-medium text-rose-900 transition-colors hover:bg-rose-500/30 dark:text-rose-100 whitespace-pre-wrap break-words",
-                          selected?.choice === "left" && "ring-2 ring-primary bg-primary/10",
-                        )}
-                        onClick={(event) => { if (event.detail === 0) openQuickDecision(unit.id, "left"); }}
-                        onDoubleClick={() => openQuickDecision(unit.id, "left")}
-                        title="לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"
-                      >
-                        {unit.leftText || "[מחיקה]"}
-                      </button>
-                    </div>
-                    <div className="px-2 py-1">
-                      <button
-                        type="button"
-                        className={cn(
-                          "w-full rounded bg-emerald-500/20 px-2 py-1 text-right font-medium text-emerald-900 transition-colors hover:bg-emerald-500/30 dark:text-emerald-100 whitespace-pre-wrap break-words",
-                          selected?.choice === "right" && "ring-2 ring-primary bg-primary/10",
-                        )}
-                        onClick={(event) => { if (event.detail === 0) openQuickDecision(unit.id, "right"); }}
-                        onDoubleClick={() => openQuickDecision(unit.id, "right")}
-                        title="לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"
-                      >
-                        {unit.rightText || "[מחיקה]"}
-                      </button>
-                    </div>
-                  </Fragment>
-                );
-              })}
-            </div>
-          </ScrollArea>
-        </Card>
-      )}
-
-      {viewMode === 'decision-side-by-side' && (
-        <Card className="overflow-hidden" data-testid="decision-side-by-side">
+        <Card className="overflow-hidden" data-testid="comparison-adjudication-view">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/20 px-4 py-3">
             <div>
-              <h3 className="text-sm font-semibold">הכרעה ישירות מתוך ההשוואה</h3>
-              <p className="text-xs text-muted-foreground">לחץ פעמיים על הנוסח הנכון כדי לפתוח אפשרויות אישור. לתיקון מלא אפשר גם ללחוץ על העיפרון.</p>
+              <h3 className="text-sm font-semibold">השוואה והכרעה</h3>
+              <p className="text-xs text-muted-foreground">לחץ פעמיים על הנוסח הנכון. החלפת התצוגה אינה משנה או מאפסת את ההכרעות.</p>
             </div>
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <div className="flex h-8 items-center rounded-md border bg-background p-0.5" role="group" aria-label="פריסת ההשוואה">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant={comparisonLayout === "continuous" ? "default" : "ghost"}
+                  className="h-7 w-7"
+                  onClick={() => setComparisonLayout("continuous")}
+                  title="תצוגה רציפה"
+                  aria-label="תצוגה רציפה"
+                >
+                  <AlignJustify className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant={comparisonLayout === "aligned" ? "default" : "ghost"}
+                  className="h-7 w-7"
+                  onClick={() => setComparisonLayout("aligned")}
+                  title="תצוגה לפי הבדלים"
+                  aria-label="תצוגה לפי הבדלים"
+                >
+                  <Rows3 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
               <Badge variant="secondary">הוכרעו {resolvedCount}</Badge>
               <Badge variant={unresolvedCount ? "outline" : "default"}>נותרו {unresolvedCount}</Badge>
               <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5" onClick={undoResolution} disabled={!resolutionHistoryRef.current.length}>
@@ -992,67 +962,101 @@ export const AdvancedDiffView = ({
             <div className="border-l px-4 py-2 text-right">גרסת בסיס</div>
             <div className="px-4 py-2 text-right">גרסה חדשה</div>
           </div>
-          <ScrollArea className="h-[500px]">
-            <div className="grid min-h-[500px] grid-cols-2 items-stretch" dir="rtl" style={textStyle}>
-              {adjudicationUnits.map((unit) => {
-                if (unit.kind === "equal") {
+          {comparisonLayout === "continuous" ? (
+            <ScrollArea className="h-[500px]">
+              <div className="grid min-h-[500px] grid-cols-2" dir="rtl" style={textStyle}>
+                {(["left", "right"] as const).map((side) => (
+                  <div key={side} className={cn("px-4 py-4 text-right whitespace-pre-wrap break-words", side === "left" && "border-l")}>
+                    {adjudicationUnits.map((unit) => {
+                      const text = side === "left" ? unit.leftText : unit.rightText;
+                      if (unit.kind === "equal") return <Fragment key={unit.id}>{text}</Fragment>;
+                      const selected = resolutions[unit.id];
+                      return (
+                        <button
+                          key={unit.id}
+                          type="button"
+                          className={cn(
+                            "inline rounded px-1 py-0.5 text-right font-medium whitespace-pre-wrap break-words transition-colors",
+                            side === "left"
+                              ? "bg-rose-500/20 text-rose-900 hover:bg-rose-500/30 dark:text-rose-100"
+                              : "bg-emerald-500/20 text-emerald-900 hover:bg-emerald-500/30 dark:text-emerald-100",
+                            selected?.choice === side && "ring-2 ring-primary bg-primary/10",
+                          )}
+                          onClick={(event) => { if (event.detail === 0) openQuickDecision(unit.id, side); }}
+                          onDoubleClick={() => openQuickDecision(unit.id, side)}
+                          title={side === "left" ? "לחץ פעמיים לאפשרויות אישור מגרסת הבסיס" : "לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"}
+                        >
+                          {text || "[מחיקה]"}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          ) : (
+            <ScrollArea className="h-[500px]">
+              <div className="grid min-h-[500px] grid-cols-2 items-stretch" dir="rtl" style={textStyle}>
+                {adjudicationUnits.map((unit) => {
+                  if (unit.kind === "equal") {
+                    return (
+                      <Fragment key={unit.id}>
+                        <div className="border-l border-muted/20 px-4 py-1 text-right whitespace-pre-wrap break-words">{unit.leftText}</div>
+                        <div className="px-4 py-1 text-right whitespace-pre-wrap break-words">{unit.rightText}</div>
+                      </Fragment>
+                    );
+                  }
+                  const conflictIndex = conflictUnits.findIndex((conflict) => conflict.id === unit.id);
+                  const selected = resolutions[unit.id];
                   return (
                     <Fragment key={unit.id}>
-                      <div className="border-l border-muted/20 px-4 py-1 text-right whitespace-pre-wrap break-words">{unit.leftText}</div>
-                      <div className="px-4 py-1 text-right whitespace-pre-wrap break-words">{unit.rightText}</div>
+                      <div className="relative border-l border-muted/20 px-2 py-1">
+                        <button
+                          type="button"
+                          className={cn(
+                            "w-full rounded bg-rose-500/15 px-2 py-1 text-right whitespace-pre-wrap break-words transition-colors hover:bg-rose-500/25",
+                            selected?.choice === "left" && "ring-2 ring-primary bg-primary/10",
+                          )}
+                          onClick={(event) => { if (event.detail === 0) openQuickDecision(unit.id, "left"); }}
+                          onDoubleClick={() => openQuickDecision(unit.id, "left")}
+                          title="לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"
+                        >
+                          {unit.leftText || "[מחיקה]"}
+                        </button>
+                      </div>
+                      <div className="flex items-start gap-1 px-2 py-1">
+                        <button
+                          type="button"
+                          className={cn(
+                            "min-w-0 flex-1 rounded bg-emerald-500/15 px-2 py-1 text-right whitespace-pre-wrap break-words transition-colors hover:bg-emerald-500/25",
+                            selected?.choice === "right" && "ring-2 ring-primary bg-primary/10",
+                          )}
+                          onClick={(event) => { if (event.detail === 0) openQuickDecision(unit.id, "right"); }}
+                          onDoubleClick={() => openQuickDecision(unit.id, "right")}
+                          title="לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"
+                        >
+                          {unit.rightText || "[מחיקה]"}
+                        </button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant={selected?.choice === "custom" ? "default" : "outline"}
+                          className="h-8 w-8 shrink-0"
+                          onClick={() => {
+                            openCustomDecision(conflictIndex);
+                            setViewMode("adjudicate");
+                          }}
+                          title="שני הנוסחים שגויים - הזן תיקון אחר"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </Fragment>
                   );
-                }
-                const conflictIndex = conflictUnits.findIndex((conflict) => conflict.id === unit.id);
-                const selected = resolutions[unit.id];
-                return (
-                  <Fragment key={unit.id}>
-                    <div className="relative border-l border-muted/20 px-2 py-1">
-                      <button
-                        type="button"
-                        className={cn(
-                          "w-full rounded px-2 py-1 text-right whitespace-pre-wrap break-words transition-colors bg-rose-500/15 hover:bg-rose-500/25",
-                          selected?.choice === "left" && "ring-2 ring-primary bg-primary/10",
-                        )}
-                        onClick={(event) => { if (event.detail === 0) openQuickDecision(unit.id, "left"); }}
-                        onDoubleClick={() => openQuickDecision(unit.id, "left")}
-                        title="לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"
-                      >
-                        {unit.leftText || "[מחיקה]"}
-                      </button>
-                    </div>
-                    <div className="flex items-start gap-1 px-2 py-1">
-                      <button
-                        type="button"
-                        className={cn(
-                          "min-w-0 flex-1 rounded px-2 py-1 text-right whitespace-pre-wrap break-words transition-colors bg-emerald-500/15 hover:bg-emerald-500/25",
-                          selected?.choice === "right" && "ring-2 ring-primary bg-primary/10",
-                        )}
-                        onClick={(event) => { if (event.detail === 0) openQuickDecision(unit.id, "right"); }}
-                        onDoubleClick={() => openQuickDecision(unit.id, "right")}
-                        title="לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"
-                      >
-                        {unit.rightText || "[מחיקה]"}
-                      </button>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant={selected?.choice === "custom" ? "default" : "outline"}
-                        className="h-8 w-8 shrink-0"
-                        onClick={() => {
-                          openCustomDecision(conflictIndex);
-                          setViewMode("adjudicate");
-                        }}
-                        title="שני הנוסחים שגויים - הזן תיקון אחר"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </Fragment>
-                );
-              })}
-            </div>
-          </ScrollArea>
+                })}
+              </div>
+            </ScrollArea>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
             <span className="text-xs text-muted-foreground">הנוסח המאומת מתעדכן מכל הכרעה, כולל תיקונים לכל המופעים.</span>
             <Button

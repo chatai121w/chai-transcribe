@@ -109,9 +109,13 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
 
     await page.goto('/text-editor');
     await page.getByRole('tab', { name: 'השוואה' }).click();
+    await expect(page.getByRole('tab', { name: 'הכרעה צד-בצד' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'תצוגה לפי הבדלים' }).click();
     await page.getByTitle('לחץ פעמיים לאפשרויות אישור מהגרסה החדשה').dblclick();
     await expect(page.getByTestId('quick-adjudication-dialog')).toBeVisible();
     await page.getByTestId('confirm-quick-all').click();
+    await page.getByRole('button', { name: 'תצוגה רציפה' }).click();
+    await expect(page.getByText('הוכרעו 1')).toBeVisible();
     await page.getByRole('tab', { name: 'הכרעה', exact: true }).click();
 
     await expect(page.getByTestId('verified-text')).toHaveValue('חורבן כאן, ועוד חורבן. אבל מחורבים לא');

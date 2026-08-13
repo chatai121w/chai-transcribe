@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdvancedDiffView } from "./AdvancedDiffView";
 import type { TextVersion } from "./TextEditHistory";
 
@@ -23,6 +23,10 @@ const versions: TextVersion[] = [
 ];
 
 describe("AdvancedDiffView adjudication", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it("opens quick adjudication directly from the regular side-by-side view", async () => {
     const user = userEvent.setup();
     render(
@@ -79,7 +83,7 @@ describe("AdvancedDiffView adjudication", () => {
     expect(screen.getByTestId("verified-text")).toHaveValue("אמר בבא בתרא היום");
   });
 
-  it("adjudicates directly from the side-by-side decision view", async () => {
+  it("switches to the aligned layout and preserves its adjudication", async () => {
     const user = userEvent.setup();
     render(
       <AdvancedDiffView
@@ -90,10 +94,13 @@ describe("AdvancedDiffView adjudication", () => {
       />,
     );
 
-    await user.click(screen.getByRole("tab", { name: "הכרעה צד-בצד" }));
+    expect(screen.queryByRole("tab", { name: "הכרעה צד-בצד" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "תצוגה לפי הבדלים" }));
     await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"));
     expect(screen.getByTestId("quick-adjudication-dialog")).toBeVisible();
     await user.click(screen.getByTestId("confirm-quick-once"));
+    await user.click(screen.getByRole("button", { name: "תצוגה רציפה" }));
+    expect(screen.getByText("הוכרעו 1")).toBeVisible();
     await user.click(screen.getByRole("tab", { name: "הכרעה", exact: true }));
     expect(screen.getByTestId("verified-text")).toHaveValue("אמר בברא בתרא היום");
   });
@@ -109,7 +116,7 @@ describe("AdvancedDiffView adjudication", () => {
       />,
     );
 
-    await user.click(screen.getByRole("tab", { name: "הכרעה צד-בצד" }));
+    await user.click(screen.getByRole("button", { name: "תצוגה לפי הבדלים" }));
     await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"));
     const input = screen.getByTestId("quick-custom-input");
     await user.clear(input);
@@ -180,7 +187,7 @@ describe("AdvancedDiffView adjudication", () => {
       />,
     );
 
-    await user.click(screen.getByRole("tab", { name: "הכרעה צד-בצד" }));
+    await user.click(screen.getByRole("button", { name: "תצוגה לפי הבדלים" }));
     await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"));
     await user.click(screen.getByTestId("confirm-quick-all"));
     await user.click(screen.getByRole("tab", { name: "הכרעה", exact: true }));
