@@ -10,6 +10,11 @@ export type AdjudicationResolution = {
   customText?: string;
 };
 
+export type GlobalReplacementRule = {
+  source: string;
+  replacement: string;
+};
+
 type AlignmentToken = {
   text: string;
   key: string;
@@ -106,12 +111,34 @@ export function buildAdjudicationUnits(left: string, right: string): Adjudicatio
 export function composeAdjudicatedText(
   units: AdjudicationUnit[],
   resolutions: Record<string, AdjudicationResolution>,
+  replacementRules: GlobalReplacementRule[] = [],
 ): string {
-  return units.map((unit) => {
+  const composed = units.map((unit) => {
     if (unit.kind === "equal") return unit.rightText;
     const resolution = resolutions[unit.id];
     if (resolution?.choice === "left") return unit.leftText;
     if (resolution?.choice === "custom") return resolution.customText || "";
     return unit.rightText;
   }).join("");
+
+  return replacementRules.reduce(
+    (text, rule) => replaceExactTextOccurrences(text, rule.source, rule.replacement),
+    composed,
+  );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Replaces a complete word or phrase without touching it inside another word. */
+export function replaceExactTextOccurrences(text: string, source: string, replacement: string): string {
+  const cleanSource = source.trim().replace(OUTER_PUNCT_RE, "");
+  if (!cleanSource) return text;
+  const flexibleWhitespace = cleanSource
+    .split(/\s+/)
+    .map(escapeRegExp)
+    .join("\\s+");
+  const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${flexibleWhitespace}(?![\\p{L}\\p{N}])`, "gu");
+  return text.replace(pattern, replacement.trim());
 }

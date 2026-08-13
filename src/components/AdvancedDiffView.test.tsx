@@ -59,4 +59,55 @@ describe("AdvancedDiffView adjudication", () => {
     await user.click(screen.getByRole("button", { name: "אשר" }));
     expect(screen.getByTestId("verified-text")).toHaveValue("אמר בבא בתרא היום");
   });
+
+  it("adjudicates directly from the side-by-side decision view", async () => {
+    const user = userEvent.setup();
+    render(
+      <AdvancedDiffView
+        versions={versions}
+        preselectedLeftId="base"
+        preselectedRightId="new"
+        onSaveVerifiedVersion={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "הכרעה צד-בצד" }));
+    await user.click(screen.getByTitle("בחר בנוסח מגרסת הבסיס"));
+    await user.click(screen.getByTitle("שני הנוסחים שגויים - הזן תיקון אחר"));
+    expect(screen.getByTestId("verified-text")).toHaveValue("אמר בברא בתרא היום");
+  });
+
+  it("applies an approved correction to every exact repeated occurrence", async () => {
+    const user = userEvent.setup();
+    const repeatedVersions: TextVersion[] = [
+      {
+        id: "repeat-base",
+        text: "חורבים כאן, ועוד חורבים. אבל מחורבים לא",
+        timestamp: new Date("2026-08-13T09:00:00Z"),
+        source: "original",
+      },
+      {
+        id: "repeat-new",
+        text: "חורבן כאן, ועוד חורבים. אבל מחורבים לא",
+        timestamp: new Date("2026-08-13T09:01:00Z"),
+        source: "manual",
+      },
+    ];
+
+    render(
+      <AdvancedDiffView
+        versions={repeatedVersions}
+        preselectedLeftId="repeat-base"
+        preselectedRightId="repeat-new"
+        onSaveVerifiedVersion={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "הכרעה" }));
+    await user.click(screen.getByRole("checkbox", { name: "תקן את כל המופעים הזהים בטקסט" }));
+    await user.click(screen.getByRole("button", { name: "אשר" }));
+
+    expect(screen.getByTestId("verified-text")).toHaveValue("חורבן כאן, ועוד חורבן. אבל מחורבים לא");
+    expect(screen.getByTestId("global-replacement-rules")).toHaveTextContent("החלף בכל הטקסט: חורבים ב-חורבן");
+  });
 });

@@ -14,7 +14,7 @@ import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
 import { ComparisonSourceDialog } from "@/components/ComparisonSourceDialog";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { buildAdjudicationUnits, composeAdjudicatedText, type AdjudicationResolution } from "@/lib/textAdjudication";
+import { buildAdjudicationUnits, composeAdjudicatedText, type AdjudicationResolution, type GlobalReplacementRule } from "@/lib/textAdjudication";
 
 interface AdvancedDiffViewProps {
   versions: TextVersion[];
@@ -315,7 +315,7 @@ export const AdvancedDiffView = ({
       setRightDetached(true);
     }
   }, [preselectedLeftId, preselectedRightId, versions]);
-  const [viewMode, setViewMode] = useState<'side-by-side' | 'adjudicate' | 'unified' | 'stats'>('side-by-side');
+  const [viewMode, setViewMode] = useState<'side-by-side' | 'decision-side-by-side' | 'adjudicate' | 'unified' | 'stats'>('side-by-side');
   const [versionFilter, setVersionFilter] = useState<VersionFilter>("all");
 
   const selectableVersions = useMemo(() => {
@@ -427,21 +427,30 @@ export const AdvancedDiffView = ({
   const [verifiedText, setVerifiedText] = useState("");
   const [activeConflictIndex, setActiveConflictIndex] = useState(0);
   const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
-  const resolutionHistoryRef = useRef<Array<Record<string, AdjudicationResolution>>>([]);
+  const [replacementRules, setReplacementRules] = useState<GlobalReplacementRule[]>([]);
+  const [applyEverywhere, setApplyEverywhere] = useState(false);
+  const [replacementSource, setReplacementSource] = useState<"left" | "right">("left");
+  const resolutionHistoryRef = useRef<Array<{ resolutions: Record<string, AdjudicationResolution>; rules: GlobalReplacementRule[] }>>([]);
 
   useEffect(() => {
     setResolutions({});
     setCustomDrafts({});
+    setReplacementRules([]);
+    setApplyEverywhere(false);
     setActiveConflictIndex(0);
     resolutionHistoryRef.current = [];
     setVerifiedText(composeAdjudicatedText(adjudicationUnits, {}));
   }, [leftId, rightId, leftText, rightText, adjudicationUnits]);
 
-  const applyResolution = (unitId: string, resolution: AdjudicationResolution) => {
-    resolutionHistoryRef.current.push(resolutions);
+  const applyResolution = (unitId: string, resolution: AdjudicationResolution, replacementRule?: GlobalReplacementRule) => {
+    resolutionHistoryRef.current.push({ resolutions, rules: replacementRules });
     const next = { ...resolutions, [unitId]: resolution };
+    const nextRules = replacementRule
+      ? [...replacementRules.filter((rule) => rule.source !== replacementRule.source), replacementRule]
+      : replacementRules;
     setResolutions(next);
-    setVerifiedText(composeAdjudicatedText(adjudicationUnits, next));
+    setReplacementRules(nextRules);
+    setVerifiedText(composeAdjudicatedText(adjudicationUnits, next, nextRules));
     const nextUnresolved = conflictUnits.findIndex((unit, index) => index > activeConflictIndex && !next[unit.id]);
     if (nextUnresolved >= 0) setActiveConflictIndex(nextUnresolved);
   };
@@ -449,8 +458,26 @@ export const AdvancedDiffView = ({
   const undoResolution = () => {
     const previous = resolutionHistoryRef.current.pop();
     if (!previous) return;
-    setResolutions(previous);
-    setVerifiedText(composeAdjudicatedText(adjudicationUnits, previous));
+    setResolutions(previous.resolutions);
+    setReplacementRules(previous.rules);
+    setVerifiedText(composeAdjudicatedText(adjudicationUnits, previous.resolutions, previous.rules));
+  };
+
+  const openCustomDecision = (index: number) => {
+    setActiveConflictIndex(index);
+    setApplyEverywhere(false);
+    setReplacementSource(conflictUnits[index]?.leftText.trim() ? "left" : "right");
+  };
+
+  const confirmCustomResolution = (unitId: string) => {
+    const unit = conflictUnits.find((candidate) => candidate.id === unitId);
+    if (!unit) return;
+    const draft = customDrafts[unit.id] ?? unit.rightText.trimEnd();
+    const trailingSpace = unit.rightText.match(/\s+$/)?.[0] || unit.leftText.match(/\s+$/)?.[0] || "";
+    const rule = applyEverywhere
+      ? { source: replacementSource === "left" ? unit.leftText : unit.rightText, replacement: draft }
+      : undefined;
+    applyResolution(unit.id, { choice: "custom", customText: `${draft}${trailingSpace}` }, rule);
   };
 
   const resolvedCount = conflictUnits.filter((unit) => Boolean(resolutions[unit.id])).length;
@@ -615,6 +642,7 @@ export const AdvancedDiffView = ({
           <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)} className="w-auto" dir="rtl">
             <TabsList className="h-8">
               <TabsTrigger value="side-by-side" className="text-xs px-2 h-7">צד-בצד</TabsTrigger>
+              <TabsTrigger value="decision-side-by-side" className="text-xs px-2 h-7">הכרעה צד-בצד</TabsTrigger>
               <TabsTrigger value="adjudicate" className="text-xs px-2 h-7">הכרעה</TabsTrigger>
               <TabsTrigger value="unified" className="text-xs px-2 h-7">מאוחד</TabsTrigger>
               <TabsTrigger value="stats" className="text-xs px-2 h-7">סטטיסטיקות</TabsTrigger>
@@ -871,6 +899,99 @@ export const AdvancedDiffView = ({
         </Card>
       )}
 
+      {viewMode === 'decision-side-by-side' && (
+        <Card className="overflow-hidden" data-testid="decision-side-by-side">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/20 px-4 py-3">
+            <div>
+              <h3 className="text-sm font-semibold">הכרעה ישירות מתוך ההשוואה</h3>
+              <p className="text-xs text-muted-foreground">לחץ על הנוסח הנכון. לתיקון אחר לחץ על העיפרון של אותו הבדל.</p>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <Badge variant="secondary">הוכרעו {resolvedCount}</Badge>
+              <Badge variant={unresolvedCount ? "outline" : "default"}>נותרו {unresolvedCount}</Badge>
+              <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5" onClick={undoResolution} disabled={!resolutionHistoryRef.current.length}>
+                <Undo2 className="h-3.5 w-3.5" /> ביטול
+              </Button>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 border-b bg-muted/10 text-sm font-medium">
+            <div className="border-l px-4 py-2 text-right">גרסת בסיס</div>
+            <div className="px-4 py-2 text-right">גרסה חדשה</div>
+          </div>
+          <ScrollArea className="h-[500px]">
+            <div className="grid min-h-[500px] grid-cols-2 items-stretch" dir="rtl" style={textStyle}>
+              {adjudicationUnits.map((unit) => {
+                if (unit.kind === "equal") {
+                  return (
+                    <Fragment key={unit.id}>
+                      <div className="border-l border-muted/20 px-4 py-1 text-right whitespace-pre-wrap break-words">{unit.leftText}</div>
+                      <div className="px-4 py-1 text-right whitespace-pre-wrap break-words">{unit.rightText}</div>
+                    </Fragment>
+                  );
+                }
+                const conflictIndex = conflictUnits.findIndex((conflict) => conflict.id === unit.id);
+                const selected = resolutions[unit.id];
+                return (
+                  <Fragment key={unit.id}>
+                    <div className="relative border-l border-muted/20 px-2 py-1">
+                      <button
+                        type="button"
+                        className={cn(
+                          "w-full rounded px-2 py-1 text-right whitespace-pre-wrap break-words transition-colors bg-rose-500/15 hover:bg-rose-500/25",
+                          selected?.choice === "left" && "ring-2 ring-primary bg-primary/10",
+                        )}
+                        onClick={() => applyResolution(unit.id, { choice: "left" })}
+                        title="בחר בנוסח מגרסת הבסיס"
+                      >
+                        {unit.leftText || "[מחיקה]"}
+                      </button>
+                    </div>
+                    <div className="flex items-start gap-1 px-2 py-1">
+                      <button
+                        type="button"
+                        className={cn(
+                          "min-w-0 flex-1 rounded px-2 py-1 text-right whitespace-pre-wrap break-words transition-colors bg-emerald-500/15 hover:bg-emerald-500/25",
+                          selected?.choice === "right" && "ring-2 ring-primary bg-primary/10",
+                        )}
+                        onClick={() => applyResolution(unit.id, { choice: "right" })}
+                        title="בחר בנוסח מהגרסה החדשה"
+                      >
+                        {unit.rightText || "[מחיקה]"}
+                      </button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant={selected?.choice === "custom" ? "default" : "outline"}
+                        className="h-8 w-8 shrink-0"
+                        onClick={() => {
+                          openCustomDecision(conflictIndex);
+                          setViewMode("adjudicate");
+                        }}
+                        title="שני הנוסחים שגויים - הזן תיקון אחר"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </Fragment>
+                );
+              })}
+            </div>
+          </ScrollArea>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+            <span className="text-xs text-muted-foreground">הנוסח המאומת מתעדכן מכל הכרעה, כולל תיקונים לכל המופעים.</span>
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 gap-1.5"
+              disabled={!verifiedText.trim() || !onSaveVerifiedVersion}
+              onClick={() => onSaveVerifiedVersion?.(verifiedText)}
+            >
+              <Save className="h-3.5 w-3.5" /> שמור נוסח מאומת
+            </Button>
+          </div>
+        </Card>
+      )}
+
       {viewMode === 'adjudicate' && (
         <Card className="overflow-hidden" data-testid="adjudication-workspace">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/20 px-4 py-3">
@@ -938,9 +1059,40 @@ export const AdvancedDiffView = ({
                             dir="rtl"
                             data-testid="adjudication-custom-input"
                           />
-                          <Button type="button" size="sm" className="h-10 shrink-0 gap-1.5" onClick={() => applyResolution(unit.id, { choice: "custom", customText: `${customDrafts[unit.id] ?? unit.rightText.trimEnd()}${unit.rightText.match(/\s+$/)?.[0] || unit.leftText.match(/\s+$/)?.[0] || ""}` })}>
+                          <Button type="button" size="sm" className="h-10 shrink-0 gap-1.5" onClick={() => confirmCustomResolution(unit.id)}>
                             <Check className="h-4 w-4" /> אשר
                           </Button>
+                        </div>
+                        <div className="mt-3 rounded-md bg-muted/30 p-2.5">
+                          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium">
+                            <Checkbox checked={applyEverywhere} onCheckedChange={(checked) => setApplyEverywhere(checked === true)} />
+                            תקן את כל המופעים הזהים בטקסט
+                          </label>
+                          {applyEverywhere && (
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                              <span className="text-muted-foreground">המילה השגויה נמצאת ב:</span>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={replacementSource === "left" ? "default" : "outline"}
+                                className="h-7"
+                                onClick={() => setReplacementSource("left")}
+                                disabled={!unit.leftText.trim()}
+                              >
+                                בסיס: {unit.leftText.trim() || "ריק"}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={replacementSource === "right" ? "default" : "outline"}
+                                className="h-7"
+                                onClick={() => setReplacementSource("right")}
+                                disabled={!unit.rightText.trim()}
+                              >
+                                חדש: {unit.rightText.trim() || "ריק"}
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -992,6 +1144,15 @@ export const AdvancedDiffView = ({
                 />
                 {unresolvedCount > 0 && (
                   <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">הנוסח מציג זמנית את הגרסה החדשה ב-{unresolvedCount} הבדלים שטרם הוכרעו.</p>
+                )}
+                {replacementRules.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5 text-xs" data-testid="global-replacement-rules">
+                    {replacementRules.map((rule) => (
+                      <Badge key={rule.source} variant="secondary">
+                        החלף בכל הטקסט: {rule.source.trim()} ב-{rule.replacement.trim()}
+                      </Badge>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>

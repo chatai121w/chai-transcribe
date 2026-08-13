@@ -86,4 +86,34 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
     await expect(newChooser).toContainText(comparisonTranscript.title);
     await expect(page.getByText('הגרסה החדשה נבחרה')).toBeVisible();
   });
+
+  test('הכרעה מתקנת את כל המופעים הזהים ושומרת מילים ארוכות', async ({ page }) => {
+    await page.addInitScript(() => {
+      const timestamp = new Date('2026-08-13T09:00:00Z').toISOString();
+      localStorage.setItem('current_editing_text', 'חורבן כאן, ועוד חורבים. אבל מחורבים לא');
+      localStorage.setItem('text_versions', JSON.stringify([
+        {
+          id: 'repeat-base',
+          text: 'חורבים כאן, ועוד חורבים. אבל מחורבים לא',
+          timestamp,
+          source: 'original',
+        },
+        {
+          id: 'repeat-new',
+          text: 'חורבן כאן, ועוד חורבים. אבל מחורבים לא',
+          timestamp: new Date('2026-08-13T09:01:00Z').toISOString(),
+          source: 'manual',
+        },
+      ]));
+    });
+
+    await page.goto('/text-editor');
+    await page.getByRole('tab', { name: 'השוואה' }).click();
+    await page.getByRole('tab', { name: 'הכרעה', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'תקן את כל המופעים הזהים בטקסט' }).click();
+    await page.getByRole('button', { name: 'אשר' }).click();
+
+    await expect(page.getByTestId('verified-text')).toHaveValue('חורבן כאן, ועוד חורבן. אבל מחורבים לא');
+    await expect(page.getByTestId('global-replacement-rules')).toContainText('החלף בכל הטקסט: חורבים ב-חורבן');
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAdjudicationUnits, composeAdjudicatedText } from "./textAdjudication";
+import { buildAdjudicationUnits, composeAdjudicatedText, replaceExactTextOccurrences } from "./textAdjudication";
 
 describe("text adjudication", () => {
   it("creates a single-word conflict and preserves surrounding text", () => {
@@ -29,5 +29,16 @@ describe("text adjudication", () => {
       [conflict.id]: { choice: "custom", customText: "בבא בתרא" },
     });
     expect(result).toBe("מסכת בבא בתרא");
+  });
+
+  it("replaces all exact occurrences while preserving punctuation and longer words", () => {
+    expect(replaceExactTextOccurrences("חורבים, ועוד חורבים. אבל מחורבים לא", "חורבים", "חורבן"))
+      .toBe("חורבן, ועוד חורבן. אבל מחורבים לא");
+  });
+
+  it("applies a global correction to equal and conflicting units", () => {
+    const units = buildAdjudicationUnits("חורבים כאן וגם חורבים", "חורבים פה וגם חורבים");
+    expect(composeAdjudicatedText(units, {}, [{ source: "חורבים", replacement: "חורבן" }]))
+      .toBe("חורבן פה וגם חורבן");
   });
 });
