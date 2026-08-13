@@ -1,4 +1,4 @@
-import { Fragment, useState, useMemo, useEffect, type Dispatch, type SetStateAction } from "react";
+import { Fragment, useState, useMemo, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -6,12 +6,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowRightLeft, ChevronDown, Copy, ArrowUp, ArrowDown, Layers, Star, Trash2, RotateCcw, ListChecks, X } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { ArrowRightLeft, ChevronDown, Copy, ArrowUp, ArrowDown, Layers, Star, Trash2, RotateCcw, ListChecks, X, Check, Pencil, Save, Undo2, ChevronRight, ChevronLeft } from "lucide-react";
 import { TextVersion } from "@/components/TextEditHistory";
 import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
 import { ComparisonSourceDialog } from "@/components/ComparisonSourceDialog";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { buildAdjudicationUnits, composeAdjudicatedText, type AdjudicationResolution } from "@/lib/textAdjudication";
 
 interface AdvancedDiffViewProps {
   versions: TextVersion[];
@@ -20,6 +23,7 @@ interface AdvancedDiffViewProps {
   textColor?: string;
   lineHeight?: number;
   onApplyVersion?: (text: string) => void;
+  onSaveVerifiedVersion?: (text: string) => void;
   preselectedLeftId?: string;
   preselectedRightId?: string;
   /** Optional: send the selected version into the AI editor as input */
@@ -260,6 +264,7 @@ export const AdvancedDiffView = ({
   textColor = 'hsl(var(--foreground))',
   lineHeight = 1.6,
   onApplyVersion,
+  onSaveVerifiedVersion,
   preselectedLeftId,
   preselectedRightId,
   onSendToAiEditor,
@@ -310,7 +315,7 @@ export const AdvancedDiffView = ({
       setRightDetached(true);
     }
   }, [preselectedLeftId, preselectedRightId, versions]);
-  const [viewMode, setViewMode] = useState<'side-by-side' | 'unified' | 'stats'>('side-by-side');
+  const [viewMode, setViewMode] = useState<'side-by-side' | 'adjudicate' | 'unified' | 'stats'>('side-by-side');
   const [versionFilter, setVersionFilter] = useState<VersionFilter>("all");
 
   const selectableVersions = useMemo(() => {
@@ -416,6 +421,40 @@ export const AdvancedDiffView = ({
   };
 
   const wordDiff = useMemo(() => buildWordDiff(leftText, rightText), [leftText, rightText]);
+  const adjudicationUnits = useMemo(() => buildAdjudicationUnits(leftText, rightText), [leftText, rightText]);
+  const conflictUnits = useMemo(() => adjudicationUnits.filter((unit) => unit.kind === "conflict"), [adjudicationUnits]);
+  const [resolutions, setResolutions] = useState<Record<string, AdjudicationResolution>>({});
+  const [verifiedText, setVerifiedText] = useState("");
+  const [activeConflictIndex, setActiveConflictIndex] = useState(0);
+  const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
+  const resolutionHistoryRef = useRef<Array<Record<string, AdjudicationResolution>>>([]);
+
+  useEffect(() => {
+    setResolutions({});
+    setCustomDrafts({});
+    setActiveConflictIndex(0);
+    resolutionHistoryRef.current = [];
+    setVerifiedText(composeAdjudicatedText(adjudicationUnits, {}));
+  }, [leftId, rightId, leftText, rightText, adjudicationUnits]);
+
+  const applyResolution = (unitId: string, resolution: AdjudicationResolution) => {
+    resolutionHistoryRef.current.push(resolutions);
+    const next = { ...resolutions, [unitId]: resolution };
+    setResolutions(next);
+    setVerifiedText(composeAdjudicatedText(adjudicationUnits, next));
+    const nextUnresolved = conflictUnits.findIndex((unit, index) => index > activeConflictIndex && !next[unit.id]);
+    if (nextUnresolved >= 0) setActiveConflictIndex(nextUnresolved);
+  };
+
+  const undoResolution = () => {
+    const previous = resolutionHistoryRef.current.pop();
+    if (!previous) return;
+    setResolutions(previous);
+    setVerifiedText(composeAdjudicatedText(adjudicationUnits, previous));
+  };
+
+  const resolvedCount = conflictUnits.filter((unit) => Boolean(resolutions[unit.id])).length;
+  const unresolvedCount = conflictUnits.length - resolvedCount;
 
   // Per-column inline streams (flattened from the aligned rows). When the two
   // buffers are identical (mirror state) these contain no highlights at all.
@@ -576,6 +615,7 @@ export const AdvancedDiffView = ({
           <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)} className="w-auto" dir="rtl">
             <TabsList className="h-8">
               <TabsTrigger value="side-by-side" className="text-xs px-2 h-7">צד-בצד</TabsTrigger>
+              <TabsTrigger value="adjudicate" className="text-xs px-2 h-7">הכרעה</TabsTrigger>
               <TabsTrigger value="unified" className="text-xs px-2 h-7">מאוחד</TabsTrigger>
               <TabsTrigger value="stats" className="text-xs px-2 h-7">סטטיסטיקות</TabsTrigger>
             </TabsList>
@@ -828,6 +868,134 @@ export const AdvancedDiffView = ({
               ))}
             </div>
           </ScrollArea>
+        </Card>
+      )}
+
+      {viewMode === 'adjudicate' && (
+        <Card className="overflow-hidden" data-testid="adjudication-workspace">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/20 px-4 py-3">
+            <div>
+              <h3 className="text-sm font-semibold">בניית נוסח מאומת</h3>
+              <p className="text-xs text-muted-foreground">כל הכרעה משנה רק את הנוסח המאומת. גרסאות המקור נשארות ללא שינוי.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <Badge variant="secondary">הוכרעו {resolvedCount}</Badge>
+              <Badge variant={unresolvedCount ? "outline" : "default"}>נותרו {unresolvedCount}</Badge>
+              <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5" onClick={undoResolution} disabled={!resolutionHistoryRef.current.length}>
+                <Undo2 className="h-3.5 w-3.5" /> ביטול הכרעה
+              </Button>
+            </div>
+          </div>
+
+          {conflictUnits.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">שתי הגרסאות זהות ואין הבדלים להכרעה.</div>
+          ) : (
+            <div className="grid min-h-[520px] grid-cols-1 lg:grid-cols-[minmax(320px,0.85fr)_minmax(0,1.4fr)]">
+              <div className="border-b p-4 lg:border-b-0 lg:border-l">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">הבדל {activeConflictIndex + 1} מתוך {conflictUnits.length}</span>
+                  <div className="flex items-center gap-1">
+                    <Button type="button" size="icon" variant="ghost" className="h-8 w-8" onClick={() => setActiveConflictIndex((index) => Math.max(0, index - 1))} disabled={activeConflictIndex === 0} title="הבדל קודם">
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button type="button" size="icon" variant="ghost" className="h-8 w-8" onClick={() => setActiveConflictIndex((index) => Math.min(conflictUnits.length - 1, index + 1))} disabled={activeConflictIndex >= conflictUnits.length - 1} title="הבדל הבא">
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {conflictUnits[activeConflictIndex] && (() => {
+                  const unit = conflictUnits[activeConflictIndex];
+                  const selected = resolutions[unit.id];
+                  return (
+                    <div className="space-y-3" data-testid={`adjudication-unit-${activeConflictIndex}`}>
+                      <button
+                        type="button"
+                        className={cn("w-full rounded-md border border-rose-200 bg-rose-500/[0.04] p-3 text-right transition-colors hover:bg-rose-500/10", selected?.choice === "left" && "ring-2 ring-primary")}
+                        onClick={() => applyResolution(unit.id, { choice: "left" })}
+                      >
+                        <span className="mb-1 block text-[11px] text-muted-foreground">בחר מגרסת הבסיס</span>
+                        <span className="whitespace-pre-wrap font-medium">{unit.leftText || "[מחיקה]"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={cn("w-full rounded-md border border-emerald-200 bg-emerald-500/[0.04] p-3 text-right transition-colors hover:bg-emerald-500/10", selected?.choice === "right" && "ring-2 ring-primary")}
+                        onClick={() => applyResolution(unit.id, { choice: "right" })}
+                      >
+                        <span className="mb-1 block text-[11px] text-muted-foreground">בחר מהגרסה החדשה</span>
+                        <span className="whitespace-pre-wrap font-medium">{unit.rightText || "[מחיקה]"}</span>
+                      </button>
+                      <div className={cn("rounded-md border p-3", selected?.choice === "custom" && "ring-2 ring-primary")}>
+                        <label className="mb-2 flex items-center gap-1.5 text-xs font-medium" htmlFor={`custom-${unit.id}`}>
+                          <Pencil className="h-3.5 w-3.5" /> שני הנוסחים שגויים
+                        </label>
+                        <div className="flex gap-2">
+                          <Input
+                            id={`custom-${unit.id}`}
+                            value={customDrafts[unit.id] ?? unit.rightText.trimEnd()}
+                            onChange={(event) => setCustomDrafts((drafts) => ({ ...drafts, [unit.id]: event.target.value }))}
+                            className="text-right"
+                            dir="rtl"
+                            data-testid="adjudication-custom-input"
+                          />
+                          <Button type="button" size="sm" className="h-10 shrink-0 gap-1.5" onClick={() => applyResolution(unit.id, { choice: "custom", customText: `${customDrafts[unit.id] ?? unit.rightText.trimEnd()}${unit.rightText.match(/\s+$/)?.[0] || unit.leftText.match(/\s+$/)?.[0] || ""}` })}>
+                            <Check className="h-4 w-4" /> אשר
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="mt-4 max-h-48 space-y-1 overflow-y-auto border-t pt-3">
+                  {conflictUnits.map((unit, index) => (
+                    <button
+                      key={unit.id}
+                      type="button"
+                      className={cn("flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-right text-xs hover:bg-muted", index === activeConflictIndex && "bg-muted")}
+                      onClick={() => setActiveConflictIndex(index)}
+                    >
+                      <span className="truncate">{unit.leftText.trim() || "מחיקה"} / {unit.rightText.trim() || "מחיקה"}</span>
+                      {resolutions[unit.id] ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" /> : <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex min-w-0 flex-col p-4">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-semibold">נוסח מאומת</h4>
+                    <p className="text-xs text-muted-foreground">אפשר לערוך גם ישירות לפני השמירה.</p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 gap-1.5"
+                    disabled={!verifiedText.trim() || !onSaveVerifiedVersion}
+                    onClick={() => {
+                      onSaveVerifiedVersion?.(verifiedText);
+                      toast({ title: "הנוסח המאומת נשמר כגרסה חדשה", description: "גרסאות הבסיס והגרסה החדשה לא שונו" });
+                    }}
+                    data-testid="save-verified-version"
+                  >
+                    <Save className="h-3.5 w-3.5" /> שמור כגרסה חדשה
+                  </Button>
+                </div>
+                <Textarea
+                  value={verifiedText}
+                  onChange={(event) => setVerifiedText(event.target.value)}
+                  className="min-h-[430px] flex-1 resize-y text-right leading-relaxed"
+                  style={textStyle}
+                  dir="rtl"
+                  data-testid="verified-text"
+                />
+                {unresolvedCount > 0 && (
+                  <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">הנוסח מציג זמנית את הגרסה החדשה ב-{unresolvedCount} הבדלים שטרם הוכרעו.</p>
+                )}
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
