@@ -72,9 +72,33 @@ describe("AdvancedDiffView adjudication", () => {
     );
 
     await user.click(screen.getByRole("tab", { name: "הכרעה צד-בצד" }));
-    await user.click(screen.getByTitle("בחר בנוסח מגרסת הבסיס"));
-    await user.click(screen.getByTitle("שני הנוסחים שגויים - הזן תיקון אחר"));
+    await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"));
+    expect(screen.getByTestId("quick-adjudication-dialog")).toBeVisible();
+    await user.click(screen.getByTestId("confirm-quick-once"));
+    await user.click(screen.getByRole("tab", { name: "הכרעה", exact: true }));
     expect(screen.getByTestId("verified-text")).toHaveValue("אמר בברא בתרא היום");
+  });
+
+  it("offers a custom correction from the side-by-side dialog", async () => {
+    const user = userEvent.setup();
+    render(
+      <AdvancedDiffView
+        versions={versions}
+        preselectedLeftId="base"
+        preselectedRightId="new"
+        onSaveVerifiedVersion={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "הכרעה צד-בצד" }));
+    await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"));
+    const input = screen.getByTestId("quick-custom-input");
+    await user.clear(input);
+    await user.type(input, "בבא");
+    await user.click(screen.getByRole("button", { name: "אשר תיקון" }));
+    await user.click(screen.getByRole("tab", { name: "הכרעה", exact: true }));
+
+    expect(screen.getByTestId("verified-text")).toHaveValue("אמר בבא בתרא היום");
   });
 
   it("applies an approved correction to every exact repeated occurrence", async () => {
@@ -106,6 +130,41 @@ describe("AdvancedDiffView adjudication", () => {
     await user.click(screen.getByRole("tab", { name: "הכרעה" }));
     await user.click(screen.getByRole("checkbox", { name: "תקן את כל המופעים הזהים בטקסט" }));
     await user.click(screen.getByRole("button", { name: "אשר" }));
+
+    expect(screen.getByTestId("verified-text")).toHaveValue("חורבן כאן, ועוד חורבן. אבל מחורבים לא");
+    expect(screen.getByTestId("global-replacement-rules")).toHaveTextContent("החלף בכל הטקסט: חורבים ב-חורבן");
+  });
+
+  it("applies a repeated correction from the side-by-side dialog", async () => {
+    const user = userEvent.setup();
+    const repeatedVersions: TextVersion[] = [
+      {
+        id: "repeat-base-quick",
+        text: "חורבים כאן, ועוד חורבים. אבל מחורבים לא",
+        timestamp: new Date("2026-08-13T09:00:00Z"),
+        source: "original",
+      },
+      {
+        id: "repeat-new-quick",
+        text: "חורבן כאן, ועוד חורבים. אבל מחורבים לא",
+        timestamp: new Date("2026-08-13T09:01:00Z"),
+        source: "manual",
+      },
+    ];
+
+    render(
+      <AdvancedDiffView
+        versions={repeatedVersions}
+        preselectedLeftId="repeat-base-quick"
+        preselectedRightId="repeat-new-quick"
+        onSaveVerifiedVersion={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "הכרעה צד-בצד" }));
+    await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"));
+    await user.click(screen.getByTestId("confirm-quick-all"));
+    await user.click(screen.getByRole("tab", { name: "הכרעה", exact: true }));
 
     expect(screen.getByTestId("verified-text")).toHaveValue("חורבן כאן, ועוד חורבן. אבל מחורבים לא");
     expect(screen.getByTestId("global-replacement-rules")).toHaveTextContent("החלף בכל הטקסט: חורבים ב-חורבן");

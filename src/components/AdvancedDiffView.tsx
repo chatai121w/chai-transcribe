@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ArrowRightLeft, ChevronDown, Copy, ArrowUp, ArrowDown, Layers, Star, Trash2, RotateCcw, ListChecks, X, Check, Pencil, Save, Undo2, ChevronRight, ChevronLeft } from "lucide-react";
 import { TextVersion } from "@/components/TextEditHistory";
 import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
@@ -430,6 +431,10 @@ export const AdvancedDiffView = ({
   const [replacementRules, setReplacementRules] = useState<GlobalReplacementRule[]>([]);
   const [applyEverywhere, setApplyEverywhere] = useState(false);
   const [replacementSource, setReplacementSource] = useState<"left" | "right">("left");
+  const [quickDecision, setQuickDecision] = useState<{ unitId: string; side: "left" | "right" } | null>(null);
+  const [quickCustomText, setQuickCustomText] = useState("");
+  const [quickApplyEverywhere, setQuickApplyEverywhere] = useState(false);
+  const [quickReplacementSource, setQuickReplacementSource] = useState<"left" | "right">("left");
   const resolutionHistoryRef = useRef<Array<{ resolutions: Record<string, AdjudicationResolution>; rules: GlobalReplacementRule[] }>>([]);
 
   useEffect(() => {
@@ -437,6 +442,9 @@ export const AdvancedDiffView = ({
     setCustomDrafts({});
     setReplacementRules([]);
     setApplyEverywhere(false);
+    setQuickDecision(null);
+    setQuickCustomText("");
+    setQuickApplyEverywhere(false);
     setActiveConflictIndex(0);
     resolutionHistoryRef.current = [];
     setVerifiedText(composeAdjudicatedText(adjudicationUnits, {}));
@@ -478,6 +486,50 @@ export const AdvancedDiffView = ({
       ? { source: replacementSource === "left" ? unit.leftText : unit.rightText, replacement: draft }
       : undefined;
     applyResolution(unit.id, { choice: "custom", customText: `${draft}${trailingSpace}` }, rule);
+  };
+
+  const quickDecisionUnit = quickDecision
+    ? conflictUnits.find((unit) => unit.id === quickDecision.unitId)
+    : undefined;
+
+  const openQuickDecision = (unitId: string, side: "left" | "right") => {
+    const unit = conflictUnits.find((candidate) => candidate.id === unitId);
+    if (!unit) return;
+    setQuickDecision({ unitId, side });
+    setQuickCustomText((side === "left" ? unit.leftText : unit.rightText).trim());
+    setQuickApplyEverywhere(false);
+    setQuickReplacementSource(side === "left" ? "right" : "left");
+  };
+
+  const closeQuickDecision = () => {
+    setQuickDecision(null);
+    setQuickApplyEverywhere(false);
+  };
+
+  const confirmQuickSource = (applyToAll: boolean) => {
+    if (!quickDecision || !quickDecisionUnit) return;
+    const chosenText = quickDecision.side === "left" ? quickDecisionUnit.leftText : quickDecisionUnit.rightText;
+    const wrongText = quickDecision.side === "left" ? quickDecisionUnit.rightText : quickDecisionUnit.leftText;
+    applyResolution(
+      quickDecisionUnit.id,
+      { choice: quickDecision.side },
+      applyToAll ? { source: wrongText, replacement: chosenText } : undefined,
+    );
+    closeQuickDecision();
+  };
+
+  const confirmQuickCustom = () => {
+    if (!quickDecisionUnit || !quickCustomText.trim()) return;
+    const trailingSpace = quickDecisionUnit.rightText.match(/\s+$/)?.[0]
+      || quickDecisionUnit.leftText.match(/\s+$/)?.[0]
+      || "";
+    const wrongText = quickReplacementSource === "left" ? quickDecisionUnit.leftText : quickDecisionUnit.rightText;
+    applyResolution(
+      quickDecisionUnit.id,
+      { choice: "custom", customText: `${quickCustomText.trim()}${trailingSpace}` },
+      quickApplyEverywhere ? { source: wrongText, replacement: quickCustomText.trim() } : undefined,
+    );
+    closeQuickDecision();
   };
 
   const resolvedCount = conflictUnits.filter((unit) => Boolean(resolutions[unit.id])).length;
@@ -904,7 +956,7 @@ export const AdvancedDiffView = ({
           <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/20 px-4 py-3">
             <div>
               <h3 className="text-sm font-semibold">הכרעה ישירות מתוך ההשוואה</h3>
-              <p className="text-xs text-muted-foreground">לחץ על הנוסח הנכון. לתיקון אחר לחץ על העיפרון של אותו הבדל.</p>
+              <p className="text-xs text-muted-foreground">לחץ פעמיים על הנוסח הנכון כדי לפתוח אפשרויות אישור. לתיקון מלא אפשר גם ללחוץ על העיפרון.</p>
             </div>
             <div className="flex items-center gap-2 text-xs">
               <Badge variant="secondary">הוכרעו {resolvedCount}</Badge>
@@ -940,8 +992,9 @@ export const AdvancedDiffView = ({
                           "w-full rounded px-2 py-1 text-right whitespace-pre-wrap break-words transition-colors bg-rose-500/15 hover:bg-rose-500/25",
                           selected?.choice === "left" && "ring-2 ring-primary bg-primary/10",
                         )}
-                        onClick={() => applyResolution(unit.id, { choice: "left" })}
-                        title="בחר בנוסח מגרסת הבסיס"
+                        onClick={(event) => { if (event.detail === 0) openQuickDecision(unit.id, "left"); }}
+                        onDoubleClick={() => openQuickDecision(unit.id, "left")}
+                        title="לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"
                       >
                         {unit.leftText || "[מחיקה]"}
                       </button>
@@ -953,8 +1006,9 @@ export const AdvancedDiffView = ({
                           "min-w-0 flex-1 rounded px-2 py-1 text-right whitespace-pre-wrap break-words transition-colors bg-emerald-500/15 hover:bg-emerald-500/25",
                           selected?.choice === "right" && "ring-2 ring-primary bg-primary/10",
                         )}
-                        onClick={() => applyResolution(unit.id, { choice: "right" })}
-                        title="בחר בנוסח מהגרסה החדשה"
+                        onClick={(event) => { if (event.detail === 0) openQuickDecision(unit.id, "right"); }}
+                        onDoubleClick={() => openQuickDecision(unit.id, "right")}
+                        title="לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"
                       >
                         {unit.rightText || "[מחיקה]"}
                       </button>
@@ -991,6 +1045,77 @@ export const AdvancedDiffView = ({
           </div>
         </Card>
       )}
+
+      <Dialog open={Boolean(quickDecision)} onOpenChange={(open) => { if (!open) closeQuickDecision(); }}>
+        <DialogContent dir="rtl" className="sm:max-w-xl" data-testid="quick-adjudication-dialog">
+          <DialogHeader className="text-right">
+            <DialogTitle>אישור הנוסח הנכון</DialogTitle>
+            <DialogDescription>
+              בחר אם לאשר רק את ההבדל הזה, לתקן את כל המופעים הזהים, או להזין נוסח אחר.
+            </DialogDescription>
+          </DialogHeader>
+
+          {quickDecisionUnit && quickDecision && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className={cn("rounded-md border p-3 text-right", quickDecision.side === "left" && "border-primary bg-primary/5 ring-1 ring-primary")}>
+                  <span className="mb-1 block text-[11px] text-muted-foreground">גרסת בסיס</span>
+                  <span className="whitespace-pre-wrap font-medium">{quickDecisionUnit.leftText || "[מחיקה]"}</span>
+                </div>
+                <div className={cn("rounded-md border p-3 text-right", quickDecision.side === "right" && "border-primary bg-primary/5 ring-1 ring-primary")}>
+                  <span className="mb-1 block text-[11px] text-muted-foreground">גרסה חדשה</span>
+                  <span className="whitespace-pre-wrap font-medium">{quickDecisionUnit.rightText || "[מחיקה]"}</span>
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button type="button" onClick={() => confirmQuickSource(false)} data-testid="confirm-quick-once">
+                  <Check className="ml-2 h-4 w-4" /> אשר רק כאן
+                </Button>
+                <Button type="button" variant="outline" onClick={() => confirmQuickSource(true)} data-testid="confirm-quick-all">
+                  <ListChecks className="ml-2 h-4 w-4" /> אשר ותקן את כל המופעים
+                </Button>
+              </div>
+
+              <div className="rounded-md border bg-muted/20 p-3">
+                <label className="mb-2 block text-xs font-semibold" htmlFor="quick-custom-correction">שני הצדדים שגויים? הזן תיקון אחר</label>
+                <div className="flex gap-2">
+                  <Input
+                    id="quick-custom-correction"
+                    value={quickCustomText}
+                    onChange={(event) => setQuickCustomText(event.target.value)}
+                    dir="rtl"
+                    className="text-right"
+                    data-testid="quick-custom-input"
+                  />
+                  <Button type="button" variant="secondary" onClick={confirmQuickCustom} disabled={!quickCustomText.trim()}>
+                    אשר תיקון
+                  </Button>
+                </div>
+                <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs">
+                  <Checkbox checked={quickApplyEverywhere} onCheckedChange={(checked) => setQuickApplyEverywhere(checked === true)} />
+                  החל את התיקון על כל המופעים הזהים
+                </label>
+                {quickApplyEverywhere && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-muted-foreground">הנוסח השגוי נמצא ב:</span>
+                    <Button type="button" size="sm" className="h-7" variant={quickReplacementSource === "left" ? "default" : "outline"} onClick={() => setQuickReplacementSource("left")}>
+                      בסיס: {quickDecisionUnit.leftText.trim() || "ריק"}
+                    </Button>
+                    <Button type="button" size="sm" className="h-7" variant={quickReplacementSource === "right" ? "default" : "outline"} onClick={() => setQuickReplacementSource("right")}>
+                      חדש: {quickDecisionUnit.rightText.trim() || "ריק"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="sm:justify-start">
+            <Button type="button" variant="ghost" onClick={closeQuickDecision}>ביטול</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {viewMode === 'adjudicate' && (
         <Card className="overflow-hidden" data-testid="adjudication-workspace">

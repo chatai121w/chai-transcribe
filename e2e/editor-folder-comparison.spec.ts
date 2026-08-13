@@ -109,9 +109,11 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
 
     await page.goto('/text-editor');
     await page.getByRole('tab', { name: 'השוואה' }).click();
+    await page.getByRole('tab', { name: 'הכרעה צד-בצד' }).click();
+    await page.getByTitle('לחץ פעמיים לאפשרויות אישור מהגרסה החדשה').dblclick();
+    await expect(page.getByTestId('quick-adjudication-dialog')).toBeVisible();
+    await page.getByTestId('confirm-quick-all').click();
     await page.getByRole('tab', { name: 'הכרעה', exact: true }).click();
-    await page.getByRole('checkbox', { name: 'תקן את כל המופעים הזהים בטקסט' }).click();
-    await page.getByRole('button', { name: 'אשר' }).click();
 
     await expect(page.getByTestId('verified-text')).toHaveValue('חורבן כאן, ועוד חורבן. אבל מחורבים לא');
     await expect(page.getByTestId('global-replacement-rules')).toContainText('החלף בכל הטקסט: חורבים ב-חורבן');
