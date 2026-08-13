@@ -23,6 +23,25 @@ const versions: TextVersion[] = [
 ];
 
 describe("AdvancedDiffView adjudication", () => {
+  it("opens quick adjudication directly from the regular side-by-side view", async () => {
+    const user = userEvent.setup();
+    render(
+      <AdvancedDiffView
+        versions={versions}
+        preselectedLeftId="base"
+        preselectedRightId="new"
+        onSaveVerifiedVersion={vi.fn()}
+      />,
+    );
+
+    await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"));
+    expect(screen.getByTestId("quick-adjudication-dialog")).toBeVisible();
+    await user.click(screen.getByTestId("confirm-quick-once"));
+    await user.click(screen.getByRole("tab", { name: "הכרעה", exact: true }));
+
+    expect(screen.getByTestId("verified-text")).toHaveValue("אמר בברא בתרא היום");
+  });
+
   it("chooses a source word and saves a new verified version", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();

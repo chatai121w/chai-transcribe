@@ -919,33 +919,55 @@ export const AdvancedDiffView = ({
               <span className="text-xs text-muted-foreground">{stats.rChars} תווים · {stats.rWords} מילים</span>
             </div>
           </div>
+          <div className="border-b bg-muted/15 px-4 py-2 text-right text-xs text-muted-foreground">
+            לחץ פעמיים על מילה או קטע צבוע בצד שבו מופיע הנוסח הנכון כדי לפתוח את אפשרויות ההכרעה.
+          </div>
           <ScrollArea className="h-[500px]">
-            {/* Each paragraph contributes a left + right cell into the SAME grid
-                row, so the browser auto-matches their height → the columns mirror
-                each other. Text flows naturally inside a cell (no empty fragments);
-                changed words are highlighted inline. An empty cell (a paragraph
-                that exists only on one side) is tinted to mark the gap. */}
             <div className="grid grid-cols-2 items-stretch min-h-[500px]" dir="rtl" style={textStyle}>
-              {wordDiff.rows.map((row, idx) => (
-                <Fragment key={idx}>
-                  <div
-                    className={cn(
-                      "border-l border-muted/20 px-4 py-1 text-right whitespace-pre-wrap break-words",
-                      row.left.length === 0 && "bg-muted/20",
-                    )}
-                  >
-                    {renderChunks(row.left)}
-                  </div>
-                  <div
-                    className={cn(
-                      "px-4 py-1 text-right whitespace-pre-wrap break-words",
-                      row.right.length === 0 && "bg-muted/20",
-                    )}
-                  >
-                    {renderChunks(row.right)}
-                  </div>
-                </Fragment>
-              ))}
+              {adjudicationUnits.map((unit) => {
+                if (unit.kind === "equal") {
+                  return (
+                    <Fragment key={unit.id}>
+                      <div className="border-l border-muted/20 px-4 py-1 text-right whitespace-pre-wrap break-words">{unit.leftText}</div>
+                      <div className="px-4 py-1 text-right whitespace-pre-wrap break-words">{unit.rightText}</div>
+                    </Fragment>
+                  );
+                }
+
+                const selected = resolutions[unit.id];
+                return (
+                  <Fragment key={unit.id}>
+                    <div className="border-l border-muted/20 px-2 py-1">
+                      <button
+                        type="button"
+                        className={cn(
+                          "w-full rounded bg-rose-500/20 px-2 py-1 text-right font-medium text-rose-900 transition-colors hover:bg-rose-500/30 dark:text-rose-100 whitespace-pre-wrap break-words",
+                          selected?.choice === "left" && "ring-2 ring-primary bg-primary/10",
+                        )}
+                        onClick={(event) => { if (event.detail === 0) openQuickDecision(unit.id, "left"); }}
+                        onDoubleClick={() => openQuickDecision(unit.id, "left")}
+                        title="לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"
+                      >
+                        {unit.leftText || "[מחיקה]"}
+                      </button>
+                    </div>
+                    <div className="px-2 py-1">
+                      <button
+                        type="button"
+                        className={cn(
+                          "w-full rounded bg-emerald-500/20 px-2 py-1 text-right font-medium text-emerald-900 transition-colors hover:bg-emerald-500/30 dark:text-emerald-100 whitespace-pre-wrap break-words",
+                          selected?.choice === "right" && "ring-2 ring-primary bg-primary/10",
+                        )}
+                        onClick={(event) => { if (event.detail === 0) openQuickDecision(unit.id, "right"); }}
+                        onDoubleClick={() => openQuickDecision(unit.id, "right")}
+                        title="לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"
+                      >
+                        {unit.rightText || "[מחיקה]"}
+                      </button>
+                    </div>
+                  </Fragment>
+                );
+              })}
             </div>
           </ScrollArea>
         </Card>

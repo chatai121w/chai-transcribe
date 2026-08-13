@@ -109,7 +109,6 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
 
     await page.goto('/text-editor');
     await page.getByRole('tab', { name: 'השוואה' }).click();
-    await page.getByRole('tab', { name: 'הכרעה צד-בצד' }).click();
     await page.getByTitle('לחץ פעמיים לאפשרויות אישור מהגרסה החדשה').dblclick();
     await expect(page.getByTestId('quick-adjudication-dialog')).toBeVisible();
     await page.getByTestId('confirm-quick-all').click();
