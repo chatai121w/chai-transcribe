@@ -1147,14 +1147,26 @@ export const AdvancedDiffView = ({
           {quickDecisionUnit && quickDecision && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className={cn("rounded-md border p-3 text-right", quickDecision.side === "left" && "border-primary bg-primary/5 ring-1 ring-primary")}>
+                <button
+                  type="button"
+                  onClick={() => setQuickDecision((current) => current ? { ...current, side: "left" } : current)}
+                  aria-pressed={quickDecision.side === "left"}
+                  data-testid="quick-source-left"
+                  className={cn("rounded-md border p-3 text-right transition-colors hover:bg-muted/50", quickDecision.side === "left" && "border-primary bg-primary/5 ring-1 ring-primary")}
+                >
                   <span className="mb-1 block text-[11px] text-muted-foreground">גרסת בסיס</span>
                   <span className="whitespace-pre-wrap font-medium">{quickDecisionUnit.leftText || "[מחיקה]"}</span>
-                </div>
-                <div className={cn("rounded-md border p-3 text-right", quickDecision.side === "right" && "border-primary bg-primary/5 ring-1 ring-primary")}>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuickDecision((current) => current ? { ...current, side: "right" } : current)}
+                  aria-pressed={quickDecision.side === "right"}
+                  data-testid="quick-source-right"
+                  className={cn("rounded-md border p-3 text-right transition-colors hover:bg-muted/50", quickDecision.side === "right" && "border-primary bg-primary/5 ring-1 ring-primary")}
+                >
                   <span className="mb-1 block text-[11px] text-muted-foreground">גרסה חדשה</span>
                   <span className="whitespace-pre-wrap font-medium">{quickDecisionUnit.rightText || "[מחיקה]"}</span>
-                </div>
+                </button>
               </div>
 
               <div className="grid gap-2 sm:grid-cols-2">

@@ -65,6 +65,30 @@ describe("AdvancedDiffView adjudication", () => {
     expect(onSave).toHaveBeenCalledWith("אמר בברא בתרא היום");
   });
 
+  it("lets the user switch the selected source inside the quick dialog", async () => {
+    const user = userEvent.setup();
+    const onSaveImmediateVersion = vi.fn();
+    render(
+      <AdvancedDiffView
+        versions={versions}
+        preselectedLeftId="base"
+        preselectedRightId="new"
+        onSaveImmediateVersion={onSaveImmediateVersion}
+      />,
+    );
+
+    await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"));
+    expect(screen.getByTestId("quick-source-left")).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(screen.getByTestId("quick-source-right"));
+    expect(screen.getByTestId("quick-source-right")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("quick-source-left")).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(screen.getByTestId("save-quick-once"));
+    expect(onSaveImmediateVersion).toHaveBeenCalledWith("אמר בטרה בתרא היום", "תיקון מיידי בהשוואה");
+    expect(screen.getAllByText("אמר בטרה בתרא היום")).toHaveLength(2);
+  });
+
   it("accepts a correction when both versions are wrong", async () => {
     const user = userEvent.setup();
     render(
