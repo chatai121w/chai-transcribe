@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAdjudicationUnits, composeAdjudicatedText, replaceExactTextOccurrences } from "./textAdjudication";
+import { buildAdjudicationUnits, composeAdjudicatedText, composeCorrectedSideText, replaceExactTextOccurrences } from "./textAdjudication";
 
 describe("text adjudication", () => {
   it("creates a single-word conflict and preserves surrounding text", () => {
@@ -40,5 +40,29 @@ describe("text adjudication", () => {
     const units = buildAdjudicationUnits("חורבים כאן וגם חורבים", "חורבים פה וגם חורבים");
     expect(composeAdjudicatedText(units, {}, [{ source: "חורבים", replacement: "חורבן" }]))
       .toBe("חורבן פה וגם חורבן");
+  });
+
+  it("corrects only the requested source side without borrowing other unresolved differences", () => {
+    const units = buildAdjudicationUnits("מיום רישון ועוד שגיאה", "מיום חישון ועוד תיקון");
+    const firstConflict = units.find((unit) => unit.kind === "conflict");
+    expect(firstConflict).toBeDefined();
+
+    const correctedLeft = composeCorrectedSideText(
+      units,
+      "left",
+      firstConflict!.id,
+      firstConflict!.rightText,
+    );
+
+    expect(correctedLeft).toContain("מיום חישון");
+    expect(correctedLeft).toContain("שגיאה");
+    expect(correctedLeft).not.toContain("תיקון");
+  });
+
+  it("corrects all exact occurrences on one source side", () => {
+    const units = buildAdjudicationUnits("מיום רישון ואז רישון", "מיום ראשון ואז ראשון");
+    const conflict = units.find((unit) => unit.kind === "conflict");
+    const corrected = composeCorrectedSideText(units, "left", conflict!.id, "ראשון ", "רישון ");
+    expect(corrected).toBe("מיום ראשון ואז ראשון");
   });
 });

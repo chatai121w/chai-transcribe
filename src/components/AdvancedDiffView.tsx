@@ -15,7 +15,7 @@ import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
 import { ComparisonSourceDialog } from "@/components/ComparisonSourceDialog";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { buildAdjudicationUnits, composeAdjudicatedText, type AdjudicationResolution, type GlobalReplacementRule } from "@/lib/textAdjudication";
+import { buildAdjudicationUnits, composeAdjudicatedText, composeCorrectedSideText, type AdjudicationResolution, type GlobalReplacementRule } from "@/lib/textAdjudication";
 
 interface AdvancedDiffViewProps {
   versions: TextVersion[];
@@ -25,6 +25,8 @@ interface AdvancedDiffViewProps {
   lineHeight?: number;
   onApplyVersion?: (text: string) => void;
   onSaveVerifiedVersion?: (text: string) => void;
+  /** Save a corrected source as a new version and make it the active editor text. */
+  onSaveImmediateVersion?: (text: string, label: string) => void;
   preselectedLeftId?: string;
   preselectedRightId?: string;
   /** Optional: send the selected version into the AI editor as input */
@@ -266,6 +268,7 @@ export const AdvancedDiffView = ({
   lineHeight = 1.6,
   onApplyVersion,
   onSaveVerifiedVersion,
+  onSaveImmediateVersion,
   preselectedLeftId,
   preselectedRightId,
   onSendToAiEditor,
@@ -533,6 +536,34 @@ export const AdvancedDiffView = ({
     closeQuickDecision();
   };
 
+  const saveQuickSourceImmediately = (applyToAll: boolean) => {
+    if (!quickDecision || !quickDecisionUnit || !onSaveImmediateVersion) return;
+    const chosenText = quickDecision.side === "left" ? quickDecisionUnit.leftText : quickDecisionUnit.rightText;
+    const wrongText = quickDecision.side === "left" ? quickDecisionUnit.rightText : quickDecisionUnit.leftText;
+    const targetSide = quickDecision.side === "left" ? "right" : "left";
+    const correctedText = composeCorrectedSideText(
+      adjudicationUnits,
+      targetSide,
+      quickDecisionUnit.id,
+      chosenText,
+      applyToAll ? wrongText : undefined,
+    );
+
+    if (targetSide === "left") {
+      setLeftDetached(true);
+      setLeftText(correctedText);
+    } else {
+      setRightDetached(true);
+      setRightText(correctedText);
+    }
+    onSaveImmediateVersion(correctedText, applyToAll ? "תיקון מיידי בכל המופעים" : "תיקון מיידי בהשוואה");
+    toast({
+      title: "התיקון נשמר והוחל מיד",
+      description: targetSide === "left" ? "גרסת הבסיס תוקנה ונשמרה כגרסה חדשה" : "הגרסה החדשה תוקנה ונשמרה כגרסה חדשה",
+    });
+    closeQuickDecision();
+  };
+
   const confirmQuickCustom = () => {
     if (!quickDecisionUnit || !quickCustomText.trim()) return;
     const trailingSpace = quickDecisionUnit.rightText.match(/\s+$/)?.[0]
@@ -544,6 +575,38 @@ export const AdvancedDiffView = ({
       { choice: "custom", customText: `${quickCustomText.trim()}${trailingSpace}` },
       quickApplyEverywhere ? { source: wrongText, replacement: quickCustomText.trim() } : undefined,
     );
+    closeQuickDecision();
+  };
+
+  const saveQuickCustomImmediately = () => {
+    if (!quickDecisionUnit || !quickCustomText.trim() || !onSaveImmediateVersion) return;
+    const replacement = quickCustomText.trim();
+    const trailingSpace = quickDecisionUnit.rightText.match(/\s+$/)?.[0]
+      || quickDecisionUnit.leftText.match(/\s+$/)?.[0]
+      || "";
+    const replacementWithSpacing = `${replacement}${trailingSpace}`;
+    const correctedLeft = composeCorrectedSideText(
+      adjudicationUnits,
+      "left",
+      quickDecisionUnit.id,
+      replacementWithSpacing,
+      quickApplyEverywhere ? quickDecisionUnit.leftText : undefined,
+    );
+    const correctedRight = composeCorrectedSideText(
+      adjudicationUnits,
+      "right",
+      quickDecisionUnit.id,
+      replacementWithSpacing,
+      quickApplyEverywhere ? quickDecisionUnit.rightText : undefined,
+    );
+    setLeftDetached(true);
+    setRightDetached(true);
+    setLeftText(correctedLeft);
+    setRightText(correctedRight);
+    // The newer/right-hand text is the active corrected result. Both columns
+    // update immediately, while the original historical versions remain intact.
+    onSaveImmediateVersion(correctedRight, quickApplyEverywhere ? "תיקון מיידי בשתי הגרסאות ובכל המופעים" : "תיקון מיידי בשתי הגרסאות");
+    toast({ title: "שתי הגרסאות תוקנו מיד", description: "הנוסח המתוקן נשמר כגרסה חדשה והמקורות נשמרו בהיסטוריה" });
     closeQuickDecision();
   };
 
@@ -1103,6 +1166,18 @@ export const AdvancedDiffView = ({
                 </Button>
               </div>
 
+              {onSaveImmediateVersion && (
+                <div className="grid gap-2 rounded-md border border-primary/20 bg-primary/5 p-3 sm:grid-cols-2">
+                  <Button type="button" variant="secondary" onClick={() => saveQuickSourceImmediately(false)} data-testid="save-quick-once">
+                    <Save className="ml-2 h-4 w-4" /> שמור ותקן כאן מיד
+                  </Button>
+                  <Button type="button" variant="secondary" onClick={() => saveQuickSourceImmediately(true)} data-testid="save-quick-all">
+                    <ListChecks className="ml-2 h-4 w-4" /> שמור ותקן הכול מיד
+                  </Button>
+                  <p className="text-[11px] text-muted-foreground sm:col-span-2">הצד השגוי יתעדכן מיד. המקור הישן יישאר שמור בהיסטוריה.</p>
+                </div>
+              )}
+
               <div className="rounded-md border bg-muted/20 p-3">
                 <label className="mb-2 block text-xs font-semibold" htmlFor="quick-custom-correction">שני הצדדים שגויים? הזן תיקון אחר</label>
                 <div className="flex gap-2">
@@ -1132,6 +1207,11 @@ export const AdvancedDiffView = ({
                       חדש: {quickDecisionUnit.rightText.trim() || "ריק"}
                     </Button>
                   </div>
+                )}
+                {onSaveImmediateVersion && (
+                  <Button type="button" className="mt-3 w-full" onClick={saveQuickCustomImmediately} disabled={!quickCustomText.trim()} data-testid="save-custom-immediately">
+                    <Save className="ml-2 h-4 w-4" /> שמור ותקן מיד בשתי הגרסאות
+                  </Button>
                 )}
               </div>
             </div>

@@ -41,7 +41,7 @@ describe("AdvancedDiffView adjudication", () => {
     await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"));
     expect(screen.getByTestId("quick-adjudication-dialog")).toBeVisible();
     await user.click(screen.getByTestId("confirm-quick-once"));
-    await user.click(screen.getByRole("tab", { name: "הכרעה", exact: true }));
+    await user.click(screen.getByRole("tab", { name: /^הכרעה$/ }));
 
     expect(screen.getByTestId("verified-text")).toHaveValue("אמר בברא בתרא היום");
   });
@@ -101,7 +101,7 @@ describe("AdvancedDiffView adjudication", () => {
     await user.click(screen.getByTestId("confirm-quick-once"));
     await user.click(screen.getByRole("button", { name: "תצוגה רציפה" }));
     expect(screen.getByText("הוכרעו 1")).toBeVisible();
-    await user.click(screen.getByRole("tab", { name: "הכרעה", exact: true }));
+    await user.click(screen.getByRole("tab", { name: /^הכרעה$/ }));
     expect(screen.getByTestId("verified-text")).toHaveValue("אמר בברא בתרא היום");
   });
 
@@ -122,7 +122,7 @@ describe("AdvancedDiffView adjudication", () => {
     await user.clear(input);
     await user.type(input, "בבא");
     await user.click(screen.getByRole("button", { name: "אשר תיקון" }));
-    await user.click(screen.getByRole("tab", { name: "הכרעה", exact: true }));
+    await user.click(screen.getByRole("tab", { name: /^הכרעה$/ }));
 
     expect(screen.getByTestId("verified-text")).toHaveValue("אמר בבא בתרא היום");
   });
@@ -190,9 +190,74 @@ describe("AdvancedDiffView adjudication", () => {
     await user.click(screen.getByRole("button", { name: "תצוגה לפי הבדלים" }));
     await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"));
     await user.click(screen.getByTestId("confirm-quick-all"));
-    await user.click(screen.getByRole("tab", { name: "הכרעה", exact: true }));
+    await user.click(screen.getByRole("tab", { name: /^הכרעה$/ }));
 
     expect(screen.getByTestId("verified-text")).toHaveValue("חורבן כאן, ועוד חורבן. אבל מחורבים לא");
     expect(screen.getByTestId("global-replacement-rules")).toHaveTextContent("החלף בכל הטקסט: חורבים ב-חורבן");
+  });
+
+  it("saves and immediately corrects the opposite side when the right side is approved", async () => {
+    const user = userEvent.setup();
+    const onSaveImmediate = vi.fn();
+    render(
+      <AdvancedDiffView
+        versions={versions}
+        preselectedLeftId="base"
+        preselectedRightId="new"
+        onSaveVerifiedVersion={vi.fn()}
+        onSaveImmediateVersion={onSaveImmediate}
+      />,
+    );
+
+    await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"));
+    await user.click(screen.getByTestId("save-quick-once"));
+
+    expect(onSaveImmediate).toHaveBeenCalledWith("אמר בטרה בתרא היום", "תיקון מיידי בהשוואה");
+    expect(screen.queryByTitle("לחץ פעמיים לאפשרויות אישור מגרסת הבסיס")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה")).not.toBeInTheDocument();
+  });
+
+  it("saves and immediately corrects the right side when the left side is approved", async () => {
+    const user = userEvent.setup();
+    const onSaveImmediate = vi.fn();
+    render(
+      <AdvancedDiffView
+        versions={versions}
+        preselectedLeftId="base"
+        preselectedRightId="new"
+        onSaveVerifiedVersion={vi.fn()}
+        onSaveImmediateVersion={onSaveImmediate}
+      />,
+    );
+
+    await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"));
+    await user.click(screen.getByTestId("save-quick-once"));
+
+    expect(onSaveImmediate).toHaveBeenCalledWith("אמר בברא בתרא היום", "תיקון מיידי בהשוואה");
+    expect(screen.queryByTitle("לחץ פעמיים לאפשרויות אישור מגרסת הבסיס")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה")).not.toBeInTheDocument();
+  });
+
+  it("saves a custom correction and updates both displayed sides immediately", async () => {
+    const user = userEvent.setup();
+    const onSaveImmediate = vi.fn();
+    render(
+      <AdvancedDiffView
+        versions={versions}
+        preselectedLeftId="base"
+        preselectedRightId="new"
+        onSaveVerifiedVersion={vi.fn()}
+        onSaveImmediateVersion={onSaveImmediate}
+      />,
+    );
+
+    await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"));
+    await user.clear(screen.getByTestId("quick-custom-input"));
+    await user.type(screen.getByTestId("quick-custom-input"), "בבא");
+    await user.click(screen.getByTestId("save-custom-immediately"));
+
+    expect(onSaveImmediate).toHaveBeenCalledWith("אמר בבא בתרא היום", "תיקון מיידי בשתי הגרסאות");
+    expect(screen.queryByTitle("לחץ פעמיים לאפשרויות אישור מגרסת הבסיס")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה")).not.toBeInTheDocument();
   });
 });

@@ -2554,6 +2554,9 @@ const TextEditor = () => {
                     onSaveVerifiedVersion={(newText) => {
                       addVersion(newText, 'manual', 'נוסח מאומת מהשוואה');
                     }}
+                    onSaveImmediateVersion={(newText, label) => {
+                      addVersion(newText, 'manual', label);
+                    }}
                     onSendToAiEditor={sendVersionToAiEditor}
                     preferenceStorageKey={transcriptIdRef.current || transcriptId || "current"}
                     transcripts={transcripts}

@@ -127,6 +127,29 @@ export function composeAdjudicatedText(
   );
 }
 
+/**
+ * Builds one corrected comparison side without borrowing unresolved text from
+ * the other side. This is used by the immediate-save action: only the selected
+ * conflict changes, while every other difference remains exactly as it was in
+ * that source version.
+ */
+export function composeCorrectedSideText(
+  units: AdjudicationUnit[],
+  side: "left" | "right",
+  unitId: string,
+  replacement: string,
+  replaceAllSource?: string,
+): string {
+  const corrected = units.map((unit) => {
+    if (unit.id === unitId) return replacement;
+    return side === "left" ? unit.leftText : unit.rightText;
+  }).join("");
+
+  return replaceAllSource
+    ? replaceExactTextOccurrences(corrected, replaceAllSource, replacement)
+    : corrected;
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
