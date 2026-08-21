@@ -2169,6 +2169,42 @@ def _yt_has_ytdlp() -> bool:
     except Exception:
         return False
 
+_YT_TRANSIENT_HTTP_ERRORS = (
+    "http error 403",
+    "http error 429",
+    "forbidden",
+    "requested format is not available",
+)
+
+
+def _yt_should_retry_download(error_text: str) -> bool:
+    """Return True when a fresh media URL and conservative retry may recover."""
+    lowered = error_text.lower()
+    return any(marker in lowered for marker in _YT_TRANSIENT_HTTP_ERRORS)
+
+
+def _yt_conservative_retry_cmd(cmd: list) -> list:
+    """Build a retry command using YouTube's embedded client and EJS solver."""
+    retry_cmd = list(cmd)
+    try:
+        fragments_idx = retry_cmd.index("--concurrent-fragments")
+        retry_cmd[fragments_idx + 1] = "1"
+    except (ValueError, IndexError):
+        retry_cmd[1:1] = ["--concurrent-fragments", "1"]
+
+    # The default android_vr media URL can be rejected when YouTube enforces a
+    # proof-of-origin token. web_embedded does not require that token, but it
+    # needs yt-dlp's official EJS challenge solver for the signed format URLs.
+    retry_cmd[1:1] = [
+        "--force-ipv4",
+        "--remote-components", "ejs:github",
+        "--extractor-args", "youtube:player_client=web_embedded",
+        "--extractor-retries", "3",
+        "--retry-sleep", "2",
+    ]
+    return retry_cmd
+
+
 def _run_ytdlp(cmd: list, job_id: str, track_key: str = "dl", timeout: int = 900,
                progress_range: tuple = (10, 48)) -> None:
     """
@@ -2184,54 +2220,82 @@ def _run_ytdlp(cmd: list, job_id: str, track_key: str = "dl", timeout: int = 900
     Also updates progress_pct (overall 0–100) mapped to progress_range.
     """
     import subprocess, threading
-    stderr_lines: list = []
 
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-    )
+    commands = [cmd]
+    first_error = ""
+    attempt = 0
 
-    def _read_stderr():
-        for line in proc.stderr:
-            stderr_lines.append(line.rstrip())
+    while attempt < len(commands):
+        active_cmd = commands[attempt]
+        stderr_lines: list = []
+        proc = subprocess.Popen(
+            active_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
 
-    stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
-    stderr_thread.start()
+        def _read_stderr():
+            for line in proc.stderr:
+                stderr_lines.append(line.rstrip())
 
-    p_start, p_end = progress_range
-    for raw_line in proc.stdout:
-        line = raw_line.rstrip()
-        m = _YT_PROGRESS_RE.search(line)
-        if m:
-            pct = float(m.group(1))
-            total_mb = _mb(float(m.group(2)), m.group(3))
-            dl_mb = round(total_mb * pct / 100.0, 2)
-            overall_pct = round(p_start + (pct / 100.0) * (p_end - p_start), 1)
-            patch: dict = {
-                f"{track_key}_pct": pct,
-                f"{track_key}_dl_mb": dl_mb,
-                f"{track_key}_total_mb": round(total_mb, 2),
-                "progress_pct": overall_pct,
-            }
-            if m.group(4):
-                patch[f"{track_key}_speed_mb"] = round(_mb(float(m.group(4)), m.group(5)), 2)
-            _yt_update(job_id, **patch)
+        stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+        stderr_thread.start()
 
-    try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        stderr_thread.join(2)
-        raise RuntimeError(f"yt-dlp timed out after {timeout}s")
+        p_start, p_end = progress_range
+        for raw_line in proc.stdout:
+            line = raw_line.rstrip()
+            m = _YT_PROGRESS_RE.search(line)
+            if m:
+                pct = float(m.group(1))
+                total_mb = _mb(float(m.group(2)), m.group(3))
+                dl_mb = round(total_mb * pct / 100.0, 2)
+                overall_pct = round(p_start + (pct / 100.0) * (p_end - p_start), 1)
+                patch: dict = {
+                    f"{track_key}_pct": pct,
+                    f"{track_key}_dl_mb": dl_mb,
+                    f"{track_key}_total_mb": round(total_mb, 2),
+                    "progress_pct": overall_pct,
+                }
+                if m.group(4):
+                    patch[f"{track_key}_speed_mb"] = round(_mb(float(m.group(4)), m.group(5)), 2)
+                _yt_update(job_id, **patch)
 
-    stderr_thread.join(5)
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stderr_thread.join(2)
+            raise RuntimeError(f"yt-dlp timed out after {timeout}s")
 
-    if proc.returncode != 0:
+        stderr_thread.join(5)
+        if proc.returncode == 0:
+            if attempt:
+                _yt_update(job_id, auto_retry_status="recovered")
+            return
+
         err_tail = "\n".join(stderr_lines[-5:]) or "unknown error"
-        raise RuntimeError(f"yt-dlp failed (rc={proc.returncode}): {err_tail[:400]}")
+        if not first_error:
+            first_error = err_tail
+
+        if attempt == 0 and _yt_should_retry_download(err_tail):
+            commands.append(_yt_conservative_retry_cmd(cmd))
+            _yt_update(
+                job_id,
+                auto_retry_status="retrying",
+                auto_retry_reason=err_tail[:240],
+                message="YouTube חסם את כתובת המדיה; עובר אוטומטית למסלול embedded מאומת",
+            )
+            time.sleep(2)
+            attempt += 1
+            continue
+
+        combined_error = err_tail
+        if attempt:
+            _yt_update(job_id, auto_retry_status="failed")
+            combined_error = f"initial: {first_error}\nembedded retry: {err_tail}"
+        raise RuntimeError(f"yt-dlp failed (rc={proc.returncode}): {combined_error[:400]}")
 
 def _yt_audio_fmt_args(audio_format: str) -> list:
     """Return yt-dlp -f / postprocess args for the requested audio format."""
@@ -2554,6 +2618,199 @@ def _yt_run_job(job_id: str, params: dict):
     finally:
         if prewarm_executor is not None:
             prewarm_executor.shutdown(wait=False, cancel_futures=True)
+
+
+_SUBTITLE_LANGUAGE_METADATA = {
+    "he": "heb", "iw": "heb", "en": "eng", "de": "deu",
+    "fr": "fra", "es": "spa", "yi": "yid",
+}
+
+
+def _subtitle_timestamp(seconds: float) -> str:
+    value = max(0.0, float(seconds))
+    hours = int(value // 3600)
+    minutes = int((value % 3600) // 60)
+    secs = value % 60
+    return f"{hours:02d}:{minutes:02d}:{int(secs):02d},{int((secs - int(secs)) * 1000):03d}"
+
+
+def _write_subtitle_srt(path: Path, segments: list) -> None:
+    lines = []
+    for index, segment in enumerate(segments, 1):
+        start = float(segment.get("start", 0))
+        end = max(start + 0.05, float(segment.get("end", start + 0.05)))
+        text = str(segment.get("text", "")).strip()
+        if not text:
+            continue
+        lines.append(f"{index}\n{_subtitle_timestamp(start)} --> {_subtitle_timestamp(end)}\n{text}\n")
+    if not lines:
+        raise ValueError("Subtitle track has no timed text")
+    path.write_text("\n".join(lines), encoding="utf-8-sig")
+
+
+@app.route("/media/subtitles", methods=["POST"])
+def media_mux_subtitles():
+    """Mux timed subtitle tracks into an uploaded video and return an MP4."""
+    import shutil
+    import subprocess
+    from flask import after_this_request, send_file
+
+    upload = request.files.get("video")
+    if upload is None or not upload.filename:
+        return jsonify({"error": "Video file is required"}), 400
+    suffix = _safe_suffix(upload.filename, "")
+    if suffix not in {".mp4", ".mkv", ".mov", ".webm", ".avi", ".wmv", ".3gp"}:
+        return jsonify({"error": "Unsupported video format"}), 400
+    try:
+        tracks = json.loads(request.form.get("tracks") or "[]")
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid subtitle tracks JSON"}), 400
+    if not isinstance(tracks, list) or not 1 <= len(tracks) <= 6:
+        return jsonify({"error": "Choose between 1 and 6 subtitle tracks"}), 400
+    if not _check_ffmpeg():
+        return jsonify({"error": "FFmpeg is not available"}), 503
+
+    work_dir = Path(tempfile.mkdtemp(prefix="subtitle_mux_"))
+    video_path = work_dir / f"input{suffix}"
+    output_path = work_dir / "video-with-subtitles.mp4"
+    try:
+        upload.save(video_path)
+        subtitle_paths = []
+        for index, track in enumerate(tracks):
+            if not isinstance(track, dict) or not isinstance(track.get("segments"), list):
+                raise ValueError("Invalid subtitle track")
+            language = str(track.get("language") or "und").lower()[:8]
+            label = str(track.get("label") or language).strip()[:80]
+            subtitle_path = work_dir / f"subtitles.{language}.{index}.srt"
+            _write_subtitle_srt(subtitle_path, track["segments"])
+            subtitle_paths.append((subtitle_path, language, label))
+
+        command = ["ffmpeg", "-y", "-i", str(video_path)]
+        for subtitle_path, _, _ in subtitle_paths:
+            command.extend(["-i", str(subtitle_path)])
+        command.extend(["-map", "0:v:0", "-map", "0:a?"])
+        for input_index in range(1, len(subtitle_paths) + 1):
+            command.extend(["-map", f"{input_index}:0"])
+        command.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text"])
+        for stream_index, (_, language, label) in enumerate(subtitle_paths):
+            metadata_language = _SUBTITLE_LANGUAGE_METADATA.get(language, language[:3] or "und")
+            command.extend([
+                f"-metadata:s:s:{stream_index}", f"language={metadata_language}",
+                f"-metadata:s:s:{stream_index}", f"title={label}",
+            ])
+            if stream_index == 0:
+                command.extend([f"-disposition:s:{stream_index}", "default"])
+        command.extend(["-movflags", "+faststart", str(output_path)])
+        result = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+        if result.returncode != 0 or not output_path.is_file():
+            raise RuntimeError((result.stderr or "FFmpeg subtitle mux failed")[-1200:])
+
+        @after_this_request
+        def cleanup(response):
+            response.call_on_close(lambda: shutil.rmtree(work_dir, ignore_errors=True))
+            return response
+
+        return send_file(
+            output_path,
+            mimetype="video/mp4",
+            as_attachment=True,
+            download_name="video-with-subtitles.mp4",
+        )
+    except ValueError as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/yt/subtitles/<job_id>", methods=["POST"])
+def yt_mux_subtitles(job_id):
+    """Mux one or more translated timed-text tracks into the downloaded MP4."""
+    import subprocess
+
+    data = request.get_json(force=True) or {}
+    tracks = data.get("tracks") or []
+    if not isinstance(tracks, list) or not 1 <= len(tracks) <= 6:
+        return jsonify({"error": "Choose between 1 and 6 subtitle tracks"}), 400
+
+    with _YT_JOBS_LOCK:
+        job = _YT_JOBS.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        outputs = list(job.get("output_files") or [])
+
+    job_dir = _YT_ROOT / job_id
+    video_entry = next((item for item in outputs if item.get("kind") == "video"), None)
+    video_path = job_dir / Path((video_entry or {}).get("filename") or "").name
+    if not video_entry or not video_path.is_file():
+        return jsonify({"error": "Downloaded video not found"}), 409
+    if not _check_ffmpeg():
+        return jsonify({"error": "FFmpeg is not available"}), 503
+
+    subtitle_paths = []
+    subtitle_outputs = []
+    try:
+        for index, track in enumerate(tracks):
+            if not isinstance(track, dict) or not isinstance(track.get("segments"), list):
+                return jsonify({"error": "Invalid subtitle track"}), 400
+            language = str(track.get("language") or "und").lower()[:8]
+            label = str(track.get("label") or language).strip()[:80]
+            subtitle_path = job_dir / f"subtitles.{language}.{index}.srt"
+            _write_subtitle_srt(subtitle_path, track["segments"])
+            subtitle_paths.append((subtitle_path, language, label))
+            subtitle_outputs.append({
+                "kind": f"srt_{language}",
+                "url": f"/yt/file/{job_id}/{subtitle_path.name}",
+                "filename": subtitle_path.name,
+                "size": subtitle_path.stat().st_size,
+                "language": language,
+                "label": label,
+            })
+
+        output_path = job_dir / "video-with-subtitles.mp4"
+        command = ["ffmpeg", "-y", "-i", str(video_path)]
+        for subtitle_path, _, _ in subtitle_paths:
+            command.extend(["-i", str(subtitle_path)])
+        command.extend(["-map", "0:v:0", "-map", "0:a?"])
+        for input_index in range(1, len(subtitle_paths) + 1):
+            command.extend(["-map", f"{input_index}:0"])
+        command.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text"])
+        for stream_index, (_, language, label) in enumerate(subtitle_paths):
+            metadata_language = _SUBTITLE_LANGUAGE_METADATA.get(language, language[:3] or "und")
+            command.extend([
+                f"-metadata:s:s:{stream_index}", f"language={metadata_language}",
+                f"-metadata:s:s:{stream_index}", f"title={label}",
+            ])
+            if stream_index == 0:
+                command.extend([f"-disposition:s:{stream_index}", "default"])
+        command.extend(["-movflags", "+faststart", str(output_path)])
+
+        _yt_update(job_id, status="muxing_subtitles", phase="subtitles", progress_pct=99)
+        result = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+        if result.returncode != 0 or not output_path.is_file():
+            error_tail = (result.stderr or "FFmpeg subtitle mux failed")[-1200:]
+            raise RuntimeError(error_tail)
+
+        final_output = {
+            "kind": "subtitled_video",
+            "url": f"/yt/file/{job_id}/{output_path.name}",
+            "filename": output_path.name,
+            "size": output_path.stat().st_size,
+            "languages": [language for _, language, _ in subtitle_paths],
+        }
+        final_outputs = [
+            item for item in outputs
+            if item.get("kind") != "subtitled_video" and not str(item.get("kind", "")).startswith("srt_")
+        ] + subtitle_outputs + [final_output]
+        _yt_update(
+            job_id, status="done", phase="done", progress_pct=100,
+            output_files=final_outputs, subtitle_languages=final_output["languages"],
+        )
+        return jsonify({"output_files": final_outputs})
+    except Exception as exc:
+        _yt_update(job_id, status="done", phase="done", progress_pct=100, subtitle_error=str(exc))
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/yt/info", methods=["POST"])

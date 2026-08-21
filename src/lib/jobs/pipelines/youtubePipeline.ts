@@ -13,6 +13,7 @@ import { uploadArtifact, downloadArtifact } from "../artifactStorage";
 import type { JobRecord } from "../types";
 import { db } from "@/lib/localDb";
 import type { YoutubePerformanceProfile } from "@/lib/youtubePerformance";
+import { buildSubtitleTracks, type TimedSubtitleSegment } from "@/lib/subtitleTracks";
 
 const YT_REGEX = /^https?:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/|live\/)|youtu\.be\/)[\w-]+/;
 export const isValidYoutubeUrl = (u: string) => YT_REGEX.test(u.trim());
@@ -29,6 +30,8 @@ export interface StartYoutubeParams {
   engine?: string;
   language?: string;
   model?: string;
+  subtitleLanguages?: string[];
+  subtitleTranslationModel?: string;
   /**
    * Result of the probe the caller already ran. Supplying it skips the probe
    * here, so the job row — and with it the progress readout — exists the moment
@@ -105,6 +108,23 @@ async function getPreferredYoutubeEngine(userId: string): Promise<string> {
   return "groq";
 }
 
+async function buildYoutubeSubtitleTracks(
+  transcriptUrl: string,
+  languages: string[],
+  model: string,
+  onProgress: (percent: number) => Promise<void>,
+) {
+  const response = await fetchLocalServer(transcriptUrl);
+  if (!response.ok) throw new Error("לא ניתן לקרוא את חותמות הזמן של התמלול");
+  const transcript = await response.json() as { language?: string; segments?: TimedSubtitleSegment[] };
+  const segments = (transcript.segments ?? []).filter(
+    (segment) => Number.isFinite(segment.start) && Number.isFinite(segment.end) && segment.text?.trim(),
+  );
+  if (!segments.length) throw new Error("לא נמצאו מקטעים מסונכרנים לכתוביות");
+  const sourceLanguage = transcript.language || "auto";
+  return buildSubtitleTracks(segments, sourceLanguage, languages, model, onProgress);
+}
+
 export async function startYoutubeJob(params: StartYoutubeParams): Promise<JobRecord> {
   if (!isValidYoutubeUrl(params.url)) throw new Error("קישור YouTube לא תקין");
 
@@ -145,6 +165,8 @@ export async function startYoutubeJob(params: StartYoutubeParams): Promise<JobRe
       engine: params.engine,
       language: params.language ?? "auto",
       model: params.model,
+      subtitleLanguages: params.subtitleLanguages ?? [],
+      subtitleTranslationModel: params.subtitleTranslationModel ?? "google/gemini-2.5-flash",
     },
   });
 
@@ -202,6 +224,8 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
     engine?: string;
     language?: string;
     model?: string;
+    subtitleLanguages?: string[];
+    subtitleTranslationModel?: string;
   };
 
   // ── stage: download ──
@@ -456,6 +480,64 @@ async function runYoutubePipeline(jobId: string): Promise<void> {
     } else {
       // local backend, no cloud save requested
       await updateStage(jobId, "upload_audio", { status: "skipped" });
+    }
+    job = (await fetchJob(jobId))!;
+  }
+
+  // ── stage: translate timed segments and mux switchable subtitle tracks ──
+  const subtitleStage = job.stages.find((s) => s.key === "subtitles");
+  if (subtitleStage && subtitleStage.status !== "done" && subtitleStage.status !== "skipped") {
+    const languages = Array.isArray(resume.subtitleLanguages)
+      ? resume.subtitleLanguages.filter((language): language is string => typeof language === "string")
+      : [];
+    if (backend !== "local" || resume.mode !== "full" || languages.length === 0) {
+      await updateStage(jobId, "subtitles", { status: "skipped" });
+    } else {
+      await updateStage(jobId, "subtitles", { status: "running", percent: 2 });
+      try {
+        const outputs = (job.output_files ?? []) as Array<{ kind: string; url: string; filename: string }>;
+        const transcript = outputs.find((file) => file.kind === "json");
+        const video = outputs.find((file) => file.kind === "video");
+        const serverJobId = job.stages.find((stage) => stage.key === "download")?.meta?.server_job_id as string | undefined;
+        const srv = await resolveLocalServerUrl().catch(() => localServer());
+        if (!srv || !serverJobId || !transcript?.url || !video?.url) {
+          throw new Error("חסרים וידאו או תמלול מסונכרן ליצירת הכתוביות");
+        }
+
+        const tracks = await buildYoutubeSubtitleTracks(
+          transcript.url,
+          languages,
+          resume.subtitleTranslationModel ?? "google/gemini-2.5-flash",
+          async (percent) => updateStage(jobId, "subtitles", { status: "running", percent: Math.max(3, percent) }).then(() => undefined),
+        );
+        await updateStage(jobId, "subtitles", { status: "running", percent: 88 });
+        const muxResponse = await fetchLocalServer(`${srv}/yt/subtitles/${serverJobId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tracks }),
+        });
+        const muxResult = await muxResponse.json();
+        if (!muxResponse.ok) throw new Error(muxResult?.error || "חיבור הכתוביות לווידאו נכשל");
+        const finalOutputs = (muxResult.output_files ?? []).map((file: Record<string, unknown>) => ({
+          ...file,
+          url: typeof file.url === "string" && file.url.startsWith("/") ? `${srv}${file.url}` : file.url,
+        }));
+        await patchJob(jobId, { output_files: finalOutputs as never } as Partial<JobRecord>);
+        await updateStage(jobId, "subtitles", {
+          status: "done",
+          percent: 100,
+          meta: {
+            languages,
+            translation_model: resume.subtitleTranslationModel ?? "google/gemini-2.5-flash",
+          },
+        });
+      } catch (error) {
+        await updateStage(jobId, "subtitles", {
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
     }
     job = (await fetchJob(jobId))!;
   }

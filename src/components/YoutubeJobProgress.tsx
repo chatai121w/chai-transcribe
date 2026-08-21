@@ -1,5 +1,5 @@
 import { Card } from "@/components/ui/card";
-import { CheckCircle2, Loader2, AlertTriangle, Download, FileAudio, Cloud, Search, Circle } from "lucide-react";
+import { CheckCircle2, Loader2, AlertTriangle, Download, FileAudio, Cloud, Search, Circle, Captions } from "lucide-react";
 import { computeOverall, type JobRecord } from "@/lib/jobs/types";
 import { useEffect, useState } from "react";
 
@@ -7,7 +7,7 @@ interface YoutubeJobProgressProps {
   job: JobRecord;
 }
 
-type StageKey = 'probe' | 'download' | 'extract_audio' | 'upload_audio' | 'transcribe';
+type StageKey = 'probe' | 'download' | 'extract_audio' | 'upload_audio' | 'transcribe' | 'subtitles';
 
 const STAGE_LABELS: Array<{ key: StageKey; label: string; icon: React.ReactNode }> = [
   { key: 'probe', label: 'בדיקת קישור', icon: <Search className="w-3.5 h-3.5" /> },
@@ -15,6 +15,7 @@ const STAGE_LABELS: Array<{ key: StageKey; label: string; icon: React.ReactNode 
   { key: 'extract_audio', label: 'חילוץ אודיו', icon: <FileAudio className="w-3.5 h-3.5" /> },
   { key: 'upload_audio', label: 'העלאה לענן', icon: <Cloud className="w-3.5 h-3.5" /> },
   { key: 'transcribe', label: 'תמלול', icon: <FileAudio className="w-3.5 h-3.5" /> },
+  { key: 'subtitles', label: 'כתוביות', icon: <Captions className="w-3.5 h-3.5" /> },
 ];
 
 function fmtClock(seconds: number): string {
@@ -72,6 +73,7 @@ export function YoutubeJobProgress({ job }: YoutubeJobProgressProps) {
     : serverStatus === 'loading_model' ? 'טוען מודל תמלול'
     : serverStatus === 'preparing_audio' ? 'מכין אודיו וזיהוי דיבור'
     : serverStatus === 'finalizing' ? 'שומר תוצאות'
+    : byKey('subtitles')?.status === 'running' ? 'מתרגם ומחבר כתוביות'
     : serverStatus === 'downloading' ? 'מוריד'
     : STAGE_LABELS.find(s => byKey(s.key)?.status === 'running')?.label
       ?? 'מתחיל...';
@@ -91,6 +93,9 @@ export function YoutubeJobProgress({ job }: YoutubeJobProgressProps) {
     }
     if (serverStatus === 'finalizing') {
       return `כתיבת TXT, SRT ו-JSON${phaseElapsed != null ? ` · ${fmtClock(phaseElapsed)}` : ''}`;
+    }
+    if (byKey('subtitles')?.status === 'running') {
+      return 'שומר את מסלולי השפה בתוך קובץ הווידאו';
     }
     if ((meta.total_mb ?? 0) > 0) {
       return `${(meta.dl_mb ?? 0).toFixed(1)} / ${(meta.total_mb ?? 0).toFixed(1)} MB`

@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Folder, FolderPlus, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronsDownUp, ChevronsUpDown, Folder, FolderOpen, FolderPlus, Loader2 } from "lucide-react";
 import { useFolderTree, type FolderTreeNode } from "@/hooks/useFolderTree";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
@@ -17,8 +17,69 @@ interface TranscriptFolderDialogProps {
   description?: string;
 }
 
-function flattenTree(nodes: FolderTreeNode[]): FolderTreeNode[] {
-  return nodes.flatMap((node) => [node, ...flattenTree(node.children)]);
+interface FolderTreeRowProps {
+  node: FolderTreeNode;
+  selectedId: string | null;
+  expanded: Set<string>;
+  onSelect: (id: string) => void;
+  onToggle: (id: string) => void;
+}
+
+function FolderTreeRow({ node, selectedId, expanded, onSelect, onToggle }: FolderTreeRowProps) {
+  const hasChildren = node.children.length > 0;
+  const isExpanded = expanded.has(node.id);
+
+  return (
+    <>
+      <div
+        className={cn(
+          "flex w-full items-center rounded px-1 py-0.5 text-right text-sm hover:bg-muted",
+          selectedId === node.id && "bg-primary/10 font-semibold text-primary",
+        )}
+        style={{ paddingInlineStart: `${4 + node.depth * 20}px` }}
+      >
+        <button
+          type="button"
+          onClick={() => hasChildren && onToggle(node.id)}
+          className="flex h-8 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background disabled:pointer-events-none"
+          disabled={!hasChildren}
+          aria-label={hasChildren ? (isExpanded ? `מזער את ${node.name}` : `הרחב את ${node.name}`) : undefined}
+          aria-expanded={hasChildren ? isExpanded : undefined}
+        >
+          {hasChildren && (isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />)}
+        </button>
+        <button
+          type="button"
+          onClick={() => onSelect(node.id)}
+          className="flex min-w-0 flex-1 items-center gap-2 py-2 text-right"
+        >
+          {isExpanded && hasChildren ? (
+            <FolderOpen className="h-4 w-4 shrink-0" style={{ color: node.color || undefined }} />
+          ) : (
+            <Folder className="h-4 w-4 shrink-0" style={{ color: node.color || undefined }} />
+          )}
+          <span className="truncate">{node.emoji ? `${node.emoji} ` : ""}{node.name}</span>
+        </button>
+      </div>
+      {isExpanded && node.children.map((child) => (
+        <FolderTreeRow
+          key={child.id}
+          node={child}
+          selectedId={selectedId}
+          expanded={expanded}
+          onSelect={onSelect}
+          onToggle={onToggle}
+        />
+      ))}
+    </>
+  );
+}
+
+function collectExpandableIds(nodes: FolderTreeNode[]): string[] {
+  return nodes.flatMap((node) => [
+    ...(node.children.length > 0 ? [node.id] : []),
+    ...collectExpandableIds(node.children),
+  ]);
 }
 
 export function TranscriptFolderDialog({
@@ -30,15 +91,28 @@ export function TranscriptFolderDialog({
   description = "אפשר להמשיך לעבוד בעורך בזמן שהחלון פתוח.",
 }: TranscriptFolderDialogProps) {
   const { tree, createFolder, getPath, loading } = useFolderTree();
-  const folders = useMemo(() => flattenTree(tree), [tree]);
+  const expandableIds = useMemo(() => collectExpandableIds(tree), [tree]);
   const [selectedId, setSelectedId] = useState<string | null>(currentFolderId);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [newFolderName, setNewFolderName] = useState("");
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open) setSelectedId(currentFolderId);
-  }, [open, currentFolderId]);
+    if (!open) return;
+    setSelectedId(currentFolderId);
+    if (currentFolderId) {
+      setExpanded(new Set(getPath(currentFolderId).slice(0, -1).map((folder) => folder.id)));
+    }
+  }, [open, currentFolderId, getPath]);
+
+  const toggleExpanded = (id: string) => {
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
   const createAndSelect = async () => {
     const name = newFolderName.trim();
@@ -78,11 +152,11 @@ export function TranscriptFolderDialog({
       <DialogContent
         hideOverlay
         dir="rtl"
-        className="left-auto right-4 top-20 max-h-[calc(100vh-6rem)] w-[min(28rem,calc(100vw-2rem))] translate-x-0 translate-y-0 overflow-hidden p-0 sm:rounded-lg"
+        className="!left-auto !right-4 !top-20 !w-[min(28rem,calc(100vw-2rem))] !max-w-none !translate-x-0 !translate-y-0 max-h-[calc(100vh-6rem)] gap-0 overflow-hidden p-0 text-right shadow-2xl sm:rounded-lg"
         data-testid="transcript-folder-dialog"
       >
-        <DialogHeader className="border-b px-5 py-4">
-          <DialogTitle>{title}</DialogTitle>
+        <DialogHeader className="border-b px-5 py-4 text-right">
+          <DialogTitle className="text-right">{title}</DialogTitle>
           <p className="text-xs text-muted-foreground">{description}</p>
         </DialogHeader>
 
@@ -101,7 +175,19 @@ export function TranscriptFolderDialog({
             </Button>
           </div>
 
-          <ScrollArea className="h-64 rounded-md border p-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-muted-foreground">עץ תיקיות</span>
+            <div className="flex items-center gap-1">
+              <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => setExpanded(new Set(expandableIds))}>
+                <ChevronsUpDown className="h-3.5 w-3.5" /> הרחב הכול
+              </Button>
+              <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => setExpanded(new Set())}>
+                <ChevronsDownUp className="h-3.5 w-3.5" /> מזער הכול
+              </Button>
+            </div>
+          </div>
+
+          <ScrollArea className="h-64 rounded-md border p-1" dir="rtl">
             <button
               type="button"
               onClick={() => setSelectedId(null)}
@@ -113,20 +199,15 @@ export function TranscriptFolderDialog({
               <Folder className="h-4 w-4" /> ללא תיקייה
             </button>
             {loading && <div className="p-4 text-center text-xs text-muted-foreground">טוען תיקיות...</div>}
-            {!loading && folders.map((folder) => (
-              <button
+            {!loading && tree.map((folder) => (
+              <FolderTreeRow
                 key={folder.id}
-                type="button"
-                onClick={() => setSelectedId(folder.id)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded py-2 pe-3 text-right text-sm hover:bg-muted",
-                  selectedId === folder.id && "bg-primary/10 font-semibold text-primary",
-                )}
-                style={{ paddingInlineStart: `${12 + folder.depth * 20}px` }}
-              >
-                <Folder className="h-4 w-4 shrink-0" style={{ color: folder.color || undefined }} />
-                <span className="truncate">{folder.emoji ? `${folder.emoji} ` : ""}{folder.name}</span>
-              </button>
+                node={folder}
+                selectedId={selectedId}
+                expanded={expanded}
+                onSelect={setSelectedId}
+                onToggle={toggleExpanded}
+              />
             ))}
           </ScrollArea>
         </div>

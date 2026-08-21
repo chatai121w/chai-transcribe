@@ -7,6 +7,8 @@ import { Progress } from "@/components/ui/progress";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -46,6 +48,7 @@ import {
   resolveCudaModel,
   type SourceLanguage,
 } from "@/lib/transcriptionLanguages";
+import { TRANSLATION_LANGUAGES } from "@/lib/translation";
 
 /** Engines offered for YouTube transcription — same set as the main page. */
 type YtEngine = 'local-server' | 'groq' | 'openai' | 'gemini' | 'google' | 'assemblyai' | 'deepgram' | 'local';
@@ -59,6 +62,12 @@ const YT_ENGINES: Array<{ id: YtEngine; label: string; hint: string; local?: boo
   { id: 'assemblyai',   label: '🎙️ AssemblyAI',        hint: 'דיוק גבוה' },
   { id: 'deepgram',     label: '🌊 Deepgram',          hint: 'מהיר וחסכוני' },
   { id: 'local',        label: '💻 ONNX (בדפדפן)',     hint: 'ללא רשת כלל', local: true },
+];
+
+const SUBTITLE_TRANSLATION_ENGINES = [
+  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", detail: "מהיר ומומלץ" },
+  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", detail: "איכות גבוהה" },
+  { value: "openai/gpt-5-mini", label: "GPT-5 Mini", detail: "חלופה רב-לשונית" },
 ];
 
 type FilterKey = 'all' | 'active' | 'done' | 'error';
@@ -120,6 +129,9 @@ export default function YouTubePage() {
   const [submitting, setSubmitting] = useState(false);
   const [engine, setEngine] = useState<YtEngine>("local-server");
   const [performanceProfile, setPerformanceProfile] = useState<YoutubePerformanceProfile>("stable");
+  const [embedSubtitles, setEmbedSubtitles] = useState(true);
+  const [subtitleLanguages, setSubtitleLanguages] = useState<string[]>(["he", "en"]);
+  const [subtitleTranslationModel, setSubtitleTranslationModel] = useState("google/gemini-2.5-flash");
   const [serverOk, setServerOk] = useState<boolean | null>(null);
   const [handingOff, setHandingOff] = useState(false);
   const [openingEditor, setOpeningEditor] = useState(false);
@@ -183,6 +195,10 @@ export default function YouTubePage() {
 
   const handleStart = async () => {
     if (!probe || !user) return;
+    if (mode === "full" && embedSubtitles && subtitleLanguages.length === 0) {
+      toast({ title: "בחר שפת כתוביות אחת לפחות", variant: "destructive" });
+      return;
+    }
     setSubmitting(true);
     try {
       const effectiveMode: YtMode = wantsCloudEngine && mode === 'transcribe' ? 'audio' : mode;
@@ -204,6 +220,8 @@ export default function YouTubePage() {
         engine,
         language: sourceLanguage,
         model: cudaModel,
+        subtitleLanguages: mode === "full" && embedSubtitles ? subtitleLanguages : [],
+        subtitleTranslationModel,
         knownInfo: {
           title: probe.title,
           thumbnail: probe.thumbnail,
@@ -485,6 +503,58 @@ export default function YouTubePage() {
                 </div>
               )}
 
+              {mode === "full" && probe?.backend === "local" && (
+                <div className="mt-4 border-t pt-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <Label htmlFor="embed-subtitles" className="text-sm font-semibold cursor-pointer">כתוביות בתוך קובץ הווידאו</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">מסלולים ניתנים להחלפה בנגן, ללא פגיעה באיכות</p>
+                    </div>
+                    <Switch id="embed-subtitles" checked={embedSubtitles} onCheckedChange={setEmbedSubtitles} />
+                  </div>
+
+                  {embedSubtitles && (
+                    <>
+                      <div>
+                        <Label className="text-xs text-muted-foreground mb-2 block">שפות כתוביות</Label>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {TRANSLATION_LANGUAGES.map((language) => {
+                            const checked = subtitleLanguages.includes(language.code);
+                            return (
+                              <label key={language.code} className="flex items-center gap-2 h-9 px-2 border rounded-md cursor-pointer hover:bg-muted/40">
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={(value) => setSubtitleLanguages((current) => value === true
+                                    ? [...new Set([...current, language.code])]
+                                    : current.filter((code) => code !== language.code))}
+                                />
+                                <span className="text-sm">{language.label}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {(sourceLanguage === "auto"
+                        ? subtitleLanguages.length > 0
+                        : subtitleLanguages.some((language) => language !== sourceLanguage)) && (
+                        <div>
+                          <Label className="text-xs text-muted-foreground mb-1 block">מנוע תרגום כתוביות</Label>
+                          <Select value={subtitleTranslationModel} onValueChange={setSubtitleTranslationModel}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {SUBTITLE_TRANSLATION_ENGINES.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>{option.label} · {option.detail}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
               {probe?.backend === "local" && engine === "local-server" && (mode === "transcribe" || mode === "full") && (
                 <div className="mt-4 rounded-lg border p-3">
                   <Label className="text-sm font-semibold mb-2 block">פרופיל ביצועים</Label>
@@ -578,9 +648,9 @@ export default function YouTubePage() {
               <JobCard job={activeJob} />
               {activeJob.status === "done" && (() => {
                 const outs = (activeJob.output_files ?? []) as Array<{ kind?: string; url?: string; filename?: string }>;
-                const videoFile = outs.find(f => f.kind === "video");
+                const videoFile = outs.find(f => f.kind === "subtitled_video") ?? outs.find(f => f.kind === "video");
                 const jsonFile = outs.find(f => f.kind === "json");
-                const srtFile = outs.find(f => f.kind === "srt");
+                const srtFile = outs.find(f => f.kind === "srt_he") ?? outs.find(f => f.kind === "srt");
                 const hasTranscript = Boolean(jsonFile || outs.some(f => f.kind === "txt"));
                 const audioFile = outs.find(f => f.kind === "audio");
 

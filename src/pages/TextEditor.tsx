@@ -7,6 +7,7 @@ import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
 import { SyncMirrorLayout } from "@/components/SyncMirrorLayout";
 import { TranscriptFolderDialog } from "@/components/TranscriptFolderDialog";
+import { AttachTranscriptToVideoDialog } from "@/components/AttachTranscriptToVideoDialog";
 import { debugLog } from "@/lib/debugLogger";
 import { AlignmentStatusBanner } from "@/components/AlignmentStatusBanner";
 import type { TextVersion } from "@/components/TextEditHistory";
@@ -41,7 +42,7 @@ const FloatingPlayerPortal = lazy(() => import("@/components/FloatingPlayerPorta
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })));
 const LoshonKodeshRules = lazy(() => import("@/pages/LoshonKodeshRules"));
 const AIVersionsGrid = lazy(() => import("@/components/AIVersionsGrid").then(m => ({ default: m.AIVersionsGrid })));
-import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Rows3, Save, Copy, LayoutPanelLeft, Square, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle, Link, AudioWaveform } from "lucide-react";
+import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Rows3, Save, Copy, LayoutPanelLeft, Square, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle, Link, AudioWaveform, Captions } from "lucide-react";
 import { uploadToDrive } from "@/components/GoogleDriveBrowser";
 import { DriveFolderPicker } from "@/components/DriveFolderPicker";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
@@ -460,6 +461,7 @@ const TextEditor = () => {
   }, [aiPolishEnabled]);
   const [comparePreselect, setComparePreselect] = useState<{ leftId: string; rightId: string } | null>(null);
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [attachVideoDialogOpen, setAttachVideoDialogOpen] = useState(false);
   const [comparisonLibraryVersions, setComparisonLibraryVersions] = useState<TextVersion[]>([]);
   const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
   const sendTextToLoshonKodesh = useCallback((opts?: { jump?: boolean }) => {
@@ -2063,6 +2065,17 @@ const TextEditor = () => {
               <Cloud className="w-3.5 h-3.5 text-yellow-600" />
               ייצא ל-Drive
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1 border-emerald-500/50 text-xs hover:bg-emerald-500/10"
+              onClick={() => setAttachVideoDialogOpen(true)}
+              data-testid="attach-transcript-to-video"
+              title="חבר את התמלול והתזמונים לקובץ וידאו"
+            >
+              <Captions className="h-3.5 w-3.5 text-emerald-600" />
+              חבר לווידאו
+            </Button>
             <div className="w-px h-5 bg-border mx-1 hidden sm:block" />
             <Button
               variant="outline"
@@ -2144,18 +2157,18 @@ const TextEditor = () => {
             return (
               <>
                 {orderedPrimary.length > 0 && (
-                  <TabsList className="flex w-full flex-wrap h-auto gap-1 p-1.5 mb-2">
+                  <TabsList dir="rtl" className="mb-2 flex h-auto w-full flex-nowrap justify-start gap-1 overflow-x-auto p-1.5 text-right sm:flex-wrap">
                     {orderedPrimary.map((tab) => (
-                      <TabsTrigger key={tab.id} value={tab.id} className="flex-1 min-w-[5rem] text-xs sm:text-sm py-2 px-3 rounded-lg">
+                      <TabsTrigger key={tab.id} value={tab.id} className="min-w-max shrink-0 rounded-lg px-4 py-2 text-right text-xs sm:text-sm">
                         {tab.label}
                       </TabsTrigger>
                     ))}
                   </TabsList>
                 )}
                 {orderedSecondary.length > 0 && (
-                  <TabsList className="flex w-full flex-wrap h-auto gap-1 p-1.5 bg-muted/40 mb-2 rounded-lg">
+                  <TabsList dir="rtl" className="mb-2 flex h-auto w-full flex-nowrap justify-start gap-1 overflow-x-auto rounded-lg bg-muted/40 p-1.5 text-right sm:flex-wrap">
                     {orderedSecondary.map((tab) => (
-                      <TabsTrigger key={tab.id} value={tab.id} className="flex-1 min-w-[4.5rem] text-xs py-1.5 px-2 rounded-md">
+                      <TabsTrigger key={tab.id} value={tab.id} className="min-w-max shrink-0 rounded-md px-3 py-1.5 text-right text-xs">
                         {tab.label}
                       </TabsTrigger>
                     ))}
@@ -2437,6 +2450,7 @@ const TextEditor = () => {
                   onDuplicateSave={(newName) => handleDuplicateAndSave(text, 'manual', 'עורך טקסט', 'שכפול מהעורך', newName)}
                   onAssignFolder={() => setFolderDialogOpen(true)}
                   onSendToCompare={() => { void openCurrentTranscriptInCompare(); }}
+                  exportTitle={transcripts.find((item) => item.id === (transcriptIdRef.current || transcriptId))?.title || "תמלול"}
                   learningProfiles={learningProfiles}
                   learningEnabled={true}
                   onSaveLearning={handleSaveLearningToProfile}
@@ -2519,7 +2533,7 @@ const TextEditor = () => {
 
           <TabsContent value="compare" className="flex flex-col gap-3">
             <Tabs value={compareSubTab} onValueChange={setCompareSubTab} dir="rtl">
-              <TabsList className="grid w-full grid-cols-2 max-w-md">
+              <TabsList dir="rtl" className="grid w-full max-w-md grid-cols-2 text-right">
                 <TabsTrigger value="versions" className="text-xs">גרסאות (Diff)</TabsTrigger>
                 <TabsTrigger value="engines" className="text-xs">מנועי AI (A/B)</TabsTrigger>
               </TabsList>
@@ -2662,6 +2676,12 @@ const TextEditor = () => {
           onOpenChange={setFolderDialogOpen}
           currentFolderId={transcripts.find((item) => item.id === (transcriptIdRef.current || transcriptId))?.folder_id || null}
           onAssign={assignCurrentTranscriptToFolder}
+        />
+        <AttachTranscriptToVideoDialog
+          open={attachVideoDialogOpen}
+          onOpenChange={setAttachVideoDialogOpen}
+          wordTimings={wordTimings}
+          transcriptTitle={transcripts.find((item) => item.id === (transcriptIdRef.current || transcriptId))?.title}
         />
         <DriveFolderPicker
           open={drivePickerOpen}

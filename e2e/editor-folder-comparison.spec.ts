@@ -12,6 +12,20 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
   });
 
   test('שיוך לתיקייה נפתח ללא חסימת העורך', async ({ page }) => {
+    const now = new Date().toISOString();
+    const folders = [
+      {
+        id: 'folder-parent', user_id: 'test-user-00000000-0000-0000-0000-000000000001', parent_id: null,
+        name: 'תיקיית אב', color: null, emoji: null, pinned: false, position: 0,
+        drive_folder_id: null, drive_folder_name: null, drive_synced_at: null, created_at: now, updated_at: now,
+      },
+      {
+        id: 'folder-child', user_id: 'test-user-00000000-0000-0000-0000-000000000001', parent_id: 'folder-parent',
+        name: 'תיקיית משנה', color: null, emoji: null, pinned: false, position: 0,
+        drive_folder_id: null, drive_folder_name: null, drive_synced_at: null, created_at: now, updated_at: now,
+      },
+    ];
+    await page.route('**/rest/v1/folders**', (route) => route.fulfill({ status: 200, json: folders }));
     await page.goto('/text-editor');
 
     const leftPaneLock = page.getByRole('button', { name: 'פתוח' }).last();
@@ -23,8 +37,24 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
     await expect(page.getByTestId('send-transcript-to-compare')).toBeVisible();
     await assignButton.click();
 
-    await expect(page.getByTestId('transcript-folder-dialog')).toBeVisible();
+    const dialog = page.getByTestId('transcript-folder-dialog');
+    await expect(dialog).toBeVisible();
     await expect(page.locator('[data-radix-dialog-overlay]')).toHaveCount(0);
+    await expect(dialog).toHaveCSS('direction', 'rtl');
+    const box = await dialog.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(Math.abs(viewport!.width - (box!.x + box!.width) - 16)).toBeLessThanOrEqual(2);
+
+    await expect(dialog.getByText('תיקיית משנה', { exact: true })).toBeHidden();
+    await dialog.getByRole('button', { name: 'הרחב את תיקיית אב' }).click();
+    await expect(dialog.getByText('תיקיית משנה', { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'מזער הכול' }).click();
+    await expect(dialog.getByText('תיקיית משנה', { exact: true })).toBeHidden();
+    await dialog.getByRole('button', { name: 'הרחב הכול' }).click();
+    await expect(dialog.getByText('תיקיית משנה', { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'סגור', exact: true }).click();
 
     const followButton = page.getByRole('button', { name: 'עוקב' }).first();
     await followButton.click();
@@ -84,7 +114,57 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
 
     await expect(baseChooser).toContainText(MOCK_TRANSCRIPTS[0].title);
     await expect(newChooser).toContainText(comparisonTranscript.title);
-    await expect(page.getByText('הגרסה החדשה נבחרה')).toBeVisible();
+    await expect(page.getByText('הגרסה החדשה נבחרה', { exact: true })).toBeVisible();
+  });
+
+  test('חיבור התמלול לווידאו משתמש בתזמונים ומוריד קובץ', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('last_word_timings_transcript_id', 'tr-002');
+      localStorage.setItem('last_word_timings', JSON.stringify([
+        { word: 'תמלול', start: 0, end: 0.55 },
+        { word: 'שני', start: 0.6, end: 1.0 },
+        { word: 'לבדיקת', start: 1.05, end: 1.55 },
+        { word: 'המערכת.', start: 1.6, end: 2.1 },
+      ]));
+    });
+    let muxCalled = false;
+    await page.route('**/media/subtitles', async (route) => {
+      muxCalled = true;
+      expect(route.request().postData() || '').toContain('"language":"he"');
+      await route.fulfill({ status: 200, contentType: 'video/mp4', body: Buffer.from('mock-mp4') });
+    });
+    await page.goto('/text-editor');
+    const primaryTabs = page.getByRole('tablist').first();
+    await expect(primaryTabs).toHaveCSS('direction', 'rtl');
+    const visiblePrimaryTabs = primaryTabs.getByRole('tab');
+    await expect(visiblePrimaryTabs).toHaveCount(6);
+    const firstTabBox = await visiblePrimaryTabs.nth(0).boundingBox();
+    const secondTabBox = await visiblePrimaryTabs.nth(1).boundingBox();
+    expect(firstTabBox).not.toBeNull();
+    expect(secondTabBox).not.toBeNull();
+    expect(firstTabBox!.x).toBeGreaterThan(secondTabBox!.x);
+
+    await page.getByTestId('export-transcript').click();
+    await expect(page.getByRole('menuitem', { name: 'ייצוא ל-PDF' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'ייצוא ל-DOCX' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'ייצוא ל-SRT (כתוביות)' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'ייצוא ל-VTT (כתוביות)' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'ייצוא הכול (ZIP)' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.getByTestId('attach-transcript-to-video').click();
+    const dialog = page.getByTestId('attach-transcript-video-dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel('אנגלית').uncheck();
+    await dialog.locator('input[type="file"]').setInputFiles({
+      name: 'lesson.mp4',
+      mimeType: 'video/mp4',
+      buffer: Buffer.from('mock-video'),
+    });
+    const downloadPromise = page.waitForEvent('download');
+    await dialog.getByRole('button', { name: 'צור והורד וידאו' }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toContain('with-subtitles.mp4');
+    expect(muxCalled).toBe(true);
   });
 
   test('הכרעה מתקנת את כל המופעים הזהים ושומרת מילים ארוכות', async ({ page }) => {

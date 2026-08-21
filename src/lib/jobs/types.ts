@@ -52,10 +52,11 @@ export interface JobRecord {
 export const STAGE_TEMPLATES: Record<JobKind, JobStage[]> = {
   youtube: [
     { key: "probe", label: "בדיקת קישור", status: "pending", percent: 0, weight: 5 },
-    { key: "download", label: "הורדה", status: "pending", percent: 0, weight: 40 },
-    { key: "extract_audio", label: "חילוץ אודיו", status: "pending", percent: 0, weight: 15 },
+    { key: "download", label: "הורדה", status: "pending", percent: 0, weight: 35 },
+    { key: "extract_audio", label: "חילוץ אודיו", status: "pending", percent: 0, weight: 10 },
     { key: "upload_audio", label: "שמירה בענן", status: "pending", percent: 0, weight: 10 },
     { key: "transcribe", label: "תמלול", status: "pending", percent: 0, weight: 30 },
+    { key: "subtitles", label: "תרגום וכתוביות", status: "pending", percent: 0, weight: 10 },
   ],
   convert: [
     { key: "probe", label: "בדיקה", status: "pending", percent: 0, weight: 10 },

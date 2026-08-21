@@ -44,6 +44,7 @@ import { RichTextEditor } from "@/components/RichTextEditor";
 import { TextMarkingOverlay } from "@/components/TextMarkingOverlay";
 import { getTrustedWordSuggestion } from '@/lib/trustedWordSuggestion';
 import { scrollWithinContainer } from '@/lib/scrollWithinContainer';
+import { ExportButton } from "@/components/ExportButton";
 
 interface SyncMirrorLayoutProps {
   wordTimings: WordTiming[];
@@ -64,6 +65,7 @@ interface SyncMirrorLayoutProps {
   onDuplicateSave?: (newName: string) => void;
   onAssignFolder?: () => void;
   onSendToCompare?: () => void;
+  exportTitle?: string;
   learningProfiles?: Array<{ id: string; name: string }>;
   learningEnabled?: boolean;
   onSaveLearning?: (payload: {
@@ -186,6 +188,7 @@ export const SyncMirrorLayout = ({
   onDuplicateSave,
   onAssignFolder,
   onSendToCompare,
+  exportTitle,
   learningProfiles = [],
   learningEnabled = true,
   onSaveLearning,
@@ -1402,7 +1405,7 @@ export const SyncMirrorLayout = ({
       {!fullEditMode && <>
       <div className={cn("grid grid-cols-2 items-stretch border-b bg-muted/10 sticky top-0 z-10 shrink-0 [&_svg]:text-[#0a1d3f] dark:[&_svg]:text-blue-300")} dir="rtl">
         {/* Visual mid-divider between right-half and left-half intent */}
-        <div className="min-w-0 flex items-center gap-1.5 px-3 py-2 border-s border-border/40">
+        <div className="min-w-0 flex flex-wrap items-center justify-start gap-1.5 border-s border-border/40 px-3 py-2 text-right">
           <AlignRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <span className={cn("text-xs font-semibold", compareMode ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
             {compareMode ? "גרסה קפואה להשוואה" : "תמלול מסונכרן"}
@@ -1426,7 +1429,7 @@ export const SyncMirrorLayout = ({
               טוען {Math.round((renderBudget / Math.max(1, totalWords)) * 100)}%
             </span>
           )}
-          <div className="ms-auto flex items-center gap-1">
+          <div className="flex flex-wrap items-center justify-start gap-1">
             {/* Highlight style picker */}
             <Popover>
               <PopoverTrigger asChild>
@@ -1576,7 +1579,7 @@ export const SyncMirrorLayout = ({
         </div>
 
         {/* Left column label + controls */}
-        <div className="min-w-0 flex flex-wrap items-center gap-1.5 px-3 py-2">
+        <div className="min-w-0 flex flex-wrap items-center justify-start gap-1.5 px-3 py-2 text-right">
           <Edit3 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <button
             onClick={toggleCompareMode}
@@ -1588,7 +1591,7 @@ export const SyncMirrorLayout = ({
           >
             {compareMode ? "לא מסונכרנת" : "עריכה מסונכרנת"}
           </button>
-          <div className="ms-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+          <div className="flex min-w-0 flex-wrap items-center justify-start gap-1.5">
             {/* Left column sync toggle */}
             <button
               onClick={() => setLeftWordHighlightOn(v => !v)}
@@ -1643,14 +1646,22 @@ export const SyncMirrorLayout = ({
               </Button>
             )}
 
-            <DropdownMenu>
+            <ExportButton
+              text={text}
+              title={exportTitle || "תמלול"}
+              wordTimings={wordTimings}
+              compact
+              className="pointer-events-auto"
+            />
+
+            <DropdownMenu dir="rtl">
               <DropdownMenuTrigger asChild>
                 <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[10px]" title="פעולות נוספות">
                   <MoreHorizontal className="h-3 w-3" />
                   פעולות
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 text-xs">
+              <DropdownMenuContent align="end" className="w-56 text-right text-xs" dir="rtl">
                 <DropdownMenuItem onClick={restoreToBaseline} disabled={!isModifiedFromBaseline}>
                   <History className="me-2 h-3.5 w-3.5" /> החזר לגרסת בסיס
                 </DropdownMenuItem>

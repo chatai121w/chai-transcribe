@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Download, FileText, File, Loader2, Braces, Archive } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 
 interface ExportButtonProps {
@@ -16,9 +17,11 @@ interface ExportButtonProps {
   title?: string;
   disabled?: boolean;
   wordTimings?: Array<{ word: string; start: number; end: number }>;
+  compact?: boolean;
+  className?: string;
 }
 
-export const ExportButton = ({ text, title = "תמלול", disabled, wordTimings }: ExportButtonProps) => {
+export const ExportButton = ({ text, title = "תמלול", disabled, wordTimings, compact = false, className }: ExportButtonProps) => {
   const [isExporting, setIsExporting] = useState(false);
 
   const exportToPDF = async () => {
@@ -282,16 +285,23 @@ export const ExportButton = ({ text, title = "תמלול", disabled, wordTimings
   return (
     <DropdownMenu dir="rtl">
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" disabled={disabled || !text.trim() || isExporting}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={disabled || !text.trim() || isExporting}
+          className={cn(compact && "h-6 gap-1 px-2 text-[10px]", className)}
+          title="ייצוא התמלול"
+          data-testid="export-transcript"
+        >
           {isExporting ? (
-            <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+            <Loader2 className={cn("animate-spin", compact ? "h-3 w-3" : "ml-2 h-4 w-4")} />
           ) : (
-            <Download className="w-4 h-4 ml-2" />
+            <Download className={cn(compact ? "h-3 w-3" : "ml-2 h-4 w-4")} />
           )}
           ייצוא
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
+      <DropdownMenuContent align="end" className="w-64 text-right" dir="rtl">
         <DropdownMenuItem onClick={exportToPDF}>
           <File className="w-4 h-4 ml-2" />
           ייצוא ל-PDF
