@@ -7,6 +7,7 @@ import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
 import { SyncMirrorLayout } from "@/components/SyncMirrorLayout";
 import { TranscriptFolderDialog } from "@/components/TranscriptFolderDialog";
+import { useFolderTree } from "@/hooks/useFolderTree";
 import { AttachTranscriptToVideoDialog } from "@/components/AttachTranscriptToVideoDialog";
 import { debugLog } from "@/lib/debugLogger";
 import { AlignmentStatusBanner } from "@/components/AlignmentStatusBanner";
@@ -15,7 +16,8 @@ import type { WordTiming, SyncAudioPlayerRef } from "@/components/SyncAudioPlaye
 import { TextStyleControl } from "@/components/TextStyleControl";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Pencil, Check as CheckIcon, Eraser } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Pencil, Check as CheckIcon, Eraser, FolderOpen } from "lucide-react";
 
 // Lazy-loaded heavy components
 const SyncAudioPlayer = lazy(() => import("@/components/SyncAudioPlayer").then(m => ({ default: m.SyncAudioPlayer })));
@@ -80,6 +82,11 @@ import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import { useCloudVersions } from "@/hooks/useCloudVersions";
 import { useOllama, isOllamaModel } from "@/hooks/useOllama";
+import {
+  chooseTranscriptFormattingModel,
+  preservesTranscriptWords,
+  requiresExactWordPreservation,
+} from "@/lib/transcriptFormatting";
 import { db, buildAudioFingerprint } from "@/lib/localDb";
 import { useCorrectionLearning } from "@/hooks/useCorrectionLearning";
 import { getServerUrl } from "@/lib/serverConfig";
@@ -156,7 +163,7 @@ function TranscriptTitleEditor({
   };
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
+    <div className="flex min-h-12 items-center gap-2 rounded-lg border bg-card px-3 py-2 text-right" dir="rtl">
       <span className="text-xs text-muted-foreground shrink-0">שם התמלול:</span>
       {editing ? (
         <>
@@ -171,7 +178,8 @@ function TranscriptTitleEditor({
                 setValue(remoteTitle);
               }
             }}
-            className="h-8 flex-1"
+            className="h-8 flex-1 text-right"
+            dir="rtl"
             disabled={saving}
           />
           <Button size="sm" variant="default" onClick={save} disabled={saving}>
@@ -180,12 +188,91 @@ function TranscriptTitleEditor({
         </>
       ) : (
         <>
-          <span className="flex-1 truncate text-sm font-medium" title={remoteTitle}>
+          <span className="flex-1 truncate text-right text-sm font-medium" title={remoteTitle} dir="auto">
             {remoteTitle || "ללא שם"}
           </span>
           <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
             <Pencil className="h-4 w-4 me-1" /> ערוך
           </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TranscriptFolderNameEditor({
+  transcriptId,
+  transcripts,
+  updateTranscript,
+  onChooseFolder,
+}: {
+  transcriptId: string | null;
+  transcripts: any[];
+  updateTranscript: (id: string, updates: { folder?: string }) => Promise<unknown>;
+  onChooseFolder: () => void;
+}) {
+  const { folders, updateFolder, getPath } = useFolderTree();
+  const current = transcriptId ? transcripts.find((item) => item.id === transcriptId) : null;
+  const folderId = (current?.folder_id as string | null | undefined) || null;
+  const folder = folderId ? folders.find((item) => item.id === folderId) : null;
+  const remoteName = folder?.name || (current?.folder as string | undefined) || '';
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(remoteName);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!editing) setValue(remoteName);
+  }, [editing, remoteName]);
+
+  const save = async () => {
+    const trimmed = value.trim();
+    if (!transcriptId || !folderId || !trimmed || trimmed === remoteName) {
+      setEditing(false);
+      setValue(remoteName);
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateFolder(folderId, { name: trimmed });
+      const fullPath = getPath(folderId).map((item) => item.id === folderId ? trimmed : item.name).join(' / ');
+      await updateTranscript(transcriptId, { folder: fullPath || trimmed });
+      toast({ title: 'שם התיקייה עודכן' });
+      setEditing(false);
+    } catch (error) {
+      toast({ title: 'שגיאה בעדכון שם התיקייה', description: error instanceof Error ? error.message : 'נסה שוב', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-12 items-center gap-2 rounded-lg border bg-card px-3 py-2 text-right" dir="rtl">
+      <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <span className="shrink-0 text-xs text-muted-foreground">שם התיקייה:</span>
+      {editing ? (
+        <>
+          <Input
+            autoFocus
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void save();
+              if (event.key === 'Escape') { setEditing(false); setValue(remoteName); }
+            }}
+            className="h-8 flex-1 text-right"
+            dir="rtl"
+            disabled={saving}
+            aria-label="עריכת שם התיקייה"
+          />
+          <Button size="sm" onClick={() => void save()} disabled={saving || !value.trim()}>
+            <CheckIcon className="h-4 w-4 me-1" /> שמור
+          </Button>
+        </>
+      ) : (
+        <>
+          <span className="flex-1 truncate text-right text-sm font-medium" dir="auto">{remoteName || 'ללא תיקייה'}</span>
+          {folderId && <Button size="sm" variant="ghost" onClick={() => setEditing(true)}><Pencil className="h-4 w-4 me-1" /> ערוך</Button>}
+          <Button size="sm" variant="outline" onClick={onChooseFolder}>{folderId ? 'החלף' : 'בחר'}</Button>
         </>
       )}
     </div>
@@ -324,7 +411,7 @@ const TextEditor = () => {
     { id: "history", label: "היסטוריה", group: "secondary" },
   ];
   // Cloud-synced style settings (must be before effects that use preferences)
-  const { preferences, updatePreference, isLoaded: cloudPreferencesLoaded } = useCloudPreferences();
+  const { preferences, updatePreference, patchTabSettings, isLoaded: cloudPreferencesLoaded } = useCloudPreferences();
 
   const [tabSettings, setTabSettings] = useState(() => {
     return loadTabSettings();
@@ -348,6 +435,22 @@ const TextEditor = () => {
   const handleStudioLayoutChange = useCallback((value: string) => {
     try { mergeCloudUiSettings({ studioLayout: JSON.parse(value) }); } catch { /* ignore malformed state */ }
   }, [mergeCloudUiSettings]);
+
+  const aiTaskModels = useMemo<Record<string, string>>(() => {
+    try {
+      const parsed = JSON.parse(preferences.tab_settings_json || '{}');
+      return parsed.aiTaskModels && typeof parsed.aiTaskModels === 'object' ? parsed.aiTaskModels : {};
+    } catch {
+      return {};
+    }
+  }, [preferences.tab_settings_json]);
+
+  const selectedAiTaskModel = useCallback((action: string) => aiTaskModels[action] || 'auto', [aiTaskModels]);
+
+  const saveAiTaskModel = useCallback((action: string, model: string) => {
+    patchTabSettings({ aiTaskModels: { ...aiTaskModels, [action]: model } });
+    toast({ title: 'בחירת המנוע נשמרה', description: 'הבחירה תישמר גם לאחר רענון ותסונכרן לענן' });
+  }, [aiTaskModels, patchTabSettings]);
 
   // Load tab settings from cloud when preferences are available
   useEffect(() => {
@@ -1186,24 +1289,37 @@ const TextEditor = () => {
       split_paragraphs: 'חלוקה לפסקאות',
       fix_and_split: 'תיקון + חלוקה',
     };
+    const selectedModel = selectedAiTaskModel(action);
     try {
       let resultText: string | undefined;
 
-      // Prefer Ollama if connected (offline-first)
-      if (ollama.isConnected && ollama.models.length > 0) {
-        const model = ollama.models[0].name;
+      const useCloud = selectedModel.startsWith('cloud:') || (!ollama.isConnected && selectedModel === 'auto');
+
+      if (!useCloud && ollama.isConnected && ollama.models.length > 0) {
+        const model = selectedModel.startsWith('ollama:')
+          ? selectedModel.slice('ollama:'.length)
+          : chooseTranscriptFormattingModel(ollama.models);
+        if (!model) throw new Error('לא נמצא מודל מקומי מתאים לעריכת תמלול');
+        if (!ollama.models.some((item) => item.name === model)) {
+          throw new Error(`המנוע שנבחר אינו מותקן: ${model}`);
+        }
         resultText = await ollama.editText({ text, action, model });
       } else {
-        // Cloud: DB proxy → edge function fallback
-        resultText = await editTranscriptCloud({ text, action });
+        const cloudModel = selectedModel === 'cloud:auto' || selectedModel === 'auto'
+          ? undefined
+          : selectedModel.replace(/^cloud:/, '');
+        resultText = await editTranscriptCloud({ text, action, model: cloudModel });
       }
 
       if (!resultText) throw new Error('לא התקבלה תשובה מ-AI');
+      if (requiresExactWordPreservation(action) && !preservesTranscriptWords(text, resultText)) {
+        throw new Error('התוצאה נפסלה: המנוע שינה או השמיט מילים');
+      }
       addVersion(resultText, 'ai-fix', labels[action]);
       toast({ title: `${labels[action]} הושלם ✅` });
     } catch (err) {
       // If Ollama failed, try cloud as fallback
-      if (ollama.isConnected) {
+      if (ollama.isConnected && selectedModel === 'auto') {
         try {
           const cloudText = await editTranscriptCloud({ text, action });
           if (cloudText) {
@@ -1219,6 +1335,23 @@ const TextEditor = () => {
       setAiAction(null);
     }
   };
+
+  const renderAiModelSelect = (action: 'fix_errors' | 'split_paragraphs' | 'fix_and_split', label: string) => (
+    <Select value={selectedAiTaskModel(action)} onValueChange={(value) => saveAiTaskModel(action, value)}>
+      <SelectTrigger className="h-7 w-[150px] text-xs bg-background" dir="rtl" aria-label={`בחירת מנוע עבור ${label}`}>
+        <SelectValue placeholder="בחר מנוע" />
+      </SelectTrigger>
+      <SelectContent dir="rtl" align="end">
+        <SelectItem value="auto">מומלץ אוטומטית</SelectItem>
+        <SelectItem value="cloud:auto">ענן אוטומטי</SelectItem>
+        <SelectItem value="cloud:gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+        <SelectItem value="cloud:gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+        {ollama.models.filter((model) => !/embedding|translate/i.test(model.name)).map((model) => (
+          <SelectItem key={model.name} value={`ollama:${model.name}`}>{model.name}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 
   /** Add nikud (diacritics) to the Hebrew text via the local DICTA model. */
   const handleNikud = async (style: 'male' | 'haser' = nikudStyle) => {
@@ -1959,36 +2092,27 @@ const TextEditor = () => {
         {/* Unified action bar — AI quick actions + save, single compact row */}
         {text.trim() && (
           <div className="flex items-center gap-2 flex-wrap py-2 px-3 rounded-xl border bg-muted/20">
-            <Button
-              variant="default"
-              size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={() => handleAiQuickAction('fix_and_split')}
-              disabled={!!aiAction}
-            >
-              {aiAction === 'fix_and_split' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
-              תקן + פסקאות
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={() => handleAiQuickAction('fix_errors')}
-              disabled={!!aiAction}
-            >
-              {aiAction === 'fix_errors' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SpellCheck className="w-3.5 h-3.5" />}
-              תקן שגיאות
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={() => handleAiQuickAction('split_paragraphs')}
-              disabled={!!aiAction}
-            >
-              {aiAction === 'split_paragraphs' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SplitSquareVertical className="w-3.5 h-3.5" />}
-              פסקאות
-            </Button>
+            <div className="inline-flex items-center gap-1" dir="rtl">
+              <Button variant="default" size="sm" className="h-7 text-xs gap-1" onClick={() => handleAiQuickAction('fix_and_split')} disabled={!!aiAction}>
+                {aiAction === 'fix_and_split' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+                פיסוק + פסקאות
+              </Button>
+              {renderAiModelSelect('fix_and_split', 'פיסוק ופסקאות')}
+            </div>
+            <div className="inline-flex items-center gap-1" dir="rtl">
+              <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => handleAiQuickAction('fix_errors')} disabled={!!aiAction}>
+                {aiAction === 'fix_errors' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SpellCheck className="w-3.5 h-3.5" />}
+                תיקון
+              </Button>
+              {renderAiModelSelect('fix_errors', 'תיקון')}
+            </div>
+            <div className="inline-flex items-center gap-1" dir="rtl">
+              <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => handleAiQuickAction('split_paragraphs')} disabled={!!aiAction}>
+                {aiAction === 'split_paragraphs' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SplitSquareVertical className="w-3.5 h-3.5" />}
+                פסקאות
+              </Button>
+              {renderAiModelSelect('split_paragraphs', 'פסקאות')}
+            </div>
             {/* Nikud — split button: main action uses the chosen style, caret picks style */}
             <div className="inline-flex">
               <Button
@@ -2101,18 +2225,26 @@ const TextEditor = () => {
         )}
 
         {/* Title editor — always visible above tabs */}
-        <div className="mb-3 flex items-center gap-2">
-          <div className="flex-1 min-w-0">
+        <div className="mb-3 grid grid-cols-1 items-stretch gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" dir="rtl">
+          <div className="min-w-0">
             <TranscriptTitleEditor
               transcriptId={transcriptId}
               transcripts={transcripts}
               updateTranscript={updateTranscript}
             />
           </div>
+          <div className="min-w-0">
+            <TranscriptFolderNameEditor
+              transcriptId={transcriptIdRef.current || transcriptId}
+              transcripts={transcripts}
+              updateTranscript={updateTranscript}
+              onChooseFolder={() => setFolderDialogOpen(true)}
+            />
+          </div>
           <Button
             variant="outline"
             size="sm"
-            className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30 shrink-0"
+            className="h-12 gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive lg:self-stretch"
             title="נקה הכל — טקסט, אודיו ותזמונים"
             onClick={async () => {
               const ok = window.confirm("לנקות את כל התוכן בעורך? פעולה זו תמחק את הטקסט, קובץ האודיו והתזמונים מהזיכרון המקומי. רשומות שכבר נשמרו בענן יישארו.");

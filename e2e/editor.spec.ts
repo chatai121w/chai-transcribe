@@ -55,6 +55,35 @@ test.describe('עורך טקסט - טעינה', () => {
     await page.goto('/text-editor');
     await expect(page.getByText('עריכת טקסט').first()).toBeVisible();
   });
+
+  test('בחירת מנוע נפרדת לפיסוק ולפסקאות נשמרת אחרי ריענון', async ({ page }) => {
+    const ollamaModels = JSON.stringify({ models: [
+      { name: 'gemma3:4b', model: 'gemma3:4b', size: 3338801804 },
+      { name: 'qwen3.5:9b', model: 'qwen3.5:9b', size: 6594474711 },
+    ] });
+    await page.route('http://localhost:11434/api/tags', route => route.fulfill({ status: 200, contentType: 'application/json', body: ollamaModels }));
+    await page.route('http://127.0.0.1:11434/api/tags', route => route.fulfill({ status: 200, contentType: 'application/json', body: ollamaModels }));
+    await seedEditor(page, 'שלום לכולם היום נלמד נושא חדש');
+    await page.goto('/text-editor');
+
+    const combinedModel = page.getByRole('combobox', { name: 'בחירת מנוע עבור פיסוק ופסקאות' });
+    const paragraphsModel = page.getByRole('combobox', { name: 'בחירת מנוע עבור פסקאות' });
+    await expect(combinedModel).toBeVisible();
+    await combinedModel.click();
+    await page.getByRole('option', { name: 'gemma3:4b' }).click();
+    await paragraphsModel.click();
+    await page.getByRole('option', { name: 'qwen3.5:9b' }).click();
+
+    await expect.poll(() => page.evaluate(() => {
+      const saved = JSON.parse(localStorage.getItem('user_preferences') || '{}');
+      const tabs = JSON.parse(saved.tab_settings_json || '{}');
+      return tabs.aiTaskModels;
+    })).toEqual({ fix_and_split: 'ollama:gemma3:4b', split_paragraphs: 'ollama:qwen3.5:9b' });
+
+    await page.reload();
+    await expect(page.getByRole('combobox', { name: 'בחירת מנוע עבור פיסוק ופסקאות' })).toContainText('gemma3:4b');
+    await expect(page.getByRole('combobox', { name: 'בחירת מנוע עבור פסקאות' })).toContainText('qwen3.5:9b');
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import { Download, CheckCircle, Trash2, HardDrive, Star, Globe2, Server, Wifi, W
 import { toast } from "@/hooks/use-toast";
 import { pipeline, env } from '@huggingface/transformers';
 import { useLocalServer } from "@/hooks/useLocalServer";
+import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 
 env.allowLocalModels = false;
 env.useBrowserCache = true;
@@ -206,6 +207,7 @@ const SERVER_MODELS: ModelInfo[] = [
 const ALL_MODELS: ModelInfo[] = [...SERVER_MODELS, ...BROWSER_MODELS];
 
 export const LocalModelManager = () => {
+  const { preferences, patchTabSettings, isLoaded: cloudPreferencesLoaded } = useCloudPreferences();
   const [models, setModels] = useState<ModelInfo[]>(ALL_MODELS);
   const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -228,6 +230,22 @@ export const LocalModelManager = () => {
     checkDownloadedModels();
     calculateCacheSize();
   }, []);
+
+  useEffect(() => {
+    if (!cloudPreferencesLoaded) return;
+    try {
+      const parsed = JSON.parse(preferences.tab_settings_json || '{}');
+      const cloudModel = typeof parsed.preferredLocalTranscriptionModel === 'string'
+        ? parsed.preferredLocalTranscriptionModel
+        : '';
+      if (cloudModel) {
+        setSelectedModel(cloudModel);
+        localStorage.setItem('preferred_local_model', cloudModel);
+        const model = ALL_MODELS.find((item) => item.id === cloudModel);
+        if (model) localStorage.setItem('preferred_local_model_runtime', model.runtime);
+      }
+    } catch { /* keep the local selection */ }
+  }, [cloudPreferencesLoaded, preferences.tab_settings_json]);
 
   useEffect(() => {
     startPolling(10_000);
@@ -309,6 +327,7 @@ export const LocalModelManager = () => {
     if (model) {
       localStorage.setItem('preferred_local_model_runtime', model.runtime);
     }
+    patchTabSettings({ preferredLocalTranscriptionModel: modelId });
     toast({
       title: "מודל נבחר",
       description: `${model?.name || modelId} מוגדר כמודל ברירת מחדל`,

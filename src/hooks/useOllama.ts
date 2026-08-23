@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ACTION_PROMPTS, TONE_PROMPTS } from "@/lib/prompts";
+import { preservesTranscriptWords, requiresExactWordPreservation } from "@/lib/transcriptFormatting";
 import { getGpuShareMode, waitUntilWhisperIdle } from "@/lib/gpuShareMode";
 import { buildHebrewGuardPrefix, isHebrewOnlyEnabled, containsForeignScript } from "@/lib/hebrewGuard";
 
@@ -478,6 +479,20 @@ export function useOllama() {
     const translateGemma = model === 'translategemma' || model.startsWith('translategemma:');
     const initialTemp = translateGemma ? 0.1 : guardOn ? 0.2 : 0.7;
     let result = await runOnce(systemPrompt, initialTemp);
+
+    if (requiresExactWordPreservation(action) && !preservesTranscriptWords(text, result)) {
+      const retryPrompt = [
+        'הניסיון הקודם נפסל מפני שרצף המילים השתנה.',
+        'בצע שוב פיסוק וחלוקה לפסקאות בלבד.',
+        'אסור לשנות, להשמיט, להוסיף או להזיז אפילו מילה אחת.',
+        '',
+        systemPrompt,
+      ].join('\n');
+      result = await runOnce(retryPrompt, 0.05);
+      if (!preservesTranscriptWords(text, result)) {
+        throw new Error('התוצאה נפסלה: המנוע שינה או השמיט מילים');
+      }
+    }
 
     // Auto-retry once if the result contains foreign script while guard is on.
     if (guardOn) {

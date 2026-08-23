@@ -2,6 +2,7 @@ import "@/styles/mobile-pages.css";
 import { useState, useEffect, useRef, lazy, Suspense, useCallback, type ChangeEvent } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { TranscriptionEngine } from "@/components/TranscriptionEngine";
+import { TranscriptFormattingControls } from "@/components/TranscriptFormattingControls";
 import { FileUploader } from "@/components/FileUploader";
 import { AudioRecorder } from "@/components/AudioRecorder";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useLocalTranscription } from "@/hooks/useLocalTranscription";
-import { useLocalServer, type TranscriptionStats, type CudaOptions } from "@/hooks/useLocalServer";
+import { useLocalServer, type TranscriptionStats, type CudaOptions, type PartialTranscript } from "@/hooks/useLocalServer";
 import { useBackgroundTask } from "@/hooks/useBackgroundTask";
 import { debugLog } from "@/lib/debugLogger";
 import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
@@ -27,7 +28,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { isVideoFile, extractAudioFromVideo, VIDEO_NEEDS_EXTRACTION, MAX_VIDEO_SIZE_MB, MAX_AUDIO_SIZE_MB } from "@/lib/videoUtils";
 import { compressAudio, needsCompression, formatFileSize, CLOUD_API_LIMIT } from "@/lib/audioCompression";
-import { extractAudioSegment, probeAudioDurationSec } from "@/lib/audioSegment";
+import { extractAudioSegment, extractAudioSegments, probeAudioDurationSec } from "@/lib/audioSegment";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
@@ -152,7 +153,12 @@ const Index = () => {
   // Audio & word timing state for sync player
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [wordTimings, setWordTimings] = useState<Array<{word: string, start: number, end: number, probability?: number}>>([]);
-  const [recoveredPartialInfo, setRecoveredPartialInfo] = useState<{progress: number, wordCount: number, lastSegEnd?: number} | null>(null);
+  const [recoveredPartialInfo, setRecoveredPartialInfo] = useState<{
+    progress: number;
+    wordCount: number;
+    lastSegEnd?: number;
+    sourceFile?: { name: string; size: number; lastModified: number; type: string; cloudAudioPath?: string; cloudBackedUpAt?: number };
+  } | null>(null);
   const [lastStats, setLastStats] = useState<TranscriptionStats | null>(null);
   const [copied, setCopied] = useState(false);
   const diarize = preferences.diarize_enabled;
@@ -165,6 +171,7 @@ const Index = () => {
   const lastFileRef = useRef<File | null>(null);
   const lastAudioUrlRef = useRef<string | null>(null);
   const resumeFileInputRef = useRef<HTMLInputElement | null>(null);
+  const recoveryUploadRef = useRef<Promise<string | null> | null>(null);
 
   // Waveform player ref for word click-to-seek
   const waveformRef = useRef<WaveformPlayerHandle | null>(null);
@@ -177,9 +184,9 @@ const Index = () => {
   const [queuePlayingId, setQueuePlayingId] = useState<string | null>(null);
 
   const { transcribe: localTranscribe, isLoading: isLocalLoading, progress: localProgress } = useLocalTranscription();
-  const { transcribeStream: serverTranscribeStream, transcribeStreamParallel: serverTranscribeParallel, isLoading: isServerLoading, progress: serverProgress, phase: serverPhase, audioDurationSec: serverAudioDur, audioProcessedSec: serverAudioProcessed, isConnected: serverConnected, modelReady: serverModelReady, recoverPartial, clearPartial, cancelStream: cancelServerStream, checkConnection, startPolling, stopPolling } = useLocalServer();
+  const { transcribeStream: serverTranscribeStream, transcribeStreamParallel: serverTranscribeParallel, isLoading: isServerLoading, progress: serverProgress, phase: serverPhase, audioDurationSec: serverAudioDur, audioProcessedSec: serverAudioProcessed, isConnected: serverConnected, modelReady: serverModelReady, recoverPartial, saveRecoveryPartial, updatePartialCloudBackup, clearPartial, cancelStream: cancelServerStream, checkConnection, startPolling, stopPolling } = useLocalServer();
   const bgTask = useBackgroundTask();
-  const { transcripts, isLoading: isCloudLoading, saveTranscript, updateTranscript, deleteTranscript, deleteAll, isCloud, getAudioUrl } = useCloudTranscripts();
+  const { transcripts, isLoading: isCloudLoading, saveTranscript, updateTranscript, deleteTranscript, deleteAll, isCloud, getAudioUrl, uploadAudioFile, deleteAudioFile } = useCloudTranscripts();
   const { jobs, submitJob, submitBatchJobs, retryJob, deleteJob } = useTranscriptionJobs();
   const localQueue = useLocalTranscriptionQueue();
   const serverConnectedRef = useRef(serverConnected);
@@ -250,13 +257,13 @@ const Index = () => {
   // Recover partial transcription on mount (runs once)
   useEffect(() => {
     const partial = recoverPartial();
-    if (partial && partial.text) {
-      setTranscriptFromEngine(partial.text);
+    if (partial && (partial.text || partial.sourceFile?.cloudAudioPath)) {
+      if (partial.text) setTranscriptFromEngine(partial.text);
       setWordTimings(partial.wordTimings || []);
-      setRecoveredPartialInfo({ progress: partial.progress, wordCount: partial.wordTimings?.length || 0, lastSegEnd: partial.lastSegEnd });
+      setRecoveredPartialInfo({ progress: partial.progress, wordCount: partial.wordTimings?.length || 0, lastSegEnd: partial.lastSegEnd, sourceFile: partial.sourceFile });
       toast({
         title: "🔄 שוחזר תמלול חלקי",
-        description: `נמצא תמלול שהופסק (${partial.progress}%) — ${partial.wordTimings?.length || 0} מילים. אפשר להמשיך מאותו מקום`,
+        description: `נמצא תמלול שהופסק (${partial.progress}%)${partial.sourceFile?.name ? ` של ${partial.sourceFile.name}` : ''}. אפשר להמשיך מאותו מקום`,
       });
       debugLog.info('Recovery', `Restored partial transcript: ${partial.progress}%, ${partial.text.length} chars`);
     }
@@ -1300,6 +1307,41 @@ const Index = () => {
     }
   };
 
+  const backupPartialAudioToCloud = async (file: File): Promise<string | null> => {
+    const partial = recoverPartial();
+    if (!partial?.sourceFile) return null;
+    if (partial.sourceFile.cloudAudioPath) return partial.sourceFile.cloudAudioPath;
+    if (!isCloud) {
+      debugLog.warn('Recovery', 'Partial audio was not uploaded because the user is not signed in');
+      return null;
+    }
+    if (recoveryUploadRef.current) return recoveryUploadRef.current;
+
+    toast({ title: 'מגבה את קובץ השחזור לענן', description: file.name });
+    recoveryUploadRef.current = (async () => {
+      const cloudPath = await uploadAudioFile(file);
+      if (!cloudPath) {
+        toast({ title: 'גיבוי קובץ השחזור נכשל', description: 'התמלול החלקי נשמר מקומית, אך האודיו לא עלה לענן', variant: 'destructive' });
+        return null;
+      }
+      const updated = updatePartialCloudBackup(cloudPath);
+      if (updated) {
+        setRecoveredPartialInfo({
+          progress: updated.progress,
+          wordCount: updated.wordTimings?.length || 0,
+          lastSegEnd: updated.lastSegEnd,
+          sourceFile: updated.sourceFile,
+        });
+      }
+      debugLog.info('Recovery', `Partial audio backed up to cloud: ${cloudPath}`);
+      toast({ title: 'קובץ השחזור נשמר בענן', description: 'אפשר להמשיך גם לאחר רענון בלי לבחור את הקובץ מחדש' });
+      return cloudPath;
+    })().finally(() => {
+      recoveryUploadRef.current = null;
+    });
+    return recoveryUploadRef.current;
+  };
+
   const transcribeWithLocalServer = async (
     file: File,
     fileAudioUrl?: string,
@@ -1422,6 +1464,7 @@ const Index = () => {
       const cloudSaveMode = preferences.cuda_cloud_save || 'immediate';
       const engineLabel = `Local CUDA (${result.model || 'server'})`;
       const effectiveLanguage = result.language || lang;
+      const recoveryCloudPath = resumeFrom ? recoverPartial()?.sourceFile?.cloudAudioPath : undefined;
       let finalText: string;
       if (cloudSaveMode === 'skip') {
         finalText = await saveToHistory(result.text, engineLabel, true, timings, undefined, undefined, false, effectiveLanguage);  // localStorage only
@@ -1431,6 +1474,7 @@ const Index = () => {
         finalText = await saveToHistory(result.text, engineLabel, undefined, timings, undefined, undefined, false, effectiveLanguage);  // full: text + audio to cloud
       }
 
+      if (recoveryCloudPath) await deleteAudioFile(recoveryCloudPath);
       clearPartial();
       addAnalyticsRecord({
         engine: engineLabel, status: 'success',
@@ -1470,6 +1514,7 @@ const Index = () => {
       }
       return 'done';
     } catch (error) {
+      await backupPartialAudioToCloud(file);
       if (error instanceof Error && error.message === 'CANCELLED') {
         toast({ title: "תמלול הופסק", description: "התמלול בוטל על ידי המשתמש" });
         if (activeQueueId) {
@@ -1716,7 +1761,7 @@ const Index = () => {
     }
   };
 
-  const transcribeWithGemini = async (file: File, fileAudioUrl?: string) => {
+  const transcribeWithGemini = async (file: File, fileAudioUrl?: string, resumeFrom?: PartialTranscript) => {
     setIsUploading(true);
     try {
       // Personal Gemini key + selected model — client controls both, edge fn falls back to Lovable AI.
@@ -1726,44 +1771,99 @@ const Index = () => {
         || getPersonalGeminiModel()
         || 'gemini-2.5-flash').replace(/^google\//, '');
 
-      setUploadProgress(0);
+      setUploadProgress(resumeFrom?.progress || 0);
       toast({
         title: '✨ שולח ל-Gemini...',
-        description: personalKey ? `מפתח אישי · ${model}` : `Lovable AI · ${model}`,
+        description: `${personalKey ? 'מפתח אישי' : 'Lovable AI'} · ${model} · שמירה לפי מקטעים`,
       });
 
-      const form = new FormData();
-      form.append('file', file, file.name);
-      form.append('model', model);
-      form.append('language', sourceLanguage);
-      if (personalKey) form.append('apiKey', personalKey);
+      const { duration, segments } = await extractAudioSegments(file, 8 * 60);
+      const startIndex = resumeFrom?.lastSegEnd
+        ? Math.min(segments.length, Math.floor(resumeFrom.lastSegEnd / (8 * 60)))
+        : 0;
+      const completedText = resumeFrom?.text?.trim() ? [resumeFrom.text.trim()] : [];
+      let provider = 'lovable';
 
-      const result = await xhrInvoke('transcribe-gemini', form, (p) => setUploadProgress(p));
-      if (result.error) throw result.error;
-      const data = result.data as { text?: string; provider?: string; fallbackReason?: string } | null;
-      if (!data?.text) throw new Error('לא התקבל תמלול מ-Gemini');
+      saveRecoveryPartial({
+        engine: 'gemini',
+        text: completedText.join('\n\n'),
+        wordTimings: [],
+        progress: Math.round((startIndex / segments.length) * 100),
+        audioDuration: duration,
+        lastSegEnd: startIndex * 8 * 60,
+        sourceFile: {
+          name: file.name,
+          size: file.size,
+          lastModified: file.lastModified,
+          type: file.type,
+          cloudAudioPath: resumeFrom?.sourceFile?.cloudAudioPath,
+          cloudBackedUpAt: resumeFrom?.sourceFile?.cloudBackedUpAt,
+        },
+      });
 
-      if (data.fallbackReason === 'personal_exhausted' && personalKey) {
-        toast({ title: 'מפתח Gemini האישי מוצה', description: 'התמלול הושלם דרך Lovable AI' });
+      for (let index = startIndex; index < segments.length; index++) {
+        const segment = segments[index];
+        const form = new FormData();
+        form.append('file', segment.file, segment.file.name);
+        form.append('model', model);
+        form.append('language', sourceLanguage);
+        if (personalKey) form.append('apiKey', personalKey);
+
+        const result = await xhrInvoke('transcribe-gemini', form, (uploadPercent) => {
+          const overall = ((index + uploadPercent / 100) / segments.length) * 100;
+          setUploadProgress(Math.min(99, Math.round(overall)));
+        });
+        if (result.error) throw result.error;
+        const data = result.data as { text?: string; provider?: string; fallbackReason?: string } | null;
+        if (!data?.text) throw new Error(`לא התקבל תמלול מ-Gemini למקטע ${index + 1}`);
+        completedText.push(data.text.trim());
+        provider = data.provider || provider;
+        if (data.fallbackReason === 'personal_exhausted' && personalKey) {
+          toast({ title: 'מפתח Gemini האישי מוצה', description: 'ממשיך דרך Lovable AI' });
+        }
+
+        const endSec = segment.endSec;
+        const progress = Math.round(((index + 1) / segments.length) * 100);
+        const partial: PartialTranscript = {
+          engine: 'gemini',
+          text: completedText.join('\n\n'),
+          wordTimings: [],
+          progress,
+          audioDuration: duration,
+          lastSegEnd: endSec,
+          sourceFile: recoverPartial()?.sourceFile || {
+            name: file.name,
+            size: file.size,
+            lastModified: file.lastModified,
+            type: file.type,
+          },
+        };
+        saveRecoveryPartial(partial);
+        setTranscriptFromEngine(partial.text);
       }
 
-      const finalText = await saveToHistory(data.text, `Gemini (${model})`, undefined, []);
-      setTranscriptFromEngine(data.text);
+      const mergedText = completedText.join('\n\n').trim();
+      if (!mergedText) throw new Error('לא התקבל תמלול מ-Gemini');
+      const recoveryCloudPath = recoverPartial()?.sourceFile?.cloudAudioPath;
+      const finalText = await saveToHistory(mergedText, `Gemini (${model})`, undefined, []);
+      setTranscriptFromEngine(mergedText);
       setWordTimings([]);
+      if (recoveryCloudPath) await deleteAudioFile(recoveryCloudPath);
+      clearPartial();
       addAnalyticsRecord({
         engine: 'Gemini', status: 'success',
         fileName: file.name, fileSize: file.size,
         processingTime: (Date.now() - transcriptionStartRef.current) / 1000,
-        charCount: data.text.length, wordCount: data.text.split(/\s+/).length,
+        charCount: mergedText.length, wordCount: mergedText.split(/\s+/).length,
       });
       perfMonitor.record({
         engine: 'Gemini', status: 'success',
         fileName: file.name, fileSize: file.size,
         audioDuration: 0,
         processingTime: (Date.now() - transcriptionStartRef.current) / 1000,
-        text: data.text, wordTimings: [],
+        text: mergedText, wordTimings: [],
       });
-      toast({ title: 'הצלחה!', description: `תמלול Gemini הושלם (${data.provider === 'personal' ? 'מפתח אישי' : 'Lovable AI'})` });
+      toast({ title: 'הצלחה!', description: `תמלול Gemini הושלם (${provider === 'personal' ? 'מפתח אישי' : 'Lovable AI'})` });
       setTimeout(() => {
         navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: [], transcriptId: lastSavedTranscriptIdRef.current } });
       }, 800);
@@ -1856,7 +1956,7 @@ const Index = () => {
       // Partial is already saved to localStorage by useLocalServer on each segment
       const partial = recoverPartial();
       if (partial && partial.text) {
-        setRecoveredPartialInfo({ progress: partial.progress, wordCount: partial.wordTimings?.length || 0, lastSegEnd: partial.lastSegEnd });
+        setRecoveredPartialInfo({ progress: partial.progress, wordCount: partial.wordTimings?.length || 0, lastSegEnd: partial.lastSegEnd, sourceFile: partial.sourceFile });
         toast({ title: "⏸ תמלול הופסק", description: `נשמר תמלול חלקי (${partial.progress}%) — ${partial.wordTimings?.length || 0} מילים. אפשר להמשיך מאותו מקום` });
       } else {
         toast({ title: "תמלול הופסק" });
@@ -1906,7 +2006,7 @@ const Index = () => {
 
   const handleResumeTranscription = async (fileOverride?: File) => {
     const partial = recoverPartial();
-    if (!partial || !partial.lastSegEnd) {
+    if (!partial || (partial.engine !== 'gemini' && !partial.lastSegEnd)) {
       toast({ title: "אין מה להמשיך", description: "לא נמצא תמלול חלקי עם נקודת המשך", variant: "destructive" });
       return;
     }
@@ -1919,6 +2019,10 @@ const Index = () => {
     lastFileRef.current = file;
     setRecoveredPartialInfo(null);
     try {
+      if (partial.engine === 'gemini') {
+        await transcribeWithGemini(file, undefined, partial);
+        return;
+      }
       await transcribeWithLocalServer(file, undefined, {
         startFrom: partial.lastSegEnd,
         existingText: partial.text,
@@ -1934,8 +2038,50 @@ const Index = () => {
     const picked = e.target.files?.[0];
     e.currentTarget.value = '';
     if (!picked) return;
+    const expected = recoverPartial()?.sourceFile;
+    if (expected) {
+      const sameFile = picked.name === expected.name
+        && picked.size === expected.size
+        && picked.lastModified === expected.lastModified;
+      if (!sameFile) {
+        toast({
+          title: 'זה אינו קובץ המקור',
+          description: `יש לבחור את ${expected.name} (${formatFileSize(expected.size)}). הקובץ שנבחר לא תואם ולכן התמלול לא חודש.`,
+          variant: 'destructive',
+          duration: 12000,
+        });
+        return;
+      }
+    }
     toast({ title: 'נבחר קובץ להמשך', description: picked.name });
     await handleResumeTranscription(picked);
+  };
+
+  const handleResumeFromCloud = async () => {
+    const partial = recoverPartial();
+    const source = partial?.sourceFile;
+    if (!source?.cloudAudioPath) return;
+    try {
+      toast({ title: 'מוריד את קובץ השחזור מהענן', description: source.name });
+      const signedUrl = await getAudioUrl(source.cloudAudioPath);
+      if (!signedUrl) throw new Error('לא ניתן ליצור קישור מאובטח לקובץ');
+      const response = await fetch(signedUrl);
+      if (!response.ok) throw new Error(`הורדת הקובץ נכשלה (${response.status})`);
+      const blob = await response.blob();
+      const file = new File([blob], source.name, {
+        type: source.type || blob.type || 'application/octet-stream',
+        lastModified: source.lastModified,
+      });
+      await handleResumeTranscription(file);
+    } catch (error) {
+      await backupPartialAudioToCloud(file);
+      debugLog.error('Recovery', 'Cloud resume failed', error instanceof Error ? error.message : String(error));
+      toast({
+        title: 'לא ניתן להמשיך מהענן',
+        description: `${error instanceof Error ? error.message : 'שגיאה לא ידועה'}. אפשר לבחור את קובץ המקור ידנית.`,
+        variant: 'destructive',
+      });
+    }
   };
 
   // Batch transcription wrapper - transcribes a single file and returns text
@@ -2349,7 +2495,7 @@ const Index = () => {
         </TranscriptionWidget>
 
         {/* Recovered partial transcript banner */}
-        {recoveredPartialInfo && !isLoading && transcript && (
+        {recoveredPartialInfo && !isLoading && (
           <TranscriptionWidget id="recovery" title="שחזור תמלול">
           <Card className="p-3 border-amber-500/40 bg-amber-500/5" dir="rtl">
             <input
@@ -2376,7 +2522,7 @@ const Index = () => {
                   <Square className="h-3 w-3" />
                   עצור
                 </Button>
-                {recoveredPartialInfo.lastSegEnd && (
+                {(recoveredPartialInfo.lastSegEnd !== undefined) && (
                   <Button
                     variant="default"
                     size="sm"
@@ -2384,13 +2530,19 @@ const Index = () => {
                     onClick={() => {
                       if (currentFileRef.current || lastFileRef.current) {
                         handleResumeTranscription();
+                      } else if (recoveredPartialInfo.sourceFile?.cloudAudioPath) {
+                        handleResumeFromCloud();
                       } else {
                         resumeFileInputRef.current?.click();
                       }
                     }}
                   >
                     <Play className="h-3 w-3" />
-                    {currentFileRef.current || lastFileRef.current ? 'המשך' : 'בחר קובץ והמשך'}
+                    {currentFileRef.current || lastFileRef.current
+                      ? 'המשך'
+                      : recoveredPartialInfo.sourceFile?.cloudAudioPath
+                        ? 'המשך מהענן'
+                        : 'בחר קובץ והמשך'}
                   </Button>
                 )}
               </div>
@@ -2401,6 +2553,11 @@ const Index = () => {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {recoveredPartialInfo.wordCount} מילים{recoveredPartialInfo.lastSegEnd ? ` — עצר ב-${Math.round(recoveredPartialInfo.lastSegEnd)}s` : ''}
+                  </p>
+                  <p className="text-xs text-muted-foreground" dir="auto">
+                    {recoveredPartialInfo.sourceFile
+                      ? `קובץ מקור: ${recoveredPartialInfo.sourceFile.name} (${formatFileSize(recoveredPartialInfo.sourceFile.size)})${recoveredPartialInfo.sourceFile.cloudAudioPath ? ' · מגובה בענן' : ''}`
+                      : 'קובץ המקור לא נרשם בתמלול הישן; יש לבחור אותו מחדש'}
                   </p>
                 </div>
               </div>
@@ -2647,6 +2804,7 @@ const Index = () => {
               <ShareTranscript transcript={transcript} />
             </div>
             <TranscriptSummary transcript={transcript} />
+            <TranscriptFormattingControls text={transcript} onTextChange={setTranscript} />
           </>
         )}
 

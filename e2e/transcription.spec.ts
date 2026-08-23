@@ -6,7 +6,7 @@ test.describe('דף תמלול - UI בסיסי', () => {
     await mockSupabase(page);
     await injectAuthSession(page);
     await mockLocalServer(page);
-    await page.goto('/transcribe');
+    await page.goto('/transcribe', { waitUntil: 'domcontentloaded' });
   });
 
   test('כותרת הדף מוצגת', async ({ page }) => {
@@ -26,6 +26,82 @@ test.describe('דף תמלול - UI בסיסי', () => {
   test('טאבים מוצגים - תמלול ועריכה', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'תמלול', exact: true })).toBeVisible();
   });
+
+  test('שחזור תמלול מציג את קובץ המקור ודוחה קובץ אחר', async ({ page }) => {
+    await page.evaluate(() => {
+      localStorage.setItem('transcription_partial', JSON.stringify({
+        text: 'טקסט חלקי שנשמר',
+        progress: 15,
+        lastSegEnd: 58,
+        wordTimings: [{ word: 'טקסט', start: 0, end: 1 }],
+        sourceFile: {
+          name: 'source-recording.m4a',
+          size: 4096,
+          lastModified: 1700000000000,
+          type: 'audio/mp4',
+        },
+      }));
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByText(/קובץ מקור: source-recording\.m4a/)).toBeVisible();
+    await page.getByRole('button', { name: 'בחר קובץ והמשך' }).click();
+    await page.locator('input[type="file"][accept*=".m4a"]').last().setInputFiles({
+      name: 'different-recording.m4a',
+      mimeType: 'audio/mp4',
+      buffer: createTestAudioBuffer(),
+    });
+
+    await expect(page.getByText('זה אינו קובץ המקור')).toBeVisible();
+    await expect(page.getByText(/יש לבחור את source-recording\.m4a/)).toBeVisible();
+    await expect(page.getByText(/קובץ מקור: source-recording\.m4a/)).toBeVisible();
+  });
+
+  test('שחזור עם גיבוי ענני מאפשר המשך ללא בחירת קובץ', async ({ page }) => {
+    await page.evaluate(() => {
+      localStorage.setItem('transcription_partial', JSON.stringify({
+        text: 'טקסט חלקי בענן',
+        progress: 32,
+        lastSegEnd: 91,
+        wordTimings: [{ word: 'טקסט', start: 0, end: 1 }],
+        sourceFile: {
+          name: 'cloud-recovery.m4a',
+          size: 8192,
+          lastModified: 1700000000000,
+          type: 'audio/mp4',
+          cloudAudioPath: 'test-user/recovery/cloud-recovery.m4a',
+          cloudBackedUpAt: 1700000001000,
+        },
+      }));
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByText(/קובץ מקור: cloud-recovery\.m4a.*מגובה בענן/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'המשך מהענן' })).toBeVisible();
+  });
+
+  test('Gemini שומר checkpoint לפי מקטע ומשלים תמלול', async ({ page }) => {
+    let geminiCalls = 0;
+    await page.route('**/functions/v1/transcribe-gemini', async route => {
+      geminiCalls += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ text: 'תמלול מקטע Gemini', provider: 'personal' }),
+      });
+    });
+
+    await page.locator('label[for="gemini"]').click();
+    await page.locator('input[type="file"][accept*=".wav"]').first().setInputFiles({
+      name: 'gemini-source.wav',
+      mimeType: 'audio/wav',
+      buffer: createTestAudioBuffer(),
+    });
+
+    await expect(page).toHaveURL(/text-editor/, { timeout: 30000 });
+    expect(geminiCalls).toBe(1);
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('transcription_partial'))).toBeNull();
+  });
 });
 
 test.describe('בחירת מנוע תמלול', () => {
@@ -33,7 +109,7 @@ test.describe('בחירת מנוע תמלול', () => {
     await mockSupabase(page);
     await injectAuthSession(page);
     await mockLocalServer(page);
-    await page.goto('/transcribe');
+    await page.goto('/transcribe', { waitUntil: 'domcontentloaded' });
   });
 
   test('ניתן לבחור מנוע Groq', async ({ page }) => {
@@ -58,6 +134,47 @@ test.describe('בחירת מנוע תמלול', () => {
     // Language selector should be available
     const langSelector = page.getByText(/עברית|אנגלית|יידיש|Hebrew|auto/i);
     await expect(langSelector.first()).toBeVisible();
+  });
+
+  test('מודל CUDA נשמר ובוררי פיסוק ופסקאות מפיקים Word RTL עם פסקאות', async ({ page }) => {
+    const source = 'שלום לכולם היום נלמד נושא חדש בשיעור הראשון נדבר על חשיבות הדיוק לאחר מכן נעבור לשאלה המרכזית למה חשוב לשמור על כל המילים עכשיו נציג תשובה מסודרת וברורה לסיום נסכם את הדברים ונשמור את המסמך';
+    const formatted = 'שלום לכולם, היום נלמד נושא חדש. בשיעור הראשון נדבר על חשיבות הדיוק.\n\nלאחר מכן נעבור לשאלה המרכזית: למה חשוב לשמור על כל המילים? עכשיו נציג תשובה מסודרת וברורה.\n\nלסיום, נסכם את הדברים ונשמור את המסמך.';
+    await page.addInitScript(({ sourceText }) => {
+      localStorage.setItem('transcription_partial', JSON.stringify({ text: sourceText, progress: 100, wordTimings: [] }));
+    }, { sourceText: source });
+    const tags = JSON.stringify({ models: [{ name: 'gemma3:4b', model: 'gemma3:4b', size: 3338801804 }] });
+    await page.route('http://localhost:11434/api/tags', route => route.fulfill({ status: 200, contentType: 'application/json', body: tags }));
+    await page.route('http://127.0.0.1:11434/api/tags', route => route.fulfill({ status: 200, contentType: 'application/json', body: tags }));
+    await page.route(/http:\/\/(localhost|127\.0\.0\.1):11434\/(v1\/chat\/completions|api\/chat)/, async route => {
+      if (route.request().url().includes('/v1/')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { content: formatted } }] }) });
+      } else {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: { content: formatted } }) });
+      }
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    await page.locator('label[for="local-server"]').click();
+    const cudaModel = page.getByRole('combobox', { name: 'בחירת מודל CUDA לתמלול' });
+    await expect(cudaModel).toBeVisible();
+    await cudaModel.click();
+    await page.getByRole('option', { name: /Ivrit.ai Large V3 - דיוק מרבי/ }).click();
+
+    const punctuationModel = page.getByRole('combobox', { name: 'בחירת מנוע עבור פיסוק + פסקאות' });
+    await expect(punctuationModel).toBeVisible();
+    await punctuationModel.click();
+    await page.getByRole('option', { name: 'gemma3:4b' }).click();
+    await page.getByRole('button', { name: 'פיסוק + פסקאות', exact: true }).click();
+    await expect(page.getByText('לאחר מכן נעבור לשאלה המרכזית:', { exact: false })).toBeVisible({ timeout: 15000 });
+
+    await page.getByTestId('export-transcript').click();
+    await page.getByRole('menuitem', { name: 'Word כפי שמופיע' }).click();
+    await expect(page.getByText('DOCX הורד בהצלחה', { exact: true }).first()).toBeVisible({ timeout: 15000 });
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator('label[for="local-server"]').click();
+    await expect(page.getByRole('combobox', { name: 'בחירת מודל CUDA לתמלול' })).toContainText('Ivrit.ai Large V3');
+    await expect(page.getByRole('combobox', { name: 'בחירת מנוע עבור פיסוק + פסקאות' })).toContainText('gemma3:4b');
   });
 });
 

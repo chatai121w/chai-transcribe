@@ -10,6 +10,8 @@ import {
 import { Download, FileText, File, Loader2, Braces, Archive } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { useTranscriptFormatting } from "@/hooks/useTranscriptFormatting";
+import { buildTranscriptDocxBlob } from "@/lib/transcriptDocx";
 
 
 interface ExportButtonProps {
@@ -23,6 +25,7 @@ interface ExportButtonProps {
 
 export const ExportButton = ({ text, title = "תמלול", disabled, wordTimings, compact = false, className }: ExportButtonProps) => {
   const [isExporting, setIsExporting] = useState(false);
+  const formatter = useTranscriptFormatting();
 
   const exportToPDF = async () => {
     setIsExporting(true);
@@ -76,58 +79,14 @@ export const ExportButton = ({ text, title = "תמלול", disabled, wordTimings
     }
   };
 
-  const exportToDOCX = async () => {
+  const exportToDOCX = async (formatWithAi: boolean) => {
     setIsExporting(true);
-    try {      const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import("docx");
-      const { saveAs } = await import("file-saver");      const paragraphs = text.split('\n').map(line =>
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: line,
-              size: 24, // 12pt
-              font: "David",
-            }),
-          ],
-          bidirectional: true,
-        })
-      );
-
-      const doc = new Document({
-        sections: [{
-          properties: {},
-          children: [
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: title,
-                  bold: true,
-                  size: 36, // 18pt
-                  font: "David",
-                }),
-              ],
-              heading: HeadingLevel.HEADING_1,
-              bidirectional: true,
-            }),
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: new Date().toLocaleString('he-IL'),
-                  size: 20,
-                  color: "888888",
-                  font: "David",
-                }),
-              ],
-              bidirectional: true,
-            }),
-            new Paragraph({ children: [] }), // spacer
-            ...paragraphs,
-          ],
-        }],
-      });
-
-      const blob = await Packer.toBlob(doc);
+    try {
+      const exportText = formatWithAi ? await formatter.run(text, 'fix_and_split') : text;
+      const { saveAs } = await import("file-saver");
+      const blob = await buildTranscriptDocxBlob(exportText, title, new Date().toLocaleString('he-IL'));
       saveAs(blob, `${title}-${Date.now()}.docx`);
-      toast({ title: "DOCX הורד בהצלחה" });
+      toast({ title: "DOCX הורד בהצלחה", description: formatWithAi ? "הטקסט פוסק וחולק לפסקאות לפני הייצוא" : "נשמר במבנה RTL" });
     } catch (error) {
       console.error("DOCX export error:", error);
       toast({ title: "שגיאה בייצוא DOCX", variant: "destructive" });
@@ -306,9 +265,13 @@ export const ExportButton = ({ text, title = "תמלול", disabled, wordTimings
           <File className="w-4 h-4 ml-2" />
           ייצוא ל-PDF
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={exportToDOCX}>
+        <DropdownMenuItem onClick={() => void exportToDOCX(true)}>
           <FileText className="w-4 h-4 ml-2" />
-          ייצוא ל-DOCX
+          Word עם פיסוק ופסקאות
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void exportToDOCX(false)}>
+          <FileText className="w-4 h-4 ml-2" />
+          Word כפי שמופיע
         </DropdownMenuItem>
         <DropdownMenuItem onClick={exportToTXT}>
           <FileText className="w-4 h-4 ml-2" />

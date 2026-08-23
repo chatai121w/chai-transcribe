@@ -30,6 +30,13 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
   const { text, model, toneStyle, targetLanguage } = params;
   let { action, customPrompt } = params;
 
+  // Quick transcript actions are local UI names. Route them as explicit prompts
+  // so older cloud functions do not reject them as unknown actions.
+  if (['fix_errors', 'split_paragraphs', 'fix_and_split'].includes(action)) {
+    customPrompt = ACTION_PROMPTS[action];
+    action = 'custom';
+  }
+
   // ── Hebrew-only output guard: convert to action='custom' with prefixed prompt ──
   const hebrewPrefix = buildHebrewGuardPrefix(action);
   if (hebrewPrefix) {

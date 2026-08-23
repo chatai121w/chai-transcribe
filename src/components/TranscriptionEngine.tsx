@@ -47,6 +47,15 @@ const getLocalModelLabel = (): string => {
 const START_CMD_LOCAL = '.\\scripts\\start-whisper-server.ps1';
 const START_CMD_LOVABLE = '.\\scripts\\start-lovable.ps1';
 
+const CUDA_TRANSCRIPTION_MODELS = [
+  { value: 'ivrit-ai/whisper-large-v3-turbo-ct2', label: 'Ivrit.ai Turbo V3 - מהיר ומומלץ' },
+  { value: 'ivrit-ai/whisper-large-v3-ct2', label: 'Ivrit.ai Large V3 - דיוק מרבי' },
+  { value: 'ivrit-ai/yi-whisper-large-v3-turbo-ct2', label: 'Ivrit.ai יידיש Turbo' },
+  { value: 'ivrit-ai/yi-whisper-large-v3-ct2', label: 'Ivrit.ai יידיש מלא' },
+  { value: 'large-v3-turbo', label: 'Whisper Large V3 Turbo' },
+  { value: 'large-v3', label: 'Whisper Large V3' },
+] as const;
+
 // True remote = not localhost AND server URL is explicitly set to a non-localhost address
 const isNonLocalHost = !['localhost', '127.0.0.1'].includes(window.location.hostname);
 const hasCustomServerUrl = () => {
@@ -59,7 +68,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { isConnected, serverStatus, checkConnection, startPolling, stopPolling, shutdownServer, warmupServer, preloadModelStream, cancelPreload, modelReady, modelLoading, getBaseUrl } = useLocalServer();
-  const { preferences: cloudPrefs, updatePreferences, isLoaded: cloudLoaded } = useCloudPreferences();
+  const { preferences: cloudPrefs, updatePreferences, patchTabSettings, isLoaded: cloudLoaded } = useCloudPreferences();
   const cloudSynced = useRef(false);
   const [isStarting, setIsStarting] = useState(false);
   const [fastMode, setFastMode] = useState(() => localStorage.getItem('cuda_fast_mode') === '1');
@@ -69,6 +78,27 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
   const [noConditionPrev, setNoConditionPrev] = useState(() => localStorage.getItem('cuda_no_condition_prev') === '1');
   const [vadAggressive, setVadAggressive] = useState(() => localStorage.getItem('cuda_vad_aggressive') === '1');
   const [preset, setPreset] = useState<'fast' | 'balanced' | 'accurate'>(() => (localStorage.getItem('cuda_preset') as 'fast' | 'balanced' | 'accurate') || 'balanced');
+  const [cudaModel, setCudaModel] = useState(() => localStorage.getItem('preferred_local_model') || 'ivrit-ai/whisper-large-v3-turbo-ct2');
+
+  useEffect(() => {
+    if (!cloudLoaded) return;
+    try {
+      const parsed = JSON.parse(cloudPrefs.tab_settings_json || '{}');
+      if (typeof parsed.preferredLocalTranscriptionModel === 'string' && parsed.preferredLocalTranscriptionModel) {
+        setCudaModel(parsed.preferredLocalTranscriptionModel);
+        localStorage.setItem('preferred_local_model', parsed.preferredLocalTranscriptionModel);
+        localStorage.setItem('preferred_local_model_runtime', 'server');
+      }
+    } catch { /* keep local choice */ }
+  }, [cloudLoaded, cloudPrefs.tab_settings_json]);
+
+  const handleCudaModelChange = useCallback((model: string) => {
+    setCudaModel(model);
+    localStorage.setItem('preferred_local_model', model);
+    localStorage.setItem('preferred_local_model_runtime', 'server');
+    patchTabSettings({ preferredLocalTranscriptionModel: model });
+    toast({ title: 'מודל התמלול נשמר', description: 'הבחירה תישמר אחרי רענון ותסונכרן לענן' });
+  }, [patchTabSettings]);
 
   // Sync local state from cloud preferences (handles login from new machine)
   useEffect(() => {
@@ -539,6 +569,23 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
       )}
 
       {/* Model preload mode + manual preload */}
+      {selected === 'local-server' && (
+        <div className="mt-3 border-t pt-3" dir="rtl">
+          <Label className="mb-1.5 block text-right text-sm font-semibold">מודל CUDA לתמלול</Label>
+          <Select value={cudaModel} onValueChange={handleCudaModelChange}>
+            <SelectTrigger className="h-10 w-full text-right" dir="rtl" aria-label="בחירת מודל CUDA לתמלול">
+              <SelectValue placeholder="בחר מודל תמלול" />
+            </SelectTrigger>
+            <SelectContent dir="rtl" align="end">
+              {CUDA_TRANSCRIPTION_MODELS.map((model) => (
+                <SelectItem key={model.value} value={model.value}>{model.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-right text-[11px] text-muted-foreground">המודל הנבחר ישמש בתמלול הבא ויישמר מקומית ובענן.</p>
+        </div>
+      )}
+
       {selected === 'local-server' && isConnected && (
         <div className="border-t pt-3 mt-3 space-y-2">
           <Label className="text-xs font-medium text-right block">מצב טעינת מודל</Label>

@@ -39,6 +39,37 @@ export async function extractAudioSegment(
   return new File([wavBuffer], segmentName, { type: "audio/wav" });
 }
 
+export async function extractAudioSegments(
+  file: File,
+  segmentDurationSec: number,
+): Promise<{ duration: number; segments: Array<{ file: File; startSec: number; endSec: number }> }> {
+  const audioBuffer = await decodeAudioFile(file);
+  const duration = audioBuffer.duration;
+  const safeSegmentDuration = Math.max(30, segmentDurationSec);
+  const segments: Array<{ file: File; startSec: number; endSec: number }> = [];
+
+  for (let startSec = 0; startSec < duration; startSec += safeSegmentDuration) {
+    const endSec = Math.min(duration, startSec + safeSegmentDuration);
+    const startSample = Math.floor(startSec * audioBuffer.sampleRate);
+    const endSample = Math.floor(endSec * audioBuffer.sampleRate);
+    const wavBuffer = encodeSegmentToWav(
+      audioBuffer,
+      startSample,
+      Math.max(1, endSample - startSample),
+      audioBuffer.numberOfChannels,
+      audioBuffer.sampleRate,
+    );
+    const baseName = file.name.replace(/\.[^.]+$/, '');
+    segments.push({
+      file: new File([wavBuffer], `${baseName}-part-${segments.length + 1}.wav`, { type: 'audio/wav' }),
+      startSec,
+      endSec,
+    });
+  }
+
+  return { duration, segments };
+}
+
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }

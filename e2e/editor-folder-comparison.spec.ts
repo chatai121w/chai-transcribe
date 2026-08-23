@@ -61,6 +61,76 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
     await expect(page.getByRole('button', { name: 'לא עוקב' }).first()).toBeVisible();
   });
 
+  test('שם ההקלטה ושם התיקייה מיושרים לימין וניתנים לעריכה', async ({ page }) => {
+    const folder = {
+      id: 'folder-edit', user_id: 'test-user-00000000-0000-0000-0000-000000000001', parent_id: null,
+      name: 'שם תיקייה קודם', color: null, emoji: null, pinned: false, position: 0,
+      drive_folder_id: null, drive_folder_name: null, drive_synced_at: null,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    };
+    const transcripts = MOCK_TRANSCRIPTS.map((item) => item.id === 'tr-002'
+      ? { ...item, title: 'שם הקלטה קודם', folder_id: folder.id, folder: folder.name }
+      : item);
+    const writes: Array<{ url: string; body: string | null }> = [];
+
+    await page.route('**/rest/v1/folders**', async route => {
+      if (route.request().method() !== 'GET') {
+        writes.push({ url: route.request().url(), body: route.request().postData() });
+        return route.fulfill({ status: 200, json: {} });
+      }
+      return route.fulfill({ status: 200, json: [folder] });
+    });
+    await page.route('**/rest/v1/transcripts**', async route => {
+      if (route.request().method() !== 'GET') {
+        writes.push({ url: route.request().url(), body: route.request().postData() });
+        return route.fulfill({ status: 200, json: {} });
+      }
+      return route.fulfill({ status: 200, json: transcripts });
+    });
+    await page.goto('/text-editor');
+
+    const titleLabel = page.getByText('שם התמלול:', { exact: true });
+    const folderLabel = page.getByText('שם התיקייה:', { exact: true });
+    await expect(titleLabel).toBeVisible({ timeout: 15_000 });
+    await expect(folderLabel).toBeVisible();
+    await expect(titleLabel.locator('..')).toHaveCSS('direction', 'rtl');
+    await expect(folderLabel.locator('..')).toHaveCSS('direction', 'rtl');
+
+    await titleLabel.locator('..').getByRole('button', { name: 'ערוך' }).click();
+    const titleInput = titleLabel.locator('..').getByRole('textbox');
+    await titleInput.fill('שם הקלטה חדש');
+    await titleLabel.locator('..').getByRole('button', { name: 'שמור' }).click();
+
+    await folderLabel.locator('..').getByRole('button', { name: 'ערוך' }).click();
+    const folderInput = page.getByRole('textbox', { name: 'עריכת שם התיקייה' });
+    await folderInput.fill('שם תיקייה חדש');
+    await folderLabel.locator('..').getByRole('button', { name: 'שמור' }).click();
+
+    await expect.poll(() => writes.some((write) => write.body?.includes('שם הקלטה חדש'))).toBe(true);
+    await expect.poll(() => writes.some((write) => write.body?.includes('שם תיקייה חדש'))).toBe(true);
+
+    await page.getByTestId('send-transcript-to-compare').click();
+    await page.getByTestId('choose-comparison-base').click();
+    const comparisonDialog = page.getByTestId('comparison-source-dialog');
+    await expect(comparisonDialog).toHaveCSS('direction', 'rtl');
+    await comparisonDialog.getByRole('button', { name: /שם תיקייה קודם/ }).click();
+
+    await comparisonDialog.getByRole('button', { name: 'ערוך שם תיקייה' }).click();
+    const dialogFolderInput = comparisonDialog.getByRole('textbox', { name: 'שם התיקייה' });
+    await expect(dialogFolderInput).toHaveCSS('text-align', 'right');
+    await dialogFolderInput.fill('תיקייה מהחלון');
+    await comparisonDialog.getByRole('button', { name: 'שמור שם' }).click();
+
+    await comparisonDialog.getByRole('button', { name: 'ערוך שם הקלטה' }).first().click();
+    const dialogTranscriptInput = comparisonDialog.getByRole('textbox', { name: 'שם ההקלטה' });
+    await expect(dialogTranscriptInput).toHaveCSS('text-align', 'right');
+    await dialogTranscriptInput.fill('הקלטה מהחלון');
+    await dialogTranscriptInput.press('Enter');
+
+    await expect.poll(() => writes.some((write) => write.body?.includes('תיקייה מהחלון'))).toBe(true);
+    await expect.poll(() => writes.some((write) => write.body?.includes('הקלטה מהחלון'))).toBe(true);
+  });
+
   test('בחירת תמלולים מתוך העץ טוענת זוג אמיתי להשוואה', async ({ page }) => {
     const folder = {
       id: 'folder-lessons',
@@ -146,7 +216,7 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
 
     await page.getByTestId('export-transcript').click();
     await expect(page.getByRole('menuitem', { name: 'ייצוא ל-PDF' })).toBeVisible();
-    await expect(page.getByRole('menuitem', { name: 'ייצוא ל-DOCX' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Word עם פיסוק ופסקאות' })).toBeVisible();
     await expect(page.getByRole('menuitem', { name: 'ייצוא ל-SRT (כתוביות)' })).toBeVisible();
     await expect(page.getByRole('menuitem', { name: 'ייצוא ל-VTT (כתוביות)' })).toBeVisible();
     await expect(page.getByRole('menuitem', { name: 'ייצוא הכול (ZIP)' })).toBeVisible();

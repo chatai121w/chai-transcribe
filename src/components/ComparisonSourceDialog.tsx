@@ -5,11 +5,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronDown, ChevronLeft, FileText, Folder, FolderOpen, Mic2, Search } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen, Loader2, Mic2, Pencil, Search, X } from "lucide-react";
 import { useFolderTree, type FolderTreeNode } from "@/hooks/useFolderTree";
-import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
+import { useCloudTranscripts, type CloudTranscript } from "@/hooks/useCloudTranscripts";
 import type { TextVersion } from "@/components/TextEditHistory";
 import { cn } from "@/lib/utils";
+import { toast } from "@/hooks/use-toast";
 
 interface ComparisonSourceDialogProps {
   open: boolean;
@@ -42,9 +43,12 @@ export function ComparisonSourceDialog({
   onSelectVersion,
   onSelectTranscript,
 }: ComparisonSourceDialogProps) {
-  const { tree } = useFolderTree();
+  const { tree, updateFolder } = useFolderTree();
+  const { updateTranscript } = useCloudTranscripts();
   const [query, setQuery] = useState("");
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState<{ type: "folder" | "transcript"; id: string; value: string } | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const normalizedQuery = query.trim().toLocaleLowerCase("he");
 
   const matchingVersions = useMemo(() => versions.filter((version) => (
@@ -82,22 +86,98 @@ export function ComparisonSourceDialog({
     onOpenChange(false);
   };
 
-  const renderTranscript = (transcript: CloudTranscript) => (
-    <button
+  const saveEdit = async () => {
+    if (!editing || savingEdit) return;
+    const value = editing.value.trim();
+    if (!value) {
+      toast({ title: "השם לא יכול להיות ריק", variant: "destructive" });
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      if (editing.type === "folder") await updateFolder(editing.id, { name: value });
+      else await updateTranscript(editing.id, { title: value });
+      setEditing(null);
+      toast({ title: editing.type === "folder" ? "שם התיקייה נשמר" : "שם ההקלטה נשמר" });
+    } catch (error) {
+      toast({
+        title: "שמירת השם נכשלה",
+        description: error instanceof Error ? error.message : "נסה שוב",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const editControls = (type: "folder" | "transcript", id: string, label: string) => {
+    const isEditing = editing?.type === type && editing.id === id;
+    if (!isEditing) {
+      return (
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8 shrink-0"
+          aria-label={type === "folder" ? "ערוך שם תיקייה" : "ערוך שם הקלטה"}
+          onClick={(event) => {
+            event.stopPropagation();
+            setEditing({ type, id, value: label });
+          }}
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+      );
+    }
+
+    return (
+      <div className="flex min-w-0 flex-1 items-center gap-1" onClick={(event) => event.stopPropagation()}>
+        <Input
+          autoFocus
+          dir="rtl"
+          value={editing.value}
+          aria-label={`שם ${type === "folder" ? "התיקייה" : "ההקלטה"}`}
+          className="h-8 min-w-0 flex-1 text-right"
+          onChange={(event) => setEditing({ ...editing, value: event.target.value })}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void saveEdit();
+            if (event.key === "Escape") setEditing(null);
+          }}
+        />
+        <Button type="button" size="icon" className="h-8 w-8" aria-label="שמור שם" disabled={savingEdit} onClick={() => void saveEdit()}>
+          {savingEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        </Button>
+        <Button type="button" size="icon" variant="ghost" className="h-8 w-8" aria-label="בטל עריכת שם" disabled={savingEdit} onClick={() => setEditing(null)}>
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+    );
+  };
+
+  const renderTranscript = (transcript: CloudTranscript) => {
+    const label = transcriptLabel(transcript);
+    const isEditing = editing?.type === "transcript" && editing.id === transcript.id;
+    return (
+    <div
       key={transcript.id}
-      type="button"
-      className="flex w-full min-w-0 items-center gap-3 rounded-md border bg-background px-3 py-2 text-right hover:border-primary/50 hover:bg-muted/40"
-      onClick={() => selectTranscript(transcript)}
+      dir="rtl"
+      className="flex w-full min-w-0 items-center gap-2 rounded-md border bg-background px-2 py-2 text-right hover:border-primary/50 hover:bg-muted/40"
     >
-      <Mic2 className="h-4 w-4 shrink-0 text-primary" />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">{transcriptLabel(transcript)}</span>
-        <span className="block truncate text-[11px] text-muted-foreground">
-          {transcript.engine || "לא ידוע"} · {new Date(transcript.updated_at || transcript.created_at).toLocaleDateString("he-IL")}
-        </span>
-      </span>
-    </button>
+      {!isEditing && (
+        <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-right" onClick={() => selectTranscript(transcript)}>
+          <Mic2 className="h-4 w-4 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium">{label}</span>
+            <span className="block truncate text-[11px] text-muted-foreground">
+              {transcript.engine || "לא ידוע"} · {new Date(transcript.updated_at || transcript.created_at).toLocaleDateString("he-IL")}
+            </span>
+          </span>
+        </button>
+      )}
+      {editControls("transcript", transcript.id, label)}
+    </div>
   );
+  };
 
   const renderFolder = (node: FolderTreeNode) => {
     if (!folderHasMatches(node)) return null;
@@ -105,20 +185,23 @@ export function ComparisonSourceDialog({
     const items = byFolder.get(node.id) || [];
     return (
       <div key={node.id} style={{ paddingInlineStart: `${node.depth * 14}px` }}>
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-right text-sm font-medium hover:bg-muted"
-          onClick={() => setOpenFolders((previous) => {
+        <div dir="rtl" className="flex w-full items-center gap-1 rounded-md px-1 py-1 text-right text-sm font-medium hover:bg-muted">
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-2 px-1 py-1 text-right"
+            onClick={() => setOpenFolders((previous) => {
             const next = new Set(previous);
             if (next.has(node.id)) next.delete(node.id); else next.add(node.id);
             return next;
-          })}
-        >
-          {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-          {isOpen ? <FolderOpen className="h-4 w-4" /> : <Folder className="h-4 w-4" />}
-          <span className="truncate">{node.emoji ? `${node.emoji} ` : ""}{node.name}</span>
-          <Badge variant="secondary" className="me-auto h-5 text-[10px]">{items.length}</Badge>
-        </button>
+            })}
+          >
+            {isOpen ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronLeft className="h-4 w-4 shrink-0" />}
+            {isOpen ? <FolderOpen className="h-4 w-4 shrink-0" /> : <Folder className="h-4 w-4 shrink-0" />}
+            {editing?.type !== "folder" || editing.id !== node.id ? <span className="truncate">{node.emoji ? `${node.emoji} ` : ""}{node.name}</span> : null}
+            <Badge variant="secondary" className="me-auto h-5 text-[10px]">{items.length}</Badge>
+          </button>
+          {editControls("folder", node.id, node.name)}
+        </div>
         {isOpen && (
           <div className="space-y-1 pb-2 pe-5">
             {items.map(renderTranscript)}
@@ -133,7 +216,7 @@ export function ComparisonSourceDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent dir="rtl" className="max-w-2xl gap-0 overflow-hidden p-0" data-testid="comparison-source-dialog">
+      <DialogContent dir="rtl" className="max-w-2xl gap-0 overflow-hidden p-0 text-right" data-testid="comparison-source-dialog">
         <DialogHeader className="border-b px-5 py-4 text-right">
           <DialogTitle>בחירת {side === "base" ? "גרסת בסיס" : "גרסה חדשה"}</DialogTitle>
           <p className="text-xs text-muted-foreground">בחר גרסה קיימת או תמלול מסווג מתוך עץ התיקיות.</p>
@@ -146,7 +229,7 @@ export function ComparisonSourceDialog({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="חפש לפי שם, תיקייה או מנוע..."
-              className="pe-9"
+              className="pe-9 text-right"
               aria-label="חיפוש מקור להשוואה"
             />
           </div>

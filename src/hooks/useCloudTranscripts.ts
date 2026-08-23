@@ -268,6 +268,15 @@ export const useCloudTranscripts = () => {
     }
   }, []);
 
+  const deleteAudioFile = useCallback(async (filePath: string): Promise<boolean> => {
+    const { error } = await supabase.storage.from('permanent-audio').remove([filePath]);
+    if (error) {
+      debugLog.error('Cloud', 'Error deleting recovery audio', error.message);
+      return false;
+    }
+    return true;
+  }, []);
+
   const ensureTranscriptAudioUploaded = useCallback(async (id: string): Promise<string | null> => {
     const cloudTranscript = state.transcripts.find((transcript) => transcript.id === id);
     if (cloudTranscript?.audio_file_path) return cloudTranscript.audio_file_path;
@@ -608,6 +617,8 @@ export const useCloudTranscripts = () => {
     deleteAll,
     fetchTranscripts,
     getAudioUrl,
+    uploadAudioFile,
+    deleteAudioFile,
     ensureTranscriptAudioUploaded,
     stats,
     isCloud: isAuthenticated,

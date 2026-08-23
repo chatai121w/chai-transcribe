@@ -54,11 +54,20 @@ export interface CudaOptions {
 }
 
 export interface PartialTranscript {
+  engine?: 'local-server' | 'gemini';
   text: string;
   wordTimings: WordTiming[];
   progress: number;         // 0-100 real percentage
   audioDuration?: number;
   lastSegEnd?: number;       // last segment end time in seconds (for resume)
+  sourceFile?: {
+    name: string;
+    size: number;
+    lastModified: number;
+    type: string;
+    cloudAudioPath?: string;
+    cloudBackedUpAt?: number;
+  };
 }
 
 interface ServerStatus {
@@ -509,11 +518,18 @@ export const useLocalServer = () => {
             const realProgress = evt.progress ?? 0;
             setProgress(realProgress);
             const partial: PartialTranscript = {
+              engine: 'local-server',
               text: accText.join(' '),
               wordTimings: [...accWords],
               progress: realProgress,
               audioDuration,
               lastSegEnd,
+              sourceFile: {
+                name: file.name,
+                size: file.size,
+                lastModified: file.lastModified,
+                type: file.type,
+              },
             };
             setPartialTranscript(partial);
             onPartial?.(partial);
@@ -706,11 +722,18 @@ export const useLocalServer = () => {
             setProgress(realProgress);
 
             const partial: PartialTranscript = {
+              engine: 'local-server',
               text: accText.join(' '),
               wordTimings: [...accWords],
               progress: realProgress,
               audioDuration,
               lastSegEnd,
+              sourceFile: {
+                name: file.name,
+                size: file.size,
+                lastModified: file.lastModified,
+                type: file.type,
+              },
             };
             setPartialTranscript(partial);
             onPartial?.(partial);
@@ -976,6 +999,27 @@ export const useLocalServer = () => {
     setModelLoading(false);
   }, []);
 
+  const saveRecoveryPartial = useCallback((partial: PartialTranscript) => {
+    localStorage.setItem(PARTIAL_STORAGE_KEY, JSON.stringify(partial));
+    setPartialTranscript(partial);
+  }, []);
+
+  const updatePartialCloudBackup = useCallback((cloudAudioPath: string): PartialTranscript | null => {
+    const partial = recoverPartial();
+    if (!partial?.sourceFile) return partial;
+    const updated: PartialTranscript = {
+      ...partial,
+      sourceFile: {
+        ...partial.sourceFile,
+        cloudAudioPath,
+        cloudBackedUpAt: Date.now(),
+      },
+    };
+    localStorage.setItem(PARTIAL_STORAGE_KEY, JSON.stringify(updated));
+    setPartialTranscript(updated);
+    return updated;
+  }, [recoverPartial]);
+
   return {
     isConnected,
     serverStatus,
@@ -993,6 +1037,8 @@ export const useLocalServer = () => {
     stageAudio,
     cancelStream,
     recoverPartial,
+    saveRecoveryPartial,
+    updatePartialCloudBackup,
     clearPartial,
     loadModel,
     downloadModel,
