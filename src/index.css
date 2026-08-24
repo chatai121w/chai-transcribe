@@ -510,3 +510,43 @@ All colors MUST be HSL.
     transform: translateY(0) !important;
   }
 }
+/* Visual audio editor: large semantic range boundaries that remain easy to grab. */
+.visual-cut-waveform[data-selection-mode="keep"] {
+  --cut-marker-color: rgb(22 163 74);
+}
+
+.visual-cut-waveform[data-selection-mode="remove"] {
+  --cut-marker-color: rgb(220 38 38);
+}
+
+.visual-cut-waveform[data-selection-mode="split"] {
+  --cut-marker-color: rgb(234 88 12);
+}
+
+.visual-cut-waveform ::part(region-handle) {
+  width: 10px !important;
+  border-color: var(--cut-marker-color) !important;
+  border-width: 3px !important;
+  z-index: 8 !important;
+}
+
+.visual-cut-waveform ::part(region-handle-left)::after,
+.visual-cut-waveform ::part(region-handle-right)::after {
+  position: absolute;
+  top: -10px;
+  width: 16px;
+  height: 16px;
+  border: 3px solid white;
+  border-radius: 9999px;
+  background: var(--cut-marker-color);
+  box-shadow: 0 1px 5px rgb(15 23 42 / 35%);
+  content: "";
+}
+
+.visual-cut-waveform ::part(region-handle-left)::after {
+  left: -9px;
+}
+
+.visual-cut-waveform ::part(region-handle-right)::after {
+  right: -9px;
+}

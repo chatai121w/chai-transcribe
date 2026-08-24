@@ -113,7 +113,7 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
     await page.getByTestId('choose-comparison-base').click();
     const comparisonDialog = page.getByTestId('comparison-source-dialog');
     await expect(comparisonDialog).toHaveCSS('direction', 'rtl');
-    await comparisonDialog.getByRole('button', { name: /שם תיקייה קודם/ }).click();
+    await comparisonDialog.getByRole('button', { name: 'פתח את תיקיית שם תיקייה קודם' }).click();
 
     await comparisonDialog.getByRole('button', { name: 'ערוך שם תיקייה' }).click();
     const dialogFolderInput = comparisonDialog.getByRole('textbox', { name: 'שם התיקייה' });
@@ -174,7 +174,7 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
     await baseChooser.click();
     const dialog = page.getByTestId('comparison-source-dialog');
     await expect(dialog.getByRole('heading', { name: 'בחירת גרסת בסיס' })).toBeVisible();
-    await dialog.getByRole('button', { name: /שיעורים מסווגים/ }).click();
+    await dialog.getByRole('button', { name: 'פתח את תיקיית שיעורים מסווגים' }).click();
     await dialog.getByRole('button', { name: new RegExp(MOCK_TRANSCRIPTS[0].title) }).click();
     await expect(baseChooser).toContainText(MOCK_TRANSCRIPTS[0].title);
 
@@ -185,6 +185,62 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
     await expect(baseChooser).toContainText(MOCK_TRANSCRIPTS[0].title);
     await expect(newChooser).toContainText(comparisonTranscript.title);
     await expect(page.getByText('הגרסה החדשה נבחרה', { exact: true })).toBeVisible();
+  });
+
+  test('ניהול תיקיות בחלון ההשוואה תומך ביצירה, קינון וגרירה ללא חסימת העורך', async ({ page }) => {
+    const now = new Date().toISOString();
+    const folders = [
+      {
+        id: 'folder-drag-source', user_id: 'test-user-00000000-0000-0000-0000-000000000001', parent_id: null,
+        name: 'תיקיית מקור', color: null, emoji: null, pinned: false, position: 0,
+        drive_folder_id: null, drive_folder_name: null, drive_synced_at: null, created_at: now, updated_at: now,
+      },
+      {
+        id: 'folder-drag-target', user_id: 'test-user-00000000-0000-0000-0000-000000000001', parent_id: null,
+        name: 'תיקיית יעד', color: null, emoji: null, pinned: false, position: 1,
+        drive_folder_id: null, drive_folder_name: null, drive_synced_at: null, created_at: now, updated_at: now,
+      },
+    ];
+    const writes: Array<{ method: string; body: string | null }> = [];
+    await page.route('**/rest/v1/folders**', async route => {
+      const method = route.request().method();
+      if (method !== 'GET') {
+        writes.push({ method, body: route.request().postData() });
+        return route.fulfill({ status: 200, json: method === 'POST' ? { ...folders[0], id: `created-${writes.length}` } : {} });
+      }
+      return route.fulfill({ status: 200, json: folders });
+    });
+
+    await page.goto('/text-editor');
+    await page.getByTestId('send-transcript-to-compare').click();
+    await page.getByTestId('choose-comparison-base').click();
+    const dialog = page.getByTestId('comparison-source-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(page.locator('[data-radix-dialog-overlay]')).toHaveCount(0);
+
+    await dialog.getByRole('button', { name: 'תיקייה חדשה' }).click();
+    await dialog.getByRole('textbox', { name: 'שם תיקייה ראשית חדשה' }).fill('תיקייה ראשית חדשה');
+    await dialog.getByRole('button', { name: 'שמור תיקייה חדשה' }).click();
+
+    await dialog.getByRole('button', { name: 'צור תת-תיקייה בתוך תיקיית יעד' }).click();
+    await dialog.getByRole('textbox', { name: 'שם תת-תיקייה חדשה' }).fill('תת תיקייה חדשה');
+    await dialog.getByRole('textbox', { name: 'שם תת-תיקייה חדשה' }).press('Enter');
+
+    await expect.poll(() => writes.some(({ body }) => body?.includes('תיקייה ראשית חדשה') && body.includes('"parent_id":null'))).toBe(true);
+    await expect.poll(() => writes.some(({ body }) => body?.includes('תת תיקייה חדשה') && body.includes('folder-drag-target'))).toBe(true);
+
+    const dragHandle = dialog.getByRole('button', { name: 'גרור את תיקיית מקור' });
+    const dropTarget = dialog.getByTestId('comparison-folder-folder-drag-target');
+    const dragBox = await dragHandle.boundingBox();
+    const dropBox = await dropTarget.boundingBox();
+    expect(dragBox).not.toBeNull();
+    expect(dropBox).not.toBeNull();
+    await page.mouse.move(dragBox!.x + dragBox!.width / 2, dragBox!.y + dragBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(dragBox!.x + dragBox!.width / 2 + 12, dragBox!.y + dragBox!.height / 2, { steps: 3 });
+    await page.mouse.move(dropBox!.x + dropBox!.width / 2, dropBox!.y + dropBox!.height / 2, { steps: 12 });
+    await page.mouse.up();
+    await expect.poll(() => writes.some(({ method, body }) => method === 'PATCH' && body?.includes('folder-drag-target'))).toBe(true);
   });
 
   test('חיבור התמלול לווידאו משתמש בתזמונים ומוריד קובץ', async ({ page }) => {

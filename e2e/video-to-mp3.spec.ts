@@ -166,12 +166,41 @@ test.describe('ממיר וידאו ואודיו', () => {
     await addAtCursor.click();
 
     await expect(editor.getByText('2 אזורים מסומנים')).toBeVisible();
+    await expect(editor.locator('.visual-cut-waveform')).toHaveAttribute('data-selection-mode', 'keep');
+    const firstRegion = waveform.locator('[part~="region"]').first();
+    await expect(firstRegion).toHaveCSS('background-color', 'rgba(34, 197, 94, 0.3)');
+    const leftHandle = waveform.locator('[part~="region-handle-left"]').first();
+    await expect(leftHandle).toBeVisible();
+    expect(await leftHandle.evaluate((element) => getComputedStyle(element, '::after').width)).toBe('16px');
     await editor.getByRole('radio', { name: /הסר את המסומן/ }).click();
     await expect(editor.getByRole('radio', { name: /הסר את המסומן/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(editor.locator('.visual-cut-waveform')).toHaveAttribute('data-selection-mode', 'remove');
+    await expect(firstRegion).toHaveCSS('background-color', 'rgba(239, 68, 68, 0.28)');
     await expect(editor.getByText(/3 קטעים יופקו/)).toBeVisible();
 
     await editor.getByRole('radio', { name: /פצל ושמור את הכול/ }).click();
+    await expect(editor.locator('.visual-cut-waveform')).toHaveAttribute('data-selection-mode', 'split');
+    await expect(firstRegion).toHaveCSS('background-color', 'rgba(249, 115, 22, 0.3)');
     await expect(editor.getByText(/5 קטעים יופקו/)).toBeVisible();
+    const orderPanel = editor.getByTestId('split-output-order');
+    await expect(orderPanel.getByText('סדר החלקים בפלט')).toBeVisible();
+    await expect(orderPanel.locator('[data-testid^="output-segment-"]')).toHaveCount(5);
+    await expect(orderPanel.getByText('קטע מסומן').first()).toHaveCSS('color', 'rgb(67, 20, 7)');
+
+    const outputRows = orderPanel.locator('[data-testid^="output-segment-"]');
+    const firstOutputId = await outputRows.first().getAttribute('data-testid');
+    const firstDragHandle = orderPanel.getByRole('button', { name: 'גרור קטע פלט 1' });
+    const lastOutput = outputRows.last();
+    const sourceBox = await firstDragHandle.boundingBox();
+    const targetBox = await lastOutput.boundingBox();
+    expect(sourceBox).not.toBeNull();
+    expect(targetBox).not.toBeNull();
+    await page.mouse.move(sourceBox!.x + sourceBox!.width / 2, sourceBox!.y + sourceBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(sourceBox!.x + 12, sourceBox!.y + sourceBox!.height / 2, { steps: 3 });
+    await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 12 });
+    await page.mouse.up();
+    await expect.poll(async () => outputRows.last().getAttribute('data-testid')).toBe(firstOutputId);
     await expect(page.getByRole('button', { name: /חתוך 5 קטעים/ })).toBeEnabled();
   });
 

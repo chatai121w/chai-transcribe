@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.esm.js";
 import TimelinePlugin from "wavesurfer.js/dist/plugins/timeline.esm.js";
-import { Pause, Play, Plus, RotateCcw, Trash2, Volume2, ZoomIn } from "lucide-react";
+import { GripVertical, Pause, Play, Plus, RotateCcw, Trash2, Volume2, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
@@ -15,14 +18,11 @@ import {
 } from "@/lib/audioEditPlan";
 import type { CutSegment } from "@/lib/audioCutEngine";
 
-const COLORS = [
-  "rgba(37, 99, 235, 0.28)",
-  "rgba(16, 185, 129, 0.28)",
-  "rgba(245, 158, 11, 0.30)",
-  "rgba(168, 85, 247, 0.28)",
-  "rgba(236, 72, 153, 0.28)",
-  "rgba(6, 182, 212, 0.28)",
-];
+const MODE_REGION_COLORS: Record<AudioSelectionMode, string> = {
+  keep: "rgba(34, 197, 94, 0.30)",
+  remove: "rgba(239, 68, 68, 0.28)",
+  split: "rgba(249, 115, 22, 0.30)",
+};
 
 const MODE_META: Record<AudioSelectionMode, { label: string; description: string; color: string }> = {
   keep: {
@@ -52,6 +52,37 @@ function formatPreciseTime(seconds: number): string {
   return hours ? `${hours}:${base}` : base;
 }
 
+function segmentKey(segment: Pick<CutSegment, "startSec" | "endSec">): string {
+  return `${segment.startSec.toFixed(3)}-${segment.endSec.toFixed(3)}`;
+}
+
+function isSelectedSegment(segment: Pick<CutSegment, "startSec" | "endSec">, ranges: AudioRange[]): boolean {
+  return ranges.some((range) => segment.startSec >= range.startSec - 0.01 && segment.endSec <= range.endSec + 0.01);
+}
+
+function SortableSegmentRow({ id, outputIndex, segment, selected }: { id: string; outputIndex: number; segment: CutSegment; selected: boolean }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        "flex items-center gap-2 rounded-md border px-2 py-2 text-xs",
+        selected ? "border-orange-300 bg-orange-100 text-orange-950" : "border-sky-300 bg-sky-100 text-sky-950",
+        isDragging && "z-10 opacity-70 shadow-lg",
+      )}
+      data-testid={`output-segment-${id}`}
+    >
+      <button type="button" className="flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded hover:bg-white/60 active:cursor-grabbing" aria-label={`גרור קטע פלט ${outputIndex + 1}`} {...attributes} {...listeners}>
+        <GripVertical className="h-4 w-4" />
+      </button>
+      <Badge variant="outline" className="h-6 w-6 shrink-0 justify-center bg-white/60 p-0">{outputIndex + 1}</Badge>
+      <span className="min-w-0 flex-1 text-right font-medium">{selected ? "קטע מסומן" : "קטע שנשאר"}</span>
+      <span className="font-mono tabular-nums">{formatPreciseTime(segment.startSec)} ← {formatPreciseTime(segment.endSec)}</span>
+    </div>
+  );
+}
+
 interface VisualAudioCutEditorProps {
   file: File;
   durationSec: number;
@@ -70,6 +101,12 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
   const [currentTime, setCurrentTime] = useState(0);
   const [zoom, setZoom] = useState(0);
   const [activeRegionId, setActiveRegionId] = useState<string | null>(null);
+  const [segmentOrder, setSegmentOrder] = useState<string[]>([]);
+  const modeRef = useRef<AudioSelectionMode>(mode);
+  const reorderSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const syncRanges = useCallback(() => {
     const next = (regionsRef.current?.getRegions() || [])
@@ -101,7 +138,7 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
     regionsRef.current = regions;
 
     const disableDrag = regions.enableDragSelection({
-      color: COLORS[0],
+      color: MODE_REGION_COLORS[modeRef.current],
       drag: true,
       resize: true,
       minLength: 0.25,
@@ -115,8 +152,7 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
     wavesurfer.on("interaction", setCurrentTime);
     wavesurfer.on("seeking", setCurrentTime);
     regions.on("region-created", (region) => {
-      const index = regions.getRegions().findIndex((candidate) => candidate.id === region.id);
-      region.setOptions({ color: COLORS[Math.max(0, index) % COLORS.length] });
+      region.setOptions({ color: MODE_REGION_COLORS[modeRef.current] });
       syncRanges();
     });
     regions.on("region-updated", syncRanges);
@@ -146,10 +182,34 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
     wavesurferRef.current?.zoom(zoom);
   }, [ready, zoom]);
 
-  const plan = useMemo(
+  useEffect(() => {
+    modeRef.current = mode;
+    regionsRef.current?.getRegions().forEach((region) => region.setOptions({ color: MODE_REGION_COLORS[mode] }));
+  }, [mode]);
+
+  const naturalPlan = useMemo(
     () => buildAudioEditPlan(ranges, durationSec, mode),
     [durationSec, mode, ranges],
   );
+
+  useEffect(() => {
+    const available = naturalPlan.map(segmentKey);
+    setSegmentOrder((previous) => [
+      ...previous.filter((key) => available.includes(key)),
+      ...available.filter((key) => !previous.includes(key)),
+    ]);
+  }, [naturalPlan]);
+
+  const plan = useMemo(() => {
+    if (mode !== "split") return naturalPlan;
+    const byKey = new Map(naturalPlan.map((segment) => [segmentKey(segment), segment]));
+    const naturalKeys = naturalPlan.map(segmentKey);
+    const orderedKeys = [
+      ...segmentOrder.filter((key) => byKey.has(key)),
+      ...naturalKeys.filter((key) => !segmentOrder.includes(key)),
+    ];
+    return orderedKeys.map((key) => byKey.get(key)).filter((segment): segment is CutSegment => Boolean(segment));
+  }, [mode, naturalPlan, segmentOrder]);
 
   useEffect(() => {
     onPlanChange(plan, mode);
@@ -166,7 +226,7 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
     const region = plugin.addRegion({
       start,
       end,
-      color: COLORS[existing.length % COLORS.length],
+      color: MODE_REGION_COLORS[modeRef.current],
       drag: true,
       resize: true,
       minLength: 0.25,
@@ -178,6 +238,15 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
     setActiveRegionId(region.id);
     region.play(true);
   }, []);
+
+  const reorderSegments = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    setSegmentOrder((current) => {
+      const from = current.indexOf(String(active.id));
+      const to = current.indexOf(String(over.id));
+      return from < 0 || to < 0 ? current : arrayMove(current, from, to);
+    });
+  };
 
   return (
     <div className="space-y-3 rounded-xl border border-primary/20 bg-background p-3 sm:p-4" dir="rtl" data-testid="visual-audio-editor">
@@ -207,7 +276,11 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-lg border bg-muted/20 p-2" dir="ltr">
+      <div
+        className={cn("visual-cut-waveform overflow-hidden rounded-lg border p-2 pt-4 transition-colors", mode === "split" ? "bg-sky-100/70" : "bg-muted/20")}
+        data-selection-mode={mode}
+        dir="ltr"
+      >
         <div ref={waveformRef} className="min-h-[132px] w-full" data-testid="waveform-selection-area" />
       </div>
 
@@ -265,6 +338,35 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
             <Badge variant="secondary">{plan.length} קטעים יופקו</Badge>
             <span className="text-muted-foreground">משך פלט כולל: {formatPreciseTime(planDuration(plan))}</span>
           </div>
+          {mode === "split" && plan.length > 0 && (
+            <div className="rounded-lg border bg-muted/10 p-3" data-testid="split-output-order">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold">סדר החלקים בפלט</p>
+                  <p className="text-xs text-muted-foreground">גרור כל חלק למיקום הרצוי. המספרים הם סדר השמירה והאיחוד.</p>
+                </div>
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="rounded border border-orange-300 bg-orange-100 px-2 py-1 text-orange-900">כתום: מסומן</span>
+                  <span className="rounded border border-sky-300 bg-sky-100 px-2 py-1 text-sky-900">כחול: נשאר</span>
+                </div>
+              </div>
+              <DndContext sensors={reorderSensors} collisionDetection={closestCenter} onDragEnd={reorderSegments}>
+                <SortableContext items={plan.map(segmentKey)} strategy={verticalListSortingStrategy}>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {plan.map((segment, index) => (
+                      <SortableSegmentRow
+                        key={segmentKey(segment)}
+                        id={segmentKey(segment)}
+                        outputIndex={index}
+                        segment={segment}
+                        selected={isSelectedSegment(segment, ranges)}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            </div>
+          )}
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {ranges.map((range, index) => {
               const region = regionsRef.current?.getRegions().find((candidate) => candidate.id === range.id);
@@ -275,7 +377,7 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
                     "flex items-center gap-2 rounded-lg border px-2 py-2 text-xs",
                     activeRegionId === range.id && "ring-2 ring-primary/40",
                   )}
-                  style={{ borderInlineStart: `5px solid ${COLORS[index % COLORS.length].replace("0.28", "0.9").replace("0.30", "0.9")}` }}
+                  style={{ borderInlineStart: `5px solid ${MODE_REGION_COLORS[mode].replace(/0\.\d+\)/, "0.9)")}` }}
                 >
                   <Badge variant="outline" className="h-6 w-6 justify-center p-0">{index + 1}</Badge>
                   <button type="button" className="min-w-0 flex-1 text-right font-mono" onClick={() => region && playRegion(region)}>

@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
+import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Check, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen, Loader2, Mic2, Pencil, Search, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen, FolderPlus, GripVertical, Loader2, Mic2, Pencil, Plus, Search, X } from "lucide-react";
 import { useFolderTree, type FolderTreeNode } from "@/hooks/useFolderTree";
 import { useCloudTranscripts, type CloudTranscript } from "@/hooks/useCloudTranscripts";
 import type { TextVersion } from "@/components/TextEditHistory";
@@ -32,6 +33,78 @@ function transcriptLabel(transcript: CloudTranscript) {
   return transcript.title?.trim() || transcriptText(transcript).slice(0, 70) || "תמלול ללא שם";
 }
 
+interface ManagedFolderRowProps {
+  node: FolderTreeNode;
+  isOpen: boolean;
+  count: number;
+  editing: boolean;
+  editControl: ReactNode;
+  children: ReactNode;
+  onToggle: () => void;
+  onCreateChild: () => void;
+}
+
+function ManagedFolderRow({ node, isOpen, count, editing, editControl, children, onToggle, onCreateChild }: ManagedFolderRowProps) {
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `comparison-folder-${node.id}`, data: { folderId: node.id } });
+  const { setNodeRef: setDragRef, attributes, listeners, isDragging } = useDraggable({
+    id: `comparison-drag-folder-${node.id}`,
+    data: { folderId: node.id },
+  });
+
+  return (
+    <div style={{ paddingInlineStart: `${node.depth * 14}px` }}>
+      <div
+        ref={setDropRef}
+        dir="rtl"
+        className={cn(
+          "group flex w-full items-center gap-1 rounded-md px-1 py-1 text-right text-sm font-medium transition-colors hover:bg-muted",
+          isOver && "bg-primary/10 ring-2 ring-primary/60",
+          isDragging && "opacity-50",
+        )}
+        data-testid={`comparison-folder-${node.id}`}
+      >
+        <button ref={setDragRef} type="button" className="flex h-8 w-7 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground hover:bg-background active:cursor-grabbing" aria-label={`גרור את ${node.name}`} {...listeners} {...attributes}>
+          <GripVertical className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 px-1 py-1 text-right"
+          aria-label={`${isOpen ? "סגור" : "פתח"} את תיקיית ${node.name}`}
+          aria-expanded={isOpen}
+          onClick={onToggle}
+        >
+          {isOpen ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronLeft className="h-4 w-4 shrink-0" />}
+          {isOpen ? <FolderOpen className="h-4 w-4 shrink-0" /> : <Folder className="h-4 w-4 shrink-0" />}
+          {!editing && <span className="truncate">{node.emoji ? `${node.emoji} ` : ""}{node.name}</span>}
+          <Badge variant="secondary" className="me-auto h-5 text-[10px]">{count}</Badge>
+        </button>
+        {editControl}
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          aria-label={`צור תת-תיקייה בתוך ${node.name}`}
+          title="צור תת-תיקייה"
+          onClick={onCreateChild}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function RootFolderDropZone({ children }: { children: ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: "comparison-folder-root", data: { folderId: null } });
+  return (
+    <div ref={setNodeRef} className={cn("min-h-full space-y-1 rounded", isOver && "bg-primary/5 ring-2 ring-inset ring-primary/50")}>
+      {children}
+    </div>
+  );
+}
+
 export function ComparisonSourceDialog({
   open,
   side,
@@ -43,12 +116,16 @@ export function ComparisonSourceDialog({
   onSelectVersion,
   onSelectTranscript,
 }: ComparisonSourceDialogProps) {
-  const { tree, updateFolder } = useFolderTree();
+  const { tree, createFolder, updateFolder, moveFolder } = useFolderTree();
   const { updateTranscript } = useCloudTranscripts();
   const [query, setQuery] = useState("");
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<{ type: "folder" | "transcript"; id: string; value: string } | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [creatingParentId, setCreatingParentId] = useState<string | null | undefined>(undefined);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const normalizedQuery = query.trim().toLocaleLowerCase("he");
 
   const matchingVersions = useMemo(() => versions.filter((version) => (
@@ -72,9 +149,12 @@ export function ComparisonSourceDialog({
     return map;
   }, [usableTranscripts]);
 
-  const folderHasMatches = (node: FolderTreeNode): boolean => (
-    Boolean(byFolder.get(node.id)?.length) || node.children.some(folderHasMatches)
-  );
+  const folderHasMatches = (node: FolderTreeNode): boolean => {
+    if (!normalizedQuery) return true;
+    return node.name.toLocaleLowerCase("he").includes(normalizedQuery)
+      || Boolean(byFolder.get(node.id)?.length)
+      || node.children.some(folderHasMatches);
+  };
 
   const selectVersion = (versionId: string) => {
     onSelectVersion(versionId);
@@ -107,6 +187,67 @@ export function ComparisonSourceDialog({
       });
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  const beginCreateFolder = (parentId: string | null) => {
+    setCreatingParentId(parentId);
+    setNewFolderName("");
+    if (parentId) setOpenFolders((previous) => new Set(previous).add(parentId));
+  };
+
+  const saveNewFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name || creatingParentId === undefined || creatingFolder) return;
+    setCreatingFolder(true);
+    try {
+      await createFolder({ name, parent_id: creatingParentId });
+      setCreatingParentId(undefined);
+      setNewFolderName("");
+      toast({ title: creatingParentId ? "תת-התיקייה נוצרה" : "התיקייה נוצרה" });
+    } catch (error) {
+      toast({ title: "יצירת התיקייה נכשלה", description: error instanceof Error ? error.message : "נסה שוב", variant: "destructive" });
+    } finally {
+      setCreatingFolder(false);
+    }
+  };
+
+  const creationRow = (parentId: string | null) => creatingParentId === parentId ? (
+    <div dir="rtl" className="flex items-center gap-1 px-2 py-1" data-testid={parentId ? `create-child-${parentId}` : "create-root-folder"}>
+      <FolderPlus className="h-4 w-4 shrink-0 text-primary" />
+      <Input
+        autoFocus
+        dir="rtl"
+        value={newFolderName}
+        className="h-8 min-w-0 flex-1 text-right"
+        placeholder={parentId ? "שם תת-התיקייה" : "שם התיקייה החדשה"}
+        aria-label={parentId ? "שם תת-תיקייה חדשה" : "שם תיקייה ראשית חדשה"}
+        onChange={(event) => setNewFolderName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") void saveNewFolder();
+          if (event.key === "Escape") setCreatingParentId(undefined);
+        }}
+      />
+      <Button type="button" size="icon" className="h-8 w-8" aria-label="שמור תיקייה חדשה" disabled={!newFolderName.trim() || creatingFolder} onClick={() => void saveNewFolder()}>
+        {creatingFolder ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+      </Button>
+      <Button type="button" size="icon" variant="ghost" className="h-8 w-8" aria-label="בטל יצירת תיקייה" disabled={creatingFolder} onClick={() => setCreatingParentId(undefined)}>
+        <X className="h-4 w-4" />
+      </Button>
+    </div>
+  ) : null;
+
+  const handleFolderDragEnd = async ({ active, over }: DragEndEvent) => {
+    if (!over) return;
+    const folderId = active.data.current?.folderId as string | undefined;
+    const parentId = (over.data.current?.folderId ?? null) as string | null;
+    if (!folderId || folderId === parentId) return;
+    try {
+      await moveFolder(folderId, parentId);
+      if (parentId) setOpenFolders((previous) => new Set(previous).add(parentId));
+      toast({ title: parentId ? "התיקייה הועברה" : "התיקייה הועברה לרמה הראשית" });
+    } catch (error) {
+      toast({ title: "העברת התיקייה נכשלה", description: error instanceof Error ? error.message : "נסה שוב", variant: "destructive" });
     }
   };
 
@@ -184,39 +325,36 @@ export function ComparisonSourceDialog({
     const isOpen = normalizedQuery ? true : openFolders.has(node.id);
     const items = byFolder.get(node.id) || [];
     return (
-      <div key={node.id} style={{ paddingInlineStart: `${node.depth * 14}px` }}>
-        <div dir="rtl" className="flex w-full items-center gap-1 rounded-md px-1 py-1 text-right text-sm font-medium hover:bg-muted">
-          <button
-            type="button"
-            className="flex min-w-0 flex-1 items-center gap-2 px-1 py-1 text-right"
-            onClick={() => setOpenFolders((previous) => {
+      <ManagedFolderRow
+        key={node.id}
+        node={node}
+        isOpen={isOpen}
+        count={items.length}
+        editing={editing?.type === "folder" && editing.id === node.id}
+        editControl={editControls("folder", node.id, node.name)}
+        onCreateChild={() => beginCreateFolder(node.id)}
+        onToggle={() => setOpenFolders((previous) => {
             const next = new Set(previous);
             if (next.has(node.id)) next.delete(node.id); else next.add(node.id);
             return next;
-            })}
-          >
-            {isOpen ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronLeft className="h-4 w-4 shrink-0" />}
-            {isOpen ? <FolderOpen className="h-4 w-4 shrink-0" /> : <Folder className="h-4 w-4 shrink-0" />}
-            {editing?.type !== "folder" || editing.id !== node.id ? <span className="truncate">{node.emoji ? `${node.emoji} ` : ""}{node.name}</span> : null}
-            <Badge variant="secondary" className="me-auto h-5 text-[10px]">{items.length}</Badge>
-          </button>
-          {editControls("folder", node.id, node.name)}
-        </div>
+        })}
+      >
+        {creationRow(node.id)}
         {isOpen && (
           <div className="space-y-1 pb-2 pe-5">
             {items.map(renderTranscript)}
             {node.children.map(renderFolder)}
           </div>
         )}
-      </div>
+      </ManagedFolderRow>
     );
   };
 
   const uncategorized = byFolder.get(null) || [];
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent dir="rtl" className="max-w-2xl gap-0 overflow-hidden p-0 text-right" data-testid="comparison-source-dialog">
+    <Dialog modal={false} open={open} onOpenChange={onOpenChange}>
+      <DialogContent hideOverlay dir="rtl" className="!left-auto !right-4 !top-20 !w-[min(42rem,calc(100vw-2rem))] !max-w-none !translate-x-0 !translate-y-0 max-h-[calc(100vh-6rem)] gap-0 overflow-hidden p-0 text-right shadow-2xl sm:rounded-lg" data-testid="comparison-source-dialog">
         <DialogHeader className="border-b px-5 py-4 text-right">
           <DialogTitle>בחירת {side === "base" ? "גרסת בסיס" : "גרסה חדשה"}</DialogTitle>
           <p className="text-xs text-muted-foreground">בחר גרסה קיימת או תמלול מסווג מתוך עץ התיקיות.</p>
@@ -242,17 +380,25 @@ export function ComparisonSourceDialog({
           </TabsList>
 
           <TabsContent value="folders" className="m-0 px-5 pb-5 pt-3">
+            <div className="mb-2 flex justify-start">
+              <Button type="button" size="sm" variant="outline" className="gap-2" onClick={() => beginCreateFolder(null)}>
+                <FolderPlus className="h-4 w-4" /> תיקייה חדשה
+              </Button>
+            </div>
             <ScrollArea className="h-[min(55vh,28rem)] rounded-md border p-2">
-              <div className="space-y-1">
-                {tree.map(renderFolder)}
-                {uncategorized.length > 0 && (
-                  <div className="rounded-md border border-dashed p-2">
-                    <p className="mb-2 flex items-center gap-2 text-sm font-medium"><Folder className="h-4 w-4" /> ללא תיקייה</p>
-                    <div className="space-y-1">{uncategorized.map(renderTranscript)}</div>
-                  </div>
-                )}
-                {!usableTranscripts.length && <p className="p-8 text-center text-sm text-muted-foreground">לא נמצאו תמלולים מתאימים.</p>}
-              </div>
+              <DndContext sensors={sensors} onDragEnd={(event) => void handleFolderDragEnd(event)}>
+                <RootFolderDropZone>
+                  {creationRow(null)}
+                  {tree.map(renderFolder)}
+                  {uncategorized.length > 0 && (
+                    <div className="rounded-md border border-dashed p-2">
+                      <p className="mb-2 flex items-center gap-2 text-sm font-medium"><Folder className="h-4 w-4" /> ללא תיקייה</p>
+                      <div className="space-y-1">{uncategorized.map(renderTranscript)}</div>
+                    </div>
+                  )}
+                  {!usableTranscripts.length && <p className="p-8 text-center text-sm text-muted-foreground">לא נמצאו תמלולים מתאימים.</p>}
+                </RootFolderDropZone>
+              </DndContext>
             </ScrollArea>
           </TabsContent>
 
