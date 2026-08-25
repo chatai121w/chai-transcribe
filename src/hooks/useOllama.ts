@@ -396,8 +396,9 @@ export function useOllama() {
     customPrompt?: string;
     toneStyle?: string;
     targetLanguage?: string;
+    signal?: AbortSignal;
   }): Promise<string> => {
-    const { text, action, model, customPrompt, toneStyle, targetLanguage } = params;
+    const { text, action, model, customPrompt, toneStyle, targetLanguage, signal } = params;
     const baseUrl = getOllamaUrl();
 
     // ── GPU sharing: in 'serial' mode, wait for Whisper to finish first ──
@@ -441,6 +442,7 @@ export function useOllama() {
       const r1 = await fetch(`${baseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal,
         body: JSON.stringify({
           model,
           messages,
@@ -457,6 +459,7 @@ export function useOllama() {
       const r2 = await fetch(`${baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal,
         body: JSON.stringify({
           model,
           messages,

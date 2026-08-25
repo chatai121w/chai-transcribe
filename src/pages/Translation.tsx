@@ -74,6 +74,37 @@ const CLOUD_ENGINES: EngineOption[] = [
 ];
 
 const TRANSLATION_BENCHMARK_STORAGE_KEY = 'translation_benchmark_v1';
+const CLOUD_CHUNK_TIMEOUT_MS = 3 * 60 * 1000;
+const LOCAL_CHUNK_TIMEOUT_MS = 10 * 60 * 1000;
+
+async function runWithTranslationTimeout<T>(
+  task: (signal: AbortSignal) => Promise<T>,
+  parentSignal: AbortSignal,
+  timeoutMs: number,
+): Promise<T> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortFromParent = () => controller.abort(parentSignal.reason);
+  if (parentSignal.aborted) abortFromParent();
+  else parentSignal.addEventListener('abort', abortFromParent, { once: true });
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort(new DOMException('Translation chunk timed out', 'TimeoutError'));
+  }, timeoutMs);
+  const aborted = new Promise<never>((_, reject) => {
+    controller.signal.addEventListener('abort', () => {
+      reject(timedOut
+        ? new Error(`המנוע לא החזיר תשובה בתוך ${Math.round(timeoutMs / 60000)} דקות`)
+        : new DOMException('התרגום בוטל', 'AbortError'));
+    }, { once: true });
+  });
+  try {
+    return await Promise.race([task(controller.signal), aborted]);
+  } finally {
+    window.clearTimeout(timer);
+    parentSignal.removeEventListener('abort', abortFromParent);
+  }
+}
 
 type TranslationBenchmarkResult = {
   average: number;
@@ -123,6 +154,7 @@ export default function Translation() {
   const [progress, setProgress] = useState(0);
   const [progressDetail, setProgressDetail] = useState('');
   const [isTranslating, setIsTranslating] = useState(false);
+  const translationAbortRef = useRef<AbortController | null>(null);
   const [licenseAccepted, setLicenseAccepted] = useState(false);
   const [isBenchmarking, setIsBenchmarking] = useState(false);
   const [benchmarkResult, setBenchmarkResult] = useState<TranslationBenchmarkResult | null>(loadTranslationBenchmark);
@@ -235,7 +267,7 @@ export default function Translation() {
     }
   };
 
-  const translateChunk = async (text: string, prompt: string): Promise<string> => {
+  const translateChunk = async (text: string, prompt: string, signal: AbortSignal): Promise<string> => {
     const target = getTranslationLanguage(targetLanguage);
     if (engine.startsWith('ollama:')) {
       return ollama.editText({
@@ -244,11 +276,12 @@ export default function Translation() {
         model: engine.slice('ollama:'.length),
         customPrompt: prompt,
         targetLanguage: `${target.modelLabel} (${target.code})`,
+        signal,
       });
     }
     const parsed = parseProviderModel(engine);
     if (parsed) {
-      return chatWithProvider({ ...parsed, systemPrompt: prompt, userText: text, temperature: 0.1 });
+      return chatWithProvider({ ...parsed, systemPrompt: prompt, userText: text, temperature: 0.1, signal });
     }
     const model = engine.replace(/^cloud:/, '');
     return editTranscriptCloud({
@@ -257,6 +290,7 @@ export default function Translation() {
       customPrompt: prompt,
       targetLanguage: `${target.modelLabel} (${target.code})`,
       model,
+      signal,
     });
   };
 
@@ -283,20 +317,36 @@ export default function Translation() {
     setProgressDetail(`מכין ${chunks.length} מקטעים`);
     setResult('');
     setResultTranscriptId(null);
+    const runController = new AbortController();
+    translationAbortRef.current?.abort();
+    translationAbortRef.current = runController;
     try {
       const translated = new Array<string>(chunks.length);
       let nextIndex = 0;
       let completed = 0;
       const workerCount = engine.startsWith('ollama:') ? 1 : Math.min(2, chunks.length);
+      const selectedEngineLabel = engines.find(item => item.value === engine)?.label || engine;
+      const chunkTimeoutMs = engine.startsWith('ollama:') ? LOCAL_CHUNK_TIMEOUT_MS : CLOUD_CHUNK_TIMEOUT_MS;
       const workers = Array.from({ length: workerCount }, async () => {
         while (nextIndex < chunks.length) {
+          if (runController.signal.aborted) throw new DOMException('התרגום בוטל', 'AbortError');
           const index = nextIndex++;
-          let output = (await translateChunk(chunks[index], prompt)).trim();
+          setProgressDetail(`מתרגם מקטע ${index + 1} מתוך ${chunks.length} באמצעות ${selectedEngineLabel}`);
+          let output = (await runWithTranslationTimeout(
+            signal => translateChunk(chunks[index], prompt, signal),
+            runController.signal,
+            chunkTimeoutMs,
+          )).trim();
           if (isLikelyWrongTranslationLanguage(output, targetLanguage)) {
             const retryPrompt = selectedTranslateGemma
               ? `${prompt}\n\nThe previous response used the wrong language. Return ${getTranslationLanguage(targetLanguage).modelLabel} (${targetLanguage}) only, with no explanation.`
               : buildStrictTranslationRetryPrompt({ sourceCode: sourceLanguage, targetCode: targetLanguage, preserveStructure, glossary });
-            output = (await translateChunk(chunks[index], retryPrompt)).trim();
+            setProgressDetail(`מנסה שוב מקטע ${index + 1} בשפת היעד באמצעות ${selectedEngineLabel}`);
+            output = (await runWithTranslationTimeout(
+              signal => translateChunk(chunks[index], retryPrompt, signal),
+              runController.signal,
+              chunkTimeoutMs,
+            )).trim();
           }
           if (isLikelyWrongTranslationLanguage(output, targetLanguage)) {
             throw new Error(`המנוע החזיר טקסט בשפה שגויה במקום ${getTranslationLanguage(targetLanguage).label}. נסה מנוע אחר או בחר שפת מקור ידנית.`);
@@ -311,8 +361,15 @@ export default function Translation() {
       setResult(translated.join('\n\n'));
       toast({ title: 'התרגום הושלם', description: `${chunks.length} מקטעים תורגמו ללא השמטה` });
     } catch (error) {
-      toast({ title: 'התרגום נכשל', description: error instanceof Error ? error.message : 'שגיאת מנוע', variant: 'destructive' });
+      runController.abort();
+      const cancelled = error instanceof DOMException && error.name === 'AbortError';
+      toast({
+        title: cancelled ? 'התרגום בוטל' : 'התרגום נכשל',
+        description: cancelled ? 'כל בקשות התרגום הפעילות נעצרו.' : error instanceof Error ? error.message : 'שגיאת מנוע',
+        variant: cancelled ? 'default' : 'destructive',
+      });
     } finally {
+      if (translationAbortRef.current === runController) translationAbortRef.current = null;
       setIsTranslating(false);
       setProgressDetail('');
     }
@@ -602,9 +659,16 @@ export default function Translation() {
             <Label htmlFor="preserve-translation-structure">שמור פסקאות, חותמות זמן ושמות דוברים</Label>
           </div>
           <Textarea value={glossary} onChange={event => setGlossary(event.target.value)} placeholder={'מילון מונחים אופציונלי, שורה לכל כלל\nבבא בתרא = Bava Batra'} className="min-h-20" />
-          <Button className="w-full" size="lg" disabled={isTranslating || !sourceText.trim()} onClick={() => void runTranslation()}>
-            <Languages className="ml-2 h-5 w-5" /> {isTranslating ? `מתרגם ${progress}%` : 'תרגם'}
-          </Button>
+          <div className="flex gap-2">
+            <Button className="flex-1" size="lg" disabled={isTranslating || !sourceText.trim()} onClick={() => void runTranslation()}>
+              <Languages className="ml-2 h-5 w-5" /> {isTranslating ? `מתרגם ${progress}%` : 'תרגם'}
+            </Button>
+            {isTranslating && (
+              <Button type="button" size="lg" variant="destructive" onClick={() => translationAbortRef.current?.abort()}>
+                <Square className="ml-2 h-4 w-4" /> בטל תרגום
+              </Button>
+            )}
+          </div>
           {isTranslating && <div className="space-y-1"><Progress value={progress} className="h-2" /><p className="text-xs text-muted-foreground">{progressDetail}</p></div>}
 
           <Textarea dir={getTranslationLanguage(targetLanguage).direction} value={result} onChange={event => setResult(event.target.value)} placeholder="התרגום יופיע כאן" className="min-h-[250px] resize-y text-base leading-7" />

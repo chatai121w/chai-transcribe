@@ -4,8 +4,8 @@ import { ACTION_PROMPTS, TONE_PROMPTS } from "@/lib/prompts";
 import {
   isPersonalGeminiEnabled,
   callPersonalGemini,
-  isPersonalGeminiFallbackEnabled,
   PersonalGeminiExhaustedError,
+  PersonalGeminiTransientError,
   getPersonalGeminiModel,
   recordLovableGatewayUsage,
   isGeminiModel,
@@ -19,6 +19,7 @@ interface EditTranscriptParams {
   customPrompt?: string;
   toneStyle?: string;
   targetLanguage?: string;
+  signal?: AbortSignal;
 }
 
 /**
@@ -27,8 +28,9 @@ interface EditTranscriptParams {
  * Edge function = fallback if DB proxy fails (no API key, etc).
  */
 export async function editTranscriptCloud(params: EditTranscriptParams): Promise<string> {
-  const { text, model, toneStyle, targetLanguage } = params;
+  const { text, model, toneStyle, targetLanguage, signal } = params;
   let { action, customPrompt } = params;
+  let forceLovableGateway = false;
 
   // Quick transcript actions are local UI names. Route them as explicit prompts
   // so older cloud functions do not reject them as unknown actions.
@@ -65,15 +67,19 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
         model: model || getPersonalGeminiModel(),
         temperature: 0.3,
         surface: "editing",
+        signal,
       });
 
     } catch (e) {
-      if (e instanceof PersonalGeminiExhaustedError && isPersonalGeminiFallbackEnabled()) {
-        try { toast.warning("מפתח Gemini האישי מוצה — עוברים ל-Lovable AI"); } catch { /* noop */ }
-        // fall through to DB proxy / edge function
-      } else {
-        throw e;
-      }
+      if (signal?.aborted || (e instanceof DOMException && e.name === 'AbortError')) throw e;
+      forceLovableGateway = true;
+      try {
+        toast.warning(e instanceof PersonalGeminiTransientError
+          ? "Gemini עמוס זמנית — עוברים אוטומטית לקרדיטים של Lovable"
+          : e instanceof PersonalGeminiExhaustedError
+            ? "מפתח Gemini האישי אינו זמין — עוברים אוטומטית לקרדיטים של Lovable"
+            : "Gemini האישי נכשל — עוברים אוטומטית לקרדיטים של Lovable");
+      } catch { /* noop */ }
     }
   }
 
@@ -86,8 +92,8 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
   const proxyAction = action === 'translate' && customPrompt ? 'custom' : action;
 
   // ── Try DB proxy first (latest code, no deployment needed) ──
-  try {
-    const { data, error } = await (supabase.rpc as any)('edit_transcript_proxy', {
+  if (!forceLovableGateway) try {
+    const request = (supabase.rpc as any)('edit_transcript_proxy', {
       p_text: text,
       p_action: proxyAction,
       p_model: routeModel,
@@ -95,6 +101,7 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
       p_tone_style: toneStyle || null,
       p_target_language: targetLanguage || null,
     });
+    const { data, error } = await (signal ? request.abortSignal(signal) : request);
 
     const result = data as { text?: string; error?: string } | null;
     if (!error && result && !result.error && result.text) {
@@ -109,12 +116,23 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
     const proxyError = error?.message || result?.error || 'Unknown DB proxy error';
     console.warn('DB proxy failed, trying edge function:', proxyError);
   } catch (e) {
+    if (signal?.aborted) throw new DOMException('התרגום בוטל', 'AbortError');
     console.warn('DB proxy exception, trying edge function:', e);
   }
 
+  if (signal?.aborted) throw new DOMException('התרגום בוטל', 'AbortError');
+
   // ── Fallback: edge function (Lovable AI Gateway) ──
   const body: Record<string, string> = { text, action };
-  if (model) body.model = model;
+  if (model) {
+    const bareModel = model.replace(/^cloud:/, '').replace(/^google\//, '');
+    const gatewayModel = bareModel === 'gemini-flash-latest'
+      ? 'gemini-2.5-flash'
+      : bareModel === 'gemini-pro-latest'
+        ? 'gemini-2.5-pro'
+        : bareModel;
+    body.model = isGeminiModel(gatewayModel) ? `google/${gatewayModel}` : model;
+  }
   if (customPrompt) body.customPrompt = customPrompt;
   if (toneStyle) body.toneStyle = toneStyle;
   if (targetLanguage) body.targetLanguage = targetLanguage;

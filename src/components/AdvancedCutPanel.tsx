@@ -33,7 +33,7 @@ import {
 } from "@/lib/audioEnhanceQueue";
 import { useConversionHistory } from "@/hooks/useConversionHistory";
 import { useCloudTranscripts } from "@/hooks/useCloudTranscripts";
-import { useFolderTree, type FolderNode } from "@/hooks/useFolderTree";
+import { useFolderTree } from "@/hooks/useFolderTree";
 import { convertAudio, onJobUpdate, type ConversionJob, type OutputFormat } from "@/lib/ffmpegConverter";
 import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
@@ -57,6 +57,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import AudioEnhanceDialog from "@/components/AudioEnhanceDialog";
+import { FolderManagementTree } from "@/components/FolderManagementTree";
 import { toast } from "@/hooks/use-toast";
 import {
   Upload,
@@ -87,7 +88,6 @@ import {
   Check,
   Music,
   FileAudio2,
-  FolderTree,
   Cloud,
   HardDrive,
   Merge,
@@ -128,103 +128,6 @@ function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const secs = (ms / 1000).toFixed(1);
   return `${secs}s`;
-}
-
-function FolderDestinationTree({
-  folders,
-  selectedId,
-  includeRoot,
-  disabled,
-  onSelect,
-}: {
-  folders: FolderNode[];
-  selectedId: string;
-  includeRoot: boolean;
-  disabled: boolean;
-  onSelect: (id: string) => void;
-}) {
-  const childrenByParent = useMemo(() => {
-    const map = new Map<string | null, FolderNode[]>();
-    folders.forEach((folder) => {
-      const parentId = folder.parent_id || null;
-      const children = map.get(parentId) || [];
-      children.push(folder);
-      map.set(parentId, children);
-    });
-    map.forEach((children) => children.sort((a, b) => a.name.localeCompare(b.name, "he")));
-    return map;
-  }, [folders]);
-
-  const renderBranch = (parentId: string | null, depth: number, ancestors: Set<string>): React.ReactNode =>
-    (childrenByParent.get(parentId) || []).map((folder) => {
-      if (ancestors.has(folder.id)) return null;
-      const nextAncestors = new Set(ancestors).add(folder.id);
-      const isSelected = selectedId === folder.id;
-      return (
-        <div key={folder.id}>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => onSelect(folder.id)}
-            aria-pressed={isSelected}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-md border border-transparent py-2 text-right text-sm transition-colors",
-              "hover:border-primary/30 hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-60",
-              isSelected && "border-primary bg-primary/10 text-foreground",
-            )}
-            style={{ paddingInlineStart: `${12 + depth * 22}px`, paddingInlineEnd: "12px" }}
-          >
-            <span
-              className={cn(
-                "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
-                isSelected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/50",
-              )}
-              aria-hidden="true"
-            >
-              {isSelected && <Check className="h-3 w-3" />}
-            </span>
-            {folder.emoji
-              ? <span className="text-base" aria-hidden="true">{folder.emoji}</span>
-              : <FolderOpen className="h-4 w-4 shrink-0 text-primary" />}
-            <span className="min-w-0 flex-1 truncate">{folder.name}</span>
-          </button>
-          {renderBranch(folder.id, depth + 1, nextAncestors)}
-        </div>
-      );
-    });
-
-  return (
-    <div className="max-h-56 overflow-y-auto rounded-md border bg-background p-1" role="tree" aria-label="עץ תיקיות יעד">
-      {includeRoot && (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onSelect("__root__")}
-          aria-pressed={selectedId === "__root__"}
-          className={cn(
-            "flex w-full items-center gap-2 rounded-md border border-transparent px-3 py-2 text-right text-sm transition-colors",
-            "hover:border-primary/30 hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-60",
-            selectedId === "__root__" && "border-primary bg-primary/10",
-          )}
-        >
-          <span
-            className={cn(
-              "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
-              selectedId === "__root__" ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/50",
-            )}
-            aria-hidden="true"
-          >
-            {selectedId === "__root__" && <Check className="h-3 w-3" />}
-          </span>
-          <FolderTree className="h-4 w-4 text-primary" />
-          <span>תיקיות ראשיות</span>
-        </button>
-      )}
-      {folders.length > 0
-        ? renderBranch(null, 0, new Set())
-        : <p className="px-3 py-4 text-center text-xs text-muted-foreground">עדיין אין תיקיות במערכת</p>}
-    </div>
-  );
 }
 
 // ─── Manual segment row ──────────────────────────────────────────────────────
@@ -867,7 +770,7 @@ export default function AdvancedCutPanel({
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { saveTranscript, saveLocalTranscript, updateTranscript } = useCloudTranscripts();
-  const { folders, createFolder, getPath } = useFolderTree();
+  const { folders, createFolder, moveFolder, getPath } = useFolderTree();
   const [folderJob, setFolderJob] = useState<CutJob | null>(null);
   const [folderChoice, setFolderChoice] = useState<string>("__new__");
   const [parentFolderChoice, setParentFolderChoice] = useState<string>("__root__");
@@ -1234,27 +1137,36 @@ export default function AdvancedCutPanel({
 
     const requestedName = newFolderName.trim();
     const requestedParentId = parentFolderChoice === "__root__" ? null : parentFolderChoice;
+    const selectedParentFolder = requestedParentId
+      ? folders.find((folder) => folder.id === requestedParentId)
+      : undefined;
     let targetFolder = folderChoice === "__new__"
-      ? folders.find(
+      ? requestedName
+        ? folders.find(
           (folder) =>
             folder.name.trim() === requestedName
             && (folder.parent_id || null) === requestedParentId,
         )
+        : selectedParentFolder
       : folders.find((folder) => folder.id === folderChoice);
 
-    if (folderChoice === "__new__" && !requestedName) {
-      toast({ title: "יש להזין שם לתיקייה", variant: "destructive" });
+    if (folderChoice === "__new__" && !requestedName && !selectedParentFolder) {
+      toast({ title: "יש להזין שם לתיקייה או לבחור תיקייה קיימת", variant: "destructive" });
       return;
     }
 
     setSavingFolder(true);
     try {
-      if (!targetFolder) {
+      if (!targetFolder && requestedName) {
         targetFolder = await createFolder({
           name: requestedName,
           parent_id: requestedParentId,
           emoji: "🎧",
         });
+      }
+
+      if (!targetFolder) {
+        throw new Error("תיקיית היעד שנבחרה אינה זמינה");
       }
 
       const orderedResults = [...folderJob.results].sort((a, b) => a.segmentIndex - b.segmentIndex);
@@ -1855,6 +1767,7 @@ export default function AdvancedCutPanel({
 {/* enhance queue panel removed per user request */}
 
       <Dialog
+        modal={false}
         open={folderJob !== null}
         onOpenChange={(open) => {
           if (!open && !savingFolder) {
@@ -1865,8 +1778,13 @@ export default function AdvancedCutPanel({
           }
         }}
       >
-        <DialogContent dir="rtl" className="sm:max-w-md">
-          <DialogHeader className="text-right">
+        <DialogContent
+          hideOverlay
+          dir="rtl"
+          className="!flex max-h-[calc(100vh-2rem)] !w-[min(46rem,calc(100vw-2rem))] !max-w-none flex-col gap-0 overflow-hidden p-0 text-right shadow-2xl sm:rounded-lg"
+          data-testid="cut-folder-dialog"
+        >
+          <DialogHeader className="shrink-0 border-b px-5 py-4 text-right">
             <DialogTitle className="flex items-center gap-2">
               <FolderPlus className="h-5 w-5 text-primary" />
               שמירת כל הקטעים בתיקייה
@@ -1876,53 +1794,45 @@ export default function AdvancedCutPanel({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
+          <div
+            className="min-h-0 flex-1 space-y-4 overflow-y-scroll px-5 py-4 [scrollbar-gutter:stable]"
+            data-testid="cut-folder-dialog-scroll"
+          >
             <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
               <span className="font-medium">{folderJob?.results.length || 0} קטעים</span>
               <span className="text-muted-foreground"> מתוך {folderJob?.sourceFileName}</span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                type="button"
-                variant={folderChoice === "__new__" ? "default" : "outline"}
-                onClick={() => setFolderChoice("__new__")}
-                disabled={savingFolder}
-                className="gap-2"
-              >
-                <FolderPlus className="h-4 w-4" />
-                צור תיקייה חדשה
-              </Button>
-              <Button
-                type="button"
-                variant={folderChoice !== "__new__" ? "default" : "outline"}
-                onClick={() => {
-                  const selectedExists = folders.some((folder) => folder.id === parentFolderChoice);
-                  setFolderChoice(selectedExists ? parentFolderChoice : (folders[0]?.id || "__new__"));
-                }}
-                disabled={savingFolder || folders.length === 0}
-                className="gap-2"
-              >
-                <FolderOpen className="h-4 w-4" />
-                תיקייה קיימת
-              </Button>
-            </div>
+            <div className="space-y-3 rounded-md border bg-muted/20 p-3" data-testid="cut-folder-destination-setup">
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={folderChoice === "__new__" ? "default" : "outline"}
+                  onClick={() => setFolderChoice("__new__")}
+                  disabled={savingFolder}
+                  className="gap-2"
+                >
+                  <FolderPlus className="h-4 w-4" />
+                  צור תיקיית קטעים
+                </Button>
+                <Button
+                  type="button"
+                  variant={folderChoice !== "__new__" ? "default" : "outline"}
+                  onClick={() => {
+                    const selectedExists = folders.some((folder) => folder.id === parentFolderChoice);
+                    setFolderChoice(selectedExists ? parentFolderChoice : (folders[0]?.id || "__new__"));
+                  }}
+                  disabled={savingFolder || folders.length === 0}
+                  className="gap-2"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  בחר תיקייה קיימת
+                </Button>
+              </div>
 
-            {folderChoice === "__new__" && (
-              <div className="space-y-4">
+              {folderChoice === "__new__" && (
                 <div className="space-y-2">
-                  <Label>בחר היכן ליצור את התיקייה החדשה</Label>
-                  <FolderDestinationTree
-                    folders={folders}
-                    selectedId={parentFolderChoice}
-                    includeRoot
-                    disabled={savingFolder}
-                    onSelect={setParentFolderChoice}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="cut-folder-name">שם תיקיית הקטעים</Label>
+                  <Label htmlFor="cut-folder-name">שם תיקיית קטעים חדשה (אופציונלי)</Label>
                   <Input
                     id="cut-folder-name"
                     value={newFolderName}
@@ -1931,37 +1841,50 @@ export default function AdvancedCutPanel({
                     disabled={savingFolder}
                     autoFocus
                   />
+                  <div className="rounded-md border bg-background px-3 py-2 text-xs">
+                    {newFolderName.trim()
+                      ? <>
+                          הנתיב שייווצר:{" "}
+                          <span className="font-medium">
+                            {parentFolderChoice === "__root__"
+                              ? newFolderName.trim()
+                              : `${getPath(parentFolderChoice).map((item) => item.name).join(" / ")} / ${newFolderName.trim()}`}
+                          </span>
+                        </>
+                      : parentFolderChoice !== "__root__"
+                        ? <>
+                            הקטעים יישמרו ישירות בתוך:{" "}
+                            <span className="font-medium">{getPath(parentFolderChoice).map((item) => item.name).join(" / ")}</span>
+                          </>
+                        : <span className="text-muted-foreground">הזן שם לתיקייה חדשה או בחר תיקייה קיימת בעץ.</span>}
+                  </div>
                 </div>
+              )}
+            </div>
 
-                <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
-                  הנתיב שייווצר:{" "}
-                  <span className="font-medium">
-                    {parentFolderChoice === "__root__"
-                      ? newFolderName.trim() || "שם התיקייה"
-                      : `${getPath(parentFolderChoice).map((item) => item.name).join(" / ")} / ${newFolderName.trim() || "שם התיקייה"}`}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {folderChoice !== "__new__" && (
+            <div className="space-y-4">
               <div className="space-y-2">
-                <Label>בחר תיקיית יעד קיימת</Label>
-                <FolderDestinationTree
+                <Label>{folderChoice === "__new__" ? "בחר היכן ליצור את תיקיית הקטעים" : "בחר תיקיית יעד קיימת"}</Label>
+                <FolderManagementTree
                   folders={folders}
-                  selectedId={folderChoice}
-                  includeRoot={false}
+                  selectedId={folderChoice === "__new__" ? parentFolderChoice : folderChoice}
+                  includeRoot={folderChoice === "__new__"}
                   disabled={savingFolder}
-                  onSelect={setFolderChoice}
+                  onSelect={folderChoice === "__new__" ? setParentFolderChoice : setFolderChoice}
+                  onCreateFolder={(name, parentId) => createFolder({ name, parent_id: parentId })}
+                  onMoveFolder={moveFolder}
                 />
+              </div>
+
+              {folderChoice !== "__new__" && (
                 <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
                   הקטעים יישמרו בתוך:{" "}
                   <span className="font-medium">
                     {getPath(folderChoice).map((item) => item.name).join(" / ")}
                   </span>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             <div className="space-y-2">
               <Label>מיקום שמירת הקטעים</Label>
@@ -2003,13 +1926,13 @@ export default function AdvancedCutPanel({
             </p>
           </div>
 
-          <DialogFooter className="gap-2 sm:justify-start">
+          <DialogFooter className="shrink-0 border-t bg-background px-5 py-4 sm:justify-start">
             <Button
               onClick={handleSaveAllToFolder}
               disabled={
                 savingFolder
                 || !folderJob
-                || (folderChoice === "__new__" && !newFolderName.trim())
+                || (folderChoice === "__new__" && !newFolderName.trim() && parentFolderChoice === "__root__")
               }
               className="gap-2"
             >

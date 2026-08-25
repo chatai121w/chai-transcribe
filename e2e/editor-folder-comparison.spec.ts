@@ -1,4 +1,4 @@
-import { test, expect, injectAuthSession, mockLocalServer, mockSupabase, MOCK_TRANSCRIPTS } from './helpers';
+import { test, expect, createTestAudioBuffer, injectAuthSession, mockLocalServer, mockSupabase, MOCK_TRANSCRIPTS } from './helpers';
 
 test.describe('עורך טקסט - תיקיות והשוואה', () => {
   test.beforeEach(async ({ page }) => {
@@ -24,8 +24,25 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
         name: 'תיקיית משנה', color: null, emoji: null, pinned: false, position: 0,
         drive_folder_id: null, drive_folder_name: null, drive_synced_at: null, created_at: now, updated_at: now,
       },
+      {
+        id: 'folder-source', user_id: 'test-user-00000000-0000-0000-0000-000000000001', parent_id: null,
+        name: 'תיקיית מקור', color: null, emoji: null, pinned: false, position: 1,
+        drive_folder_id: null, drive_folder_name: null, drive_synced_at: null, created_at: now, updated_at: now,
+      },
     ];
-    await page.route('**/rest/v1/folders**', (route) => route.fulfill({ status: 200, json: folders }));
+    const writes: Array<{ method: string; body: string | null }> = [];
+    await page.route('**/rest/v1/folders**', (route) => {
+      const method = route.request().method();
+      if (method !== 'GET') {
+        writes.push({ method, body: route.request().postData() });
+        const body = JSON.parse(route.request().postData() || '{}');
+        return route.fulfill({
+          status: 200,
+          json: method === 'POST' ? { ...folders[0], ...body, id: `created-${writes.length}` } : {},
+        });
+      }
+      return route.fulfill({ status: 200, json: folders });
+    });
     await page.goto('/text-editor');
 
     const leftPaneLock = page.getByRole('button', { name: 'פתוח' }).last();
@@ -45,15 +62,47 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
     const viewport = page.viewportSize();
     expect(box).not.toBeNull();
     expect(viewport).not.toBeNull();
-    expect(Math.abs(viewport!.width - (box!.x + box!.width) - 16)).toBeLessThanOrEqual(2);
+    expect(box!.y).toBeGreaterThanOrEqual(8);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height - 8);
+    await expect(dialog.getByRole('tree', { name: 'עץ תיקיות סיווג' })).toHaveCount(1);
 
     await expect(dialog.getByText('תיקיית משנה', { exact: true })).toBeHidden();
     await dialog.getByRole('button', { name: 'הרחב את תיקיית אב' }).click();
     await expect(dialog.getByText('תיקיית משנה', { exact: true })).toBeVisible();
-    await dialog.getByRole('button', { name: 'מזער הכול' }).click();
+    await dialog.getByRole('button', { name: 'מזער את תיקיית אב' }).click();
     await expect(dialog.getByText('תיקיית משנה', { exact: true })).toBeHidden();
-    await dialog.getByRole('button', { name: 'הרחב הכול' }).click();
-    await expect(dialog.getByText('תיקיית משנה', { exact: true })).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'צור תיקייה ראשית' }).click();
+    await dialog.getByRole('textbox', { name: 'שם תיקייה ראשית חדשה' }).fill('תיקייה ראשית חדשה');
+    await dialog.getByRole('button', { name: 'שמור תיקייה חדשה' }).click();
+
+    const targetRow = dialog.getByTestId('cut-folder-folder-parent');
+    await targetRow.hover();
+    await dialog.getByRole('button', { name: 'צור תת-תיקייה בתוך תיקיית אב' }).click();
+    await dialog.getByRole('textbox', { name: 'שם תת-תיקייה חדשה' }).fill('תת תיקייה חדשה');
+    await dialog.getByRole('textbox', { name: 'שם תת-תיקייה חדשה' }).press('Enter');
+
+    await expect.poll(() => writes.some(({ body }) => body?.includes('תיקייה ראשית חדשה') && body.includes('"parent_id":null'))).toBe(true);
+    await expect.poll(() => writes.some(({ body }) => body?.includes('תת תיקייה חדשה') && body.includes('folder-parent'))).toBe(true);
+
+    const search = dialog.getByRole('textbox', { name: 'חיפוש תיקייה' });
+    await search.fill('מקור');
+    await expect(dialog.getByText('תיקיית מקור', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('תיקיית אב', { exact: true })).toBeHidden();
+    await search.clear();
+
+    const dragHandle = dialog.getByRole('button', { name: 'גרור את תיקיית מקור' });
+    const dragBox = await dragHandle.boundingBox();
+    const dropBox = await targetRow.boundingBox();
+    expect(dragBox).not.toBeNull();
+    expect(dropBox).not.toBeNull();
+    await page.mouse.move(dragBox!.x + dragBox!.width / 2, dragBox!.y + dragBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(dragBox!.x + dragBox!.width / 2 + 12, dragBox!.y + dragBox!.height / 2, { steps: 3 });
+    await page.mouse.move(dropBox!.x + dropBox!.width / 2, dropBox!.y + dropBox!.height / 2, { steps: 12 });
+    await page.mouse.up();
+    await expect.poll(() => writes.some(({ method, body }) => method === 'PATCH' && body?.includes('folder-parent'))).toBe(true);
+
     await dialog.getByRole('button', { name: 'סגור', exact: true }).click();
 
     const followButton = page.getByRole('button', { name: 'עוקב' }).first();
@@ -129,6 +178,78 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
 
     await expect.poll(() => writes.some((write) => write.body?.includes('תיקייה מהחלון'))).toBe(true);
     await expect.poll(() => writes.some((write) => write.body?.includes('הקלטה מהחלון'))).toBe(true);
+  });
+
+  test('תמלול נוסף מאותה הקלטה נשמר כגרסה ונפתח להשוואה בלי לדרוס את המקור', async ({ page }) => {
+    const versionWrites: Array<Record<string, unknown>> = [];
+    const jobWrites: Array<{ method: string; body: Record<string, unknown> }> = [];
+    await mockLocalServer(page, { connected: true, model: 'ivrit-ai/whisper-large-v3-turbo-ct2' });
+    await page.route('**/rest/v1/transcript_versions**', async (route) => {
+      const method = route.request().method();
+      if (method === 'GET') return route.fulfill({ status: 200, json: [] });
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      versionWrites.push(body);
+      return route.fulfill({
+        status: 201,
+        json: {
+          ...body,
+          id: 'version-retranscribed',
+          version_number: 1,
+          word_count: 4,
+          created_at: new Date().toISOString(),
+        },
+      });
+    });
+    await page.route('**/rest/v1/transcription_jobs**', async (route) => {
+      const method = route.request().method();
+      if (method === 'GET') return route.fulfill({ status: 200, json: [] });
+      const body = (route.request().postDataJSON() || {}) as Record<string, unknown>;
+      jobWrites.push({ method, body });
+      if (method === 'POST') return route.fulfill({ status: 201, json: { ...body, id: 'job-retranscribed' } });
+      return route.fulfill({ status: 200, json: {} });
+    });
+    for (const pattern of ['**/localhost:3000/transcribe-stream', '**/whisper/transcribe-stream']) {
+      await page.route(pattern, (route) => route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        body: [
+          'data: {"type":"info","duration":2.0,"model":"ivrit-ai/whisper-large-v3-turbo-ct2"}\n\n',
+          'data: {"type":"segment","text":"תמלול חדש ממנוע אחר","progress":100,"segEnd":2,"words":[{"word":"תמלול","start":0,"end":0.5}]}\n\n',
+          'data: {"type":"done","text":"תמלול חדש ממנוע אחר","duration":2,"language":"he","model":"ivrit-ai/whisper-large-v3-turbo-ct2","wordTimings":[{"word":"תמלול","start":0,"end":0.5}]}\n\n',
+        ].join(''),
+      }));
+    }
+
+    await page.goto('/text-editor');
+    const button = page.getByTestId('retranscribe-audio');
+    await expect(button).toBeVisible({ timeout: 15_000 });
+    await button.click();
+
+    const dialog = page.getByTestId('retranscribe-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(page.locator('[data-radix-dialog-overlay]')).toHaveCount(0);
+    await expect(dialog).toHaveCSS('direction', 'rtl');
+    await dialog.getByLabel('מנוע לתמלול נוסף').click();
+    await page.getByRole('option', { name: /CUDA מקומי/ }).click();
+    await dialog.getByTestId('retranscription-source-file').setInputFiles({
+      name: 'same-recording.wav',
+      mimeType: 'audio/wav',
+      buffer: createTestAudioBuffer(),
+    });
+    await dialog.getByTestId('start-retranscription').click();
+
+    await expect(dialog.getByText('נשמרה גרסה חדשה וההשוואה מוכנה')).toBeVisible({ timeout: 30_000 });
+    await expect.poll(() => versionWrites.length).toBe(1);
+    expect(versionWrites[0].source).toBe('transcription');
+    expect(versionWrites[0].text).toBe('תמלול חדש ממנוע אחר');
+    expect(versionWrites[0].word_timings).toEqual([{ word: 'תמלול', start: 0, end: 0.5 }]);
+    expect(versionWrites[0].transcription_job_id).toBe('job-retranscribed');
+    await expect.poll(() => jobWrites.some((write) => write.method === 'PATCH' && write.body.status === 'completed')).toBe(true);
+
+    await dialog.getByRole('button', { name: 'סגור' }).click();
+    await expect(page.getByRole('tab', { name: 'השוואה', exact: true })).toHaveAttribute('data-state', 'active');
+    await expect(page.getByText('תמלול שני לבדיקת המערכת', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('תמלול חדש ממנוע אחר', { exact: true }).first()).toBeVisible();
   });
 
   test('בחירת תמלולים מתוך העץ טוענת זוג אמיתי להשוואה', async ({ page }) => {

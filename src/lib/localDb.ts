@@ -130,6 +130,9 @@ export interface LocalVersion {
   ai_usage_event_id?: string | null;
   folder_id?: string | null;
   audio_file_path?: string | null;
+  word_timings?: Array<{ word: string; start: number; end: number; probability?: number }> | null;
+  detected_language?: string | null;
+  transcription_job_id?: string | null;
   _dirty?: boolean;
 }
 

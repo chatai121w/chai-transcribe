@@ -7,6 +7,7 @@ import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
 import { SyncMirrorLayout } from "@/components/SyncMirrorLayout";
 import { TranscriptFolderDialog } from "@/components/TranscriptFolderDialog";
+import { RetranscribeDialog } from "@/components/RetranscribeDialog";
 import { useFolderTree } from "@/hooks/useFolderTree";
 import { AttachTranscriptToVideoDialog } from "@/components/AttachTranscriptToVideoDialog";
 import { debugLog } from "@/lib/debugLogger";
@@ -44,7 +45,8 @@ const FloatingPlayerPortal = lazy(() => import("@/components/FloatingPlayerPorta
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })));
 const LoshonKodeshRules = lazy(() => import("@/pages/LoshonKodeshRules"));
 const AIVersionsGrid = lazy(() => import("@/components/AIVersionsGrid").then(m => ({ default: m.AIVersionsGrid })));
-import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Rows3, Save, Copy, LayoutPanelLeft, Square, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle, Link, AudioWaveform, Captions } from "lucide-react";
+import { Home, Wand2, SplitSquareVertical, SpellCheck, Loader2, Rows3, Save, Copy, LayoutPanelLeft, Square, PictureInPicture2, SlidersHorizontal, Search, ChevronUp, ChevronDown, X, Keyboard, Cloud, Type, ShoppingBasket, ScrollText, ArrowLeftCircle, Link, AudioWaveform, Captions, RotateCcw } from "lucide-react";
+import type { RetranscriptionResult } from "@/lib/retranscriptionRunner";
 import { uploadToDrive } from "@/components/GoogleDriveBrowser";
 import { DriveFolderPicker } from "@/components/DriveFolderPicker";
 import { TabSettingsManager, TabConfig, loadTabSettings, saveTabSettings, getDefaultTabConfig } from "@/components/TabSettingsManager";
@@ -564,6 +566,7 @@ const TextEditor = () => {
   }, [aiPolishEnabled]);
   const [comparePreselect, setComparePreselect] = useState<{ leftId: string; rightId: string } | null>(null);
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [retranscribeDialogOpen, setRetranscribeDialogOpen] = useState(false);
   const [attachVideoDialogOpen, setAttachVideoDialogOpen] = useState(false);
   const [comparisonLibraryVersions, setComparisonLibraryVersions] = useState<TextVersion[]>([]);
   const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
@@ -1261,6 +1264,34 @@ const TextEditor = () => {
     setActiveTab('compare');
     toast({ title: 'נשלח להשוואה' });
   }, [compareVersions]);
+
+  const handleRetranscriptionComplete = useCallback(async (result: RetranscriptionResult, jobId: string | null) => {
+    const id = transcriptIdRef.current || transcriptId;
+    if (!id) throw new Error("לא נמצא תמלול בסיס לשמירת הגרסה");
+    const current = transcripts.find((item) => item.id === id);
+    const saved = await saveCloudVersion(
+      result.text,
+      "transcription",
+      result.engineLabel,
+      "תמלול נוסף מאותה הקלטה",
+      {
+        transcriptId: id,
+        audioFilePath: current?.audio_file_path || null,
+        folderId: current?.folder_id || null,
+        wordTimings: result.wordTimings,
+        detectedLanguage: result.detectedLanguage || null,
+        transcriptionJobId: jobId,
+      },
+    );
+    if (!saved) throw new Error("לא ניתן לשמור את גרסת התמלול החדשה");
+    setComparePreselect({
+      leftId: current?.edited_text?.trim() && current.edited_text !== current.text ? "current-edited" : "current-original",
+      rightId: saved.id,
+    });
+    setCompareSubTab("versions");
+    setActiveTab("compare");
+    toast({ title: "התמלול הנוסף הושלם", description: `${result.engineLabel} נשמר כגרסה חדשה ונפתח להשוואה` });
+  }, [saveCloudVersion, transcriptId, transcripts]);
 
   const sendVersionToAiEditor = useCallback((versionId: string) => {
     const target = compareVersions.find(v => v.id === versionId);
@@ -2174,6 +2205,18 @@ const TextEditor = () => {
             <Button
               variant="outline"
               size="sm"
+              className="h-7 gap-1 border-sky-500/50 text-xs hover:bg-sky-500/10"
+              onClick={() => setRetranscribeDialogOpen(true)}
+              disabled={!transcriptId}
+              data-testid="retranscribe-audio"
+              title={audioBlob ? "צור תמלול נוסף מאותה הקלטה באמצעות מנוע אחר" : "בחר מחדש את קובץ ההקלטה וצור תמלול נוסף"}
+            >
+              <RotateCcw className="h-3.5 w-3.5 text-sky-600" />
+              תמלל שוב
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               className="h-7 text-xs gap-1"
               onClick={() => handleDuplicateAndSave(text, 'manual', 'עורך טקסט', 'שכפול ידני')}
             >
@@ -2694,8 +2737,16 @@ const TextEditor = () => {
                     lineHeight={lineHeight}
                     preselectedLeftId={comparePreselect?.leftId}
                     preselectedRightId={comparePreselect?.rightId}
-                    onApplyVersion={(newText) => {
+                    onApplyVersion={(newText, versionId) => {
                       setText(newText);
+                      const selectedCloudVersion = versionId ? cloudVersions.find((version) => version.id === versionId) : undefined;
+                      if (selectedCloudVersion?.word_timings?.length) {
+                        const timings = selectedCloudVersion.word_timings as WordTiming[];
+                        wordTimingsRef.current = timings;
+                        wordTimingsRevisionRef.current += 1;
+                        setWordTimings(timings);
+                        toast({ title: "הגרסה והתזמונים נטענו לנגן", description: selectedCloudVersion.engine_label || undefined });
+                      }
                     }}
                     onSaveVerifiedVersion={(newText) => {
                       addVersion(newText, 'manual', 'נוסח מאומת מהשוואה');
@@ -2808,6 +2859,16 @@ const TextEditor = () => {
           onOpenChange={setFolderDialogOpen}
           currentFolderId={transcripts.find((item) => item.id === (transcriptIdRef.current || transcriptId))?.folder_id || null}
           onAssign={assignCurrentTranscriptToFolder}
+        />
+        <RetranscribeDialog
+          open={retranscribeDialogOpen}
+          onOpenChange={setRetranscribeDialogOpen}
+          transcriptId={transcriptIdRef.current || transcriptId}
+          currentEngine={transcripts.find((item) => item.id === (transcriptIdRef.current || transcriptId))?.engine}
+          audioBlob={audioBlob}
+          audioFileName={audioFileName || transcripts.find((item) => item.id === (transcriptIdRef.current || transcriptId))?.title || undefined}
+          audioFilePath={transcripts.find((item) => item.id === (transcriptIdRef.current || transcriptId))?.audio_file_path || null}
+          onComplete={handleRetranscriptionComplete}
         />
         <AttachTranscriptToVideoDialog
           open={attachVideoDialogOpen}

@@ -193,6 +193,33 @@ export class PersonalGeminiExhaustedError extends Error {
   }
 }
 
+export class PersonalGeminiTransientError extends Error {
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "PersonalGeminiTransientError";
+    this.status = status;
+  }
+}
+
+function waitForGeminiRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("הבקשה בוטלה", "AbortError"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("הבקשה בוטלה", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export function getPersonalGeminiKey(): string {
   try { return (localStorage.getItem(LS_KEY) || "").trim(); } catch { return ""; }
 }
@@ -266,6 +293,7 @@ export async function callPersonalGemini(params: {
   model?: string;
   temperature?: number;
   surface?: UsageSurface;
+  signal?: AbortSignal;
 }): Promise<string> {
 
   const key = getPersonalGeminiKey();
@@ -282,17 +310,35 @@ export async function callPersonalGemini(params: {
     body.systemInstruction = { role: "system", parts: [{ text: params.systemPrompt }] };
   }
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch (e) {
-    // network — treat as transient, do NOT mark exhausted
-    throw new Error(`Gemini network error: ${(e as Error).message}`);
+  let res: Response | null = null;
+  const transientStatuses = new Set([500, 502, 503, 504]);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: params.signal,
+      });
+    } catch (e) {
+      if (params.signal?.aborted) throw new DOMException("הבקשה בוטלה", "AbortError");
+      if (attempt === 2) throw new PersonalGeminiTransientError(`Gemini network error: ${(e as Error).message}`);
+      await waitForGeminiRetry(750 * (attempt + 1), params.signal);
+      continue;
+    }
+    if (!transientStatuses.has(res.status)) break;
+    if (attempt === 2) {
+      const errorText = await res.text().catch(() => "");
+      throw new PersonalGeminiTransientError(`Gemini אינו זמין זמנית (${res.status}): ${errorText.slice(0, 200)}`, res.status);
+    }
+    const retryAfterSeconds = Number(res.headers.get("retry-after"));
+    const delayMs = Number.isFinite(retryAfterSeconds)
+      ? Math.min(5_000, Math.max(0, retryAfterSeconds * 1000))
+      : 750 * (attempt + 1);
+    await waitForGeminiRetry(delayMs, params.signal);
   }
+
+  if (!res) throw new PersonalGeminiTransientError("Gemini לא החזיר תשובה");
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");

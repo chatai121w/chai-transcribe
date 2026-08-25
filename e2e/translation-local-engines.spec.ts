@@ -142,6 +142,84 @@ test.describe('תרגום בענן', () => {
     }
   });
 
+  test('עומס 503 ב-Gemini מפעיל ניסיונות חוזרים ומעבר אוטומטי לענן החלופי', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('gemini_api_key', 'AIza-test-key');
+      localStorage.setItem('use_personal_gemini', '1');
+      localStorage.setItem('personal_gemini_fallback', '0');
+    });
+
+    let personalGeminiRequests = 0;
+    let fallbackRequests = 0;
+    let dbProxyRequests = 0;
+    let fallbackBody: Record<string, unknown> | null = null;
+    await page.route('https://generativelanguage.googleapis.com/**', async route => {
+      personalGeminiRequests += 1;
+      await route.fulfill({
+        status: 503,
+        headers: { 'retry-after': '0' },
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 503,
+            message: 'This model is currently experiencing high demand.',
+            status: 'UNAVAILABLE',
+          },
+        }),
+      });
+    });
+    await page.route('**/rest/v1/rpc/edit_transcript_proxy**', async route => {
+      dbProxyRequests += 1;
+      await route.fulfill({ status: 500, json: { error: 'DB proxy must be skipped' } });
+    });
+    await page.route('**/functions/v1/edit-transcript', async route => {
+      fallbackRequests += 1;
+      fallbackBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ text: 'Translation completed by the automatic fallback.' }),
+      });
+    });
+
+    await page.goto('/translation');
+    await page.locator('textarea').first().fill('טקסט עברי שנועד לבדוק התאוששות אוטומטית מעומס זמני בשירות התרגום.');
+    await page.getByRole('button', { name: 'תרגם', exact: true }).click();
+
+    await expect(page.getByText('Gemini עמוס זמנית — עוברים אוטומטית לקרדיטים של Lovable')).toBeVisible();
+    await expect(page.locator('textarea').nth(2)).toHaveValue('Translation completed by the automatic fallback.');
+    expect(personalGeminiRequests).toBe(3);
+    expect(fallbackRequests).toBe(1);
+    expect(dbProxyRequests).toBe(0);
+    expect(fallbackBody).toMatchObject({ model: 'google/gemini-2.5-flash' });
+  });
+
+  test('בקשת ענן תקועה ניתנת לביטול ומשחררת את ממשק התרגום', async ({ page }) => {
+    let requestStarted = false;
+    await page.route('**/rest/v1/rpc/edit_transcript_proxy**', async route => {
+      requestStarted = true;
+      await new Promise(resolve => setTimeout(resolve, 2_000));
+      if (!route.request().isNavigationRequest()) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ text: 'A response that arrived too late.' }),
+        }).catch(() => undefined);
+      }
+    });
+
+    await page.goto('/translation');
+    await page.locator('textarea').first().fill('טקסט עברי ארוך מספיק לבדיקת ביטול של בקשת תרגום שנתקעה ברשת.');
+    await page.getByRole('button', { name: 'תרגם', exact: true }).click();
+    await expect.poll(() => requestStarted).toBe(true);
+    await expect(page.getByText(/מתרגם מקטע 1 מתוך 1 באמצעות Gemini 2.5 Flash/)).toBeVisible();
+
+    await page.getByRole('button', { name: 'בטל תרגום' }).click();
+    await expect(page.getByRole('button', { name: 'בטל תרגום' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'תרגם', exact: true })).toBeEnabled();
+    await expect(page.getByText('התרגום בוטל', { exact: true })).toBeVisible();
+  });
+
   test('מסווג את המקור ואת התרגום בנפרד דרך דיאלוג התיקיות המשותף', async ({ page }) => {
     await page.goto('/translation');
 

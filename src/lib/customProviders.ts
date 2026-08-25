@@ -241,6 +241,7 @@ export async function chatWithProvider(args: {
   systemPrompt: string;
   userText: string;
   temperature?: number;
+  signal?: AbortSignal;
 }): Promise<string> {
   const provider = getProviders().find(p => p.id === args.providerId);
   if (!provider) throw new Error(`ספק לא ידוע: ${args.providerId}`);
@@ -258,6 +259,7 @@ export async function chatWithProvider(args: {
   const res = await fetch(`${provider.baseUrl}/chat/completions`, {
     method: "POST",
     headers,
+    signal: args.signal,
     body: JSON.stringify({
       model: args.modelId,
       messages: [

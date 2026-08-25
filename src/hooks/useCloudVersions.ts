@@ -19,6 +19,9 @@ export interface CloudVersion {
   ai_usage_event_id?: string | null;
   folder_id?: string | null;
   audio_file_path?: string | null;
+  word_timings?: Array<{ word: string; start: number; end: number; probability?: number }> | null;
+  detected_language?: string | null;
+  transcription_job_id?: string | null;
 }
 
 export const useCloudVersions = (transcriptId: string | null) => {
@@ -52,6 +55,9 @@ export const useCloudVersions = (transcriptId: string | null) => {
             ai_usage_event_id: l.ai_usage_event_id ?? null,
             folder_id: l.folder_id ?? null,
             audio_file_path: l.audio_file_path ?? null,
+            word_timings: l.word_timings ?? null,
+            detected_language: l.detected_language ?? null,
+            transcription_job_id: l.transcription_job_id ?? null,
           }));
           setVersions(localVersions);
         }
@@ -86,6 +92,9 @@ export const useCloudVersions = (transcriptId: string | null) => {
           ai_usage_event_id: v.ai_usage_event_id ?? null,
           folder_id: v.folder_id ?? null,
           audio_file_path: v.audio_file_path ?? null,
+          word_timings: v.word_timings ?? null,
+          detected_language: v.detected_language ?? null,
+          transcription_job_id: v.transcription_job_id ?? null,
           _dirty: false,
         }));
         await db.versions.bulkPut(toSync);
@@ -145,7 +154,14 @@ export const useCloudVersions = (transcriptId: string | null) => {
     source: string,
     engineLabel?: string | null,
     actionLabel?: string | null,
-    options?: { audioFilePath?: string | null; folderId?: string | null; transcriptId?: string | null },
+    options?: {
+      audioFilePath?: string | null;
+      folderId?: string | null;
+      transcriptId?: string | null;
+      wordTimings?: Array<{ word: string; start: number; end: number; probability?: number }> | null;
+      detectedLanguage?: string | null;
+      transcriptionJobId?: string | null;
+    },
   ): Promise<CloudVersion | null> => {
     const targetTranscriptId = options?.transcriptId || transcriptId;
     if (!targetTranscriptId || !user) return null;
@@ -167,6 +183,9 @@ export const useCloudVersions = (transcriptId: string | null) => {
       version_number: nextNumber,
       created_at: now,
       audio_file_path: options?.audioFilePath ?? null,
+      word_timings: options?.wordTimings ?? null,
+      detected_language: options?.detectedLanguage ?? null,
+      transcription_job_id: options?.transcriptionJobId ?? null,
       folder_id: options?.folderId ?? null,
       _dirty: true,
     };
@@ -184,6 +203,9 @@ export const useCloudVersions = (transcriptId: string | null) => {
       word_count: null,
       created_at: now,
       audio_file_path: options?.audioFilePath ?? null,
+      word_timings: options?.wordTimings ?? null,
+      detected_language: options?.detectedLanguage ?? null,
+      transcription_job_id: options?.transcriptionJobId ?? null,
       folder_id: options?.folderId ?? null,
       ai_usage_event_id: null,
     };
@@ -208,6 +230,9 @@ export const useCloudVersions = (transcriptId: string | null) => {
         ai_usage_event_id: usageEventId,
         folder_id: options?.folderId ?? null,
         audio_file_path: options?.audioFilePath ?? null,
+        word_timings: options?.wordTimings ?? null,
+        detected_language: options?.detectedLanguage ?? null,
+        transcription_job_id: options?.transcriptionJobId ?? null,
       };
 
       const { data, error } = await (supabase

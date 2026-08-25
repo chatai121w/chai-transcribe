@@ -137,6 +137,125 @@ test.describe('ממיר וידאו ואודיו', () => {
     await expect(page.getByText('2/2 קטעים')).toBeVisible();
   });
 
+  test('דיאלוג שמירת קטעים מציג עץ מלא ותומך ביצירה, קינון וגרירת תיקיות', async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 620 });
+    const now = new Date().toISOString();
+    const folders = [
+      {
+        id: 'cut-folder-source', user_id: 'test-user-00000000-0000-0000-0000-000000000001', parent_id: null,
+        name: 'תיקיית מקור', color: null, emoji: null, pinned: false, position: 0,
+        drive_folder_id: null, drive_folder_name: null, drive_synced_at: null, created_at: now, updated_at: now,
+      },
+      {
+        id: 'cut-folder-target', user_id: 'test-user-00000000-0000-0000-0000-000000000001', parent_id: null,
+        name: 'תיקיית יעד', color: null, emoji: null, pinned: false, position: 1,
+        drive_folder_id: null, drive_folder_name: null, drive_synced_at: null, created_at: now, updated_at: now,
+      },
+      {
+        id: 'cut-folder-existing-child', user_id: 'test-user-00000000-0000-0000-0000-000000000001', parent_id: 'cut-folder-target',
+        name: 'תת תיקייה קיימת', color: null, emoji: null, pinned: false, position: 0,
+        drive_folder_id: null, drive_folder_name: null, drive_synced_at: null, created_at: now, updated_at: now,
+      },
+    ];
+    const writes: Array<{ method: string; body: string | null }> = [];
+    await page.route('**/rest/v1/folders**', async route => {
+      const method = route.request().method();
+      if (method === 'GET') return route.fulfill({ status: 200, json: folders });
+      writes.push({ method, body: route.request().postData() });
+      return route.fulfill({
+        status: 200,
+        json: method === 'POST'
+          ? { ...folders[0], id: `cut-created-${writes.length}`, name: 'תיקייה שנוצרה' }
+          : {},
+      });
+    });
+
+    await page.goto('/video-to-mp3?tab=cut', { waitUntil: 'domcontentloaded' });
+    await page.locator('input[type="file"][accept="audio/*,video/*"]').setInputFiles({
+      name: 'folder-dialog-cut.wav',
+      mimeType: 'audio/wav',
+      buffer: createToneWavBuffer(2),
+    });
+    await page.getByRole('button', { name: '2 חלקים', exact: true }).click();
+    await page.getByRole('button', { name: /חתוך 2 קטעים/ }).click();
+    await expect(page.getByText('2/2 קטעים')).toBeVisible({ timeout: 15000 });
+    const completedPanel = page.getByRole('dialog', { name: 'קבצים שהושלמו' });
+    if (await completedPanel.isVisible()) {
+      await completedPanel.getByRole('button', { name: 'מזער' }).click();
+    }
+    await page.getByTitle('שמור את כל הקטעים בתיקייה').click();
+
+    const dialog = page.getByTestId('cut-folder-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(page.locator('[data-radix-dialog-overlay]')).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: /שמור 2 קטעים/ })).toBeVisible();
+    const dialogBox = await dialog.boundingBox();
+    const viewport = page.viewportSize();
+    expect(dialogBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(dialogBox!.y).toBeGreaterThanOrEqual(8);
+    expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(viewport!.height - 8);
+    const folderTree = dialog.getByRole('tree', { name: 'עץ תיקיות יעד' });
+    await expect(folderTree).toHaveCount(1);
+    const destinationSetup = dialog.getByTestId('cut-folder-destination-setup');
+    const folderNameInput = dialog.getByLabel(/שם תיקיית קטעים חדשה/);
+    await expect(folderNameInput).toBeVisible();
+    const setupBox = await destinationSetup.boundingBox();
+    const treeBox = await folderTree.boundingBox();
+    expect(setupBox).not.toBeNull();
+    expect(treeBox).not.toBeNull();
+    expect(setupBox!.y + setupBox!.height).toBeLessThanOrEqual(treeBox!.y);
+    const dialogScroll = dialog.getByTestId('cut-folder-dialog-scroll');
+    const scrollMetrics = await dialogScroll.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+    await dialogScroll.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect.poll(() => dialogScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await expect(dialog.getByRole('button', { name: /שמור 2 קטעים/ })).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'בחר תיקייה קיימת' }).click();
+    await expect(dialog.getByRole('tree', { name: 'עץ תיקיות יעד' })).toHaveCount(1);
+    await expect(dialog.getByLabel(/שם תיקיית קטעים חדשה/)).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'צור תיקיית קטעים' }).click();
+    await expect(dialog.getByRole('tree', { name: 'עץ תיקיות יעד' })).toHaveCount(1);
+    await expect(dialog.getByLabel(/שם תיקיית קטעים חדשה/)).toBeVisible();
+    const targetRow = dialog.getByTestId('cut-folder-cut-folder-target');
+    await expect(dialog.getByTestId('cut-folder-cut-folder-existing-child')).toBeHidden();
+    await dialog.getByRole('button', { name: 'הרחב את תיקיית יעד' }).click();
+    await expect(dialog.getByTestId('cut-folder-cut-folder-existing-child')).toBeVisible();
+    await dialog.getByRole('button', { name: 'מזער את תיקיית יעד' }).click();
+    await expect(dialog.getByTestId('cut-folder-cut-folder-existing-child')).toBeHidden();
+    await targetRow.getByText('תיקיית יעד', { exact: true }).click();
+    await expect(dialog.getByText(/הקטעים יישמרו ישירות בתוך/)).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /שמור 2 קטעים/ })).toBeEnabled();
+
+    await dialog.getByRole('button', { name: 'צור תיקייה ראשית' }).click();
+    await dialog.getByRole('textbox', { name: 'שם תיקייה ראשית חדשה' }).fill('תיקייה ראשית חדשה');
+    await dialog.getByRole('button', { name: 'שמור תיקייה חדשה' }).click();
+
+    await targetRow.hover();
+    await dialog.getByRole('button', { name: 'צור תת-תיקייה בתוך תיקיית יעד' }).click();
+    await dialog.getByRole('textbox', { name: 'שם תת-תיקייה חדשה' }).fill('תת תיקייה חדשה');
+    await dialog.getByRole('textbox', { name: 'שם תת-תיקייה חדשה' }).press('Enter');
+
+    await expect.poll(() => writes.some(({ body }) => body?.includes('תיקייה ראשית חדשה') && body.includes('"parent_id":null'))).toBe(true);
+    await expect.poll(() => writes.some(({ body }) => body?.includes('תת תיקייה חדשה') && body.includes('cut-folder-target'))).toBe(true);
+
+    const dragHandle = dialog.getByRole('button', { name: 'גרור את תיקיית מקור' });
+    const dragBox = await dragHandle.boundingBox();
+    const dropBox = await targetRow.boundingBox();
+    expect(dragBox).not.toBeNull();
+    expect(dropBox).not.toBeNull();
+    await page.mouse.move(dragBox!.x + dragBox!.width / 2, dragBox!.y + dragBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(dragBox!.x + dragBox!.width / 2 + 12, dragBox!.y + dragBox!.height / 2, { steps: 3 });
+    await page.mouse.move(dropBox!.x + dropBox!.width / 2, dropBox!.y + dropBox!.height / 2, { steps: 12 });
+    await page.mouse.up();
+    await expect.poll(() => writes.some(({ method, body }) => method === 'PATCH' && body?.includes('cut-folder-target'))).toBe(true);
+  });
+
   test('העורך החזותי מנגן, מסמן כמה אזורים ומחליף את מדיניות הפלט', async ({ page }) => {
     await page.goto('/video-to-mp3?tab=cut', { waitUntil: 'domcontentloaded' });
     await page.locator('input[type="file"][accept="audio/*,video/*"]').setInputFiles({

@@ -23,7 +23,7 @@ interface AdvancedDiffViewProps {
   fontFamily?: string;
   textColor?: string;
   lineHeight?: number;
-  onApplyVersion?: (text: string) => void;
+  onApplyVersion?: (text: string, versionId?: string) => void;
   onSaveVerifiedVersion?: (text: string) => void;
   /** Save a corrected source as a new version and make it the active editor text. */
   onSaveImmediateVersion?: (text: string, label: string) => void;
@@ -957,7 +957,7 @@ export const AdvancedDiffView = ({
               <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={copyDiff}>
                 <Copy className="w-3 h-3 ml-1" />העתק
               </Button>
-              <Button size="sm" className="h-7 text-xs" onClick={() => onApplyVersion(rightVersion.text)}>
+              <Button size="sm" className="h-7 text-xs" onClick={() => onApplyVersion(rightVersion.text, rightVersion.id)}>
                 החל גרסה חדשה
               </Button>
             </div>

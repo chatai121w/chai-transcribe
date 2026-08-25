@@ -32,8 +32,15 @@ import { extractAudioSegment, extractAudioSegments, probeAudioDurationSec } from
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { addNotification } from "@/hooks/useNotifications";
-import { getApiKey, getEncryptedKey } from "@/lib/keyCrypto";
-import { recoverProviderKeysFromCloud } from "@/lib/cloudKeyFallback";
+import { getApiKey } from "@/lib/keyCrypto";
+import {
+  getProviderApiKeyPool,
+  getProviderStartIndex,
+  setProviderActiveKey,
+  shouldRotateProviderKey,
+  transcriptionProviderLabel as providerLabel,
+  type CloudTranscriptionProvider as CloudProvider,
+} from "@/lib/providerApiKeys";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
 import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, isLkAiEnabled, isLkAiAuto, applyLkAiFix } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
@@ -565,98 +572,6 @@ const Index = () => {
 
       xhr.send(formData);
     });
-  };
-
-  type CloudProvider = 'openai' | 'groq' | 'google' | 'assemblyai' | 'deepgram';
-
-  const providerSingleKeyStorage: Record<CloudProvider, string> = {
-    openai: 'openai_api_key',
-    groq: 'groq_api_key',
-    google: 'google_api_key',
-    assemblyai: 'assemblyai_api_key',
-    deepgram: 'deepgram_api_key',
-  };
-
-  const providerPoolStorage: Record<CloudProvider, string> = {
-    openai: 'openai_api_keys_pool',
-    groq: 'groq_api_keys_pool',
-    google: 'google_api_keys_pool',
-    assemblyai: 'assemblyai_api_keys_pool',
-    deepgram: 'deepgram_api_keys_pool',
-  };
-
-  const providerActiveIndexStorage: Record<CloudProvider, string> = {
-    openai: 'openai_api_key_active_index',
-    groq: 'groq_api_key_active_index',
-    google: 'google_api_key_active_index',
-    assemblyai: 'assemblyai_api_key_active_index',
-    deepgram: 'deepgram_api_key_active_index',
-  };
-
-  const providerLabel: Record<CloudProvider, string> = {
-    openai: 'OpenAI',
-    groq: 'Groq',
-    google: 'Google',
-    assemblyai: 'AssemblyAI',
-    deepgram: 'Deepgram',
-  };
-
-  const getProviderApiKeyPool = async (provider: CloudProvider): Promise<string[]> => {
-    // Use async decrypt so keys are available even if CloudKeySync hasn't
-    // populated the in-memory cache yet (race on first transcription after refresh).
-    const single = (await getEncryptedKey(providerSingleKeyStorage[provider]))?.trim();
-    const raw = localStorage.getItem(providerPoolStorage[provider]);
-    let pooled: string[] = [];
-
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as string[];
-        if (Array.isArray(parsed)) {
-          pooled = parsed.map((k) => k.trim()).filter(Boolean);
-        }
-      } catch {
-        // Ignore malformed pool storage and fall back to single key.
-      }
-    }
-
-    const merged = [...pooled];
-    if (single && !merged.includes(single)) {
-      merged.unshift(single);
-    }
-    const local = Array.from(new Set(merged));
-    if (local.length > 0) return local;
-
-    // Nothing usable locally (fresh session → encrypted blob can't be decrypted,
-    // or CloudKeySync hasn't run yet) — recover straight from the cloud.
-    return await recoverProviderKeysFromCloud(provider);
-  };
-
-  const shouldRotateProviderKey = (err: any): boolean => {
-    const msg = String(err?.message || err?.error || '').toLowerCase();
-    return (
-      msg.includes('rate_limit') ||
-      msg.includes('rate limit') ||
-      msg.includes('quota') ||
-      msg.includes('429') ||
-      msg.includes('invalid api key') ||
-      msg.includes('api key is invalid') ||
-      msg.includes('expired') ||
-      msg.includes('insufficient_quota') ||
-      msg.includes('unauthorized') ||
-      msg.includes('authentication')
-    );
-  };
-
-  const getProviderStartIndex = (provider: CloudProvider, poolLength: number): number => {
-    if (poolLength <= 0) return 0;
-    const raw = parseInt(localStorage.getItem(providerActiveIndexStorage[provider]) || '0', 10);
-    if (!Number.isFinite(raw)) return 0;
-    return ((raw % poolLength) + poolLength) % poolLength;
-  };
-
-  const setProviderActiveKey = (provider: CloudProvider, pool: string[], index: number) => {
-    localStorage.setItem(providerActiveIndexStorage[provider], String(index));
-    localStorage.setItem(providerSingleKeyStorage[provider], pool[index]);
   };
 
   const parseRangeValue = (raw: string): number => {

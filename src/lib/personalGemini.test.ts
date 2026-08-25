@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  callPersonalGemini,
   getLovableGatewayUsage,
   getPersonalGeminiUsage,
   normalizeGeminiUsage,
@@ -25,7 +26,27 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("Gemini usage route separation", () => {
+  it("retries temporary 503 overload responses before returning the translation", async () => {
+    store.gemini_api_key = "AIza-test-key";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 503 } }), { status: 503, headers: { "retry-after": "0" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 503 } }), { status: 503, headers: { "retry-after": "0" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: "Translated successfully" }] } }],
+        usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 2, totalTokenCount: 6 },
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(callPersonalGemini({ userPrompt: "תרגם", model: "gemini-flash-latest" }))
+      .resolves.toBe("Translated successfully");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it("normalizes Google and Lovable token metadata and includes thinking tokens", () => {
     expect(normalizeGeminiUsage({
       promptTokenCount: 100,

@@ -11,8 +11,8 @@ import { GeminiModelSelect, loadGeminiModel } from "@/components/GeminiModelSele
 import {
   isPersonalGeminiEnabled,
   callPersonalGemini,
-  isPersonalGeminiFallbackEnabled,
   PersonalGeminiExhaustedError,
+  PersonalGeminiTransientError,
   recordLovableGatewayUsage,
 } from "@/lib/personalGemini";
 
@@ -50,11 +50,15 @@ export const TranscriptSummary = ({ transcript }: TranscriptSummaryProps) => {
           });
 
         } catch (e) {
-          if (e instanceof PersonalGeminiExhaustedError && isPersonalGeminiFallbackEnabled()) {
-            toast({ title: "Gemini האישי מוצה", description: "עוברים ל-Lovable AI" });
-          } else {
-            throw e;
-          }
+          if (e instanceof DOMException && e.name === 'AbortError') throw e;
+          toast({
+            title: e instanceof PersonalGeminiTransientError
+              ? "Gemini עמוס זמנית"
+              : e instanceof PersonalGeminiExhaustedError
+                ? "Gemini האישי אינו זמין"
+                : "Gemini האישי נכשל",
+            description: "עוברים אוטומטית לקרדיטים של Lovable",
+          });
         }
       }
 

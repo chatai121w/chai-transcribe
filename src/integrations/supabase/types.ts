@@ -871,45 +871,54 @@ export type Database = {
           ai_usage_event_id: string | null
           audio_file_path: string | null
           created_at: string
+          detected_language: string | null
           engine_label: string | null
           folder_id: string | null
           id: string
           source: string
           text: string
+          transcription_job_id: string | null
           transcript_id: string
           user_id: string
           version_number: number
           word_count: number | null
+          word_timings: Json | null
         }
         Insert: {
           action_label?: string | null
           ai_usage_event_id?: string | null
           audio_file_path?: string | null
           created_at?: string
+          detected_language?: string | null
           engine_label?: string | null
           folder_id?: string | null
           id?: string
           source?: string
           text: string
+          transcription_job_id?: string | null
           transcript_id: string
           user_id: string
           version_number?: number
           word_count?: number | null
+          word_timings?: Json | null
         }
         Update: {
           action_label?: string | null
           ai_usage_event_id?: string | null
           audio_file_path?: string | null
           created_at?: string
+          detected_language?: string | null
           engine_label?: string | null
           folder_id?: string | null
           id?: string
           source?: string
           text?: string
+          transcription_job_id?: string | null
           transcript_id?: string
           user_id?: string
           version_number?: number
           word_count?: number | null
+          word_timings?: Json | null
         }
         Relationships: [
           {
@@ -924,6 +933,13 @@ export type Database = {
             columns: ["folder_id"]
             isOneToOne: false
             referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transcript_versions_transcription_job_id_fkey"
+            columns: ["transcription_job_id"]
+            isOneToOne: false
+            referencedRelation: "transcription_jobs"
             referencedColumns: ["id"]
           },
           {
