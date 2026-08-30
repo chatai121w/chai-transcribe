@@ -15,7 +15,7 @@
     "test": "node scripts/run-playwright.mjs smoke",
     "test:all": "node scripts/run-playwright.mjs full",
     "test:unit": "vitest run",
-    "test:quality-gate": "vitest run src/lib/asrMetrics.test.ts src/lib/asrQualityGate.test.ts src/lib/learningRegression.test.ts src/lib/whisperAlignment.test.ts src/utils/correctionLearning.test.ts",
+    "test:quality-gate": "vitest run src/lib/asrMetrics.test.ts src/lib/asrQualityGate.test.ts src/lib/asrDatasetMetadata.test.ts src/lib/correctionApprovalPolicy.test.ts src/lib/learningRegression.test.ts src/lib/whisperAlignment.test.ts src/utils/correctionLearning.test.ts",
     "quality:compare": "tsx scripts/check-asr-quality.ts",
     "quality:compare-responses": "tsx scripts/compare-asr-responses.ts",
     "test:unit:watch": "vitest",

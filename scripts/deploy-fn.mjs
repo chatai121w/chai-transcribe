@@ -57,13 +57,16 @@ async function main() {
   console.log('✅ Logged in as:', authData.user.email);
 
   if (command === 'check') {
-    await checkReady();
+    const ready = await checkReady();
+    if (!ready) process.exitCode = 1;
   } else if (command === 'list') {
     listFunctions();
   } else if (command === 'all') {
-    await deployAll();
+    const ok = await deployAll();
+    if (!ok) process.exitCode = 1;
   } else {
-    await deploySingle(command);
+    const ok = await deploySingle(command);
+    if (!ok) process.exitCode = 1;
   }
 
   await supabase.auth.signOut();
@@ -95,19 +98,22 @@ async function checkReady() {
   console.log(`  deploy_edge_fn function: ${fnOk ? '✅' : '❌ Not created'}`);
 
   // Check token exists (we can't read it, just check existence)
+  let tokenOk = false;
   if (tableOk) {
     const { data: d4 } = await supabase.rpc('exec_sql_return', {
       query: "SELECT json_build_object('exists', EXISTS(SELECT 1 FROM public.system_secrets WHERE key = 'SUPABASE_MANAGEMENT_TOKEN'))"
     });
-    const tokenOk = d4?.exists;
+    tokenOk = d4?.exists === true;
     console.log(`  Management token: ${tokenOk ? '✅' : '❌ Not set'}`);
   }
 
-  if (httpOk && tableOk && fnOk) {
+  const ready = httpOk && tableOk && fnOk && tokenOk;
+  if (ready) {
     console.log('\n✅ Deploy system is ready!');
   } else {
-    console.log('\n❌ Deploy system not ready. Ask Lovable to run the setup SQL.');
+    console.log('\n❌ Deploy system is not ready. Run the setup migration and configure the Management token.');
   }
+  return ready;
 }
 
 function listFunctions() {
@@ -183,6 +189,7 @@ async function deployAll() {
 
   console.log('─'.repeat(50));
   console.log(`📊 Results: ${success} succeeded, ${failed} failed`);
+  return failed === 0;
 }
 
 main().catch(console.error);

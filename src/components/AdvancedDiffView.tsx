@@ -13,6 +13,7 @@ import { ArrowRightLeft, ChevronDown, Copy, ArrowUp, ArrowDown, Layers, Star, Tr
 import { TextVersion } from "@/components/TextEditHistory";
 import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
 import { ComparisonSourceDialog } from "@/components/ComparisonSourceDialog";
+import { WordContextMenu } from "@/components/WordContextMenu";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { buildAdjudicationUnits, composeAdjudicatedText, composeCorrectedSideText, type AdjudicationResolution, type GlobalReplacementRule } from "@/lib/textAdjudication";
@@ -461,6 +462,12 @@ export const AdvancedDiffView = ({
   const [quickCustomText, setQuickCustomText] = useState("");
   const [quickApplyEverywhere, setQuickApplyEverywhere] = useState(false);
   const [quickReplacementSource, setQuickReplacementSource] = useState<"left" | "right">("left");
+  const [comparisonWordTarget, setComparisonWordTarget] = useState<{
+    unitId: string;
+    side: "left" | "right";
+    wordIndex: number;
+    word: string;
+  } | null>(null);
   const resolutionHistoryRef = useRef<Array<{ resolutions: Record<string, AdjudicationResolution>; rules: GlobalReplacementRule[] }>>([]);
 
   useEffect(() => {
@@ -471,10 +478,83 @@ export const AdvancedDiffView = ({
     setQuickDecision(null);
     setQuickCustomText("");
     setQuickApplyEverywhere(false);
+    setComparisonWordTarget(null);
     setActiveConflictIndex(0);
     resolutionHistoryRef.current = [];
     setVerifiedText(composeAdjudicatedText(adjudicationUnits, {}));
   }, [leftId, rightId, leftText, rightText, adjudicationUnits]);
+
+  const replaceWordAtIndex = (value: string, targetIndex: number, replacement: string): string => {
+    const parts = value.split(/(\s+)/);
+    let currentIndex = -1;
+    const targetPartIndex = parts.findIndex((part) => {
+      if (!part || /^\s+$/.test(part)) return false;
+      currentIndex += 1;
+      return currentIndex === targetIndex;
+    });
+    if (targetPartIndex < 0) return value;
+    parts[targetPartIndex] = replacement;
+    if (!replacement) {
+      if (targetPartIndex + 1 < parts.length && /^\s+$/.test(parts[targetPartIndex + 1])) parts[targetPartIndex + 1] = "";
+      else if (targetPartIndex > 0 && /^\s+$/.test(parts[targetPartIndex - 1])) parts[targetPartIndex - 1] = "";
+    }
+    return parts.join("");
+  };
+
+  const applyComparisonWordCorrection = (replacement: string) => {
+    if (!comparisonWordTarget) return;
+    const targetUnit = adjudicationUnits.find((unit) => unit.id === comparisonWordTarget.unitId);
+    if (!targetUnit) return;
+    const side = comparisonWordTarget.side;
+    const currentUnitText = side === "left" ? targetUnit.leftText : targetUnit.rightText;
+    const correctedWord = replacement === "__DELETE__" ? "" : replacement;
+    const correctedUnitText = replaceWordAtIndex(currentUnitText, comparisonWordTarget.wordIndex, correctedWord);
+    const correctedText = adjudicationUnits.map((unit) => {
+      if (unit.id === targetUnit.id) return correctedUnitText;
+      return side === "left" ? unit.leftText : unit.rightText;
+    }).join("");
+
+    if (side === "left") {
+      setLeftDetached(true);
+      setLeftText(correctedText);
+    } else {
+      setRightDetached(true);
+      setRightText(correctedText);
+    }
+
+    const action = replacement === "__DELETE__"
+      ? `מחיקת מילה בהשוואה: ${comparisonWordTarget.word}`
+      : `תיקון מילה בהשוואה: ${comparisonWordTarget.word} → ${replacement}`;
+    onSaveImmediateVersion?.(correctedText, action);
+    toast({
+      title: replacement === "__DELETE__" ? "המילה נמחקה ונשמרה" : "המילה תוקנה ונשמרה",
+      description: side === "left" ? "גרסת הבסיס עודכנה כגרסה חדשה" : "הגרסה החדשה עודכנה כגרסה חדשה",
+    });
+    setComparisonWordTarget(null);
+  };
+
+  const renderComparisonWords = (value: string, unitId: string, side: "left" | "right") => {
+    let wordIndex = -1;
+    return value.split(/(\s+)/).map((part, partIndex) => {
+      if (!part || /^\s+$/.test(part)) return <Fragment key={`${unitId}-${side}-space-${partIndex}`}>{part}</Fragment>;
+      wordIndex += 1;
+      const currentWordIndex = wordIndex;
+      const selectWord = () => setComparisonWordTarget({ unitId, side, wordIndex: currentWordIndex, word: part });
+      return (
+        <span
+          key={`${unitId}-${side}-word-${currentWordIndex}`}
+          data-testid="comparison-editable-word"
+          data-comparison-side={side}
+          className="cursor-context-menu rounded-sm px-0.5 hover:bg-primary/10 hover:underline hover:decoration-dotted hover:underline-offset-2"
+          onPointerDown={(event) => { if (event.button === 2) selectWord(); }}
+          onContextMenu={selectWord}
+          title="אפשרויות תיקון"
+        >
+          {part}
+        </span>
+      );
+    });
+  };
 
   const applyResolution = (unitId: string, resolution: AdjudicationResolution, replacementRule?: GlobalReplacementRule) => {
     resolutionHistoryRef.current.push({ resolutions, rules: replacementRules });
@@ -1041,12 +1121,13 @@ export const AdvancedDiffView = ({
           </div>
           {comparisonLayout === "continuous" ? (
             <ScrollArea className="h-[500px]">
+              <WordContextMenu word={comparisonWordTarget?.word || ""} onReplace={applyComparisonWordCorrection}>
               <div className="grid min-h-[500px] grid-cols-2" dir="rtl" style={textStyle}>
                 {(["left", "right"] as const).map((side) => (
-                  <div key={side} className={cn("px-4 py-4 text-right whitespace-pre-wrap break-words", side === "left" && "border-l")}>
+                  <div key={side} data-testid={`comparison-column-${side}`} className={cn("px-4 py-4 text-right whitespace-pre-wrap break-words", side === "left" && "border-l")}>
                     {adjudicationUnits.map((unit) => {
                       const text = side === "left" ? unit.leftText : unit.rightText;
-                      if (unit.kind === "equal") return <Fragment key={unit.id}>{text}</Fragment>;
+                      if (unit.kind === "equal") return <Fragment key={unit.id}>{renderComparisonWords(text, unit.id, side)}</Fragment>;
                       const selected = resolutions[unit.id];
                       return (
                         <button
@@ -1063,23 +1144,25 @@ export const AdvancedDiffView = ({
                           onDoubleClick={() => openQuickDecision(unit.id, side)}
                           title={side === "left" ? "לחץ פעמיים לאפשרויות אישור מגרסת הבסיס" : "לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"}
                         >
-                          {text || "[מחיקה]"}
+                          {text ? renderComparisonWords(text, unit.id, side) : "[מחיקה]"}
                         </button>
                       );
                     })}
                   </div>
                 ))}
               </div>
+              </WordContextMenu>
             </ScrollArea>
           ) : (
             <ScrollArea className="h-[500px]">
+              <WordContextMenu word={comparisonWordTarget?.word || ""} onReplace={applyComparisonWordCorrection}>
               <div className="grid min-h-[500px] grid-cols-2 items-stretch" dir="rtl" style={textStyle}>
                 {adjudicationUnits.map((unit) => {
                   if (unit.kind === "equal") {
                     return (
                       <Fragment key={unit.id}>
-                        <div className="border-l border-muted/20 px-4 py-1 text-right whitespace-pre-wrap break-words">{unit.leftText}</div>
-                        <div className="px-4 py-1 text-right whitespace-pre-wrap break-words">{unit.rightText}</div>
+                        <div className="border-l border-muted/20 px-4 py-1 text-right whitespace-pre-wrap break-words">{renderComparisonWords(unit.leftText, unit.id, "left")}</div>
+                        <div className="px-4 py-1 text-right whitespace-pre-wrap break-words">{renderComparisonWords(unit.rightText, unit.id, "right")}</div>
                       </Fragment>
                     );
                   }
@@ -1098,7 +1181,7 @@ export const AdvancedDiffView = ({
                           onDoubleClick={() => openQuickDecision(unit.id, "left")}
                           title="לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"
                         >
-                          {unit.leftText || "[מחיקה]"}
+                          {unit.leftText ? renderComparisonWords(unit.leftText, unit.id, "left") : "[מחיקה]"}
                         </button>
                       </div>
                       <div className="flex items-start gap-1 px-2 py-1">
@@ -1112,7 +1195,7 @@ export const AdvancedDiffView = ({
                           onDoubleClick={() => openQuickDecision(unit.id, "right")}
                           title="לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"
                         >
-                          {unit.rightText || "[מחיקה]"}
+                          {unit.rightText ? renderComparisonWords(unit.rightText, unit.id, "right") : "[מחיקה]"}
                         </button>
                         <Button
                           type="button"
@@ -1132,6 +1215,7 @@ export const AdvancedDiffView = ({
                   );
                 })}
               </div>
+              </WordContextMenu>
             </ScrollArea>
           )}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">

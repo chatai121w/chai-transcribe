@@ -47,6 +47,10 @@ import { runAiAlignmentReview, type AiAlignment } from '@/utils/aiAlignmentRevie
 import { getAllTerms } from '@/utils/customVocabulary';
 import { getAllCorrections } from '@/utils/correctionLearning';
 import { Sparkle, ShieldCheck, ArrowDownAZ, ArrowUpAZ, ArrowDown10, ArrowUp10, Filter } from 'lucide-react';
+import { getPersonalGeminiKey, getPersonalGeminiModel } from '@/lib/personalGemini';
+import { fingerprintFile } from '@/lib/recordingFingerprint';
+import { buildApprovedAsrMetadata } from '@/lib/asrDatasetMetadata';
+import { decideCorrectionApproval } from '@/lib/correctionApprovalPolicy';
 
 // ─── Tanakh book catalog (Sefaria refs) ───────────────────────────────────
 const TANAKH_BOOKS: Array<{ value: string; label: string; chapters: number }> = [
@@ -77,7 +81,7 @@ const DEFAULT_TARGET_TERMS = [
   'משנה','ברייתא','הלכה','איסור','היתר','טמא','טהור','חייב','פטור','מצווה',
 ];
 
-type Engine = 'lovable' | 'local';
+type Engine = 'lovable' | 'local' | 'gemini';
 type LearningMode = 'auto' | 'hybrid' | 'manual';
 
 interface RunMetrics {
@@ -144,6 +148,21 @@ async function transcribeWithLocal(file: File, serverUrl: string): Promise<{ tex
   if (!resp.ok) throw new Error(`Local server ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
   const data = await resp.json();
   return { text: data.text || data.transcript || '', elapsed_ms: Date.now() - t0 };
+}
+
+async function transcribeWithGemini(file: File, model: string): Promise<{ text: string; elapsed_ms: number; model: string }> {
+  const fd = new FormData();
+  fd.append('file', file, file.name || 'audio.webm');
+  fd.append('model', model);
+  fd.append('language', 'he');
+  fd.append('customVocabulary', JSON.stringify(getAllTerms().map((item) => item.term).slice(0, 100)));
+  const personalKey = getPersonalGeminiKey();
+  if (personalKey) fd.append('apiKey', personalKey);
+  const startedAt = Date.now();
+  const { data, error } = await supabase.functions.invoke('transcribe-gemini', { body: fd });
+  if (error) throw new Error(error.message);
+  if (data?.error) throw new Error(data.error);
+  return { text: data?.text || '', elapsed_ms: Date.now() - startedAt, model: data?.model || model };
 }
 
 function evaluateRun(ref: string, hyp: string, elapsed_ms: number): { metrics: RunMetrics; diff: DiffOp[]; candidates: Array<{wrong:string;correct:string}> } {
@@ -240,7 +259,11 @@ export default function AsrTraining() {
 
   const [useLovable, setUseLovable] = useState(true);
   const [useLocal, setUseLocal] = useState(false);
+  const [useGemini, setUseGemini] = useState<boolean>(() => localStorage.getItem('asr_training_use_gemini') === 'true');
   const [lovableModel, setLovableModel] = useState('openai/gpt-4o-mini-transcribe');
+  const [geminiModel, setGeminiModel] = useState<string>(
+    () => localStorage.getItem('asr_training_gemini_model') || getPersonalGeminiModel(),
+  );
   const [localServerUrl, setLocalServerUrl] = useState<string>(
     () => localStorage.getItem('asr_training_local_url') || 'http://localhost:3000',
   );
@@ -272,6 +295,8 @@ export default function AsrTraining() {
 
   useEffect(() => { localStorage.setItem('asr_training_mode', learningMode); }, [learningMode]);
   useEffect(() => { localStorage.setItem('asr_training_local_url', localServerUrl); }, [localServerUrl]);
+  useEffect(() => { localStorage.setItem('asr_training_use_gemini', String(useGemini)); }, [useGemini]);
+  useEffect(() => { localStorage.setItem('asr_training_gemini_model', geminiModel); }, [geminiModel]);
   useEffect(() => { localStorage.setItem('asr_training_save_local', String(saveLocally)); }, [saveLocally]);
   useEffect(() => { localStorage.setItem('asr_training_save_cloud', String(saveCloud)); }, [saveCloud]);
   useEffect(() => { setCorrectionThreshold(confidenceThreshold); }, [confidenceThreshold]);
@@ -398,7 +423,7 @@ export default function AsrTraining() {
       setRefLabel('טקסט חופשי');
     }
     if (!effectiveRef) { toast({ title: 'טען טקסט קנוני קודם', variant: 'destructive' }); return; }
-    if (!useLovable && !useLocal) { toast({ title: 'בחר לפחות מנוע אחד', variant: 'destructive' }); return; }
+    if (!useLovable && !useLocal && !useGemini) { toast({ title: 'בחר לפחות מנוע אחד', variant: 'destructive' }); return; }
 
     setRunning(true);
     setResults([]);
@@ -430,6 +455,19 @@ export default function AsrTraining() {
           setResults([...results]);
         } catch (err) {
           toast({ title: 'שרת מקומי לא זמין', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
+        }
+      }
+      if (useGemini) {
+        toast({ title: 'מתמלל עם Gemini להשוואת מורה' });
+        try {
+          const { text, elapsed_ms, model } = await transcribeWithGemini(audioFile, geminiModel);
+          const { fixedText, hits } = applyRulesToText(text);
+          if (hits.length > 0) toast({ title: `${hits.length} תיקוני חוקים עבריים הופעלו (Gemini)` });
+          const { metrics, diff, candidates } = evaluateRun(effectiveRef, fixedText, elapsed_ms);
+          results.push({ engine: 'gemini', model, hyp: fixedText, metrics, diff, candidates });
+          setResults([...results]);
+        } catch (err) {
+          toast({ title: 'Gemini לא זמין', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
         }
       }
 
@@ -470,17 +508,18 @@ export default function AsrTraining() {
         const conf = breakdown.total;
         const ruleIds = breakdown.ruleHit ? [breakdown.ruleHit.ruleId] : [];
 
-        // Auto-approve if confidence passes threshold OR mode allows it
-        const passesAutoThreshold = conf >= autoApproveThreshold;
+        // Every automatic mode must respect the confidence gate. Lower scores
+        // remain reviewable instead of silently becoming global corrections.
+        const decision = decideCorrectionApproval({
+          mode: learningMode,
+          confidence: conf,
+          threshold: autoApproveThreshold,
+          occurrences: n,
+        });
 
-        if (learningMode === 'auto' || passesAutoThreshold) {
+        if (decision === 'apply') {
           autoApplied.push(buildCorrection(wrong, correct, n, a.engine));
           autoSummary.push({ wrong, correct, occurrences: n, engine: a.engine });
-        } else if (learningMode === 'hybrid') {
-          if (n >= 2) {
-            autoApplied.push(buildCorrection(wrong, correct, n, a.engine));
-            autoSummary.push({ wrong, correct, occurrences: n, engine: a.engine });
-          } else queuedPending.push({ wrong, correct, engine: a.engine, confidence: conf, rule_ids: ruleIds });
         } else {
           queuedPending.push({ wrong, correct, engine: a.engine, confidence: conf, rule_ids: ruleIds });
         }
@@ -675,7 +714,15 @@ export default function AsrTraining() {
     if (!audioFile || !refText.trim() || results.length === 0) return;
     setAddingToLora(true);
     try {
-      const data = await addApprovedPair(audioFile, refText.trim());
+      const recordingFingerprint = await fingerprintFile(audioFile);
+      const data = await addApprovedPair(audioFile, refText.trim(), 'approved-ground-truth', buildApprovedAsrMetadata({
+        recordingFingerprint,
+        sourceKind,
+        sourceRef: sourceKind === 'tanakh' ? `${book}.${chapter}${verses ? `.${verses}` : ''}` : 'free-text',
+        sourceLabel: refLabel || audioFile.name,
+        teacherEngines: results.map((result) => `${result.engine}:${result.model}`),
+        approvedAt: new Date().toISOString(),
+      }));
       toast({
         title: 'הדוגמה אושרה לאימון LoRA',
         description: `${data.rows} דוגמאות במאגר · ${data.eval_count || 0} לבדיקת איכות`,
@@ -1490,6 +1537,19 @@ export default function AsrTraining() {
               {useLocal && (
                 <Input value={localServerUrl} onChange={(e) => setLocalServerUrl(e.target.value)} placeholder="http://localhost:3000" className="text-xs h-8" />
               )}
+              <div className="flex items-center gap-2">
+                <Checkbox id="eng-gemini" checked={useGemini} onCheckedChange={(value) => setUseGemini(!!value)} />
+                <label htmlFor="eng-gemini" className="text-sm flex-1">Gemini כמנוע מורה להשוואה</label>
+                <Select value={geminiModel} onValueChange={setGeminiModel} disabled={!useGemini}>
+                  <SelectTrigger className="w-44 h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="gemini-3.5-transcribe">Gemini 3.5 Transcribe (ייעודי)</SelectItem>
+                    <SelectItem value="gemini-flash-latest">Gemini Flash</SelectItem>
+                    <SelectItem value="gemini-pro-latest">Gemini Pro</SelectItem>
+                    <SelectItem value="gemini-2.5-flash-lite">Gemini Flash Lite</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <Separator />
@@ -1497,9 +1557,9 @@ export default function AsrTraining() {
             <div className="space-y-2">
               <Label className="text-xs">מצב למידה אוטומטית</Label>
               <RadioGroup value={learningMode} onValueChange={(v) => setLearningMode(v as LearningMode)}>
-                <div className="flex items-center gap-2"><RadioGroupItem value="auto" id="m-auto" /><label htmlFor="m-auto" className="text-sm">🟢 אוטומטי — שמור כל תיקון (חוץ מדו-משמעיים)</label></div>
-                <div className="flex items-center gap-2"><RadioGroupItem value="hybrid" id="m-hybrid" /><label htmlFor="m-hybrid" className="text-sm">🟡 היברידי — אוטומטי על 2+ הופעות, אחרת לאישור</label></div>
-                <div className="flex items-center gap-2"><RadioGroupItem value="manual" id="m-manual" /><label htmlFor="m-manual" className="text-sm">🔴 ידני — הכל ממתין לאישור</label></div>
+                <div className="flex items-center gap-2"><RadioGroupItem value="auto" id="m-auto" /><label htmlFor="m-auto" className="text-sm">אוטומטי — רק מעל סף הביטחון ולא דו־משמעי</label></div>
+                <div className="flex items-center gap-2"><RadioGroupItem value="hybrid" id="m-hybrid" /><label htmlFor="m-hybrid" className="text-sm">היברידי — מעל הסף וב־2+ הופעות, אחרת לאישור</label></div>
+                <div className="flex items-center gap-2"><RadioGroupItem value="manual" id="m-manual" /><label htmlFor="m-manual" className="text-sm">ידני — הכל ממתין לאישור</label></div>
               </RadioGroup>
             </div>
 

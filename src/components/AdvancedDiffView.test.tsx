@@ -47,6 +47,32 @@ describe("AdvancedDiffView adjudication", () => {
     expect(screen.getByTestId("verified-text")).toHaveValue("אמר בברא בתרא היום");
   });
 
+  it("edits any comparison word through the shared word context menu and saves a new version", async () => {
+    const user = userEvent.setup();
+    const onSaveImmediate = vi.fn();
+    render(
+      <AdvancedDiffView
+        versions={versions}
+        preselectedLeftId="base"
+        preselectedRightId="new"
+        onSaveImmediateVersion={onSaveImmediate}
+      />,
+    );
+
+    const leftWord = screen.getAllByTestId("comparison-editable-word")
+      .find((element) => element.getAttribute("data-comparison-side") === "left" && element.textContent === "אמר");
+    expect(leftWord).toBeDefined();
+    fireEvent.contextMenu(leftWord!);
+    expect(await screen.findByText("מחק מילה", { exact: true })).toBeVisible();
+
+    await user.click(screen.getByText("מחק מילה", { exact: true }));
+
+    expect(onSaveImmediate).toHaveBeenCalledWith(
+      "בברא בתרא היום",
+      "מחיקת מילה בהשוואה: אמר",
+    );
+  });
+
   it("keeps the quick adjudication non-modal and supports minimize and restore", async () => {
     const user = userEvent.setup();
     render(
@@ -107,7 +133,8 @@ describe("AdvancedDiffView adjudication", () => {
 
     await user.click(screen.getByTestId("save-quick-once"));
     expect(onSaveImmediateVersion).toHaveBeenCalledWith("אמר בטרה בתרא היום", "תיקון מיידי בהשוואה");
-    expect(screen.getAllByText("אמר בטרה בתרא היום")).toHaveLength(2);
+    expect(screen.getByTestId("comparison-column-left")).toHaveTextContent("אמר בטרה בתרא היום");
+    expect(screen.getByTestId("comparison-column-right")).toHaveTextContent("אמר בטרה בתרא היום");
   });
 
   it("accepts a correction when both versions are wrong", async () => {
@@ -314,7 +341,8 @@ describe("AdvancedDiffView adjudication", () => {
     await user.click(screen.getByTestId("save-custom-immediately"));
 
     expect(onSaveImmediate).toHaveBeenCalledWith("אמר בבא בתרא היום", "תיקון מיידי בשתי הגרסאות");
-    expect(screen.getAllByText("אמר בבא בתרא היום")).toHaveLength(2);
+    expect(screen.getByTestId("comparison-column-left")).toHaveTextContent("אמר בבא בתרא היום");
+    expect(screen.getByTestId("comparison-column-right")).toHaveTextContent("אמר בבא בתרא היום");
     expect(screen.queryByTitle("לחץ פעמיים לאפשרויות אישור מגרסת הבסיס")).not.toBeInTheDocument();
     expect(screen.queryByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה")).not.toBeInTheDocument();
   });

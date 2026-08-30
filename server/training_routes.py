@@ -83,6 +83,39 @@ def _audio_duration(path: Path) -> Optional[float]:
         return None
 
 
+def _evaluation_fingerprint(rows: list[dict]) -> str:
+    """Stable identity for the exact holdout rows used by an experiment."""
+    canonical = [
+        {
+            "audio_sha256": row.get("audio_sha256") or hashlib.sha256(Path(row["audio"]).read_bytes()).hexdigest(),
+            "text": row["text"],
+            "group_id": row.get("group_id") or row.get("metadata", {}).get("groupId") or "",
+        }
+        for row in rows
+    ]
+    canonical.sort(key=lambda row: (row["group_id"], row["audio_sha256"], row["text"]))
+    payload = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _model_quality_gate(progress: dict) -> tuple[bool, list[str]]:
+    """Reject models with missing, incomparable, or regressing holdout results."""
+    reasons = []
+    required = ("wer_before", "wer_after", "cer_before", "cer_after")
+    if any(progress.get(key) is None for key in required):
+        reasons.append("missing WER/CER holdout metrics")
+        return False, reasons
+    if not progress.get("eval_fingerprint") or not progress.get("eval_sample_count"):
+        reasons.append("evaluation set identity is missing")
+    if progress["wer_after"] > progress["wer_before"]:
+        reasons.append("holdout WER regressed")
+    if progress["cer_after"] > progress["cer_before"]:
+        reasons.append("holdout CER regressed")
+    if progress["wer_after"] == progress["wer_before"] and progress["cer_after"] == progress["cer_before"]:
+        reasons.append("model did not improve WER or CER")
+    return not reasons, reasons
+
+
 def _finalize_dataset(ds_dir: Path) -> dict:
     rows = []
     total_duration = 0.0
@@ -106,6 +139,7 @@ def _finalize_dataset(ds_dir: Path) -> dict:
         group_id = str(metadata.get("groupId") or metadata.get("group_id") or audio_path.stem)
         rows.append({
             "audio": str(audio_path.resolve()), "text": text, "duration": duration,
+            "audio_sha256": hashlib.sha256(audio_path.read_bytes()).hexdigest(),
             "group_id": group_id, "metadata": metadata,
         })
 
@@ -129,12 +163,19 @@ def _finalize_dataset(ds_dir: Path) -> dict:
     eval_audio = {row["audio"] for row in eval_rows}
     train_rows = [row for row in rows if row["audio"] not in eval_audio]
     eval_count = len(eval_rows)
+    quality_counts = {"gold": 0, "silver": 0, "bronze": 0, "unknown": 0}
+    label_source_counts = {}
+    for row in rows:
+        tier = str(row["metadata"].get("qualityTier") or row["metadata"].get("quality_tier") or "unknown").lower()
+        quality_counts[tier if tier in quality_counts else "unknown"] += 1
+        source = str(row["metadata"].get("labelSource") or row["metadata"].get("label_source") or "unknown")
+        label_source_counts[source] = label_source_counts.get(source, 0) + 1
 
     def write_manifest(name: str, values: list[dict]):
         path = ds_dir / name
         with path.open("w", encoding="utf-8") as handle:
             for row in values:
-                handle.write(json.dumps({"audio": row["audio"], "text": row["text"]}, ensure_ascii=False) + "\n")
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
         return path
 
     manifest = write_manifest("manifest.jsonl", rows)
@@ -152,6 +193,8 @@ def _finalize_dataset(ds_dir: Path) -> dict:
     meta = {
         "count": len(rows), "train_count": len(train_rows) if eval_rows else len(rows),
         "eval_count": eval_count, "recording_groups": len(groups), "duration_seconds": round(total_duration, 2),
+        "eval_fingerprint": _evaluation_fingerprint(eval_rows) if eval_rows else None,
+        "quality_counts": quality_counts, "label_source_counts": label_source_counts,
         "ready_for_training": len(rows) >= 20 and bool(eval_rows), "warnings": warnings,
     }
     (ds_dir / "dataset_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -163,7 +206,8 @@ def resolve_trained_model(model_id: str) -> Optional[str]:
         return None
     try:
         for item in json.loads(TRAINED_MODELS_FILE.read_text(encoding="utf-8")):
-            if item.get("model_id") == model_id and Path(item.get("ct2_path", "")).is_dir():
+            quality_passed, _ = _model_quality_gate(item)
+            if item.get("model_id") == model_id and quality_passed and Path(item.get("ct2_path", "")).is_dir():
                 return item["ct2_path"]
     except Exception:
         pass
@@ -438,6 +482,12 @@ def register_training_routes(app):
                 "progress": prog.get("progress"),
                 "wer_before": prog.get("wer_before"),
                 "wer_after": prog.get("wer_after"),
+                "cer_before": prog.get("cer_before"),
+                "cer_after": prog.get("cer_after"),
+                "eval_sample_count": prog.get("eval_sample_count"),
+                "eval_fingerprint": prog.get("eval_fingerprint"),
+                "quality_gate": _model_quality_gate(prog)[0],
+                "quality_gate_reasons": _model_quality_gate(prog)[1],
                 "adapter_path": prog.get("adapter_path") or (str(d / "adapter") if (d / "adapter").is_dir() else None),
                 "ct2_model_path": prog.get("ct2_model_path") or (str(d / "ct2") if (d / "ct2").is_dir() else None),
                 "updated_at": prog.get("updated_at"),
@@ -466,16 +516,25 @@ def register_training_routes(app):
             return jsonify({"error": f"ct2_path not a directory: {ct2}"}), 400
         job_id = _safe_id(body.get("job_id") or Path(ct2).parent.name)
         progress = _read_progress(job_id)
-        if progress.get("wer_before") is None or progress.get("wer_after") is None:
-            return jsonify({"error": "model has no holdout evaluation; smoke-test models cannot be selected"}), 400
-        if progress["wer_after"] >= progress["wer_before"] and not body.get("force"):
-            return jsonify({"error": "model did not improve holdout WER"}), 400
+        quality_passed, quality_reasons = _model_quality_gate(progress)
+        if not quality_passed and not body.get("force"):
+            return jsonify({
+                "error": "model failed the holdout quality gate",
+                "reasons": quality_reasons,
+            }), 400
         models = []
         if TRAINED_MODELS_FILE.is_file():
             models = json.loads(TRAINED_MODELS_FILE.read_text(encoding="utf-8"))
         model_id = f"lora:{job_id}"
         models = [m for m in models if m.get("model_id") != model_id]
-        models.append({"model_id": model_id, "ct2_path": str(Path(ct2).resolve()), "wer_before": progress["wer_before"], "wer_after": progress["wer_after"]})
+        models.append({
+            "model_id": model_id,
+            "ct2_path": str(Path(ct2).resolve()),
+            "wer_before": progress["wer_before"], "wer_after": progress["wer_after"],
+            "cer_before": progress["cer_before"], "cer_after": progress["cer_after"],
+            "eval_sample_count": progress.get("eval_sample_count"),
+            "eval_fingerprint": progress.get("eval_fingerprint"),
+        })
         TRAINED_MODELS_FILE.write_text(json.dumps(models, ensure_ascii=False, indent=2), encoding="utf-8")
         ACTIVE_MODEL_FILE.write_text(json.dumps({
             "active": model_id,
@@ -488,7 +547,15 @@ def register_training_routes(app):
         if not ACTIVE_MODEL_FILE.is_file():
             return jsonify({"active": None})
         try:
-            return jsonify(json.loads(ACTIVE_MODEL_FILE.read_text(encoding="utf-8")))
+            data = json.loads(ACTIVE_MODEL_FILE.read_text(encoding="utf-8"))
+            active = data.get("active")
+            if active and active.startswith("lora:") and not resolve_trained_model(active):
+                return jsonify({
+                    "active": None,
+                    "suspended": active,
+                    "reason": "the previously active model does not have a passing comparable WER/CER holdout",
+                })
+            return jsonify(data)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
@@ -496,6 +563,8 @@ def register_training_routes(app):
     def get_trained_models():
         try:
             models = json.loads(TRAINED_MODELS_FILE.read_text(encoding="utf-8")) if TRAINED_MODELS_FILE.is_file() else []
+            for model in models:
+                model["quality_gate"], model["quality_gate_reasons"] = _model_quality_gate(model)
             return jsonify({"models": models})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -509,7 +578,8 @@ def get_active_ct2_path() -> Optional[str]:
     try:
         if ACTIVE_MODEL_FILE.is_file():
             data = json.loads(ACTIVE_MODEL_FILE.read_text(encoding="utf-8"))
-            p = data.get("ct2_path")
+            active = data.get("active")
+            p = resolve_trained_model(active) if isinstance(active, str) else None
             if p and Path(p).is_dir():
                 return p
     except Exception:

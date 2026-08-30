@@ -26,6 +26,7 @@ faster-whisper inference at
 """
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -102,7 +103,8 @@ def load_manifest(path: str) -> list[dict]:
                 continue
             if not Path(obj["audio"]).is_file():
                 continue
-            rows.append({"audio": obj["audio"], "text": obj["text"].strip()})
+            obj["text"] = obj["text"].strip()
+            rows.append(obj)
     return rows
 
 
@@ -179,6 +181,21 @@ def main():
             train_ds, eval_ds = split["train"], split["test"]
         else:
             train_ds, eval_ds = ds, None
+
+        if eval_rows:
+            eval_identity = [
+                {
+                    "audio_sha256": row.get("audio_sha256") or hashlib.sha256(Path(row["audio"]).read_bytes()).hexdigest(),
+                    "text": row["text"],
+                    "group_id": row.get("group_id") or row.get("metadata", {}).get("groupId") or "",
+                }
+                for row in eval_rows
+            ]
+            eval_identity.sort(key=lambda row: (row["group_id"], row["audio_sha256"], row["text"]))
+            eval_fingerprint = hashlib.sha256(json.dumps(
+                eval_identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")).hexdigest()
+            progress.update(eval_sample_count=len(eval_rows), eval_fingerprint=eval_fingerprint)
 
         # ── 2. Load processor + base model ─────────────────────────────
         progress.log("Loading feature extractor / tokenizer / processor…")
@@ -269,15 +286,13 @@ def main():
                 model.eval()
                 base_preds, base_refs = [], []
                 with torch.no_grad():
-                    for i, row in enumerate(eval_ds):
+                    for row in eval_ds:
                         inp = torch.tensor(row["input_features"]).unsqueeze(0).to(device).to(dtype)
                         gen = model.generate(input_features=inp, max_new_tokens=225, language=args.language, task=args.task)
                         base_preds.append(tokenizer.decode(gen[0], skip_special_tokens=True))
                         labels = list(row["labels"])
                         labels = [t for t in labels if t != -100]
                         base_refs.append(tokenizer.decode(labels, skip_special_tokens=True))
-                        if i >= 30:  # cap baseline eval to keep startup fast
-                            break
                 wer_before = 100 * metric_wer.compute(predictions=base_preds, references=base_refs)
                 cer_before = 100 * metric_cer.compute(predictions=base_preds, references=base_refs)
                 progress.log(f"Baseline  WER={wer_before:.2f}%  CER={cer_before:.2f}%")

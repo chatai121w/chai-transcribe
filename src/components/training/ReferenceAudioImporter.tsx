@@ -12,6 +12,10 @@ import { cropLearningAudio } from '@/lib/audioLearning';
 import { getServerUrl } from '@/lib/serverConfig';
 import { assessReferenceSegment, buildReferenceSegments, referenceWordErrorRate, type ReferenceSegment } from '@/lib/referenceAudioLearning';
 import type { WordTiming } from '@/components/SyncAudioPlayer';
+import { fingerprintFile } from '@/lib/recordingFingerprint';
+import { buildApprovedAsrMetadata } from '@/lib/asrDatasetMetadata';
+
+const MAX_AUTO_SELECT_WER = 0.35;
 
 export function ReferenceAudioImporter({ datasetId }: { datasetId: string }) {
   const { addApprovedPair } = useLoraTraining();
@@ -54,9 +58,17 @@ export function ReferenceAudioImporter({ datasetId }: { datasetId: string }) {
       const next = buildReferenceSegments(reference, timings);
       setRawTranscript(result.text || '');
       setSegments(next);
-      const safe = next.filter((segment) => assessReferenceSegment(segment).safe);
+      const transcriptWer = referenceWordErrorRate(reference, result.text || '');
+      const safe = transcriptWer <= MAX_AUTO_SELECT_WER
+        ? next.filter((segment) => assessReferenceSegment(segment).safe)
+        : [];
       setSelectedIds(new Set(safe.map((segment) => segment.id)));
-      toast({ title: `הוכנו ${next.length} קטעים לבדיקה`, description: `${safe.length} קטעים עברו בדיקת איכות ונבחרו אוטומטית` });
+      toast({
+        title: `הוכנו ${next.length} קטעים לבדיקה`,
+        description: transcriptWer <= MAX_AUTO_SELECT_WER
+          ? `${safe.length} קטעים עברו בדיקת איכות ונבחרו אוטומטית`
+          : `הפער מהתמלול הקולי הוא ${(transcriptWer * 100).toFixed(1)}%; נדרש אישור ידני ולא נבחרו קטעים אוטומטית`,
+      });
     } catch (error) {
       toast({ title: 'הניתוח נכשל', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
     } finally {
@@ -79,19 +91,22 @@ export function ReferenceAudioImporter({ datasetId }: { datasetId: string }) {
     if (!audio || !selected.length) return;
     setApproving(true);
     setProgress({ done: 0, total: selected.length });
-    const groupId = `${audio.name}:${audio.size}:${audio.lastModified}`;
+    const groupId = await fingerprintFile(audio);
     let approved = 0;
     const failed = new Set<string>();
     for (const segment of selected) {
       try {
         const clip = await cropLearningAudio(audio, segment.start, segment.end);
         const file = new File([clip], `${audio.name}-${segment.start.toFixed(2)}.wav`, { type: 'audio/wav' });
-        await addApprovedPair(file, segment.text, datasetId, {
-          groupId,
-          source: 'reference-audio-import',
-          start: segment.start,
-          end: segment.end,
-        });
+        await addApprovedPair(file, segment.text, datasetId, buildApprovedAsrMetadata({
+          recordingFingerprint: groupId,
+          sourceKind: 'reference-audio-import',
+          sourceRef: audio.name,
+          sourceLabel: audio.name,
+          teacherEngines: ['local:alignment-source'],
+          startSeconds: segment.start,
+          endSeconds: segment.end,
+        }));
         approved += 1;
       } catch {
         failed.add(segment.id);
@@ -134,6 +149,7 @@ export function ReferenceAudioImporter({ datasetId }: { datasetId: string }) {
       {wer != null && (
         <div className="flex flex-wrap gap-2 text-xs">
           <Badge variant={wer > 0.4 ? 'destructive' : 'secondary'}>WER לפני למידה: {(wer * 100).toFixed(1)}%</Badge>
+          {wer > MAX_AUTO_SELECT_WER && <Badge variant="destructive">הבחירה האוטומטית נחסמה</Badge>}
           <Badge variant="secondary">{segments.length} קטעים</Badge>
           {unsafeCount > 0 && <Badge variant="destructive">{unsafeCount} דורשים בדיקה ידנית</Badge>}
         </div>

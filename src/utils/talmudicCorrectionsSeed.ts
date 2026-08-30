@@ -16,14 +16,13 @@ import { learnFromCorrections, type CorrectionEntry } from "./correctionLearning
 
 // Bump the flag whenever new safe variants are added so existing users receive
 // them without clearing or replacing their personal correction history.
-const SEED_FLAG_KEY = "talmudic_corrections_seeded_v2";
+const SEED_FLAG_KEY = "talmudic_corrections_seeded_v3";
 
 // Mirrors tools/asr_eval/corrections.json — keep in sync if you edit it.
 const WORD_REPLACEMENTS: Record<string, string> = {
   גמרה: "גמרא",
   מתניתן: "מתניתין",
   קמשמע: "קא משמע",
-  אבי: "אביי",
   "רבה אשי": "רב אשי",
   "רבה פפא": "רב פפא",
   "תנו רבנין": "תנו רבנן",
