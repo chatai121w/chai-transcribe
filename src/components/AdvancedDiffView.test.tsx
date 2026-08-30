@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -44,6 +45,26 @@ describe("AdvancedDiffView adjudication", () => {
     await user.click(screen.getByRole("tab", { name: /^הכרעה$/ }));
 
     expect(screen.getByTestId("verified-text")).toHaveValue("אמר בברא בתרא היום");
+  });
+
+  it("keeps the quick adjudication non-modal and supports minimize and restore", async () => {
+    const user = userEvent.setup();
+    render(
+      <AdvancedDiffView
+        versions={versions}
+        preselectedLeftId="base"
+        preselectedRightId="new"
+        onSaveVerifiedVersion={vi.fn()}
+      />,
+    );
+
+    await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מגרסת הבסיס"));
+    expect(document.querySelector("[data-radix-dialog-overlay]")).toBeNull();
+    await user.click(screen.getByTestId("minimize-quick-adjudication"));
+    expect(screen.getByTestId("quick-adjudication-minimized")).toBeVisible();
+    expect(screen.queryByTestId("quick-adjudication-dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "הרחב חלון הכרעה" }));
+    expect(screen.getByTestId("quick-adjudication-dialog")).toBeVisible();
   });
 
   it("chooses a source word and saves a new verified version", async () => {
@@ -265,15 +286,27 @@ describe("AdvancedDiffView adjudication", () => {
   it("saves a custom correction and updates both displayed sides immediately", async () => {
     const user = userEvent.setup();
     const onSaveImmediate = vi.fn();
-    render(
-      <AdvancedDiffView
-        versions={versions}
-        preselectedLeftId="base"
-        preselectedRightId="new"
-        onSaveVerifiedVersion={vi.fn()}
-        onSaveImmediateVersion={onSaveImmediate}
-      />,
-    );
+    const StatefulComparison = () => {
+      const [liveVersions, setLiveVersions] = useState(versions);
+      return (
+        <AdvancedDiffView
+          versions={liveVersions}
+          preselectedLeftId="base"
+          preselectedRightId="new"
+          onSaveVerifiedVersion={vi.fn()}
+          onSaveImmediateVersion={(text, label) => {
+            onSaveImmediate(text, label);
+            setLiveVersions((current) => [...current, {
+              id: `saved-${current.length}`,
+              text,
+              timestamp: new Date(),
+              source: "manual",
+            }]);
+          }}
+        />
+      );
+    };
+    render(<StatefulComparison />);
 
     await user.dblClick(screen.getByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה"));
     await user.clear(screen.getByTestId("quick-custom-input"));
@@ -281,6 +314,7 @@ describe("AdvancedDiffView adjudication", () => {
     await user.click(screen.getByTestId("save-custom-immediately"));
 
     expect(onSaveImmediate).toHaveBeenCalledWith("אמר בבא בתרא היום", "תיקון מיידי בשתי הגרסאות");
+    expect(screen.getAllByText("אמר בבא בתרא היום")).toHaveLength(2);
     expect(screen.queryByTitle("לחץ פעמיים לאפשרויות אישור מגרסת הבסיס")).not.toBeInTheDocument();
     expect(screen.queryByTitle("לחץ פעמיים לאפשרויות אישור מהגרסה החדשה")).not.toBeInTheDocument();
   });

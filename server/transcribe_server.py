@@ -737,6 +737,55 @@ import uuid
 _staged_files: dict[str, dict] = {}  # stage_id → { path, filename, timestamp }
 STAGE_TTL_SECONDS = 5 * 60  # 5 minutes — auto-cleanup staged files
 
+# Reusable audio sessions keep the source on local disk while the editor is open.
+# They intentionally do not retain decoded audio or tensors in VRAM.
+_audio_sessions: dict[str, dict] = {}
+_audio_sessions_lock = threading.Lock()
+AUDIO_SESSION_TTL_SECONDS = 2 * 60 * 60
+
+
+def _probe_audio_duration(path: str) -> float:
+    import subprocess
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path],
+            capture_output=True, text=True, timeout=30,
+        )
+        return max(0.0, float(probe.stdout.strip())) if probe.returncode == 0 else 0.0
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return 0.0
+
+
+def _delete_audio_session(session_id: str) -> bool:
+    with _audio_sessions_lock:
+        info = _audio_sessions.get(session_id)
+        if not info or info.get("in_use", 0) > 0:
+            if info:
+                info["delete_pending"] = True
+            return False
+        info = _audio_sessions.pop(session_id, None)
+    if info:
+        try:
+            os.unlink(info["path"])
+        except OSError:
+            pass
+        return True
+    return False
+
+
+def _release_audio_session_use(session_id: str | None) -> None:
+    if not session_id:
+        return
+    delete_after = False
+    with _audio_sessions_lock:
+        info = _audio_sessions.get(session_id)
+        if info:
+            info["in_use"] = max(0, info.get("in_use", 1) - 1)
+            info["last_access"] = time.time()
+            delete_after = info["in_use"] == 0 and bool(info.get("delete_pending"))
+    if delete_after:
+        _delete_audio_session(session_id)
+
 # Model registry - maps friendly names to HuggingFace model IDs
 MODEL_REGISTRY = {
     # Standard Whisper models
@@ -1503,7 +1552,8 @@ def transcribe():
 def transcribe_stream():
     """Transcribe audio with Server-Sent Events — sends each segment as it's ready.
     Supports `start_from` (seconds) to resume from a specific time offset.
-    Supports `stage_id` to use a pre-uploaded audio file (parallel upload + preload).
+    Supports `audio_session_id` to reuse one uploaded source across model runs.
+    Supports legacy `stage_id` for one-shot parallel upload + preload.
 
     DEBUG & STABILITY features:
     - Concurrency lock: only 1 GPU transcription at a time (prevents VRAM collision)
@@ -1517,32 +1567,50 @@ def transcribe_stream():
     request_id = str(uuid.uuid4())[:8]
     request_start = time.time()
 
-    # Resolve audio source: staged file OR uploaded file
+    # Resolve audio source: reusable session, one-shot staged file, or upload.
+    audio_session_id = request.form.get("audio_session_id")
+    owns_tmp_path = True
+    session_duration = 0.0
+    if audio_session_id:
+        with _audio_sessions_lock:
+            session = _audio_sessions.get(audio_session_id)
+            if not session or not os.path.exists(session.get("path", "")):
+                return jsonify({"error": "Audio session expired", "code": "AUDIO_SESSION_EXPIRED"}), 410
+            session["in_use"] = session.get("in_use", 0) + 1
+            session["last_access"] = time.time()
+            tmp_path = session["path"]
+            audio_filename = session["filename"]
+            session_duration = float(session.get("duration", 0.0) or 0.0)
+            owns_tmp_path = False
+        _log.info(f"[{request_id}] Reusing audio session {audio_session_id[:8]} for {audio_filename}")
+
     stage_id = request.form.get("stage_id")
-    if stage_id and stage_id in _staged_files:
+    if not audio_session_id and stage_id and stage_id in _staged_files:
         staged = _staged_files.pop(stage_id)
         tmp_path = staged["path"]
         audio_filename = staged["filename"]
         _log.info(f"[{request_id}] Using staged file: {audio_filename} (stage_id={stage_id[:8]}...)")
-    elif "file" in request.files:
+    elif not audio_session_id and "file" in request.files:
         audio_file = request.files["file"]
         audio_filename = audio_file.filename or "audio.webm"
         suffix = _safe_suffix(audio_filename)
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             audio_file.save(tmp)
             tmp_path = tmp.name
-    else:
-        return jsonify({"error": "No file or stage_id provided"}), 400
+    elif not audio_session_id:
+        return jsonify({"error": "No file, audio_session_id, or stage_id provided"}), 400
 
     # ── File size validation ──
     file_size_bytes = os.path.getsize(tmp_path)
     file_size_mb = file_size_bytes / (1024 * 1024)
     if file_size_mb > MAX_UPLOAD_SIZE_MB:
         _log.warning(f"[{request_id}] REJECTED: file too large ({file_size_mb:.1f} MB > {MAX_UPLOAD_SIZE_MB} MB limit)")
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+        if owns_tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        _release_audio_session_use(audio_session_id)
         return jsonify({"error": f"File too large: {file_size_mb:.1f} MB (max {MAX_UPLOAD_SIZE_MB} MB)"}), 413
 
     # ── Concurrency check ──
@@ -1564,6 +1632,7 @@ def transcribe_stream():
         except Exception:
             trained_model_path = None
     if model_id not in MODEL_REGISTRY and not model_id.startswith("ivrit-ai/") and not trained_model_path:
+        _release_audio_session_use(audio_session_id)
         return jsonify({"error": f"Unknown model: {model_id}", "available": list(MODEL_REGISTRY.keys())}), 400
 
     _VALID_LANGUAGES = {
@@ -1572,6 +1641,7 @@ def transcribe_stream():
         "hu", "ro", "el", "th", "vi", "id", "ms", "hi", "bn", "ta", "te",
     }
     if language and language not in _VALID_LANGUAGES:
+        _release_audio_session_use(audio_session_id)
         return jsonify({"error": f"Unsupported language: {language}", "supported": sorted(_VALID_LANGUAGES)}), 400
 
     # ── Resolve preset → defaults, then allow per-param overrides ──
@@ -1633,6 +1703,10 @@ def transcribe_stream():
     share_mode = (request.headers.get("X-GPU-Share-Mode") or "serial").lower()
 
     suffix = _safe_suffix(audio_filename)
+    known_duration = session_duration or _probe_audio_duration(tmp_path)
+    perf_samples = _perf_metrics.get(resolved, [])
+    estimated_rtf = sorted(perf_samples)[len(perf_samples) // 2] if perf_samples else None
+    was_queued = bool(_transcribe_active)
 
     _log.info(f"[{request_id}] NEW REQUEST: {audio_filename} ({file_size_mb:.1f} MB) model={resolved} lang={language}")
 
@@ -1674,6 +1748,10 @@ def transcribe_stream():
             "status": "started",
         }
 
+        yield f"data: {json.dumps({'type': 'source', 'duration': round(known_duration, 2), 'audio_session_id': audio_session_id, 'session_reused': bool(audio_session_id), 'estimated_rtf': estimated_rtf})}\n\n"
+        if was_queued:
+            yield f"data: {json.dumps({'type': 'queued', 'message': 'Waiting for the CUDA worker'})}\n\n"
+
         # ── Acquire GPU lock ──
         lock_wait_start = time.time()
         acquired = _transcribe_lock.acquire(timeout=600)  # wait max 10 min
@@ -1684,6 +1762,12 @@ def transcribe_stream():
             request_record["error"] = "GPU lock timeout"
             _request_history.append(request_record)
             yield f"data: {json.dumps({'type': 'error', 'error': 'Server busy — GPU lock timeout. Try again later.'})}\n\n"
+            if owns_tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+            _release_audio_session_use(audio_session_id)
             return
 
         if lock_wait > 1:
@@ -1713,6 +1797,7 @@ def transcribe_stream():
 
             model = load_model(resolved, compute_type_override=compute_type_req)
             _log.info(f"[{request_id}] Model loaded, starting transcription...")
+            yield f"data: {json.dumps({'type': 'preprocessing', 'message': 'Preparing audio and VAD', 'duration': round(known_duration, 2), 'estimated_rtf': estimated_rtf})}\n\n"
 
             transcribe_path = trimmed_path if trimmed_path else tmp_path
             actual_file_size = os.path.getsize(transcribe_path)
@@ -1938,12 +2023,16 @@ def transcribe_stream():
             _transcribe_lock.release()
 
             # ── Cleanup temp files ──
-            for path in [tmp_path, trimmed_path]:
+            cleanup_paths = [trimmed_path]
+            if owns_tmp_path:
+                cleanup_paths.append(tmp_path)
+            for path in cleanup_paths:
                 if path:
                     try:
                         os.unlink(path)
                     except OSError:
                         pass
+            _release_audio_session_use(audio_session_id)
 
             # ── Post-transcription GPU cleanup ──
             _cleanup_gpu_memory()
@@ -3023,6 +3112,112 @@ def youtube_transcribe():
         # Cleanup temp dir
         import shutil
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@app.route("/audio-sessions", methods=["POST"])
+def create_audio_session():
+    """Upload an audio source once and reuse it across CUDA model runs."""
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    audio_file = request.files["file"]
+    filename = audio_file.filename or "audio.webm"
+    suffix = _safe_suffix(filename)
+    hasher = hashlib.sha256()
+    size = 0
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        while True:
+            chunk = audio_file.stream.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+                tmp_path = tmp.name
+                tmp.close()
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                return jsonify({"error": f"File too large (max {MAX_UPLOAD_SIZE_MB} MB)"}), 413
+            hasher.update(chunk)
+            tmp.write(chunk)
+        tmp_path = tmp.name
+
+    if size == 0:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        return jsonify({"error": "Empty file"}), 400
+
+    digest = hasher.hexdigest()
+    now = time.time()
+    with _audio_sessions_lock:
+        existing_id = next((
+            sid for sid, info in _audio_sessions.items()
+            if info.get("sha256") == digest and info.get("size") == size and os.path.exists(info.get("path", ""))
+        ), None)
+        if existing_id:
+            info = _audio_sessions[existing_id]
+            info["last_access"] = now
+            duration = info.get("duration", 0.0)
+        else:
+            session_id = str(uuid.uuid4())
+            duration = _probe_audio_duration(tmp_path)
+            _audio_sessions[session_id] = {
+                "path": tmp_path,
+                "filename": filename,
+                "timestamp": now,
+                "last_access": now,
+                "sha256": digest,
+                "size": size,
+                "duration": duration,
+                "in_use": 0,
+                "delete_pending": False,
+            }
+
+    if existing_id:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        session_id = existing_id
+
+    _log.info(f"[audio-session] {'Reused' if existing_id else 'Created'} {session_id[:8]} for {filename} ({size / 1024:.0f} KB)")
+    return jsonify({
+        "audio_session_id": session_id,
+        "filename": filename,
+        "file_size": size,
+        "duration": round(duration, 2),
+        "reused": bool(existing_id),
+        "expires_in": AUDIO_SESSION_TTL_SECONDS,
+    })
+
+
+@app.route("/audio-sessions/<session_id>", methods=["GET"])
+def get_audio_session(session_id):
+    with _audio_sessions_lock:
+        info = _audio_sessions.get(session_id)
+        if not info or not os.path.exists(info.get("path", "")):
+            return jsonify({"error": "Audio session not found or expired"}), 404
+        info["last_access"] = time.time()
+        return jsonify({
+            "audio_session_id": session_id,
+            "filename": info["filename"],
+            "file_size": info["size"],
+            "duration": round(info.get("duration", 0.0), 2),
+            "expires_in": AUDIO_SESSION_TTL_SECONDS,
+        })
+
+
+@app.route("/audio-sessions/<session_id>", methods=["DELETE"])
+def delete_audio_session(session_id):
+    deleted = _delete_audio_session(session_id)
+    if deleted:
+        return jsonify({"deleted": True})
+    with _audio_sessions_lock:
+        exists = session_id in _audio_sessions
+    return jsonify({"deleted": False, "pending": exists}), 202 if exists else 404
 
 
 @app.route("/stage-audio", methods=["POST"])
@@ -4846,6 +5041,18 @@ def _evict_stale_models():
                 except OSError:
                     pass
                 print(f"  [stage] Cleaned up expired staged file: {info['filename']}")
+
+        # Reusable editor audio sessions have a longer TTL and are never
+        # removed while a transcription is actively reading them.
+        with _audio_sessions_lock:
+            expired_sessions = [
+                sid for sid, info in _audio_sessions.items()
+                if info.get("in_use", 0) == 0
+                and now - info.get("last_access", info.get("timestamp", now)) > AUDIO_SESSION_TTL_SECONDS
+            ]
+        for sid in expired_sessions:
+            if _delete_audio_session(sid):
+                print(f"  [audio-session] Cleaned up expired session: {sid[:8]}")
 
 
 # ════════════════════════════════════════════════════════════════════

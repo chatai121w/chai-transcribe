@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowRightLeft, ChevronDown, Copy, ArrowUp, ArrowDown, Layers, Star, Trash2, RotateCcw, ListChecks, X, Check, Pencil, Save, Undo2, ChevronRight, ChevronLeft, AlignJustify, Rows3 } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, Copy, ArrowUp, ArrowDown, Layers, Star, Trash2, RotateCcw, ListChecks, X, Check, Pencil, Save, Undo2, ChevronRight, ChevronLeft, AlignJustify, Rows3, Minimize2, Maximize2 } from "lucide-react";
 import { TextVersion } from "@/components/TextEditHistory";
 import type { CloudTranscript } from "@/hooks/useCloudTranscripts";
 import { ComparisonSourceDialog } from "@/components/ComparisonSourceDialog";
@@ -39,7 +39,7 @@ interface AdvancedDiffViewProps {
 type VersionFilter = "all" | "ai" | "manual" | "original" | "cloud" | "local";
 
 const sourceLabels: Record<TextVersion['source'], string> = {
-  original: 'מקורי',
+  original: 'תמלול ראשון',
   manual: 'עריכה ידנית',
   'ai-improve': 'AI - שיפור',
   'ai-sources': 'AI - מקורות',
@@ -298,10 +298,16 @@ export const AdvancedDiffView = ({
   }, [versions, defaultLeftId]);
   const [leftId, setLeftId] = useState(preselectedLeftId || defaultLeftId);
   const [rightId, setRightId] = useState(preselectedRightId || defaultRightId);
+  const appliedPreselectionRef = useRef("");
 
   // Re-apply preselect when caller pushes a new pair. A distinct right version
   // detaches the right column and loads that version, so the diff shows at once.
   useEffect(() => {
+    const preselectionKey = `${preselectedLeftId || ""}:${preselectedRightId || ""}`;
+    const requestedIds = [preselectedLeftId, preselectedRightId].filter(Boolean) as string[];
+    if (!requestedIds.length || requestedIds.some((id) => !versions.some((version) => version.id === id))) return;
+    if (appliedPreselectionRef.current === preselectionKey) return;
+
     if (preselectedLeftId && versions.some(v => v.id === preselectedLeftId)) {
       setLeftId(preselectedLeftId);
       const preLeft = versions.find(v => v.id === preselectedLeftId);
@@ -318,6 +324,7 @@ export const AdvancedDiffView = ({
       setRightText(preRight.text);
       setRightDetached(true);
     }
+    appliedPreselectionRef.current = preselectionKey;
   }, [preselectedLeftId, preselectedRightId, versions]);
   const [viewMode, setViewMode] = useState<'side-by-side' | 'adjudicate' | 'unified' | 'stats'>('side-by-side');
   const [comparisonLayout, setComparisonLayout] = useState<'continuous' | 'aligned'>(() => {
@@ -450,6 +457,7 @@ export const AdvancedDiffView = ({
   const [applyEverywhere, setApplyEverywhere] = useState(false);
   const [replacementSource, setReplacementSource] = useState<"left" | "right">("left");
   const [quickDecision, setQuickDecision] = useState<{ unitId: string; side: "left" | "right" } | null>(null);
+  const [quickDecisionMinimized, setQuickDecisionMinimized] = useState(false);
   const [quickCustomText, setQuickCustomText] = useState("");
   const [quickApplyEverywhere, setQuickApplyEverywhere] = useState(false);
   const [quickReplacementSource, setQuickReplacementSource] = useState<"left" | "right">("left");
@@ -514,6 +522,7 @@ export const AdvancedDiffView = ({
     const unit = conflictUnits.find((candidate) => candidate.id === unitId);
     if (!unit) return;
     setQuickDecision({ unitId, side });
+    setQuickDecisionMinimized(false);
     setQuickCustomText((side === "left" ? unit.leftText : unit.rightText).trim());
     setQuickApplyEverywhere(false);
     setQuickReplacementSource(side === "left" ? "right" : "left");
@@ -521,6 +530,7 @@ export const AdvancedDiffView = ({
 
   const closeQuickDecision = () => {
     setQuickDecision(null);
+    setQuickDecisionMinimized(false);
     setQuickApplyEverywhere(false);
   };
 
@@ -691,8 +701,12 @@ export const AdvancedDiffView = ({
   const textStyle = { fontFamily, fontSize: `${fontSize}px`, color: textColor, lineHeight };
 
   const getLabel = (v: TextVersion) => {
-    const base = sourceLabels[v.source];
-    const label = v.customPrompt ? `${base} (${v.customPrompt})` : base;
+    const action = v.actionLabel?.trim() || sourceLabels[v.source];
+    const engine = v.engineLabel?.trim();
+    const detail = engine
+      || (v.source === 'original' ? 'המנוע לא נשמר' : v.customPrompt?.trim());
+    const runs = (v.runCount || 0) > 1 ? ` · ${v.runCount} הרצות זהות` : '';
+    const label = `${detail ? `${detail} · ` : ''}${action}${runs}`;
     return favoriteIds.has(v.id) ? `★ ${label}` : label;
   };
 
@@ -1135,13 +1149,40 @@ export const AdvancedDiffView = ({
         </Card>
       )}
 
-      <Dialog open={Boolean(quickDecision)} onOpenChange={(open) => { if (!open) closeQuickDecision(); }}>
-        <DialogContent dir="rtl" className="sm:max-w-xl" data-testid="quick-adjudication-dialog">
+      {quickDecision && quickDecisionMinimized && (
+        <section
+          dir="rtl"
+          data-testid="quick-adjudication-minimized"
+          className="fixed bottom-4 right-4 z-[70] w-[min(22rem,calc(100vw-2rem))] rounded-md border bg-background p-3 text-right shadow-2xl"
+          aria-label="הכרעת נוסח ממוזערת"
+        >
+          <div className="flex items-center gap-2">
+            <Check className="h-4 w-4 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">אישור הנוסח הנכון</p>
+              <p className="truncate text-xs text-muted-foreground">החלון ממוזער; ההשוואה נשארה פתוחה לעריכה</p>
+            </div>
+            <Button type="button" size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={() => setQuickDecisionMinimized(false)} title="הרחב חלון הכרעה" aria-label="הרחב חלון הכרעה">
+              <Maximize2 className="h-4 w-4" />
+            </Button>
+          </div>
+        </section>
+      )}
+
+      <Dialog modal={false} open={Boolean(quickDecision) && !quickDecisionMinimized} onOpenChange={(open) => { if (!open && !quickDecisionMinimized) closeQuickDecision(); }}>
+        <DialogContent hideOverlay dir="rtl" className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-xl" data-testid="quick-adjudication-dialog">
           <DialogHeader className="text-right">
-            <DialogTitle>אישור הנוסח הנכון</DialogTitle>
-            <DialogDescription>
-              בחר אם לאשר רק את ההבדל הזה, לתקן את כל המופעים הזהים, או להזין נוסח אחר.
-            </DialogDescription>
+            <div className="flex items-start justify-between gap-3 pe-8">
+              <div className="min-w-0">
+                <DialogTitle>אישור הנוסח הנכון</DialogTitle>
+                <DialogDescription className="mt-1">
+                  בחר אם לאשר רק את ההבדל הזה, לתקן את כל המופעים הזהים, או להזין נוסח אחר.
+                </DialogDescription>
+              </div>
+              <Button type="button" size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => setQuickDecisionMinimized(true)} title="מזער חלון הכרעה" aria-label="מזער חלון הכרעה" data-testid="minimize-quick-adjudication">
+                <Minimize2 className="h-4 w-4" />
+              </Button>
+            </div>
           </DialogHeader>
 
           {quickDecisionUnit && quickDecision && (

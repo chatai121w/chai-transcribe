@@ -567,6 +567,7 @@ const TextEditor = () => {
   const [comparePreselect, setComparePreselect] = useState<{ leftId: string; rightId: string } | null>(null);
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
   const [retranscribeDialogOpen, setRetranscribeDialogOpen] = useState(false);
+  const [retranscribeRestoreRequest, setRetranscribeRestoreRequest] = useState(0);
   const [attachVideoDialogOpen, setAttachVideoDialogOpen] = useState(false);
   const [comparisonLibraryVersions, setComparisonLibraryVersions] = useState<TextVersion[]>([]);
   const [lkEmbeddedText, setLkEmbeddedText] = useState<string>("");
@@ -700,6 +701,8 @@ const TextEditor = () => {
     // Get text from navigation state or localStorage
     const stateText = location.state?.text;
     const stateTranscriptId = location.state?.transcriptId as string | undefined;
+    const stateTranscript = stateTranscriptId ? transcripts.find((item) => item.id === stateTranscriptId) : undefined;
+    const stateEngineLabel = (location.state?.engineLabel as string | undefined) || stateTranscript?.engine || null;
     const savedTranscriptId = localStorage.getItem('current_transcript_id');
     const effectiveTranscriptId = stateTranscriptId || (!stateText ? savedTranscriptId || undefined : undefined);
     const savedText = localStorage.getItem('current_editing_text');
@@ -716,7 +719,10 @@ const TextEditor = () => {
         id: crypto.randomUUID(),
         text: stateText,
         timestamp: new Date(),
-        source: 'original'
+        source: 'original',
+        engineLabel: stateEngineLabel,
+        actionLabel: 'תמלול ראשון',
+        wordCount: stateText.split(/\s+/).filter(Boolean).length,
       };
       let restoredVersions: TextVersion[] = [];
       if (resumeLocalEdit && savedVersions) {
@@ -736,7 +742,7 @@ const TextEditor = () => {
       if (stateTranscriptId && !resumeLocalEdit) {
         // Defer to avoid calling saveCloudVersion before hook is ready
         setTimeout(() => {
-          saveCloudVersion(stateText, 'original', null, 'תמלול מקורי', { transcriptId: stateTranscriptId });
+          saveCloudVersion(stateText, 'original', stateEngineLabel, 'תמלול ראשון', { transcriptId: stateTranscriptId });
         }, 500);
       }
     } else {
@@ -915,6 +921,10 @@ const TextEditor = () => {
       timestamp: new Date(latest.created_at),
       source: 'original',
       customPrompt: 'תמלול מקורי',
+      engineLabel: latest.engine || null,
+      actionLabel: 'תמלול ראשון',
+      wordCount: latest.text.split(/\s+/).filter(Boolean).length,
+      storage: latest.local_only ? 'local' : 'cloud',
     };
     setVersions(prev => prev.length ? prev : [initialVersion]);
     setSelectedVersionId(initialVersion.id);
@@ -1084,6 +1094,13 @@ const TextEditor = () => {
     return null;
   }, [transcriptId, text, saveTranscript, location.state]);
 
+  const openRetranscriptionDialog = useCallback(async () => {
+    const id = transcriptIdRef.current || transcriptId || await ensureCloudTranscript();
+    if (!id) return;
+    setRetranscribeRestoreRequest((current) => current + 1);
+    setRetranscribeDialogOpen(true);
+  }, [ensureCloudTranscript, transcriptId]);
+
   const assignCurrentTranscriptToFolder = useCallback(async (folderId: string | null, folderName: string) => {
     const id = transcriptIdRef.current || transcriptId || await ensureCloudTranscript();
     if (!id) throw new Error("לא ניתן לשמור את התמלול לפני השיוך");
@@ -1146,12 +1163,22 @@ const TextEditor = () => {
 
     const originalText = currentCloudTranscript?.text || originalTextRef.current || text;
     if (originalText?.trim()) {
+      const matchingOriginalVersion = cloudVersions.find((version) => (
+        version.text.normalize('NFKC').replace(/\s+/g, ' ').trim()
+          === originalText.normalize('NFKC').replace(/\s+/g, ' ').trim()
+        && Boolean(version.engine_label)
+      ));
       byId.set('current-original', {
         id: 'current-original',
         text: originalText,
         timestamp: currentCloudTranscript?.created_at ? new Date(currentCloudTranscript.created_at) : new Date(0),
         source: 'original',
         customPrompt: joinVersionLabels(currentCloudTranscript?.engine, 'תמלול מקורי'),
+        engineLabel: currentCloudTranscript?.engine || matchingOriginalVersion?.engine_label || null,
+        actionLabel: 'תמלול ראשון',
+        detectedLanguage: matchingOriginalVersion?.detected_language || null,
+        wordCount: originalText.split(/\s+/).filter(Boolean).length,
+        storage: currentCloudTranscript?.local_only ? 'local' : 'cloud',
       });
     }
 
@@ -1163,11 +1190,18 @@ const TextEditor = () => {
         timestamp: currentCloudTranscript?.updated_at ? new Date(currentCloudTranscript.updated_at) : new Date(),
         source: 'manual',
         customPrompt: 'הטקסט הנוכחי בעורך',
+        actionLabel: 'עריכה ידנית',
+        wordCount: editedText.split(/\s+/).filter(Boolean).length,
+        storage: currentCloudTranscript?.local_only ? 'local' : 'cloud',
       });
     }
 
     for (const v of versions) {
-      byId.set(v.id, v);
+      byId.set(v.id, {
+        ...v,
+        wordCount: v.wordCount ?? v.text.split(/\s+/).filter(Boolean).length,
+        storage: v.storage || ((transcriptIdRef.current || transcriptId) ? 'cloud' : 'local'),
+      });
     }
 
     for (const cv of cloudVersions) {
@@ -1178,6 +1212,11 @@ const TextEditor = () => {
         timestamp: new Date(cv.created_at),
         source: toKnownSource(cv.source),
         customPrompt: joinVersionLabels(cv.engine_label, cv.action_label),
+        engineLabel: cv.engine_label,
+        actionLabel: cv.action_label,
+        detectedLanguage: cv.detected_language,
+        wordCount: cv.word_count ?? cv.text.split(/\s+/).filter(Boolean).length,
+        storage: 'cloud',
       });
     }
 
@@ -1206,6 +1245,10 @@ const TextEditor = () => {
             'אותו קובץ אודיו',
             formatVersionTime(sibling.created_at),
           ),
+          engineLabel: sibling.engine || null,
+          actionLabel: 'תמלול נוסף',
+          wordCount: (sibling.edited_text?.trim() || sibling.text).split(/\s+/).filter(Boolean).length,
+          storage: sibling.local_only ? 'local' : 'cloud',
         });
       }
     }
@@ -1221,6 +1264,18 @@ const TextEditor = () => {
         continue;
       }
       duplicateCounts.set(signature, (duplicateCounts.get(signature) || 1) + 1);
+      const existing = uniqueByText.get(signature)!;
+      const duplicateEngine = version.engineLabel?.trim();
+      const mergedEngines = Array.from(new Set([
+        ...(existing.duplicateEngines || []),
+        ...(existing.engineLabel ? [existing.engineLabel] : []),
+        ...(duplicateEngine ? [duplicateEngine] : []),
+      ]));
+      uniqueByText.set(signature, {
+        ...existing,
+        engineLabel: existing.engineLabel || version.engineLabel || null,
+        duplicateEngines: mergedEngines,
+      });
     }
     return Array.from(uniqueByText.entries()).map(([signature, version]) => {
       const count = duplicateCounts.get(signature) || 1;
@@ -1229,6 +1284,7 @@ const TextEditor = () => {
         : {
             ...version,
             customPrompt: joinVersionLabels(version.customPrompt, `${count} הרצות עם טקסט זהה`),
+            runCount: count,
           };
     });
   }, [versions, cloudVersions, transcripts, transcriptId, text, comparisonLibraryVersions]);
@@ -1240,6 +1296,10 @@ const TextEditor = () => {
       timestamp: new Date(item.updated_at || item.created_at),
       source: 'original',
       customPrompt: joinVersionLabels(item.title, item.engine, item.folder || undefined),
+      engineLabel: item.engine || null,
+      actionLabel: 'תמלול מהספרייה',
+      wordCount: (item.edited_text?.trim() || item.text).split(/\s+/).filter(Boolean).length,
+      storage: item.local_only ? 'local' : 'cloud',
     };
     setComparisonLibraryVersions((previous) => [
       ...previous.filter((version) => version.id !== libraryVersion.id),
@@ -2206,10 +2266,10 @@ const TextEditor = () => {
               variant="outline"
               size="sm"
               className="h-7 gap-1 border-sky-500/50 text-xs hover:bg-sky-500/10"
-              onClick={() => setRetranscribeDialogOpen(true)}
-              disabled={!transcriptId}
+              onClick={() => void openRetranscriptionDialog()}
+              disabled={!text.trim()}
               data-testid="retranscribe-audio"
-              title={audioBlob ? "צור תמלול נוסף מאותה הקלטה באמצעות מנוע אחר" : "בחר מחדש את קובץ ההקלטה וצור תמלול נוסף"}
+              title={!text.trim() ? "טען או כתוב תמלול תחילה" : audioBlob ? "צור תמלול נוסף מאותה הקלטה באמצעות מנוע אחר" : "בחר מחדש את קובץ ההקלטה וצור תמלול נוסף"}
             >
               <RotateCcw className="h-3.5 w-3.5 text-sky-600" />
               תמלל שוב
@@ -2863,6 +2923,7 @@ const TextEditor = () => {
         <RetranscribeDialog
           open={retranscribeDialogOpen}
           onOpenChange={setRetranscribeDialogOpen}
+          restoreRequest={retranscribeRestoreRequest}
           transcriptId={transcriptIdRef.current || transcriptId}
           currentEngine={transcripts.find((item) => item.id === (transcriptIdRef.current || transcriptId))?.engine}
           audioBlob={audioBlob}

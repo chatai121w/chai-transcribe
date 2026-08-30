@@ -70,6 +70,24 @@ export interface PartialTranscript {
   };
 }
 
+export interface LocalServerStreamStatus {
+  type: 'uploading' | 'session' | 'queued' | 'loading' | 'preprocessing' | 'info';
+  message?: string;
+  duration?: number;
+  model?: string;
+  progress?: number;
+  audioSessionId?: string | null;
+  reused?: boolean;
+  estimatedRtf?: number | null;
+}
+
+export interface LocalAudioSession {
+  id: string;
+  duration: number;
+  reused: boolean;
+  expiresIn: number;
+}
+
 interface ServerStatus {
   status: string;
   device: string;
@@ -597,6 +615,8 @@ export const useLocalServer = () => {
     onPartial?: (partial: PartialTranscript) => void,
     resumeFrom?: { startFrom: number; existingText: string; existingWords: WordTiming[] },
     cudaOptions?: CudaOptions,
+    onStatus?: (status: LocalServerStreamStatus) => void,
+    audioSessionId?: string | null,
   ): Promise<ServerTranscriptionResult> => {
     return enqueueTranscription(async () => {
     setIsLoading(true);
@@ -610,7 +630,8 @@ export const useLocalServer = () => {
     }
 
     const form = new FormData();
-    form.append('file', file, file.name);
+    if (audioSessionId) form.append('audio_session_id', audioSessionId);
+    else form.append('file', file, file.name);
     if (model) form.append('model', model);
     form.append('language', language);
     if (resumeFrom) {
@@ -654,13 +675,42 @@ export const useLocalServer = () => {
     try {
       abortRef.current = new AbortController();
       const streamUrl = `${getBaseUrl()}/transcribe-stream`;
+      onStatus?.(audioSessionId
+        ? { type: 'session', audioSessionId, reused: true, message: 'Reusing audio already stored on the CUDA server' }
+        : { type: 'uploading', message: 'Uploading audio to CUDA server' });
 
-      const res = await fetchLocalServer(streamUrl, {
+      let res = await fetchLocalServer(streamUrl, {
         method: 'POST',
         headers: getApiHeaders(),
         body: form,
         signal: abortRef.current.signal,
       });
+
+      if (res.status === 410 && audioSessionId) {
+        onStatus?.({ type: 'session', audioSessionId: null, message: 'Audio session expired; uploading again' });
+        const replacement = await createAudioSession(file, (uploadProgress) => {
+          onStatus?.({ type: 'uploading', progress: uploadProgress, message: 'Uploading audio to CUDA server' });
+        });
+        form.delete('audio_session_id');
+        if (replacement) {
+          form.append('audio_session_id', replacement.id);
+          onStatus?.({
+            type: 'session',
+            audioSessionId: replacement.id,
+            duration: replacement.duration,
+            reused: replacement.reused,
+            message: 'Audio is ready on the CUDA server',
+          });
+        } else {
+          form.append('file', file, file.name);
+        }
+        res = await fetchLocalServer(streamUrl, {
+          method: 'POST',
+          headers: getApiHeaders(),
+          body: form,
+          signal: abortRef.current.signal,
+        });
+      }
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -700,14 +750,36 @@ export const useLocalServer = () => {
 
           debugLog.info('CUDA-SSE', `event: ${evt.type}`, evt.type === 'segment' ? `progress=${evt.progress}% words=${evt.words?.length}` : evt);
 
-          if (evt.type === 'loading') {
+          if (evt.type === 'source') {
+            audioDuration = evt.duration || 0;
+            setAudioDurationSec(audioDuration);
+            onStatus?.({
+              type: 'session',
+              audioSessionId: evt.audio_session_id || audioSessionId || null,
+              duration: audioDuration,
+              reused: Boolean(evt.session_reused),
+              estimatedRtf: evt.estimated_rtf ?? null,
+              message: evt.session_reused ? 'Reusing audio already stored on the CUDA server' : 'Audio source is ready',
+            });
+          } else if (evt.type === 'queued') {
+            onStatus?.({ type: 'queued', message: evt.message });
+          } else if (evt.type === 'loading') {
             setPhase('loading-model');
+            onStatus?.({ type: 'loading', message: evt.message, model: evt.model });
+          } else if (evt.type === 'preprocessing') {
+            onStatus?.({
+              type: 'preprocessing',
+              message: evt.message,
+              duration: evt.duration || audioDuration,
+              estimatedRtf: evt.estimated_rtf ?? null,
+            });
           } else if (evt.type === 'info') {
             audioDuration = evt.duration || 0;
             setAudioDurationSec(audioDuration);
             setAudioProcessedSec(0);
             if (evt.model) resolvedModel = evt.model;
             setPhase('transcribing');
+            onStatus?.({ type: 'info', duration: audioDuration, model: evt.model });
           } else if (evt.type === 'segment') {
             setPhase('transcribing'); // ensure phase transitions even if info event was missed
             if (evt.paragraphBreak) accText.push('\n\n');
@@ -859,6 +931,54 @@ export const useLocalServer = () => {
     }
     await checkConnection(); // Refresh status
   };
+
+  const createAudioSession = useCallback((
+    file: File,
+    onUploadProgress?: (progress: number) => void,
+  ): Promise<LocalAudioSession | null> => new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${getBaseUrl()}/audio-sessions`);
+    const headers = getApiHeaders();
+    for (const [key, value] of Object.entries(headers)) xhr.setRequestHeader(key, value);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onUploadProgress?.(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+      }
+    };
+    xhr.onerror = () => resolve(null);
+    xhr.ontimeout = () => resolve(null);
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        resolve(null);
+        return;
+      }
+      try {
+        const data = JSON.parse(xhr.responseText);
+        resolve({
+          id: data.audio_session_id,
+          duration: Number(data.duration || 0),
+          reused: Boolean(data.reused),
+          expiresIn: Number(data.expires_in || 0),
+        });
+      } catch {
+        resolve(null);
+      }
+    };
+    const form = new FormData();
+    form.append('file', file, file.name);
+    xhr.send(form);
+  }), []);
+
+  const releaseAudioSession = useCallback(async (audioSessionId: string): Promise<void> => {
+    try {
+      await fetchLocalServer(`${getBaseUrl()}/audio-sessions/${encodeURIComponent(audioSessionId)}`, {
+        method: 'DELETE',
+        headers: getApiHeaders(),
+      });
+    } catch {
+      // The server TTL remains the final cleanup guarantee.
+    }
+  }, []);
 
   const checkModelUpdates = async (modelIds: string[]): Promise<ModelUpdateInfo[]> => {
     const res = await fetchLocalServer(`${getBaseUrl()}/model-updates`, {
@@ -1035,6 +1155,8 @@ export const useLocalServer = () => {
     transcribeStream,
     transcribeStreamParallel,
     stageAudio,
+    createAudioSession,
+    releaseAudioSession,
     cancelStream,
     recoverPartial,
     saveRecoveryPartial,

@@ -180,10 +180,36 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
     await expect.poll(() => writes.some((write) => write.body?.includes('הקלטה מהחלון'))).toBe(true);
   });
 
+  test('גרסאות להשוואה מציגות מנוע, סוג גרסה ומידע מובנה במקום הכיתוב מקורי', async ({ page }) => {
+    await page.goto('/text-editor');
+    await page.getByTestId('send-transcript-to-compare').click();
+    await page.getByTestId('choose-comparison-base').click();
+
+    const dialog = page.getByTestId('comparison-source-dialog');
+    await dialog.getByRole('tab', { name: 'גרסאות קיימות' }).click();
+    const original = dialog.getByTestId('comparison-version-current-original');
+
+    await expect(original).toBeVisible();
+    await expect(original.getByText('OpenAI Whisper', { exact: true })).toBeVisible();
+    await expect(original.getByText('תמלול ראשון', { exact: true })).toBeVisible();
+    await expect(original).toContainText('מילים');
+    await expect(original).not.toContainText('המנוע לא נשמר');
+    await expect(original).not.toContainText('מקורי');
+    await expect(original).toHaveCSS('direction', 'rtl');
+  });
+
   test('תמלול נוסף מאותה הקלטה נשמר כגרסה ונפתח להשוואה בלי לדרוס את המקור', async ({ page }) => {
     const versionWrites: Array<Record<string, unknown>> = [];
     const jobWrites: Array<{ method: string; body: Record<string, unknown> }> = [];
+    let audioSessionUploads = 0;
+    const transcriptionBodies: Array<string> = [];
     await mockLocalServer(page, { connected: true, model: 'ivrit-ai/whisper-large-v3-turbo-ct2' });
+    for (const pattern of ['**/localhost:3000/audio-sessions**', '**/whisper/audio-sessions**']) {
+      await page.route(pattern, async (route) => {
+        if (route.request().method() === 'POST') audioSessionUploads += 1;
+        await route.fallback();
+      });
+    }
     await page.route('**/rest/v1/transcript_versions**', async (route) => {
       const method = route.request().method();
       if (method === 'GET') return route.fulfill({ status: 200, json: [] });
@@ -209,15 +235,21 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
       return route.fulfill({ status: 200, json: {} });
     });
     for (const pattern of ['**/localhost:3000/transcribe-stream', '**/whisper/transcribe-stream']) {
-      await page.route(pattern, (route) => route.fulfill({
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-        body: [
-          'data: {"type":"info","duration":2.0,"model":"ivrit-ai/whisper-large-v3-turbo-ct2"}\n\n',
-          'data: {"type":"segment","text":"תמלול חדש ממנוע אחר","progress":100,"segEnd":2,"words":[{"word":"תמלול","start":0,"end":0.5}]}\n\n',
-          'data: {"type":"done","text":"תמלול חדש ממנוע אחר","duration":2,"language":"he","model":"ivrit-ai/whisper-large-v3-turbo-ct2","wordTimings":[{"word":"תמלול","start":0,"end":0.5}]}\n\n',
-        ].join(''),
-      }));
+      await page.route(pattern, async (route) => {
+        transcriptionBodies.push(route.request().postData() || '');
+        await new Promise((resolve) => setTimeout(resolve, 750));
+        await route.fulfill({
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+          body: [
+            'data: {"type":"source","duration":2.0,"audio_session_id":"audio-session-e2e","session_reused":true}\n\n',
+            'data: {"type":"preprocessing","duration":2.0,"message":"Preparing audio and VAD"}\n\n',
+            'data: {"type":"info","duration":2.0,"model":"ivrit-ai/whisper-large-v3-turbo-ct2"}\n\n',
+            'data: {"type":"segment","text":"תמלול חדש ממנוע אחר","progress":100,"segEnd":2,"words":[{"word":"תמלול","start":0,"end":0.5}]}\n\n',
+            'data: {"type":"done","text":"תמלול חדש ממנוע אחר","duration":2,"language":"he","model":"ivrit-ai/whisper-large-v3-turbo-ct2","wordTimings":[{"word":"תמלול","start":0,"end":0.5}]}\n\n',
+          ].join(''),
+        });
+      });
     }
 
     await page.goto('/text-editor');
@@ -237,6 +269,18 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
       buffer: createTestAudioBuffer(),
     });
     await dialog.getByTestId('start-retranscription').click();
+    const progressPanel = dialog.getByTestId('retranscription-progress');
+    await expect(progressPanel).toBeVisible();
+    await expect(progressPanel).toContainText('זמן שחלף');
+    await expect(progressPanel).not.toContainText('%');
+    await dialog.getByTestId('minimize-retranscription').click();
+    const minimized = page.getByTestId('retranscribe-minimized');
+    await expect(minimized).toBeVisible();
+    await expect(minimized).toContainText('תמלול נוסף מאותה הקלטה');
+    await expect(button).toBeEnabled();
+    await button.click();
+    await expect(minimized).toBeHidden();
+    await expect(dialog).toBeVisible();
 
     await expect(dialog.getByText('נשמרה גרסה חדשה וההשוואה מוכנה')).toBeVisible({ timeout: 30_000 });
     await expect.poll(() => versionWrites.length).toBe(1);
@@ -245,11 +289,23 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
     expect(versionWrites[0].word_timings).toEqual([{ word: 'תמלול', start: 0, end: 0.5 }]);
     expect(versionWrites[0].transcription_job_id).toBe('job-retranscribed');
     await expect.poll(() => jobWrites.some((write) => write.method === 'PATCH' && write.body.status === 'completed')).toBe(true);
+    expect(audioSessionUploads).toBe(1);
+    expect(transcriptionBodies[0]).toContain('audio_session_id');
 
     await dialog.getByRole('button', { name: 'סגור' }).click();
     await expect(page.getByRole('tab', { name: 'השוואה', exact: true })).toHaveAttribute('data-state', 'active');
     await expect(page.getByText('תמלול שני לבדיקת המערכת', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('תמלול חדש ממנוע אחר', { exact: true }).first()).toBeVisible();
+
+    await button.click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId('cuda-audio-session-ready')).toBeVisible();
+    await dialog.getByLabel('מודל CUDA לתמלול נוסף').click();
+    await page.getByRole('option', { name: /Ivrit.ai Large V3 - דיוק מרבי/ }).click();
+    await dialog.getByTestId('start-retranscription').click();
+    await expect(dialog.getByText('נשמרה גרסה חדשה וההשוואה מוכנה')).toBeVisible({ timeout: 30_000 });
+    expect(audioSessionUploads).toBe(1);
+    expect(transcriptionBodies[1]).toContain('audio_session_id');
   });
 
   test('בחירת תמלולים מתוך העץ טוענת זוג אמיתי להשוואה', async ({ page }) => {
@@ -439,6 +495,11 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
     await expect(page.getByRole('tab', { name: 'הכרעה צד-בצד' })).toHaveCount(0);
     await page.getByRole('button', { name: 'תצוגה לפי הבדלים' }).click();
     await page.getByTitle('לחץ פעמיים לאפשרויות אישור מהגרסה החדשה').dblclick();
+    await expect(page.getByTestId('quick-adjudication-dialog')).toBeVisible();
+    await expect(page.locator('[data-radix-dialog-overlay]')).toHaveCount(0);
+    await page.getByTestId('minimize-quick-adjudication').click();
+    await expect(page.getByTestId('quick-adjudication-minimized')).toBeVisible();
+    await page.getByRole('button', { name: 'הרחב חלון הכרעה' }).click();
     await expect(page.getByTestId('quick-adjudication-dialog')).toBeVisible();
     await page.getByTestId('confirm-quick-all').click();
     await page.getByRole('button', { name: 'תצוגה רציפה' }).click();

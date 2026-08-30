@@ -884,7 +884,7 @@ const Index = () => {
         if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
         // Auto-navigate to text editor
         setTimeout(() => {
-          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current, engineLabel: 'OpenAI Whisper' } });
         }, 1000);
       } else {
         throw new Error('No transcription received');
@@ -1017,7 +1017,7 @@ const Index = () => {
         if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
         // Auto-navigate to text editor
         setTimeout(() => {
-          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current, engineLabel: 'Groq Whisper' } });
         }, 1000);
       } else {
         debugLog.error('Groq', 'No text in response data', data);
@@ -1155,7 +1155,7 @@ const Index = () => {
         if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
         // Auto-navigate to text editor
         setTimeout(() => {
-          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current, engineLabel: 'Google Speech-to-Text' } });
         }, 1000);
       } else {
         throw new Error('No transcription received from Google');
@@ -1204,7 +1204,7 @@ const Index = () => {
       if (result.wordTimings?.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(result.wordTimings));
       // Auto-navigate to text editor
       setTimeout(() => {
-        navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: result.wordTimings, transcriptId: lastSavedTranscriptIdRef.current } });
+        navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: result.wordTimings, transcriptId: lastSavedTranscriptIdRef.current, engineLabel: 'Local (Browser)' } });
       }, 1000);
     } catch (error) {
       debugLog.error('Local', 'Browser transcription failed', error instanceof Error ? error.message : error);
@@ -1422,7 +1422,7 @@ const Index = () => {
       });
       if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
       setTimeout(() => {
-        navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+        navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current, engineLabel } });
       }, 1000);
       if (activeQueueId) {
         await localQueue.updateItemStatus(activeQueueId, 'completed').catch(() => {});
@@ -1545,7 +1545,7 @@ const Index = () => {
         });
         if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
         setTimeout(() => {
-          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current, engineLabel: 'AssemblyAI' } });
         }, 1000);
       } else {
         throw new Error('No transcription received');
@@ -1653,7 +1653,7 @@ const Index = () => {
         });
         if (timings.length > 0) localStorage.setItem('last_word_timings', JSON.stringify(timings));
         setTimeout(() => {
-          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current } });
+          navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: timings, transcriptId: lastSavedTranscriptIdRef.current, engineLabel: 'Deepgram' } });
         }, 1000);
       } else {
         throw new Error('No transcription received');
@@ -1780,7 +1780,7 @@ const Index = () => {
       });
       toast({ title: 'הצלחה!', description: `תמלול Gemini הושלם (${provider === 'personal' ? 'מפתח אישי' : 'Lovable AI'})` });
       setTimeout(() => {
-        navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: [], transcriptId: lastSavedTranscriptIdRef.current } });
+        navigate('/text-editor', { state: { text: finalText, audioUrl: fileAudioUrl, wordTimings: [], transcriptId: lastSavedTranscriptIdRef.current, engineLabel: `Gemini (${model})` } });
       }, 800);
     } catch (error) {
       const err = (error && typeof error === 'object') ? error as Record<string, unknown> : {};
@@ -2644,7 +2644,7 @@ const Index = () => {
             }
             const liveAudioUrl = audioBlob ? URL.createObjectURL(audioBlob) : undefined;
             saveToHistory(text, historyEngineLabel, undefined, wordTimings, audioFile, folder, false, language).then((finalText) => {
-              setTimeout(() => navigate('/text-editor', { state: { text: finalText, audioUrl: liveAudioUrl, wordTimings, transcriptId: lastSavedTranscriptIdRef.current } }), 1000);
+              setTimeout(() => navigate('/text-editor', { state: { text: finalText, audioUrl: liveAudioUrl, wordTimings, transcriptId: lastSavedTranscriptIdRef.current, engineLabel: historyEngineLabel } }), 1000);
             });
             addAnalyticsRecord({
               engine: engineLabel, status: 'success',

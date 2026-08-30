@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Check, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen, FolderPlus, GripVertical, Loader2, Mic2, Pencil, Plus, Search, X } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, ChevronLeft, CircleAlert, Cloud, Cpu, Folder, FolderOpen, FolderPlus, GripVertical, HardDrive, Hash, Languages, Loader2, Mic2, Pencil, Plus, Search, X } from "lucide-react";
 import { useFolderTree, type FolderTreeNode } from "@/hooks/useFolderTree";
 import { useCloudTranscripts, type CloudTranscript } from "@/hooks/useCloudTranscripts";
 import type { TextVersion } from "@/components/TextEditHistory";
@@ -31,6 +31,71 @@ function transcriptText(transcript: CloudTranscript) {
 
 function transcriptLabel(transcript: CloudTranscript) {
   return transcript.title?.trim() || transcriptText(transcript).slice(0, 70) || "תמלול ללא שם";
+}
+
+const VERSION_SOURCE_LABELS: Record<TextVersion["source"], string> = {
+  original: "תמלול ראשון",
+  manual: "עריכה ידנית",
+  "ai-improve": "שיפור ניסוח",
+  "ai-sources": "הוספת מקורות",
+  "ai-readable": "שיפור קריאות",
+  "ai-custom": "עיבוד AI מותאם",
+  "ai-fix": "תיקון AI",
+  "ai-grammar": "דקדוק ואיות",
+  "ai-punctuation": "פיסוק",
+  "ai-paragraphs": "חלוקה לפסקאות",
+  "ai-bullets": "תבליטים",
+  "ai-headings": "כותרות",
+  "ai-expand": "הרחבה",
+  "ai-shorten": "קיצור",
+  "ai-summarize": "סיכום",
+  "ai-translate": "תרגום",
+  "ai-speakers": "זיהוי דוברים",
+  "ai-tone": "שינוי טון",
+};
+
+function legacyEngineLabel(version: TextVersion): string | null {
+  if (version.engineLabel?.trim()) return version.engineLabel.trim();
+  const prompt = version.customPrompt?.trim() || "";
+  const knownEngine = prompt.match(/(?:^|•\s*)((?:Local CUDA|Gemini|Groq(?: Whisper)?|OpenAI(?: Whisper)?|AssemblyAI|Deepgram|Google Speech-to-Text|Whisper)[^•]*)/i);
+  return knownEngine?.[1]?.trim() || null;
+}
+
+function splitEngineLabel(value: string | null): { engine: string; model: string | null; detail: string | null } {
+  if (!value) return { engine: "המנוע לא נשמר", model: null, detail: null };
+  const normalizedEngines: Record<string, string> = {
+    openai: "OpenAI Whisper",
+    groq: "Groq Whisper",
+    google: "Google Speech-to-Text",
+    assemblyai: "AssemblyAI",
+    deepgram: "Deepgram",
+    gemini: "Gemini",
+    "local-server": "Local CUDA",
+    local: "Whisper בדפדפן",
+  };
+  const normalizedValue = normalizedEngines[value.toLocaleLowerCase()] || value;
+  const match = normalizedValue.match(/^([^()]+?)\s*\((.+)\)$/);
+  if (!match) return { engine: normalizedValue, model: null, detail: null };
+  const inner = match[2].trim();
+  const [model, ...details] = inner.split(",").map((part) => part.trim()).filter(Boolean);
+  return { engine: match[1].trim(), model: model || null, detail: details.join(" · ") || null };
+}
+
+function languageLabel(value?: string | null): string | null {
+  if (!value) return null;
+  const labels: Record<string, string> = { he: "עברית", hebrew: "עברית", en: "אנגלית", english: "אנגלית", auto: "זיהוי אוטומטי" };
+  return labels[value.toLocaleLowerCase()] || value;
+}
+
+function formatVersionDate(value: Date): string {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime()) || value.getTime() <= 0) return "תאריך לא נשמר";
+  return new Intl.DateTimeFormat("he-IL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(value);
 }
 
 interface ManagedFolderRowProps {
@@ -128,9 +193,16 @@ export function ComparisonSourceDialog({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const normalizedQuery = query.trim().toLocaleLowerCase("he");
 
-  const matchingVersions = useMemo(() => versions.filter((version) => (
-    !normalizedQuery || getVersionLabel(version).toLocaleLowerCase("he").includes(normalizedQuery)
-  )), [getVersionLabel, normalizedQuery, versions]);
+  const matchingVersions = useMemo(() => versions.filter((version) => {
+    if (!normalizedQuery) return true;
+    return [
+      getVersionLabel(version),
+      legacyEngineLabel(version),
+      version.actionLabel,
+      version.detectedLanguage,
+      ...(version.duplicateEngines || []),
+    ].filter(Boolean).join(" ").toLocaleLowerCase("he").includes(normalizedQuery);
+  }), [getVersionLabel, normalizedQuery, versions]);
 
   const usableTranscripts = useMemo(() => transcripts.filter((transcript) => {
     if (!transcriptText(transcript)) return false;
@@ -352,6 +424,81 @@ export function ComparisonSourceDialog({
 
   const uncategorized = byFolder.get(null) || [];
 
+  const renderVersion = (version: TextVersion) => {
+    const rawEngine = legacyEngineLabel(version);
+    const { engine, model, detail } = splitEngineLabel(rawEngine);
+    const isMissingEngine = !rawEngine;
+    const action = version.actionLabel?.trim() || VERSION_SOURCE_LABELS[version.source];
+    const words = version.wordCount ?? version.text.split(/\s+/).filter(Boolean).length;
+    const language = languageLabel(version.detectedLanguage);
+    const duplicateEngines = Array.from(new Set(version.duplicateEngines || []));
+    const storageLabel = version.storage === "local" ? "מקומי" : version.storage === "cloud" ? "ענן" : "מיקום לא נשמר";
+
+    return (
+      <button
+        key={version.id}
+        type="button"
+        dir="rtl"
+        data-testid={`comparison-version-${version.id}`}
+        className={cn(
+          "w-full rounded-md border bg-background p-3 text-right transition-colors hover:border-primary/60 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+          selectedVersionId === version.id && "border-primary bg-primary/5 ring-1 ring-primary/30",
+        )}
+        aria-label={`בחר ${engine}${model ? `, מודל ${model}` : ""}, ${action}`}
+        onClick={() => selectVersion(version.id)}
+      >
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <span className={cn(
+              "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-muted/40",
+              isMissingEngine && "border-amber-300 bg-amber-50 text-amber-800",
+            )}>
+              {isMissingEngine ? <CircleAlert className="h-4 w-4" /> : <Cpu className="h-4 w-4 text-primary" />}
+            </span>
+            <span className="min-w-0">
+              <span className={cn("block text-sm font-semibold", isMissingEngine && "text-amber-800")}>{engine}</span>
+              {model && (
+                <span className="mt-1 block break-all rounded border bg-muted/50 px-2 py-1 font-mono text-[11px] leading-5 text-foreground" dir="ltr">
+                  {model}
+                </span>
+              )}
+              {detail && <span className="mt-1 block text-[11px] text-muted-foreground">{detail}</span>}
+            </span>
+          </div>
+          {selectedVersionId === version.id && <Badge className="shrink-0">נבחר</Badge>}
+        </div>
+
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <Badge variant="secondary" className="font-normal">{action}</Badge>
+          <Badge variant="outline" className="gap-1 font-normal">
+            {version.storage === "local" ? <HardDrive className="h-3 w-3" /> : <Cloud className="h-3 w-3" />}
+            {storageLabel}
+          </Badge>
+          {(version.runCount || 0) > 1 && <Badge variant="outline" className="font-normal">{version.runCount} הרצות עם טקסט זהה</Badge>}
+        </div>
+
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-2 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1"><CalendarClock className="h-3.5 w-3.5" />{formatVersionDate(version.timestamp)}</span>
+          {language && <span className="inline-flex items-center gap-1"><Languages className="h-3.5 w-3.5" />{language}</span>}
+          <span className="inline-flex items-center gap-1"><Hash className="h-3.5 w-3.5" />{words.toLocaleString("he-IL")} מילים</span>
+        </div>
+
+        {duplicateEngines.length > 1 && (
+          <div className="mt-2 rounded-md border border-dashed bg-muted/20 px-2.5 py-2">
+            <span className="block text-[11px] font-medium">אותו טקסט הופק גם באמצעות:</span>
+            <span className="mt-1.5 flex flex-wrap gap-1">
+              {duplicateEngines.map((duplicateEngine) => (
+                <Badge key={duplicateEngine} variant="outline" className="max-w-full font-normal">
+                  <span className="truncate" title={duplicateEngine}>{duplicateEngine}</span>
+                </Badge>
+              ))}
+            </span>
+          </div>
+        )}
+      </button>
+    );
+  };
+
   return (
     <Dialog modal={false} open={open} onOpenChange={onOpenChange}>
       <DialogContent hideOverlay dir="rtl" className="!left-auto !right-4 !top-20 !w-[min(42rem,calc(100vw-2rem))] !max-w-none !translate-x-0 !translate-y-0 max-h-[calc(100vh-6rem)] gap-0 overflow-hidden p-0 text-right shadow-2xl sm:rounded-lg" data-testid="comparison-source-dialog">
@@ -404,22 +551,8 @@ export function ComparisonSourceDialog({
 
           <TabsContent value="versions" className="m-0 px-5 pb-5 pt-3">
             <ScrollArea className="h-[min(55vh,28rem)] rounded-md border p-2">
-              <div className="space-y-1">
-                {matchingVersions.map((version) => (
-                  <button
-                    key={version.id}
-                    type="button"
-                    className={cn(
-                      "flex w-full items-center gap-3 rounded-md border px-3 py-2 text-right hover:border-primary/50 hover:bg-muted/40",
-                      selectedVersionId === version.id && "border-primary bg-primary/5",
-                    )}
-                    onClick={() => selectVersion(version.id)}
-                  >
-                    <FileText className="h-4 w-4 shrink-0" />
-                    <span className="min-w-0 flex-1 truncate text-sm">{getVersionLabel(version)}</span>
-                    {selectedVersionId === version.id && <Badge>נבחר</Badge>}
-                  </button>
-                ))}
+              <div className="space-y-2">
+                {matchingVersions.map(renderVersion)}
                 {!matchingVersions.length && <p className="p-8 text-center text-sm text-muted-foreground">לא נמצאו גרסאות מתאימות.</p>}
               </div>
             </ScrollArea>

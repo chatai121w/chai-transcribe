@@ -241,12 +241,31 @@ export async function mockLocalServer(page: Page, options?: {
     });
   }
 
+  const audioSessionPatterns = ['**/localhost:3000/audio-sessions**', '**/whisper/audio-sessions**'];
+  for (const pattern of audioSessionPatterns) {
+    await page.route(pattern, async (route) => {
+      if (!connected) return route.abort('connectionrefused');
+      if (route.request().method() === 'DELETE') {
+        return route.fulfill({ status: 200, json: { deleted: true } });
+      }
+      if (route.request().method() === 'GET') {
+        return route.fulfill({ status: 200, json: { audio_session_id: 'audio-session-e2e', duration: 5, file_size: 244 } });
+      }
+      return route.fulfill({
+        status: 200,
+        json: { audio_session_id: 'audio-session-e2e', duration: 5, file_size: 244, reused: false, expires_in: 7200 },
+      });
+    });
+  }
+
   const transcribePatterns = ['**/localhost:3000/transcribe-stream', '**/whisper/transcribe-stream'];
   for (const pattern of transcribePatterns) {
     await page.route(pattern, async (route) => {
       if (!connected) return route.abort('connectionrefused');
       // Return a simple SSE mock with a done event
       const sseBody = [
+        'data: {"type":"source","duration":5.0,"audio_session_id":"audio-session-e2e","session_reused":true}\n\n',
+        'data: {"type":"preprocessing","duration":5.0,"message":"Preparing audio and VAD"}\n\n',
         'data: {"type":"info","duration":5.0}\n\n',
         'data: {"type":"segment","text":"טקסט תמלול מוק","progress":100,"words":[]}\n\n',
         'data: {"type":"done","text":"טקסט תמלול מוק","duration":5.0,"language":"he","model":"' + model + '","processing_time":1.2,"wordTimings":[]}\n\n',

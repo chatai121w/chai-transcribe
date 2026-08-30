@@ -16,6 +16,14 @@ export interface TextVersion {
     'ai-grammar' | 'ai-punctuation' | 'ai-paragraphs' | 'ai-bullets' | 'ai-headings' |
     'ai-expand' | 'ai-shorten' | 'ai-summarize' | 'ai-translate' | 'ai-speakers' | 'ai-tone';
   customPrompt?: string;
+  /** Structured transcription metadata used by comparison/version pickers. */
+  engineLabel?: string | null;
+  actionLabel?: string | null;
+  detectedLanguage?: string | null;
+  wordCount?: number | null;
+  storage?: 'cloud' | 'local';
+  runCount?: number;
+  duplicateEngines?: string[];
 }
 
 const sourceLabels: Record<string, string> = {
