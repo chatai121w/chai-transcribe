@@ -26,6 +26,25 @@ describe('SyncMirrorLayout padded alignment', () => {
     localStorage.clear();
   });
 
+  it('builds synthetic timings when a transcript has no word timings', async () => {
+    const text = 'תמלול ללא חותמות זמן שעדיין צריך להופיע בעורך';
+    const view = render(
+      <SyncMirrorLayout
+        wordTimings={[]}
+        currentTime={0}
+        text={text}
+        syncEnabled={false}
+        onTextChange={vi.fn()}
+        onWordReplace={vi.fn()}
+        onWordClick={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(view.container.textContent).toContain(text);
+    });
+  });
+
   it('keeps a large locked snapshot block-aligned after distant edits', async () => {
     const originalWords = makeTranscript();
     const originalText = originalWords.join(' ');

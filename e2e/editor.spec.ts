@@ -25,6 +25,13 @@ test.describe('עורך טקסט - טעינה', () => {
     await expect(page.getByText('עריכת טקסט').first()).toBeVisible({ timeout: 10000 });
   });
 
+  test('עורך מסונכרן נטען גם ללא תזמוני מילים', async ({ page }) => {
+    await page.goto('/text-editor');
+
+    await expect(page.getByText('תמלול שני לבדיקת המערכת').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('שגיאה בעורך טקסט')).toHaveCount(0);
+  });
+
   test('טאבים מוצגים בעורך', async ({ page }) => {
     await page.goto('/text-editor');
     const tabTexts = ['נגן', 'עריכת טקסט', 'תבניות', 'AI', 'היסטוריה'];

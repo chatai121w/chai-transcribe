@@ -20,7 +20,11 @@ import { cn } from "@/lib/utils";
 import clsx from "clsx";
 import { createRenderReporter, syncLog, syncTime, notePhase, syncTraceEnabled } from "@/lib/syncPerfTrace";
 import { buildLineAlignment } from "@/lib/lineAlignment";
-import { chunkTranscriptText, chunkTranscriptTimings } from "@/lib/transcriptBlocks";
+import {
+  chunkTranscriptText,
+  chunkTranscriptTimings,
+  textToSyntheticTimings,
+} from "@/lib/transcriptBlocks";
 
 const syncRenderReporter = createRenderReporter('SyncMirrorLayout');
 import { Badge } from "@/components/ui/badge";
@@ -423,7 +427,7 @@ export const SyncMirrorLayout = ({
   const displayTimings = useMemo((): WordTiming[] => {
     const words = text.trim().split(/\s+/).filter(Boolean);
     if (!words.length) return [];
-    if (!wordTimings.length) return textToTimings(text);
+    if (!wordTimings.length) return textToSyntheticTimings(text);
 
     // Convert userAnchors Map → UserAnchor[] for the alignment function
     const anchorsArr = Array.from(userAnchors.entries()).map(([editedIdx, { start, end }]) => ({
@@ -757,7 +761,7 @@ export const SyncMirrorLayout = ({
   const compareToBaseline = useCallback(() => {
     if (!hasBaseline) return;
     // Snapshot the baseline as the frozen panel and enter compare mode
-    setFrozenTimings(textToTimings(baselineText));
+    setFrozenTimings(textToSyntheticTimings(baselineText));
     setCompareMode(true);
     toast({ title: 'משווה לגרסת בסיס', description: 'הצד הימני מציג כעת את גרסת הבסיס.' });
   }, [hasBaseline, baselineText]);
