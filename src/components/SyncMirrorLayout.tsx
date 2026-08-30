@@ -538,25 +538,67 @@ export const SyncMirrorLayout = ({
     }
     syncLog('⇉ padded alignment: running LCS', { snapshotLines: n, currentLines: m, cells: n * m });
 
-    // LCS DP
-    const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-    for (let i = 1; i <= n; i++) {
-      for (let j = 1; j <= m; j++) {
-        dp[i][j] = A[i - 1] === B[j - 1]
-          ? dp[i - 1][j - 1] + 1
-          : Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
+    // Only the stretch that actually differs needs diffing. Editing a few lines
+    // of a long transcript leaves identical text above and below them, so
+    // trimming the shared prefix and suffix usually turns a 900×900 matrix into
+    // a handful of cells. Building the full matrix is what made switching this
+    // mode on stall on a long recording.
+    let pre = 0;
+    while (pre < n && pre < m && A[pre] === B[pre]) pre++;
+    let suf = 0;
+    while (suf < n - pre && suf < m - pre && A[n - 1 - suf] === B[m - 1 - suf]) suf++;
+
+    const midN = n - pre - suf;
+    const midM = m - pre - suf;
+
     const ops: Array<{ t: 'eq' | 'del' | 'ins'; a?: number; b?: number }> = [];
-    let i = n, j = m;
-    while (i > 0 && j > 0) {
-      if (A[i - 1] === B[j - 1]) { ops.push({ t: 'eq', a: i - 1, b: j - 1 }); i--; j--; }
-      else if (dp[i - 1][j] >= dp[i][j - 1]) { ops.push({ t: 'del', a: i - 1 }); i--; }
-      else { ops.push({ t: 'ins', b: j - 1 }); j--; }
+    for (let k = 0; k < pre; k++) ops.push({ t: 'eq', a: k, b: k });
+
+    // A transcript rewritten wholesale can still leave a large middle. Rather
+    // than allocate a matrix big enough to freeze the tab, pair the rows off and
+    // mark them all edited: less precise, but the mode stays usable.
+    const MAX_CELLS = 250_000;
+    if (midN * midM > MAX_CELLS) {
+      syncLog('⇉ padded alignment: middle too large, pairing instead', {
+        midN, midM, cells: midN * midM,
+      });
+      const paired = Math.min(midN, midM);
+      for (let k = 0; k < paired; k++) {
+        ops.push({ t: 'del', a: pre + k });
+        ops.push({ t: 'ins', b: pre + k });
+      }
+      for (let k = paired; k < midN; k++) ops.push({ t: 'del', a: pre + k });
+      for (let k = paired; k < midM; k++) ops.push({ t: 'ins', b: pre + k });
+    } else if (midN || midM) {
+      syncLog('⇉ padded alignment: LCS on trimmed middle', {
+        total: `${n}×${m}`, middle: `${midN}×${midM}`, cellsSaved: n * m - midN * midM,
+      });
+      // One flat typed array rather than an array of arrays: a single
+      // allocation, and a known row stride instead of per-row indirection.
+      const w = midM + 1;
+      const dp = new Int32Array((midN + 1) * w);
+      for (let i = 1; i <= midN; i++) {
+        const ai = A[pre + i - 1];
+        for (let j = 1; j <= midM; j++) {
+          dp[i * w + j] = ai === B[pre + j - 1]
+            ? dp[(i - 1) * w + (j - 1)] + 1
+            : Math.max(dp[(i - 1) * w + j], dp[i * w + (j - 1)]);
+        }
+      }
+      const mid: Array<{ t: 'eq' | 'del' | 'ins'; a?: number; b?: number }> = [];
+      let i = midN, j = midM;
+      while (i > 0 && j > 0) {
+        if (A[pre + i - 1] === B[pre + j - 1]) { mid.push({ t: 'eq', a: pre + i - 1, b: pre + j - 1 }); i--; j--; }
+        else if (dp[(i - 1) * w + j] >= dp[i * w + (j - 1)]) { mid.push({ t: 'del', a: pre + i - 1 }); i--; }
+        else { mid.push({ t: 'ins', b: pre + j - 1 }); j--; }
+      }
+      while (i > 0) { mid.push({ t: 'del', a: pre + i - 1 }); i--; }
+      while (j > 0) { mid.push({ t: 'ins', b: pre + j - 1 }); j--; }
+      mid.reverse();
+      ops.push(...mid);
     }
-    while (i > 0) { ops.push({ t: 'del', a: i - 1 }); i--; }
-    while (j > 0) { ops.push({ t: 'ins', b: j - 1 }); j--; }
-    ops.reverse();
+
+    for (let k = 0; k < suf; k++) ops.push({ t: 'eq', a: n - suf + k, b: m - suf + k });
     const snapOut: PaddedRow[] = [];
     const curOut: PaddedRow[] = [];
     for (const op of ops) {
