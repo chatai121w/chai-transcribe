@@ -25,6 +25,10 @@ export interface LoraJob {
   wer_after?: number | null;
   cer_before?: number | null;
   cer_after?: number | null;
+  eval_sample_count?: number | null;
+  eval_fingerprint?: string | null;
+  quality_gate?: boolean;
+  quality_gate_reasons?: string[];
   adapter_path?: string | null;
   ct2_model_path?: string | null;
   log_tail?: string;
@@ -42,6 +46,8 @@ export interface LoraDataset {
   recording_groups?: number;
   ready_for_training?: boolean;
   warnings?: string[];
+  quality_counts?: Record<'gold' | 'silver' | 'bronze' | 'unknown', number>;
+  label_source_counts?: Record<string, number>;
 }
 
 interface StartJobOptions {
@@ -164,7 +170,12 @@ export function useLoraTraining() {
     return (await res.json()).dataset_id as string;
   }, [refreshDatasets]);
 
-  const uploadPair = useCallback(async (datasetId: string, audio: File, text: string) => {
+  const uploadPair = useCallback(async (
+    datasetId: string,
+    audio: File,
+    text: string,
+    metadata?: Record<string, string | number>,
+  ) => {
     const fd = new FormData();
     fd.append('dataset_id', datasetId);
     fd.append('audio', audio, audio.name);
@@ -189,6 +200,7 @@ export function useLoraTraining() {
     fd.append('dataset_id', datasetId);
     fd.append('audio', audio, audio.name);
     fd.append('text', text);
+    if (metadata) fd.append('metadata', JSON.stringify(metadata));
     if (metadata) fd.append('metadata', JSON.stringify(metadata));
     const res = await fetch(`${base()}/training/dataset/approved-pair`, { method: 'POST', body: fd });
     const data = await res.json().catch(() => ({}));

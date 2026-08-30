@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { useLoraTraining, type LoraJob } from '@/hooks/useLoraTraining';
 import { ReferenceAudioImporter } from '@/components/training/ReferenceAudioImporter';
+import { buildApprovedAsrMetadata } from '@/lib/asrDatasetMetadata';
 
 const STATUS_COLORS: Record<LoraJob['status'], string> = {
   queued: 'bg-muted text-muted-foreground',
@@ -56,6 +57,7 @@ export default function LoraFineTuningPanel() {
   const [selectedDs, setSelectedDs] = useState<string>('');
   const [pairText, setPairText] = useState('');
   const [pairAudio, setPairAudio] = useState<File | null>(null);
+  const [recordingGroup, setRecordingGroup] = useState('');
   const [uploadingPair, setUploadingPair] = useState(false);
 
   // ── Training state ───────────────────────────────────────────
@@ -84,13 +86,19 @@ export default function LoraFineTuningPanel() {
   };
 
   const handleUploadPair = async () => {
-    if (!selectedDs || !pairAudio || !pairText.trim()) {
-      toast({ title: 'חסר מידע', description: 'יש לבחור dataset, אודיו וטקסט אמת', variant: 'destructive' });
+    if (!selectedDs || !pairAudio || !pairText.trim() || !recordingGroup.trim()) {
+      toast({ title: 'חסר מידע', description: 'יש לבחור מאגר, אודיו, טקסט אמת ומזהה הקלטת מקור', variant: 'destructive' });
       return;
     }
     setUploadingPair(true);
     try {
-      await uploadPair(selectedDs, pairAudio, pairText.trim());
+      await uploadPair(selectedDs, pairAudio, pairText.trim(), buildApprovedAsrMetadata({
+        recordingFingerprint: recordingGroup.trim(),
+        sourceKind: 'manual-upload',
+        sourceRef: pairAudio.name,
+        sourceLabel: pairAudio.name,
+        teacherEngines: [],
+      }));
       setPairAudio(null);
       setPairText('');
       toast({ title: 'נוסף לדאטהסט' });
@@ -214,6 +222,12 @@ export default function LoraFineTuningPanel() {
                   {selectedDsInfo?.recording_groups != null && ` · ${selectedDsInfo.recording_groups} הקלטות`}
                   {selectedDsInfo?.duration_seconds != null && ` · ${selectedDsInfo.duration_seconds.toFixed(1)} שניות`}
                 </div>
+                {selectedDsInfo?.quality_counts && (
+                  <div className="text-xs text-muted-foreground">
+                    Gold: {selectedDsInfo.quality_counts.gold ?? 0} · Silver: {selectedDsInfo.quality_counts.silver ?? 0}
+                    {' · '}Bronze: {selectedDsInfo.quality_counts.bronze ?? 0} · ללא סיווג: {selectedDsInfo.quality_counts.unknown ?? 0}
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <Input
                     type="file"
@@ -228,6 +242,14 @@ export default function LoraFineTuningPanel() {
                   onChange={(e) => setPairText(e.target.value)}
                   rows={2}
                 />
+                <Input
+                  value={recordingGroup}
+                  onChange={(event) => setRecordingGroup(event.target.value)}
+                  placeholder="מזהה הקלטת המקור (זהה לכל הקטעים מאותו שיעור)"
+                />
+                <p className="text-xs text-muted-foreground">
+                  מזהה זה מונע מקטעים של אותו שיעור להופיע גם באימון וגם בבדיקת האיכות.
+                </p>
                 <div className="flex gap-2">
                   <Button onClick={handleUploadPair} disabled={uploadingPair} className="gap-1">
                     {uploadingPair ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
@@ -340,17 +362,17 @@ export default function LoraFineTuningPanel() {
                                 <Button
                                   size="icon"
                                   variant={activeCt2 === `lora:${j.job_id}` ? 'default' : 'ghost'}
-                                  disabled={j.wer_before == null || j.wer_after == null || j.wer_after >= j.wer_before}
+                                  disabled={!j.quality_gate}
                                   onClick={() => setActiveModel(activeCt2 === `lora:${j.job_id}` ? null : j.ct2_model_path!, j.job_id)}
                                 >
                                   <Power className="w-4 h-4" />
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>
-                                {j.wer_before == null || j.wer_after == null
-                                  ? 'אין בדיקת איכות נפרדת; לא ניתן לבחור מודל בדיקה'
-                                  : j.wer_after >= j.wer_before
-                                  ? 'המודל לא שיפר WER ולכן אינו זמין לבחירה'
+                                {j.quality_gate == null
+                                  ? 'אין בדיקת איכות מלאה; לא ניתן לבחור את המודל'
+                                  : !j.quality_gate
+                                  ? `המודל חסום: ${(j.quality_gate_reasons || []).join(', ')}`
                                   : activeCt2 === `lora:${j.job_id}` ? 'חזור למודל בסיס' : 'הוסף למודלים ובחר'}
                               </TooltipContent>
                             </Tooltip>
@@ -379,9 +401,25 @@ export default function LoraFineTuningPanel() {
                             WER אחרי: <span className="font-mono">{j.wer_after.toFixed(2)}%</span>
                           </div>
                         )}
+                        {j.cer_before != null && (
+                          <div>CER לפני: <span className="font-mono">{j.cer_before.toFixed(2)}%</span></div>
+                        )}
+                        {j.cer_after != null && (
+                          <div className={j.cer_before != null && j.cer_after <= j.cer_before ? 'text-green-600' : 'text-destructive'}>
+                            CER אחרי: <span className="font-mono">{j.cer_after.toFixed(2)}%</span>
+                          </div>
+                        )}
                         {j.train_loss != null && <div>train loss: <span className="font-mono">{Number(j.train_loss).toFixed(4)}</span></div>}
                         {j.eval_loss != null && <div>eval loss: <span className="font-mono">{Number(j.eval_loss).toFixed(4)}</span></div>}
                       </div>
+
+                      {j.status === 'done' && (
+                        <div className={`text-xs ${j.quality_gate ? 'text-green-600' : 'text-destructive'}`}>
+                          {j.quality_gate
+                            ? `עבר שער איכות על ${j.eval_sample_count ?? 0} קטעי בדיקה קבועים`
+                            : `לא הופעל: ${(j.quality_gate_reasons || ['בדיקת האיכות לא הושלמה']).join(' · ')}`}
+                        </div>
+                      )}
 
                       {j.error && (
                         <div className="text-xs text-destructive flex items-start gap-1">

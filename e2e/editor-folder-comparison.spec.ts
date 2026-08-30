@@ -198,6 +198,36 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
     await expect(original).toHaveCSS('direction', 'rtl');
   });
 
+  test('קליק ימני על מילה בהשוואה מאפשר תיקון ושומר גרסה חדשה', async ({ page }) => {
+    const versionWrites: string[] = [];
+    await page.route('**/rest/v1/transcript_versions**', async (route) => {
+      if (route.request().method() !== 'GET') {
+        versionWrites.push(route.request().postData() || '');
+        return route.fulfill({ status: 200, json: { id: `word-fix-${versionWrites.length}` } });
+      }
+      return route.fulfill({ status: 200, json: [] });
+    });
+
+    await page.goto('/text-editor');
+    await page.getByTestId('send-transcript-to-compare').click();
+    const targetWord = page.locator('[data-testid="comparison-editable-word"][data-comparison-side="right"]')
+      .filter({ hasText: /^תמלול$/ })
+      .first();
+    await expect(targetWord).toBeVisible({ timeout: 15_000 });
+    await targetWord.click({ button: 'right' });
+
+    await expect(page.getByRole('menuitem', { name: 'עריכת תווים ופיסוק' })).toBeVisible();
+    await page.getByRole('menuitem', { name: 'עריכת תווים ופיסוק' }).hover();
+    const editInput = page.locator('[role="menu"] input').last();
+    await expect(editInput).toHaveValue('תמלול');
+    await editInput.fill('התמלול');
+    await page.locator('[role="menu"]').last().getByRole('button', { name: 'שמור', exact: true }).click();
+
+    await expect(page.getByText('המילה תוקנה ונשמרה', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('comparison-column-right')).toContainText('התמלול שני לבדיקת המערכת');
+    await expect.poll(() => versionWrites.some((body) => body.includes('תיקון מילה בהשוואה'))).toBe(true);
+  });
+
   test('תמלול נוסף מאותה הקלטה נשמר כגרסה ונפתח להשוואה בלי לדרוס את המקור', async ({ page }) => {
     const versionWrites: Array<Record<string, unknown>> = [];
     const jobWrites: Array<{ method: string; body: Record<string, unknown> }> = [];

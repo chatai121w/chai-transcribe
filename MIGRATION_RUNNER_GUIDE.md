@@ -12,7 +12,7 @@ scripts/direct-run.mjs
 ## שלב 1: כניסה לתיקיית הפרויקט
 
 ```powershell
-cd "c:\Users\jj121\smart-hebrew-transcriber"
+cd "c:\Users\jj121\chai-transcribe"
 ```
 
 ## שלב 2: הרצת מיגרציה מקובץ SQL
@@ -89,7 +89,7 @@ supabase/migrations/
 ## דוגמה מלאה להרצת המיגרציה החדשה של compare settings
 
 ```powershell
-cd "c:\Users\jj121\smart-hebrew-transcriber"
+cd "c:\Users\jj121\chai-transcribe"
 node scripts/direct-run.mjs file "supabase/migrations/20260405143000_add_compare_settings_json.sql"
 ```
 
@@ -98,3 +98,36 @@ node scripts/direct-run.mjs file "supabase/migrations/20260405143000_add_compare
 1. תמיד להריץ מה-root של הפרויקט.
 2. הכי טוב לעבוד עם `file` ולא עם `sql` למיגרציות קבועות.
 3. לפני הרצה בפרודקשן, לבדוק קודם בסביבת dev/staging.
+
+## פריסת Edge Functions אינה מיגרציה
+
+`scripts/direct-run.mjs` מריץ SQL בלבד. הוא אינו מעלה את קוד
+`supabase/functions/<slug>/index.ts`.
+
+לפני פריסת Edge Function יש לוודא פעם אחת שהמיגרציה הבאה הורצה:
+
+```powershell
+node scripts/direct-run.mjs file "supabase/migrations/deploy_edge_fn.sql"
+```
+
+המיגרציה יוצרת את `deploy_edge_fn`, אבל אינה יכולה ליצור Supabase
+Management Personal Access Token. את הטוקן יש ליצור בחשבון Supabase ולשמור
+כסוד `SUPABASE_MANAGEMENT_TOKEN` בטבלת `system_secrets`. אין לשמור אותו
+בקוד או בקובץ migration.
+
+בדיקת מוכנות:
+
+```powershell
+$env:ADMIN_EMAIL="admin@example.com"
+$env:ADMIN_PASSWORD="..."
+node scripts/deploy-fn.mjs check
+```
+
+פריסת פונקציה יחידה:
+
+```powershell
+node scripts/deploy-fn.mjs transcribe-gemini
+```
+
+רק כאשר `check` מאשר `http`, טבלת `system_secrets`, הפונקציה
+`deploy_edge_fn` והטוקן, ניתן לפרוס את קוד הפונקציה.

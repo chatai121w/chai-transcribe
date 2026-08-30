@@ -9,6 +9,7 @@ const corsHeaders = {
 };
 
 const ALLOWED_MODELS = new Set([
+  "gemini-3.5-transcribe",
   "gemini-flash-latest",
   "gemini-pro-latest",
   "gemini-2.5-flash",
@@ -106,6 +107,80 @@ async function callPersonalGoogle(params: {
   return { text, usage };
 }
 
+async function callGemini35Transcribe(params: {
+  apiKey: string;
+  file: File;
+  mimeType: string;
+  lang: string;
+  customVocabulary: string[];
+}) {
+  const startResponse = await fetch("https://generativelanguage.googleapis.com/upload/v1beta/files", {
+    method: "POST",
+    headers: {
+      "x-goog-api-key": params.apiKey,
+      "X-Goog-Upload-Protocol": "resumable",
+      "X-Goog-Upload-Command": "start",
+      "X-Goog-Upload-Header-Content-Length": String(params.file.size),
+      "X-Goog-Upload-Header-Content-Type": params.mimeType,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ file: { display_name: params.file.name || "audio" } }),
+  });
+  if (!startResponse.ok) throw new Error(`Gemini file upload start ${startResponse.status}: ${(await startResponse.text()).slice(0, 200)}`);
+  const uploadUrl = startResponse.headers.get("x-goog-upload-url");
+  if (!uploadUrl) throw new Error("Gemini file upload URL was not returned");
+
+  const uploadResponse = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      "Content-Length": String(params.file.size),
+      "X-Goog-Upload-Offset": "0",
+      "X-Goog-Upload-Command": "upload, finalize",
+    },
+    body: await params.file.arrayBuffer(),
+  });
+  if (!uploadResponse.ok) throw new Error(`Gemini file upload ${uploadResponse.status}: ${(await uploadResponse.text()).slice(0, 200)}`);
+  const uploaded = await uploadResponse.json();
+  const file = uploaded?.file || uploaded;
+  if (!file?.uri) throw new Error("Gemini uploaded file URI was not returned");
+
+  const languageCodes = params.lang === "auto" ? [] : [params.lang === "he" ? "he-IL" : params.lang];
+  try {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      method: "POST",
+      headers: { "x-goog-api-key": params.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gemini-3.5-transcribe",
+        input: [{ type: "audio", uri: file.uri, mime_type: params.mimeType }],
+        generation_config: {
+          transcription_config: {
+            language_codes: languageCodes,
+            custom_vocabulary: params.customVocabulary.slice(0, 100),
+            mode: { type: "verbatim" },
+          },
+        },
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      const error = new Error(`Gemini Transcribe ${response.status}: ${body.slice(0, 200)}`);
+      (error as { status?: number }).status = response.status;
+      (error as { exhausted?: boolean }).exhausted = response.status === 401 || response.status === 403 || response.status === 429;
+      throw error;
+    }
+    const interaction = await response.json();
+    const text = String(interaction?.output_text || "").trim();
+    if (!text) throw new Error("Gemini Transcribe returned an empty transcript");
+    return { text, usage: interaction?.usage || interaction?.usage_metadata };
+  } finally {
+    if (file?.name) {
+      await fetch(`https://generativelanguage.googleapis.com/v1beta/${file.name}`, {
+        method: "DELETE", headers: { "x-goog-api-key": params.apiKey },
+      }).catch(() => undefined);
+    }
+  }
+}
+
 async function callLovableGemini(params: {
   model: string;
   mimeType: string;
@@ -180,6 +255,11 @@ serve(async (req) => {
     const model = ALLOWED_MODELS.has(modelRaw) ? modelRaw : DEFAULT_MODEL;
     const lang = (form.get("language") as string | null) || "he";
     const mimeType = file.type || "audio/mpeg";
+    let customVocabulary: string[] = [];
+    try {
+      const parsed = JSON.parse((form.get("customVocabulary") as string | null) || "[]");
+      if (Array.isArray(parsed)) customVocabulary = [...new Set(parsed.map(String).map((term) => term.trim()).filter(Boolean))].slice(0, 100);
+    } catch { /* invalid optional vocabulary is ignored */ }
 
     console.log(`[transcribe-gemini] req=${requestId} user=${userId} model=${model} lang=${lang} personal=${!!personalKey} size=${file.size}`);
 
@@ -188,13 +268,16 @@ serve(async (req) => {
     let text = "";
     let usage: unknown = null;
     let provider: "personal" | "lovable" = "lovable";
+    let usedModel = model;
     let fallbackReason: string | null = null;
     let personalStatus: number | null = null;
     let lovableError: { message: string; status?: number } | null = null;
 
     if (personalKey) {
       try {
-        const r = await callPersonalGoogle({ apiKey: personalKey, model: resolvePersonalModel(model), mimeType, audioB64, lang });
+        const r = model === "gemini-3.5-transcribe"
+          ? await callGemini35Transcribe({ apiKey: personalKey, file, mimeType, lang, customVocabulary })
+          : await callPersonalGoogle({ apiKey: personalKey, model: resolvePersonalModel(model), mimeType, audioB64, lang });
         text = r.text; usage = r.usage; provider = "personal";
       } catch (e) {
         const exhausted = (e as { exhausted?: boolean }).exhausted;
@@ -206,8 +289,10 @@ serve(async (req) => {
 
     if (!text) {
       try {
-        const r = await callLovableGemini({ model, mimeType, audioB64, lang });
-        text = r.text; usage = r.usage; provider = "lovable";
+        const gatewayModel = model === "gemini-3.5-transcribe" ? DEFAULT_MODEL : model;
+        if (gatewayModel !== model) fallbackReason = fallbackReason || "gemini-3.5-transcribe requires a working personal API key";
+        const r = await callLovableGemini({ model: gatewayModel, mimeType, audioB64, lang });
+        text = r.text; usage = r.usage; provider = "lovable"; usedModel = gatewayModel;
       } catch (e) {
         const msg = (e as Error).message || "Lovable AI failed";
         const m = /Lovable AI (\d+)/.exec(msg);
@@ -234,7 +319,7 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ text, model, provider, fallbackReason, usage, requestId }),
+      JSON.stringify({ text, model: usedModel, requestedModel: model, provider, fallbackReason, usage, requestId }),
       { headers: jsonHeaders },
     );
   } catch (error) {
