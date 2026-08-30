@@ -143,6 +143,17 @@ describe('buildLineAlignment', () => {
     expect(alignedLineCount(ops)).toBe(alignedLineCount(referenceAlignment(before, after)));
   });
 
+  it('preserves matches between distant edits even when the middle exceeds the matrix cap', () => {
+    const before = Array.from({ length: 900 }, (_, i) => `line ${i}`);
+    const after = [...before];
+    after[1] = 'edited near start';
+    after[898] = 'edited near end';
+
+    const ops = buildLineAlignment(before, after);
+    expectValidAlignment(ops, before, after);
+    expect(alignedLineCount(ops)).toBe(898);
+  });
+
   it('falls back to pairing instead of allocating a huge matrix', () => {
     const before = Array.from({ length: 900 }, (_, i) => `alpha ${i}`);
     const after = Array.from({ length: 900 }, (_, i) => `beta ${i}`);

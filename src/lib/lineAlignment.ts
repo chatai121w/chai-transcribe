@@ -1,34 +1,22 @@
-/**
- * Line-level alignment for the mirrored transcript panes.
- *
- * When one pane is locked, the two sides show different versions of the same
- * text and have to be padded so matching lines sit opposite each other. That is
- * a diff, and a diff over the whole transcript is quadratic: at nine hundred
- * lines a naive matrix is eight hundred thousand cells, built synchronously the
- * moment the mode is switched on.
- *
- * Editing leaves the text above and below the edit untouched, so the shared
- * prefix and suffix are trimmed and only the span that actually differs is
- * diffed — usually a handful of rows.
- */
+/** Line-level alignment for the mirrored transcript panes. */
 
 export type AlignOp =
   | { t: 'eq'; a: number; b: number }
   | { t: 'del'; a: number }
   | { t: 'ins'; b: number };
 
-/**
- * Beyond this many cells the exact diff is abandoned in favour of pairing rows
- * off positionally. That loses precision on a transcript rewritten wholesale,
- * but the alternative is allocating a matrix large enough to freeze the tab.
- */
+/** Maximum matrix size used by an exact LCS segment. */
 export const MAX_ALIGN_CELLS = 250_000;
 
+type Anchor = { a: number; b: number };
+
 /**
- * Build the edit script aligning `snapshot` (the locked side) to `current`.
+ * Build an edit script aligning `snapshot` to `current`.
  *
- * Indices in the returned ops address the original arrays, so callers can use
- * them directly regardless of the trimming done internally.
+ * Small changed regions use exact LCS. Large regions are partitioned around a
+ * longest increasing sequence of unique common rows, then each gap is aligned
+ * independently. This preserves matches between distant edits without ever
+ * allocating an unbounded quadratic matrix.
  */
 export function buildLineAlignment(
   snapshot: readonly string[],
@@ -37,64 +25,140 @@ export function buildLineAlignment(
 ): AlignOp[] {
   const A = snapshot;
   const B = current;
-  const n = A.length;
-  const m = B.length;
-
-  let pre = 0;
-  while (pre < n && pre < m && A[pre] === B[pre]) pre++;
-  let suf = 0;
-  while (suf < n - pre && suf < m - pre && A[n - 1 - suf] === B[m - 1 - suf]) suf++;
-
-  const midN = n - pre - suf;
-  const midM = m - pre - suf;
-
   const ops: AlignOp[] = [];
-  for (let k = 0; k < pre; k++) ops.push({ t: 'eq', a: k, b: k });
+  const safeMaxCells = Math.max(0, Math.floor(maxCells));
 
-  if (midN * midM > maxCells) {
-    const paired = Math.min(midN, midM);
-    for (let k = 0; k < paired; k++) {
-      ops.push({ t: 'del', a: pre + k });
-      ops.push({ t: 'ins', b: pre + k });
-    }
-    for (let k = paired; k < midN; k++) ops.push({ t: 'del', a: pre + k });
-    for (let k = paired; k < midM; k++) ops.push({ t: 'ins', b: pre + k });
-  } else if (midN || midM) {
-    // One flat typed array rather than nested arrays: a single allocation, and
-    // a known row stride instead of per-row indirection in the inner loop.
-    const w = midM + 1;
-    const dp = new Int32Array((midN + 1) * w);
-    for (let i = 1; i <= midN; i++) {
-      const ai = A[pre + i - 1];
-      for (let j = 1; j <= midM; j++) {
-        dp[i * w + j] = ai === B[pre + j - 1]
-          ? dp[(i - 1) * w + (j - 1)] + 1
-          : Math.max(dp[(i - 1) * w + j], dp[i * w + (j - 1)]);
+  const exactRange = (aStart: number, aEnd: number, bStart: number, bEnd: number): AlignOp[] => {
+    const n = aEnd - aStart;
+    const m = bEnd - bStart;
+    const width = m + 1;
+    const dp = new Int32Array((n + 1) * width);
+
+    for (let i = 1; i <= n; i++) {
+      const value = A[aStart + i - 1];
+      for (let j = 1; j <= m; j++) {
+        dp[i * width + j] = value === B[bStart + j - 1]
+          ? dp[(i - 1) * width + j - 1] + 1
+          : Math.max(dp[(i - 1) * width + j], dp[i * width + j - 1]);
       }
     }
-    const mid: AlignOp[] = [];
-    let i = midN;
-    let j = midM;
+
+    const result: AlignOp[] = [];
+    let i = n;
+    let j = m;
     while (i > 0 && j > 0) {
-      if (A[pre + i - 1] === B[pre + j - 1]) {
-        mid.push({ t: 'eq', a: pre + i - 1, b: pre + j - 1 }); i--; j--;
-      } else if (dp[(i - 1) * w + j] >= dp[i * w + (j - 1)]) {
-        mid.push({ t: 'del', a: pre + i - 1 }); i--;
+      if (A[aStart + i - 1] === B[bStart + j - 1]) {
+        result.push({ t: 'eq', a: aStart + i - 1, b: bStart + j - 1 });
+        i--;
+        j--;
+      } else if (dp[(i - 1) * width + j] >= dp[i * width + j - 1]) {
+        result.push({ t: 'del', a: aStart + i - 1 });
+        i--;
       } else {
-        mid.push({ t: 'ins', b: pre + j - 1 }); j--;
+        result.push({ t: 'ins', b: bStart + j - 1 });
+        j--;
       }
     }
-    while (i > 0) { mid.push({ t: 'del', a: pre + i - 1 }); i--; }
-    while (j > 0) { mid.push({ t: 'ins', b: pre + j - 1 }); j--; }
-    mid.reverse();
-    ops.push(...mid);
-  }
+    while (i > 0) result.push({ t: 'del', a: aStart + --i });
+    while (j > 0) result.push({ t: 'ins', b: bStart + --j });
+    result.reverse();
+    return result;
+  };
 
-  for (let k = 0; k < suf; k++) ops.push({ t: 'eq', a: n - suf + k, b: m - suf + k });
+  const findUniqueAnchors = (aStart: number, aEnd: number, bStart: number, bEnd: number): Anchor[] => {
+    const countA = new Map<string, number>();
+    const countB = new Map<string, number>();
+    const indexB = new Map<string, number>();
+    for (let i = aStart; i < aEnd; i++) countA.set(A[i], (countA.get(A[i]) ?? 0) + 1);
+    for (let j = bStart; j < bEnd; j++) {
+      countB.set(B[j], (countB.get(B[j]) ?? 0) + 1);
+      indexB.set(B[j], j);
+    }
+
+    const candidates: Anchor[] = [];
+    for (let i = aStart; i < aEnd; i++) {
+      if (countA.get(A[i]) === 1 && countB.get(A[i]) === 1) {
+        candidates.push({ a: i, b: indexB.get(A[i])! });
+      }
+    }
+    if (!candidates.length) return [];
+
+    // Longest increasing subsequence of B positions preserves row order.
+    const tails: number[] = [];
+    const previous = new Int32Array(candidates.length);
+    previous.fill(-1);
+    for (let i = 0; i < candidates.length; i++) {
+      let low = 0;
+      let high = tails.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (candidates[tails[middle]].b < candidates[i].b) low = middle + 1;
+        else high = middle;
+      }
+      if (low > 0) previous[i] = tails[low - 1];
+      tails[low] = i;
+    }
+
+    const anchors: Anchor[] = [];
+    for (let i = tails[tails.length - 1]; i >= 0; i = previous[i]) anchors.push(candidates[i]);
+    anchors.reverse();
+    return anchors;
+  };
+
+  const alignRange = (aStart: number, aEnd: number, bStart: number, bEnd: number): void => {
+    while (aStart < aEnd && bStart < bEnd && A[aStart] === B[bStart]) {
+      ops.push({ t: 'eq', a: aStart, b: bStart });
+      aStart++;
+      bStart++;
+    }
+
+    let suffix = 0;
+    while (
+      aStart < aEnd - suffix
+      && bStart < bEnd - suffix
+      && A[aEnd - 1 - suffix] === B[bEnd - 1 - suffix]
+    ) suffix++;
+
+    const middleAEnd = aEnd - suffix;
+    const middleBEnd = bEnd - suffix;
+    const n = middleAEnd - aStart;
+    const m = middleBEnd - bStart;
+
+    if (!n) {
+      for (let j = bStart; j < middleBEnd; j++) ops.push({ t: 'ins', b: j });
+    } else if (!m) {
+      for (let i = aStart; i < middleAEnd; i++) ops.push({ t: 'del', a: i });
+    } else if (n * m <= safeMaxCells) {
+      ops.push(...exactRange(aStart, middleAEnd, bStart, middleBEnd));
+    } else {
+      const anchors = findUniqueAnchors(aStart, middleAEnd, bStart, middleBEnd);
+      if (anchors.length) {
+        let nextA = aStart;
+        let nextB = bStart;
+        for (const anchor of anchors) {
+          alignRange(nextA, anchor.a, nextB, anchor.b);
+          ops.push({ t: 'eq', a: anchor.a, b: anchor.b });
+          nextA = anchor.a + 1;
+          nextB = anchor.b + 1;
+        }
+        alignRange(nextA, middleAEnd, nextB, middleBEnd);
+      } else {
+        // No stable anchors exist. Preserve responsiveness and mark the segment
+        // changed instead of guessing matches or allocating a huge matrix.
+        for (let i = aStart; i < middleAEnd; i++) ops.push({ t: 'del', a: i });
+        for (let j = bStart; j < middleBEnd; j++) ops.push({ t: 'ins', b: j });
+      }
+    }
+
+    for (let k = suffix; k > 0; k--) {
+      ops.push({ t: 'eq', a: aEnd - k, b: bEnd - k });
+    }
+  };
+
+  alignRange(0, A.length, 0, B.length);
   return ops;
 }
 
-/** How many lines the alignment managed to match. Used by the tests. */
 export function alignedLineCount(ops: readonly AlignOp[]): number {
   let count = 0;
   for (const op of ops) if (op.t === 'eq') count++;

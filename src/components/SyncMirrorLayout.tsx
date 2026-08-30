@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import clsx from "clsx";
 import { createRenderReporter, syncLog, syncTime, notePhase, syncTraceEnabled } from "@/lib/syncPerfTrace";
 import { buildLineAlignment } from "@/lib/lineAlignment";
+import { chunkTranscriptText, chunkTranscriptTimings } from "@/lib/transcriptBlocks";
 
 const syncRenderReporter = createRenderReporter('SyncMirrorLayout');
 import { Badge } from "@/components/ui/badge";
@@ -111,30 +112,6 @@ type FontMetrics = {
  * shared by every line-measuring memo below (current text, locked snapshot,
  * frozen compare snapshot) — previously this canvas logic was copy-pasted 3×.
  */
-/**
- * Split the transcript into readable blocks, preferring sentence ends.
- *
- * Each block is rendered as its own element so the browser can skip the ones
- * that are off-screen (see `content-visibility` on the row). Without this the
- * whole transcript is a single paint target, and anything that moves over it —
- * a sliding sidebar, a scroll — repaints thousands of words every frame.
- */
-function chunkIntoBlocks(timings: WordTiming[], target = 55, hardMax = 90): WordTiming[][] {
-  if (!timings.length) return [];
-  const blocks: WordTiming[][] = [];
-  let current: WordTiming[] = [];
-  for (const wt of timings) {
-    current.push(wt);
-    const endsSentence = /[.!?:]["'״׳)\]]?$/.test(wt.word);
-    if ((current.length >= target && endsSentence) || current.length >= hardMax) {
-      blocks.push(current);
-      current = [];
-    }
-  }
-  if (current.length) blocks.push(current);
-  return blocks;
-}
-
 function measureLineBreaks(timings: WordTiming[], width: number, font: FontMetrics): WordTiming[][] {
   if (!timings.length) return [];
   const effectiveWidth = width > 0 ? width : 400;
@@ -159,14 +136,6 @@ function measureLineBreaks(timings: WordTiming[], width: number, font: FontMetri
   }
   if (line.length) result.push(line);
   return result;
-}
-
-/**
- * Convert plain text into synthetic word-timings (one slot per word). Used for
- * snapshots/baselines that carry no real audio timings of their own.
- */
-function textToTimings(text: string): WordTiming[] {
-  return text.trim().split(/\s+/).filter(Boolean).map((word, i) => ({ word, start: i, end: i + 1 }));
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -501,14 +470,14 @@ export const SyncMirrorLayout = ({
   // that have nothing to do with the text — opening the sidebar, resizing the
   // window, returning to the page — each one rebuilding the entire view.
   const lines = useMemo(
-    () => chunkIntoBlocks(displayTimings),
+    () => chunkTranscriptTimings(displayTimings),
     [displayTimings],
   );
 
   // ── Snapshot lines (the locked side's frozen view) ──────────────────────────
   const snapshotLines = useMemo<WordTiming[][]>(() => {
     if (!lockedSnapshotText.trim()) return [];
-    return [textToTimings(lockedSnapshotText)];
+    return chunkTranscriptText(lockedSnapshotText);
   }, [lockedSnapshotText]);
 
   // ── Padded alignment via line-level LCS ────────────────────────────────────
