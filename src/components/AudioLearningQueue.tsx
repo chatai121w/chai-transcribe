@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useLoraTraining } from '@/hooks/useLoraTraining';
 import { cropLearningAudio, getAudioLearningOperation, type AudioLearningCandidate } from '@/lib/audioLearning';
+import { classifyAsrEdit } from '@/lib/asrEvidence';
 import { toast } from '@/hooks/use-toast';
 
 interface AudioLearningQueueProps {
@@ -61,7 +62,9 @@ export function AudioLearningQueue({ audioBlob, audioFileName, candidates, onRem
   const uploadCandidate = async (candidate: AudioLearningCandidate) => {
     const clip = await buildClip(candidate);
     const file = new File([clip], `${audioFileName || 'recording'}-${candidate.id}.wav`, { type: 'audio/wav' });
+    const evidence = classifyAsrEdit(candidate);
     return addApprovedPair(file, candidate.referenceText, 'approved-ground-truth', {
+        sourceRecordingId: candidate.recordingKey,
         groupId: candidate.recordingKey,
         source: 'text-editor-correction',
         original: candidate.original,
@@ -69,6 +72,9 @@ export function AudioLearningQueue({ audioBlob, audioFileName, candidates, onRem
         operation: candidate.operation || getAudioLearningOperation(candidate.original, candidate.corrected),
         start: candidate.start,
         end: candidate.end,
+        editClassification: evidence.classification,
+        acousticEvidence: evidence.hasAcousticEvidence ? 1 : 0,
+        reviewStatus: 'human-approved-after-listening',
     });
   };
 

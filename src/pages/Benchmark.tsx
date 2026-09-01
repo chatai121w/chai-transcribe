@@ -20,6 +20,7 @@ import { toast } from "@/hooks/use-toast";
 import { enhanceAudioOnServer, type EnhancementPreset } from "@/lib/audioEnhancement";
 import { extractAudioSegment, probeAudioDurationSec } from "@/lib/audioSegment";
 import { getServerUrl } from "@/lib/serverConfig";
+import { useCustomVocabulary } from "@/hooks/useCustomVocabulary";
 
 const SERVER = getServerUrl();
 const VERDICTS_KEY = "benchmark_verdicts_v1";
@@ -167,6 +168,7 @@ function ClickableText({
 
 export default function Benchmark() {
   const navigate = useNavigate();
+  const vocabulary = useCustomVocabulary();
 
   // File / mic
   const [audioFile, setAudioFile]     = useState<File | null>(null);
@@ -418,14 +420,22 @@ export default function Benchmark() {
       toast({ title: "יש למלא שני השדות", variant: "destructive" }); return;
     }
     try {
-      const res = await fetch(`${SERVER}/lk/dictionary`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spoken_form: dictForm.spokenForm, correct_form: dictForm.correctForm, note: dictForm.note || undefined, source: "benchmark" }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const existing = vocabulary.entries.find((entry) => entry.term === dictForm.correctForm.trim());
+      const saved = existing
+        ? vocabulary.update(existing.term, {
+            variants: [...existing.variants, dictForm.spokenForm.trim()],
+            notes: dictForm.note || existing.notes,
+            approvalStatus: 'candidate',
+          })
+        : vocabulary.add(dictForm.correctForm.trim(), 'other', [dictForm.spokenForm.trim()], {
+            source: 'import',
+            approvalStatus: 'candidate',
+            confidence: 0.6,
+            notes: dictForm.note || 'נוסף מבדיקת שיפור אודיו',
+          });
+      if (!saved) throw new Error('המונח כבר קיים ללא שינוי');
       setDictSaved(true);
-      toast({ title: `"${dictForm.spokenForm}" נשמר למילון` });
+      toast({ title: `"${dictForm.spokenForm}" נוסף כמועמד למילון המרכזי` });
     } catch (err) {
       toast({ title: "שגיאה", description: err instanceof Error ? err.message : "שגיאה", variant: "destructive" });
     }

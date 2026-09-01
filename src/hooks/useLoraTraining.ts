@@ -66,6 +66,24 @@ interface StartJobOptions {
   smoke_test?: boolean;
 }
 
+export async function addApprovedLoraPair(
+  audio: File,
+  text: string,
+  datasetId = 'approved-ground-truth',
+  metadata?: Record<string, string | number>,
+) {
+  const fd = new FormData();
+  fd.append('dataset_id', datasetId);
+  fd.append('audio', audio, audio.name);
+  fd.append('text', text);
+  if (metadata) fd.append('metadata', JSON.stringify(metadata));
+  const baseUrl = getServerUrl().replace(/\/$/, '');
+  const res = await fetch(`${baseUrl}/training/dataset/approved-pair`, { method: 'POST', body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `approval failed: ${res.status}`);
+  return data;
+}
+
 export function useLoraTraining() {
   const { user } = useAuth();
   const [jobs, setJobs] = useState<LoraJob[]>([]);
@@ -180,6 +198,7 @@ export function useLoraTraining() {
     fd.append('dataset_id', datasetId);
     fd.append('audio', audio, audio.name);
     fd.append('text', text);
+    if (metadata) fd.append('metadata', JSON.stringify(metadata));
     const res = await fetch(`${base()}/training/dataset/upload-pair`, { method: 'POST', body: fd });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -196,15 +215,7 @@ export function useLoraTraining() {
     datasetId = 'approved-ground-truth',
     metadata?: Record<string, string | number>,
   ) => {
-    const fd = new FormData();
-    fd.append('dataset_id', datasetId);
-    fd.append('audio', audio, audio.name);
-    fd.append('text', text);
-    if (metadata) fd.append('metadata', JSON.stringify(metadata));
-    if (metadata) fd.append('metadata', JSON.stringify(metadata));
-    const res = await fetch(`${base()}/training/dataset/approved-pair`, { method: 'POST', body: fd });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `approval failed: ${res.status}`);
+    const data = await addApprovedLoraPair(audio, text, datasetId, metadata);
     await refreshDatasets();
     return data;
   }, [refreshDatasets]);

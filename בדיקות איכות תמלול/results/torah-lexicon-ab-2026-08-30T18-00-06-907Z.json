@@ -1,0 +1,2195 @@
+{
+  "createdAt": "2026-08-30T18:00:06.909Z",
+  "reports": [
+    {
+      "audio": "C:\\Users\\jj121\\chai-transcribe\\בדיקות איכות תמלול\\הרב שפירא\\דברים - הרב משה שפירא זצל - 1058497-00m00s-01m00s.mp3",
+      "model": "ivrit-ai/whisper-large-v3-turbo-ct2",
+      "hotwordsCount": 120,
+      "baseline": {
+        "duration": 60,
+        "language": "he",
+        "model": "ivrit-ai/whisper-large-v3-turbo-ct2",
+        "processing_time": 3.41,
+        "text": "כתוב בתוספות הראשון במסכת גיטין, למה נהגו שיהיו יב שורות בגט? מביאים תוספות, וראי שמע בשם רב הייגאון, בשם רבנו סעדיה, משום דכתיב ספר כריתות, כשיעור יב שיטין המפסיקים בין ארבעה חומשי ספר תורה. כי דאמר בברא בתרא שצריך להניח ארבעה שיטין בין כל ספר וספר. ספר כריתות זה נקרא ספר שמפריד, ספר שמפריד בין שני דברים מחוברים. המפריד שבין שני דברים מחוברים זה ההפרדות שישנם בין הספרים. בראשית לשמוע,",
+        "wordTimings": [
+          {
+            "end": 1.61,
+            "probability": 0.98,
+            "start": 0.85,
+            "word": "כתוב"
+          },
+          {
+            "end": 4.05,
+            "probability": 0.989,
+            "start": 1.61,
+            "word": "בתוספות"
+          },
+          {
+            "end": 4.49,
+            "probability": 0.987,
+            "start": 4.05,
+            "word": "הראשון"
+          },
+          {
+            "end": 5.11,
+            "probability": 0.994,
+            "start": 4.49,
+            "word": "במסכת"
+          },
+          {
+            "end": 5.51,
+            "probability": 0.99,
+            "start": 5.11,
+            "word": "גיטין,"
+          },
+          {
+            "end": 12.97,
+            "probability": 0.952,
+            "start": 12.45,
+            "word": "למה"
+          },
+          {
+            "end": 13.43,
+            "probability": 0.999,
+            "start": 12.97,
+            "word": "נהגו"
+          },
+          {
+            "end": 14.03,
+            "probability": 0.998,
+            "start": 13.43,
+            "word": "שיהיו"
+          },
+          {
+            "end": 14.81,
+            "probability": 0.529,
+            "start": 14.03,
+            "word": "יב"
+          },
+          {
+            "end": 15.35,
+            "probability": 0.959,
+            "start": 14.81,
+            "word": "שורות"
+          },
+          {
+            "end": 15.87,
+            "probability": 0.998,
+            "start": 15.35,
+            "word": "בגט?"
+          },
+          {
+            "end": 19.08,
+            "probability": 0.955,
+            "start": 18.56,
+            "word": "מביאים"
+          },
+          {
+            "end": 19.52,
+            "probability": 0.999,
+            "start": 19.08,
+            "word": "תוספות,"
+          },
+          {
+            "end": 19.9,
+            "probability": 0.759,
+            "start": 19.66,
+            "word": "וראי"
+          },
+          {
+            "end": 20.2,
+            "probability": 0.952,
+            "start": 19.9,
+            "word": "שמע"
+          },
+          {
+            "end": 20.58,
+            "probability": 0.985,
+            "start": 20.2,
+            "word": "בשם"
+          },
+          {
+            "end": 20.8,
+            "probability": 0.98,
+            "start": 20.58,
+            "word": "רב"
+          },
+          {
+            "end": 21.32,
+            "probability": 0.892,
+            "start": 20.8,
+            "word": "הייגאון,"
+          },
+          {
+            "end": 21.96,
+            "probability": 0.994,
+            "start": 21.5,
+            "word": "בשם"
+          },
+          {
+            "end": 22.38,
+            "probability": 0.887,
+            "start": 21.96,
+            "word": "רבנו"
+          },
+          {
+            "end": 22.98,
+            "probability": 0.997,
+            "start": 22.38,
+            "word": "סעדיה,"
+          },
+          {
+            "end": 24.9,
+            "probability": 0.934,
+            "start": 24.28,
+            "word": "משום"
+          },
+          {
+            "end": 25.3,
+            "probability": 0.974,
+            "start": 24.9,
+            "word": "דכתיב"
+          },
+          {
+            "end": 25.9,
+            "probability": 0.947,
+            "start": 25.3,
+            "word": "ספר"
+          },
+          {
+            "end": 26.74,
+            "probability": 0.983,
+            "start": 25.9,
+            "word": "כריתות,"
+          },
+          {
+            "end": 28.64,
+            "probability": 0.997,
+            "start": 27.96,
+            "word": "כשיעור"
+          },
+          {
+            "end": 29.52,
+            "probability": 0.986,
+            "start": 28.64,
+            "word": "יב"
+          },
+          {
+            "end": 30.18,
+            "probability": 0.966,
+            "start": 29.52,
+            "word": "שיטין"
+          },
+          {
+            "end": 30.96,
+            "probability": 0.975,
+            "start": 30.18,
+            "word": "המפסיקים"
+          },
+          {
+            "end": 31.18,
+            "probability": 0.998,
+            "start": 30.96,
+            "word": "בין"
+          },
+          {
+            "end": 31.64,
+            "probability": 0.997,
+            "start": 31.18,
+            "word": "ארבעה"
+          },
+          {
+            "end": 32.18,
+            "probability": 0.999,
+            "start": 31.64,
+            "word": "חומשי"
+          },
+          {
+            "end": 32.62,
+            "probability": 0.999,
+            "start": 32.18,
+            "word": "ספר"
+          },
+          {
+            "end": 32.98,
+            "probability": 0.993,
+            "start": 32.62,
+            "word": "תורה."
+          },
+          {
+            "end": 34.86,
+            "probability": 0.89,
+            "start": 33.8,
+            "word": "כי"
+          },
+          {
+            "end": 35.22,
+            "probability": 0.969,
+            "start": 34.86,
+            "word": "דאמר"
+          },
+          {
+            "end": 35.6,
+            "probability": 0.782,
+            "start": 35.22,
+            "word": "בברא"
+          },
+          {
+            "end": 36.14,
+            "probability": 0.912,
+            "start": 35.6,
+            "word": "בתרא"
+          },
+          {
+            "end": 36.92,
+            "probability": 0.99,
+            "start": 36.14,
+            "word": "שצריך"
+          },
+          {
+            "end": 37.38,
+            "probability": 1,
+            "start": 36.92,
+            "word": "להניח"
+          },
+          {
+            "end": 37.9,
+            "probability": 0.995,
+            "start": 37.38,
+            "word": "ארבעה"
+          },
+          {
+            "end": 38.28,
+            "probability": 0.695,
+            "start": 37.9,
+            "word": "שיטין"
+          },
+          {
+            "end": 38.56,
+            "probability": 0.999,
+            "start": 38.28,
+            "word": "בין"
+          },
+          {
+            "end": 38.76,
+            "probability": 1,
+            "start": 38.56,
+            "word": "כל"
+          },
+          {
+            "end": 39.2,
+            "probability": 1,
+            "start": 38.76,
+            "word": "ספר"
+          },
+          {
+            "end": 39.76,
+            "probability": 0.985,
+            "start": 39.2,
+            "word": "וספר."
+          },
+          {
+            "end": 41.2,
+            "probability": 0.996,
+            "start": 40.46,
+            "word": "ספר"
+          },
+          {
+            "end": 41.68,
+            "probability": 0.981,
+            "start": 41.2,
+            "word": "כריתות"
+          },
+          {
+            "end": 41.84,
+            "probability": 0.989,
+            "start": 41.68,
+            "word": "זה"
+          },
+          {
+            "end": 42.26,
+            "probability": 1,
+            "start": 41.84,
+            "word": "נקרא"
+          },
+          {
+            "end": 43,
+            "probability": 0.977,
+            "start": 42.26,
+            "word": "ספר"
+          },
+          {
+            "end": 44.14,
+            "probability": 1,
+            "start": 43,
+            "word": "שמפריד,"
+          },
+          {
+            "end": 46.2,
+            "probability": 0.999,
+            "start": 45.72,
+            "word": "ספר"
+          },
+          {
+            "end": 47.08,
+            "probability": 1,
+            "start": 46.2,
+            "word": "שמפריד"
+          },
+          {
+            "end": 47.46,
+            "probability": 0.998,
+            "start": 47.08,
+            "word": "בין"
+          },
+          {
+            "end": 47.72,
+            "probability": 1,
+            "start": 47.46,
+            "word": "שני"
+          },
+          {
+            "end": 48.1,
+            "probability": 1,
+            "start": 47.72,
+            "word": "דברים"
+          },
+          {
+            "end": 48.68,
+            "probability": 1,
+            "start": 48.1,
+            "word": "מחוברים."
+          },
+          {
+            "end": 53.06,
+            "probability": 0.89,
+            "start": 52.1,
+            "word": "המפריד"
+          },
+          {
+            "end": 53.72,
+            "probability": 0.998,
+            "start": 53.06,
+            "word": "שבין"
+          },
+          {
+            "end": 53.96,
+            "probability": 1,
+            "start": 53.72,
+            "word": "שני"
+          },
+          {
+            "end": 54.34,
+            "probability": 1,
+            "start": 53.96,
+            "word": "דברים"
+          },
+          {
+            "end": 54.98,
+            "probability": 1,
+            "start": 54.34,
+            "word": "מחוברים"
+          },
+          {
+            "end": 55.34,
+            "probability": 0.984,
+            "start": 54.98,
+            "word": "זה"
+          },
+          {
+            "end": 56.16,
+            "probability": 1,
+            "start": 55.34,
+            "word": "ההפרדות"
+          },
+          {
+            "end": 56.76,
+            "probability": 0.945,
+            "start": 56.16,
+            "word": "שישנם"
+          },
+          {
+            "end": 56.96,
+            "probability": 1,
+            "start": 56.76,
+            "word": "בין"
+          },
+          {
+            "end": 57.5,
+            "probability": 0.997,
+            "start": 56.96,
+            "word": "הספרים."
+          },
+          {
+            "end": 59.76,
+            "probability": 0.806,
+            "start": 58.8,
+            "word": "בראשית"
+          },
+          {
+            "end": 59.96,
+            "probability": 0.606,
+            "start": 59.76,
+            "word": "לשמוע,"
+          }
+        ]
+      },
+      "enhanced": {
+        "duration": 60,
+        "language": "he",
+        "model": "ivrit-ai/whisper-large-v3-turbo-ct2",
+        "processing_time": 5.5,
+        "text": "כתוב בתוספות הראשון במסכת גיטין, למה נהגו שיהיו יב שורות בגט? מביאים תוספות, וראי שמע בשם רב הייגאון, בשם רבנו סעדיה, משום דכתיב ספר כריתות, כשיעור יב שיטין המפסיקים בין ארבעה חומשי ספר תורה. כי דאמר בברא בתרא שצריך להניח ארבעה שיטין בין כל ספר וספר. ספר כריתות זה נקרא ספר שמפריד, ספר שמפריד בין שני דברים מחוברים. המפריד שבין שני דברים מחוברים זה ההפרדות שישנם בין הספרים. בראשית לשמוע,",
+        "wordTimings": [
+          {
+            "end": 1.61,
+            "probability": 0.98,
+            "start": 0.85,
+            "word": "כתוב"
+          },
+          {
+            "end": 4.05,
+            "probability": 0.989,
+            "start": 1.61,
+            "word": "בתוספות"
+          },
+          {
+            "end": 4.49,
+            "probability": 0.987,
+            "start": 4.05,
+            "word": "הראשון"
+          },
+          {
+            "end": 5.11,
+            "probability": 0.994,
+            "start": 4.49,
+            "word": "במסכת"
+          },
+          {
+            "end": 5.51,
+            "probability": 0.99,
+            "start": 5.11,
+            "word": "גיטין,"
+          },
+          {
+            "end": 12.97,
+            "probability": 0.952,
+            "start": 12.45,
+            "word": "למה"
+          },
+          {
+            "end": 13.43,
+            "probability": 0.999,
+            "start": 12.97,
+            "word": "נהגו"
+          },
+          {
+            "end": 14.03,
+            "probability": 0.998,
+            "start": 13.43,
+            "word": "שיהיו"
+          },
+          {
+            "end": 14.81,
+            "probability": 0.529,
+            "start": 14.03,
+            "word": "יב"
+          },
+          {
+            "end": 15.35,
+            "probability": 0.959,
+            "start": 14.81,
+            "word": "שורות"
+          },
+          {
+            "end": 15.87,
+            "probability": 0.998,
+            "start": 15.35,
+            "word": "בגט?"
+          },
+          {
+            "end": 19.08,
+            "probability": 0.955,
+            "start": 18.56,
+            "word": "מביאים"
+          },
+          {
+            "end": 19.52,
+            "probability": 0.999,
+            "start": 19.08,
+            "word": "תוספות,"
+          },
+          {
+            "end": 19.9,
+            "probability": 0.759,
+            "start": 19.66,
+            "word": "וראי"
+          },
+          {
+            "end": 20.2,
+            "probability": 0.952,
+            "start": 19.9,
+            "word": "שמע"
+          },
+          {
+            "end": 20.58,
+            "probability": 0.985,
+            "start": 20.2,
+            "word": "בשם"
+          },
+          {
+            "end": 20.8,
+            "probability": 0.98,
+            "start": 20.58,
+            "word": "רב"
+          },
+          {
+            "end": 21.32,
+            "probability": 0.892,
+            "start": 20.8,
+            "word": "הייגאון,"
+          },
+          {
+            "end": 21.96,
+            "probability": 0.994,
+            "start": 21.5,
+            "word": "בשם"
+          },
+          {
+            "end": 22.38,
+            "probability": 0.887,
+            "start": 21.96,
+            "word": "רבנו"
+          },
+          {
+            "end": 22.98,
+            "probability": 0.997,
+            "start": 22.38,
+            "word": "סעדיה,"
+          },
+          {
+            "end": 24.9,
+            "probability": 0.934,
+            "start": 24.28,
+            "word": "משום"
+          },
+          {
+            "end": 25.3,
+            "probability": 0.974,
+            "start": 24.9,
+            "word": "דכתיב"
+          },
+          {
+            "end": 25.9,
+            "probability": 0.947,
+            "start": 25.3,
+            "word": "ספר"
+          },
+          {
+            "end": 26.74,
+            "probability": 0.983,
+            "start": 25.9,
+            "word": "כריתות,"
+          },
+          {
+            "end": 28.64,
+            "probability": 0.997,
+            "start": 27.96,
+            "word": "כשיעור"
+          },
+          {
+            "end": 29.52,
+            "probability": 0.986,
+            "start": 28.64,
+            "word": "יב"
+          },
+          {
+            "end": 30.18,
+            "probability": 0.966,
+            "start": 29.52,
+            "word": "שיטין"
+          },
+          {
+            "end": 30.96,
+            "probability": 0.975,
+            "start": 30.18,
+            "word": "המפסיקים"
+          },
+          {
+            "end": 31.18,
+            "probability": 0.998,
+            "start": 30.96,
+            "word": "בין"
+          },
+          {
+            "end": 31.64,
+            "probability": 0.997,
+            "start": 31.18,
+            "word": "ארבעה"
+          },
+          {
+            "end": 32.18,
+            "probability": 0.999,
+            "start": 31.64,
+            "word": "חומשי"
+          },
+          {
+            "end": 32.62,
+            "probability": 0.999,
+            "start": 32.18,
+            "word": "ספר"
+          },
+          {
+            "end": 32.98,
+            "probability": 0.993,
+            "start": 32.62,
+            "word": "תורה."
+          },
+          {
+            "end": 34.86,
+            "probability": 0.89,
+            "start": 33.8,
+            "word": "כי"
+          },
+          {
+            "end": 35.22,
+            "probability": 0.969,
+            "start": 34.86,
+            "word": "דאמר"
+          },
+          {
+            "end": 35.6,
+            "probability": 0.782,
+            "start": 35.22,
+            "word": "בברא"
+          },
+          {
+            "end": 36.14,
+            "probability": 0.912,
+            "start": 35.6,
+            "word": "בתרא"
+          },
+          {
+            "end": 36.92,
+            "probability": 0.99,
+            "start": 36.14,
+            "word": "שצריך"
+          },
+          {
+            "end": 37.38,
+            "probability": 1,
+            "start": 36.92,
+            "word": "להניח"
+          },
+          {
+            "end": 37.9,
+            "probability": 0.995,
+            "start": 37.38,
+            "word": "ארבעה"
+          },
+          {
+            "end": 38.28,
+            "probability": 0.695,
+            "start": 37.9,
+            "word": "שיטין"
+          },
+          {
+            "end": 38.56,
+            "probability": 0.999,
+            "start": 38.28,
+            "word": "בין"
+          },
+          {
+            "end": 38.76,
+            "probability": 1,
+            "start": 38.56,
+            "word": "כל"
+          },
+          {
+            "end": 39.2,
+            "probability": 1,
+            "start": 38.76,
+            "word": "ספר"
+          },
+          {
+            "end": 39.76,
+            "probability": 0.985,
+            "start": 39.2,
+            "word": "וספר."
+          },
+          {
+            "end": 41.2,
+            "probability": 0.996,
+            "start": 40.46,
+            "word": "ספר"
+          },
+          {
+            "end": 41.68,
+            "probability": 0.981,
+            "start": 41.2,
+            "word": "כריתות"
+          },
+          {
+            "end": 41.84,
+            "probability": 0.989,
+            "start": 41.68,
+            "word": "זה"
+          },
+          {
+            "end": 42.26,
+            "probability": 1,
+            "start": 41.84,
+            "word": "נקרא"
+          },
+          {
+            "end": 43,
+            "probability": 0.977,
+            "start": 42.26,
+            "word": "ספר"
+          },
+          {
+            "end": 44.14,
+            "probability": 1,
+            "start": 43,
+            "word": "שמפריד,"
+          },
+          {
+            "end": 46.2,
+            "probability": 0.999,
+            "start": 45.72,
+            "word": "ספר"
+          },
+          {
+            "end": 47.08,
+            "probability": 1,
+            "start": 46.2,
+            "word": "שמפריד"
+          },
+          {
+            "end": 47.46,
+            "probability": 0.998,
+            "start": 47.08,
+            "word": "בין"
+          },
+          {
+            "end": 47.72,
+            "probability": 1,
+            "start": 47.46,
+            "word": "שני"
+          },
+          {
+            "end": 48.1,
+            "probability": 1,
+            "start": 47.72,
+            "word": "דברים"
+          },
+          {
+            "end": 48.68,
+            "probability": 1,
+            "start": 48.1,
+            "word": "מחוברים."
+          },
+          {
+            "end": 53.06,
+            "probability": 0.89,
+            "start": 52.1,
+            "word": "המפריד"
+          },
+          {
+            "end": 53.72,
+            "probability": 0.998,
+            "start": 53.06,
+            "word": "שבין"
+          },
+          {
+            "end": 53.96,
+            "probability": 1,
+            "start": 53.72,
+            "word": "שני"
+          },
+          {
+            "end": 54.34,
+            "probability": 1,
+            "start": 53.96,
+            "word": "דברים"
+          },
+          {
+            "end": 54.98,
+            "probability": 1,
+            "start": 54.34,
+            "word": "מחוברים"
+          },
+          {
+            "end": 55.34,
+            "probability": 0.984,
+            "start": 54.98,
+            "word": "זה"
+          },
+          {
+            "end": 56.16,
+            "probability": 1,
+            "start": 55.34,
+            "word": "ההפרדות"
+          },
+          {
+            "end": 56.76,
+            "probability": 0.945,
+            "start": 56.16,
+            "word": "שישנם"
+          },
+          {
+            "end": 56.96,
+            "probability": 1,
+            "start": 56.76,
+            "word": "בין"
+          },
+          {
+            "end": 57.5,
+            "probability": 0.997,
+            "start": 56.96,
+            "word": "הספרים."
+          },
+          {
+            "end": 59.76,
+            "probability": 0.806,
+            "start": 58.8,
+            "word": "בראשית"
+          },
+          {
+            "end": 59.96,
+            "probability": 0.606,
+            "start": 59.76,
+            "word": "לשמוע,"
+          }
+        ]
+      },
+      "comparison": {
+        "changeRate": 0,
+        "baselineTermCount": 3,
+        "enhancedTermCount": 3,
+        "baselineTerms": [
+          "גיטין",
+          "כריתות",
+          "רב"
+        ],
+        "enhancedTerms": [
+          "גיטין",
+          "כריתות",
+          "רב"
+        ],
+        "addedTerms": [],
+        "removedTerms": [],
+        "referenceAvailable": false
+      }
+    },
+    {
+      "audio": "C:\\Users\\jj121\\chai-transcribe\\בדיקות איכות תמלול\\הרב שפירא\\דברים - הרב משה שפירא זצל - 1058497-01m00s-02m00s.mp3",
+      "model": "ivrit-ai/whisper-large-v3-turbo-ct2",
+      "hotwordsCount": 120,
+      "baseline": {
+        "duration": 60,
+        "language": "he",
+        "model": "ivrit-ai/whisper-large-v3-turbo-ct2",
+        "processing_time": 2.65,
+        "text": "בין שמות, בין שמות לביקרא, בין ביקרא לבמדבר. בכל אחד ארבעה שיטים, לכן צריך בגט ספר כריתות, צריך יב שיטים. והפסק שבין וידבר למשנה תורה לא חשיב, שאינו אלא חוזר ושונה מה שלמעלה. אלו המלים שכתוב בתוספים. הפסק שבין וידבר למשנה תורה, את זה לא מחשיבים, כי בסך הכול אינו אלא חוזר ושונה מה שלמעלה. הדברים האלה הם באמת, באמת, מאוד מאוד לא מובנים. מה זאת אומרת? ספר דברים הוא לא ספר? מה זאת אומרת שאינו אלא חוזר ושונה מה שלמעלה? לכן זה לא ספר? אין חמישה חומשי תורה? מה פירוש המילים? הפסק שבין וידבר למשנה תורה לא חשיב, מפני שאינו אלא, בסך הכול, מה יש?",
+        "wordTimings": [
+          {
+            "end": 0,
+            "probability": 0.949,
+            "start": 0,
+            "word": "בין"
+          },
+          {
+            "end": 0.36,
+            "probability": 0.971,
+            "start": 0,
+            "word": "שמות,"
+          },
+          {
+            "end": 1.08,
+            "probability": 0.995,
+            "start": 0.4,
+            "word": "בין"
+          },
+          {
+            "end": 1.58,
+            "probability": 0.994,
+            "start": 1.08,
+            "word": "שמות"
+          },
+          {
+            "end": 2.42,
+            "probability": 0.794,
+            "start": 1.58,
+            "word": "לביקרא,"
+          },
+          {
+            "end": 3.68,
+            "probability": 0.997,
+            "start": 3.18,
+            "word": "בין"
+          },
+          {
+            "end": 4.12,
+            "probability": 0.887,
+            "start": 3.68,
+            "word": "ביקרא"
+          },
+          {
+            "end": 4.78,
+            "probability": 0.966,
+            "start": 4.12,
+            "word": "לבמדבר."
+          },
+          {
+            "end": 6.3,
+            "probability": 0.938,
+            "start": 5.8,
+            "word": "בכל"
+          },
+          {
+            "end": 6.46,
+            "probability": 0.989,
+            "start": 6.3,
+            "word": "אחד"
+          },
+          {
+            "end": 6.9,
+            "probability": 0.963,
+            "start": 6.46,
+            "word": "ארבעה"
+          },
+          {
+            "end": 7.28,
+            "probability": 0.887,
+            "start": 6.9,
+            "word": "שיטים,"
+          },
+          {
+            "end": 7.84,
+            "probability": 0.966,
+            "start": 7.42,
+            "word": "לכן"
+          },
+          {
+            "end": 8.34,
+            "probability": 0.998,
+            "start": 7.84,
+            "word": "צריך"
+          },
+          {
+            "end": 9.02,
+            "probability": 0.945,
+            "start": 8.34,
+            "word": "בגט"
+          },
+          {
+            "end": 9.94,
+            "probability": 0.914,
+            "start": 9.44,
+            "word": "ספר"
+          },
+          {
+            "end": 10.58,
+            "probability": 0.985,
+            "start": 9.94,
+            "word": "כריתות,"
+          },
+          {
+            "end": 11.36,
+            "probability": 0.984,
+            "start": 10.58,
+            "word": "צריך"
+          },
+          {
+            "end": 12.16,
+            "probability": 0.401,
+            "start": 11.36,
+            "word": "יב"
+          },
+          {
+            "end": 12.76,
+            "probability": 0.9,
+            "start": 12.16,
+            "word": "שיטים."
+          },
+          {
+            "end": 14.76,
+            "probability": 0.978,
+            "start": 13.76,
+            "word": "והפסק"
+          },
+          {
+            "end": 15.2,
+            "probability": 0.985,
+            "start": 14.76,
+            "word": "שבין"
+          },
+          {
+            "end": 15.78,
+            "probability": 0.933,
+            "start": 15.2,
+            "word": "וידבר"
+          },
+          {
+            "end": 16.3,
+            "probability": 0.999,
+            "start": 15.78,
+            "word": "למשנה"
+          },
+          {
+            "end": 16.68,
+            "probability": 0.996,
+            "start": 16.3,
+            "word": "תורה"
+          },
+          {
+            "end": 16.92,
+            "probability": 0.891,
+            "start": 16.68,
+            "word": "לא"
+          },
+          {
+            "end": 17.44,
+            "probability": 0.985,
+            "start": 16.92,
+            "word": "חשיב,"
+          },
+          {
+            "end": 18.18,
+            "probability": 0.998,
+            "start": 17.6,
+            "word": "שאינו"
+          },
+          {
+            "end": 18.5,
+            "probability": 0.96,
+            "start": 18.18,
+            "word": "אלא"
+          },
+          {
+            "end": 18.98,
+            "probability": 0.999,
+            "start": 18.5,
+            "word": "חוזר"
+          },
+          {
+            "end": 19.58,
+            "probability": 0.998,
+            "start": 18.98,
+            "word": "ושונה"
+          },
+          {
+            "end": 19.88,
+            "probability": 0.94,
+            "start": 19.58,
+            "word": "מה"
+          },
+          {
+            "end": 20.54,
+            "probability": 0.989,
+            "start": 19.88,
+            "word": "שלמעלה."
+          },
+          {
+            "end": 22.48,
+            "probability": 0.985,
+            "start": 21.98,
+            "word": "אלו"
+          },
+          {
+            "end": 23.06,
+            "probability": 0.928,
+            "start": 22.48,
+            "word": "המלים"
+          },
+          {
+            "end": 23.62,
+            "probability": 0.999,
+            "start": 23.06,
+            "word": "שכתוב"
+          },
+          {
+            "end": 24.16,
+            "probability": 0.799,
+            "start": 23.62,
+            "word": "בתוספים."
+          },
+          {
+            "end": 26.57,
+            "probability": 0.995,
+            "start": 25.99,
+            "word": "הפסק"
+          },
+          {
+            "end": 26.95,
+            "probability": 0.999,
+            "start": 26.57,
+            "word": "שבין"
+          },
+          {
+            "end": 27.43,
+            "probability": 0.998,
+            "start": 26.95,
+            "word": "וידבר"
+          },
+          {
+            "end": 27.87,
+            "probability": 1,
+            "start": 27.43,
+            "word": "למשנה"
+          },
+          {
+            "end": 28.29,
+            "probability": 0.999,
+            "start": 27.87,
+            "word": "תורה,"
+          },
+          {
+            "end": 28.69,
+            "probability": 0.999,
+            "start": 28.37,
+            "word": "את"
+          },
+          {
+            "end": 28.83,
+            "probability": 1,
+            "start": 28.69,
+            "word": "זה"
+          },
+          {
+            "end": 28.97,
+            "probability": 0.998,
+            "start": 28.83,
+            "word": "לא"
+          },
+          {
+            "end": 29.53,
+            "probability": 0.993,
+            "start": 28.97,
+            "word": "מחשיבים,"
+          },
+          {
+            "end": 30.33,
+            "probability": 0.996,
+            "start": 29.95,
+            "word": "כי"
+          },
+          {
+            "end": 30.91,
+            "probability": 0.995,
+            "start": 30.33,
+            "word": "בסך"
+          },
+          {
+            "end": 31.27,
+            "probability": 0.615,
+            "start": 30.91,
+            "word": "הכול"
+          },
+          {
+            "end": 31.65,
+            "probability": 0.901,
+            "start": 31.27,
+            "word": "אינו"
+          },
+          {
+            "end": 31.89,
+            "probability": 0.968,
+            "start": 31.65,
+            "word": "אלא"
+          },
+          {
+            "end": 32.35,
+            "probability": 0.999,
+            "start": 31.89,
+            "word": "חוזר"
+          },
+          {
+            "end": 32.81,
+            "probability": 0.999,
+            "start": 32.35,
+            "word": "ושונה"
+          },
+          {
+            "end": 33.07,
+            "probability": 0.819,
+            "start": 32.81,
+            "word": "מה"
+          },
+          {
+            "end": 33.69,
+            "probability": 0.986,
+            "start": 33.07,
+            "word": "שלמעלה."
+          },
+          {
+            "end": 34.91,
+            "probability": 0.834,
+            "start": 34.15,
+            "word": "הדברים"
+          },
+          {
+            "end": 35.29,
+            "probability": 1,
+            "start": 34.91,
+            "word": "האלה"
+          },
+          {
+            "end": 35.55,
+            "probability": 0.991,
+            "start": 35.29,
+            "word": "הם"
+          },
+          {
+            "end": 36.11,
+            "probability": 1,
+            "start": 35.55,
+            "word": "באמת,"
+          },
+          {
+            "end": 36.93,
+            "probability": 1,
+            "start": 36.11,
+            "word": "באמת,"
+          },
+          {
+            "end": 37.57,
+            "probability": 0.999,
+            "start": 36.93,
+            "word": "מאוד"
+          },
+          {
+            "end": 37.89,
+            "probability": 0.966,
+            "start": 37.57,
+            "word": "מאוד"
+          },
+          {
+            "end": 38.13,
+            "probability": 0.991,
+            "start": 37.89,
+            "word": "לא"
+          },
+          {
+            "end": 38.59,
+            "probability": 1,
+            "start": 38.13,
+            "word": "מובנים."
+          },
+          {
+            "end": 40.05,
+            "probability": 1,
+            "start": 39.53,
+            "word": "מה"
+          },
+          {
+            "end": 40.17,
+            "probability": 1,
+            "start": 40.05,
+            "word": "זאת"
+          },
+          {
+            "end": 40.45,
+            "probability": 1,
+            "start": 40.17,
+            "word": "אומרת?"
+          },
+          {
+            "end": 40.73,
+            "probability": 0.999,
+            "start": 40.45,
+            "word": "ספר"
+          },
+          {
+            "end": 41.03,
+            "probability": 0.99,
+            "start": 40.73,
+            "word": "דברים"
+          },
+          {
+            "end": 41.15,
+            "probability": 1,
+            "start": 41.03,
+            "word": "הוא"
+          },
+          {
+            "end": 41.25,
+            "probability": 1,
+            "start": 41.15,
+            "word": "לא"
+          },
+          {
+            "end": 41.69,
+            "probability": 1,
+            "start": 41.25,
+            "word": "ספר?"
+          },
+          {
+            "end": 43.33,
+            "probability": 0.992,
+            "start": 42.95,
+            "word": "מה"
+          },
+          {
+            "end": 43.43,
+            "probability": 1,
+            "start": 43.33,
+            "word": "זאת"
+          },
+          {
+            "end": 43.59,
+            "probability": 1,
+            "start": 43.43,
+            "word": "אומרת"
+          },
+          {
+            "end": 43.89,
+            "probability": 0.989,
+            "start": 43.59,
+            "word": "שאינו"
+          },
+          {
+            "end": 44.27,
+            "probability": 0.997,
+            "start": 43.89,
+            "word": "אלא"
+          },
+          {
+            "end": 44.65,
+            "probability": 0.998,
+            "start": 44.27,
+            "word": "חוזר"
+          },
+          {
+            "end": 45.05,
+            "probability": 1,
+            "start": 44.65,
+            "word": "ושונה"
+          },
+          {
+            "end": 45.25,
+            "probability": 0.993,
+            "start": 45.05,
+            "word": "מה"
+          },
+          {
+            "end": 45.71,
+            "probability": 0.997,
+            "start": 45.25,
+            "word": "שלמעלה?"
+          },
+          {
+            "end": 46.21,
+            "probability": 0.998,
+            "start": 45.81,
+            "word": "לכן"
+          },
+          {
+            "end": 46.81,
+            "probability": 0.587,
+            "start": 46.21,
+            "word": "זה"
+          },
+          {
+            "end": 46.97,
+            "probability": 1,
+            "start": 46.81,
+            "word": "לא"
+          },
+          {
+            "end": 47.45,
+            "probability": 1,
+            "start": 46.97,
+            "word": "ספר?"
+          },
+          {
+            "end": 47.75,
+            "probability": 1,
+            "start": 47.55,
+            "word": "אין"
+          },
+          {
+            "end": 48.19,
+            "probability": 0.997,
+            "start": 47.75,
+            "word": "חמישה"
+          },
+          {
+            "end": 48.57,
+            "probability": 0.998,
+            "start": 48.19,
+            "word": "חומשי"
+          },
+          {
+            "end": 48.85,
+            "probability": 1,
+            "start": 48.57,
+            "word": "תורה?"
+          },
+          {
+            "end": 52.61,
+            "probability": 0.994,
+            "start": 52.23,
+            "word": "מה"
+          },
+          {
+            "end": 52.89,
+            "probability": 0.986,
+            "start": 52.61,
+            "word": "פירוש"
+          },
+          {
+            "end": 53.31,
+            "probability": 0.992,
+            "start": 52.89,
+            "word": "המילים?"
+          },
+          {
+            "end": 54.07,
+            "probability": 0.975,
+            "start": 53.53,
+            "word": "הפסק"
+          },
+          {
+            "end": 54.45,
+            "probability": 0.931,
+            "start": 54.07,
+            "word": "שבין"
+          },
+          {
+            "end": 54.99,
+            "probability": 0.834,
+            "start": 54.45,
+            "word": "וידבר"
+          },
+          {
+            "end": 55.47,
+            "probability": 0.968,
+            "start": 54.99,
+            "word": "למשנה"
+          },
+          {
+            "end": 55.79,
+            "probability": 0.727,
+            "start": 55.47,
+            "word": "תורה"
+          },
+          {
+            "end": 55.97,
+            "probability": 0.998,
+            "start": 55.79,
+            "word": "לא"
+          },
+          {
+            "end": 56.57,
+            "probability": 0.996,
+            "start": 55.97,
+            "word": "חשיב,"
+          },
+          {
+            "end": 57.13,
+            "probability": 1,
+            "start": 56.69,
+            "word": "מפני"
+          },
+          {
+            "end": 57.93,
+            "probability": 0.999,
+            "start": 57.13,
+            "word": "שאינו"
+          },
+          {
+            "end": 58.57,
+            "probability": 0.999,
+            "start": 57.93,
+            "word": "אלא,"
+          },
+          {
+            "end": 59.17,
+            "probability": 1,
+            "start": 58.57,
+            "word": "בסך"
+          },
+          {
+            "end": 59.51,
+            "probability": 0.97,
+            "start": 59.17,
+            "word": "הכול,"
+          },
+          {
+            "end": 59.81,
+            "probability": 0.996,
+            "start": 59.61,
+            "word": "מה"
+          },
+          {
+            "end": 59.97,
+            "probability": 0.853,
+            "start": 59.81,
+            "word": "יש?"
+          }
+        ]
+      },
+      "enhanced": {
+        "duration": 60,
+        "language": "he",
+        "model": "ivrit-ai/whisper-large-v3-turbo-ct2",
+        "processing_time": 5.07,
+        "text": "בין שמות, בין שמות לביקרא, בין ביקרא לבמדבר. בכל אחד ארבעה שיטים, לכן צריך בגט ספר כריתות, צריך יב שיטים. והפסק שבין וידבר למשנה תורה לא חשיב, שאינו אלא חוזר ושונה מה שלמעלה. אלו המלים שכתוב בתוספים. הפסק שבין וידבר למשנה תורה, את זה לא מחשיבים, כי בסך הכול אינו אלא חוזר ושונה מה שלמעלה. הדברים האלה הם באמת, באמת, מאוד מאוד לא מובנים. מה זאת אומרת? ספר דברים הוא לא ספר? מה זאת אומרת שאינו אלא חוזר ושונה מה שלמעלה? לכן זה לא ספר? אין חמישה חומשי תורה? מה פירוש המילים? הפסק שבין וידבר למשנה תורה לא חשיב, מפני שאינו אלא, בסך הכול, מה יש?",
+        "wordTimings": [
+          {
+            "end": 0,
+            "probability": 0.949,
+            "start": 0,
+            "word": "בין"
+          },
+          {
+            "end": 0.36,
+            "probability": 0.971,
+            "start": 0,
+            "word": "שמות,"
+          },
+          {
+            "end": 1.08,
+            "probability": 0.995,
+            "start": 0.4,
+            "word": "בין"
+          },
+          {
+            "end": 1.58,
+            "probability": 0.994,
+            "start": 1.08,
+            "word": "שמות"
+          },
+          {
+            "end": 2.42,
+            "probability": 0.794,
+            "start": 1.58,
+            "word": "לביקרא,"
+          },
+          {
+            "end": 3.68,
+            "probability": 0.997,
+            "start": 3.18,
+            "word": "בין"
+          },
+          {
+            "end": 4.12,
+            "probability": 0.887,
+            "start": 3.68,
+            "word": "ביקרא"
+          },
+          {
+            "end": 4.78,
+            "probability": 0.966,
+            "start": 4.12,
+            "word": "לבמדבר."
+          },
+          {
+            "end": 6.3,
+            "probability": 0.938,
+            "start": 5.8,
+            "word": "בכל"
+          },
+          {
+            "end": 6.46,
+            "probability": 0.989,
+            "start": 6.3,
+            "word": "אחד"
+          },
+          {
+            "end": 6.9,
+            "probability": 0.963,
+            "start": 6.46,
+            "word": "ארבעה"
+          },
+          {
+            "end": 7.28,
+            "probability": 0.887,
+            "start": 6.9,
+            "word": "שיטים,"
+          },
+          {
+            "end": 7.84,
+            "probability": 0.966,
+            "start": 7.42,
+            "word": "לכן"
+          },
+          {
+            "end": 8.34,
+            "probability": 0.998,
+            "start": 7.84,
+            "word": "צריך"
+          },
+          {
+            "end": 9.02,
+            "probability": 0.945,
+            "start": 8.34,
+            "word": "בגט"
+          },
+          {
+            "end": 9.94,
+            "probability": 0.914,
+            "start": 9.44,
+            "word": "ספר"
+          },
+          {
+            "end": 10.58,
+            "probability": 0.985,
+            "start": 9.94,
+            "word": "כריתות,"
+          },
+          {
+            "end": 11.36,
+            "probability": 0.984,
+            "start": 10.58,
+            "word": "צריך"
+          },
+          {
+            "end": 12.16,
+            "probability": 0.401,
+            "start": 11.36,
+            "word": "יב"
+          },
+          {
+            "end": 12.76,
+            "probability": 0.9,
+            "start": 12.16,
+            "word": "שיטים."
+          },
+          {
+            "end": 14.76,
+            "probability": 0.978,
+            "start": 13.76,
+            "word": "והפסק"
+          },
+          {
+            "end": 15.2,
+            "probability": 0.985,
+            "start": 14.76,
+            "word": "שבין"
+          },
+          {
+            "end": 15.78,
+            "probability": 0.933,
+            "start": 15.2,
+            "word": "וידבר"
+          },
+          {
+            "end": 16.3,
+            "probability": 0.999,
+            "start": 15.78,
+            "word": "למשנה"
+          },
+          {
+            "end": 16.68,
+            "probability": 0.996,
+            "start": 16.3,
+            "word": "תורה"
+          },
+          {
+            "end": 16.92,
+            "probability": 0.891,
+            "start": 16.68,
+            "word": "לא"
+          },
+          {
+            "end": 17.44,
+            "probability": 0.985,
+            "start": 16.92,
+            "word": "חשיב,"
+          },
+          {
+            "end": 18.18,
+            "probability": 0.998,
+            "start": 17.6,
+            "word": "שאינו"
+          },
+          {
+            "end": 18.5,
+            "probability": 0.96,
+            "start": 18.18,
+            "word": "אלא"
+          },
+          {
+            "end": 18.98,
+            "probability": 0.999,
+            "start": 18.5,
+            "word": "חוזר"
+          },
+          {
+            "end": 19.58,
+            "probability": 0.998,
+            "start": 18.98,
+            "word": "ושונה"
+          },
+          {
+            "end": 19.88,
+            "probability": 0.94,
+            "start": 19.58,
+            "word": "מה"
+          },
+          {
+            "end": 20.54,
+            "probability": 0.989,
+            "start": 19.88,
+            "word": "שלמעלה."
+          },
+          {
+            "end": 22.48,
+            "probability": 0.985,
+            "start": 21.98,
+            "word": "אלו"
+          },
+          {
+            "end": 23.06,
+            "probability": 0.928,
+            "start": 22.48,
+            "word": "המלים"
+          },
+          {
+            "end": 23.62,
+            "probability": 0.999,
+            "start": 23.06,
+            "word": "שכתוב"
+          },
+          {
+            "end": 24.16,
+            "probability": 0.799,
+            "start": 23.62,
+            "word": "בתוספים."
+          },
+          {
+            "end": 26.57,
+            "probability": 0.995,
+            "start": 25.99,
+            "word": "הפסק"
+          },
+          {
+            "end": 26.95,
+            "probability": 0.999,
+            "start": 26.57,
+            "word": "שבין"
+          },
+          {
+            "end": 27.43,
+            "probability": 0.998,
+            "start": 26.95,
+            "word": "וידבר"
+          },
+          {
+            "end": 27.87,
+            "probability": 1,
+            "start": 27.43,
+            "word": "למשנה"
+          },
+          {
+            "end": 28.29,
+            "probability": 0.999,
+            "start": 27.87,
+            "word": "תורה,"
+          },
+          {
+            "end": 28.69,
+            "probability": 0.999,
+            "start": 28.37,
+            "word": "את"
+          },
+          {
+            "end": 28.83,
+            "probability": 1,
+            "start": 28.69,
+            "word": "זה"
+          },
+          {
+            "end": 28.97,
+            "probability": 0.998,
+            "start": 28.83,
+            "word": "לא"
+          },
+          {
+            "end": 29.53,
+            "probability": 0.993,
+            "start": 28.97,
+            "word": "מחשיבים,"
+          },
+          {
+            "end": 30.33,
+            "probability": 0.996,
+            "start": 29.95,
+            "word": "כי"
+          },
+          {
+            "end": 30.91,
+            "probability": 0.995,
+            "start": 30.33,
+            "word": "בסך"
+          },
+          {
+            "end": 31.27,
+            "probability": 0.615,
+            "start": 30.91,
+            "word": "הכול"
+          },
+          {
+            "end": 31.65,
+            "probability": 0.901,
+            "start": 31.27,
+            "word": "אינו"
+          },
+          {
+            "end": 31.89,
+            "probability": 0.968,
+            "start": 31.65,
+            "word": "אלא"
+          },
+          {
+            "end": 32.35,
+            "probability": 0.999,
+            "start": 31.89,
+            "word": "חוזר"
+          },
+          {
+            "end": 32.81,
+            "probability": 0.999,
+            "start": 32.35,
+            "word": "ושונה"
+          },
+          {
+            "end": 33.07,
+            "probability": 0.819,
+            "start": 32.81,
+            "word": "מה"
+          },
+          {
+            "end": 33.69,
+            "probability": 0.986,
+            "start": 33.07,
+            "word": "שלמעלה."
+          },
+          {
+            "end": 34.91,
+            "probability": 0.834,
+            "start": 34.15,
+            "word": "הדברים"
+          },
+          {
+            "end": 35.29,
+            "probability": 1,
+            "start": 34.91,
+            "word": "האלה"
+          },
+          {
+            "end": 35.55,
+            "probability": 0.991,
+            "start": 35.29,
+            "word": "הם"
+          },
+          {
+            "end": 36.11,
+            "probability": 1,
+            "start": 35.55,
+            "word": "באמת,"
+          },
+          {
+            "end": 36.93,
+            "probability": 1,
+            "start": 36.11,
+            "word": "באמת,"
+          },
+          {
+            "end": 37.57,
+            "probability": 0.999,
+            "start": 36.93,
+            "word": "מאוד"
+          },
+          {
+            "end": 37.89,
+            "probability": 0.966,
+            "start": 37.57,
+            "word": "מאוד"
+          },
+          {
+            "end": 38.13,
+            "probability": 0.991,
+            "start": 37.89,
+            "word": "לא"
+          },
+          {
+            "end": 38.59,
+            "probability": 1,
+            "start": 38.13,
+            "word": "מובנים."
+          },
+          {
+            "end": 40.05,
+            "probability": 1,
+            "start": 39.53,
+            "word": "מה"
+          },
+          {
+            "end": 40.17,
+            "probability": 1,
+            "start": 40.05,
+            "word": "זאת"
+          },
+          {
+            "end": 40.45,
+            "probability": 1,
+            "start": 40.17,
+            "word": "אומרת?"
+          },
+          {
+            "end": 40.73,
+            "probability": 0.999,
+            "start": 40.45,
+            "word": "ספר"
+          },
+          {
+            "end": 41.03,
+            "probability": 0.99,
+            "start": 40.73,
+            "word": "דברים"
+          },
+          {
+            "end": 41.15,
+            "probability": 1,
+            "start": 41.03,
+            "word": "הוא"
+          },
+          {
+            "end": 41.25,
+            "probability": 1,
+            "start": 41.15,
+            "word": "לא"
+          },
+          {
+            "end": 41.69,
+            "probability": 1,
+            "start": 41.25,
+            "word": "ספר?"
+          },
+          {
+            "end": 43.33,
+            "probability": 0.992,
+            "start": 42.95,
+            "word": "מה"
+          },
+          {
+            "end": 43.43,
+            "probability": 1,
+            "start": 43.33,
+            "word": "זאת"
+          },
+          {
+            "end": 43.59,
+            "probability": 1,
+            "start": 43.43,
+            "word": "אומרת"
+          },
+          {
+            "end": 43.89,
+            "probability": 0.989,
+            "start": 43.59,
+            "word": "שאינו"
+          },
+          {
+            "end": 44.27,
+            "probability": 0.997,
+            "start": 43.89,
+            "word": "אלא"
+          },
+          {
+            "end": 44.65,
+            "probability": 0.998,
+            "start": 44.27,
+            "word": "חוזר"
+          },
+          {
+            "end": 45.05,
+            "probability": 1,
+            "start": 44.65,
+            "word": "ושונה"
+          },
+          {
+            "end": 45.25,
+            "probability": 0.993,
+            "start": 45.05,
+            "word": "מה"
+          },
+          {
+            "end": 45.71,
+            "probability": 0.997,
+            "start": 45.25,
+            "word": "שלמעלה?"
+          },
+          {
+            "end": 46.21,
+            "probability": 0.998,
+            "start": 45.81,
+            "word": "לכן"
+          },
+          {
+            "end": 46.81,
+            "probability": 0.587,
+            "start": 46.21,
+            "word": "זה"
+          },
+          {
+            "end": 46.97,
+            "probability": 1,
+            "start": 46.81,
+            "word": "לא"
+          },
+          {
+            "end": 47.45,
+            "probability": 1,
+            "start": 46.97,
+            "word": "ספר?"
+          },
+          {
+            "end": 47.75,
+            "probability": 1,
+            "start": 47.55,
+            "word": "אין"
+          },
+          {
+            "end": 48.19,
+            "probability": 0.997,
+            "start": 47.75,
+            "word": "חמישה"
+          },
+          {
+            "end": 48.57,
+            "probability": 0.998,
+            "start": 48.19,
+            "word": "חומשי"
+          },
+          {
+            "end": 48.85,
+            "probability": 1,
+            "start": 48.57,
+            "word": "תורה?"
+          },
+          {
+            "end": 52.61,
+            "probability": 0.994,
+            "start": 52.23,
+            "word": "מה"
+          },
+          {
+            "end": 52.89,
+            "probability": 0.986,
+            "start": 52.61,
+            "word": "פירוש"
+          },
+          {
+            "end": 53.31,
+            "probability": 0.992,
+            "start": 52.89,
+            "word": "המילים?"
+          },
+          {
+            "end": 54.07,
+            "probability": 0.975,
+            "start": 53.53,
+            "word": "הפסק"
+          },
+          {
+            "end": 54.45,
+            "probability": 0.931,
+            "start": 54.07,
+            "word": "שבין"
+          },
+          {
+            "end": 54.99,
+            "probability": 0.834,
+            "start": 54.45,
+            "word": "וידבר"
+          },
+          {
+            "end": 55.47,
+            "probability": 0.968,
+            "start": 54.99,
+            "word": "למשנה"
+          },
+          {
+            "end": 55.79,
+            "probability": 0.727,
+            "start": 55.47,
+            "word": "תורה"
+          },
+          {
+            "end": 55.97,
+            "probability": 0.998,
+            "start": 55.79,
+            "word": "לא"
+          },
+          {
+            "end": 56.57,
+            "probability": 0.996,
+            "start": 55.97,
+            "word": "חשיב,"
+          },
+          {
+            "end": 57.13,
+            "probability": 1,
+            "start": 56.69,
+            "word": "מפני"
+          },
+          {
+            "end": 57.93,
+            "probability": 0.999,
+            "start": 57.13,
+            "word": "שאינו"
+          },
+          {
+            "end": 58.57,
+            "probability": 0.999,
+            "start": 57.93,
+            "word": "אלא,"
+          },
+          {
+            "end": 59.17,
+            "probability": 1,
+            "start": 58.57,
+            "word": "בסך"
+          },
+          {
+            "end": 59.51,
+            "probability": 0.97,
+            "start": 59.17,
+            "word": "הכול,"
+          },
+          {
+            "end": 59.81,
+            "probability": 0.996,
+            "start": 59.61,
+            "word": "מה"
+          },
+          {
+            "end": 59.97,
+            "probability": 0.853,
+            "start": 59.81,
+            "word": "יש?"
+          }
+        ]
+      },
+      "comparison": {
+        "changeRate": 0,
+        "baselineTermCount": 1,
+        "enhancedTermCount": 1,
+        "baselineTerms": [
+          "כריתות"
+        ],
+        "enhancedTerms": [
+          "כריתות"
+        ],
+        "addedTerms": [],
+        "removedTerms": [],
+        "referenceAvailable": false
+      }
+    }
+  ]
+}

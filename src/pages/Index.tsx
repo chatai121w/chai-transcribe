@@ -21,7 +21,7 @@ import { Settings, FileEdit, ChevronDown, X, Zap, Globe, Chrome, Mic, Waves, Ser
 import { openQuickCut } from "@/lib/quickCutBus";
 import { usePerfMonitor } from "@/hooks/usePerfMonitor";
 import { PerfMonitorPanel } from "@/components/PerfMonitorPanel";
-import { db } from "@/lib/localDb";
+import { db, retainAudioBlob } from "@/lib/localDb";
 import { useTranscriptionJobs } from "@/hooks/useTranscriptionJobs";
 import { useLocalTranscriptionQueue } from "@/hooks/useLocalTranscriptionQueue";
 import { useAuth } from "@/contexts/AuthContext";
@@ -608,13 +608,7 @@ const Index = () => {
 
     // Persist audio blob to IndexedDB (Dexie) for text-editor recovery
     try {
-      await db.audioBlobs.put({
-        id: 'last_audio',
-        blob: file,
-        type: file.type,
-        name: file.name,
-        saved_at: Date.now(),
-      });
+      await retainAudioBlob(file, file.name, file.type);
     } catch { /* IndexedDB not available — ok */ }
 
     // Show audio/video duration after file select
@@ -744,13 +738,7 @@ const Index = () => {
       currentFileRef.current = fileToTranscribe;
       lastFileRef.current = fileToTranscribe;
       try {
-        await db.audioBlobs.put({
-          id: 'last_audio',
-          blob: fileToTranscribe,
-          type: fileToTranscribe.type,
-          name: fileToTranscribe.name,
-          saved_at: Date.now(),
-        });
+        await retainAudioBlob(fileToTranscribe, fileToTranscribe.name, fileToTranscribe.type);
       } catch {
         // Ignore IndexedDB write errors.
       }
@@ -2634,13 +2622,11 @@ const Index = () => {
             // Save audio to Dexie so TextEditor & Diarization can recover it
             if (audioBlob) {
               try {
-                await db.audioBlobs.put({
-                  id: 'last_audio',
-                  blob: audioBlob,
-                  type: audioBlob.type || 'audio/webm',
-                  name: audioFile?.name || `live-${Date.now()}.webm`,
-                  saved_at: Date.now(),
-                });
+                await retainAudioBlob(
+                  audioBlob,
+                  audioFile?.name || `live-${Date.now()}.webm`,
+                  audioBlob.type || 'audio/webm',
+                );
               } catch { /* Dexie not available */ }
             }
             const liveAudioUrl = audioBlob ? URL.createObjectURL(audioBlob) : undefined;

@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import { fingerprintFile } from '@/lib/recordingFingerprint';
 
 // ─── Interfaces ──────────────────────────────────────────────────
 export interface LocalTranscript {
@@ -237,6 +238,52 @@ export interface PendingDriveUpload {
 }
 
 export const db = new SmartTranscriberDB();
+
+export const LAST_AUDIO_ALIAS = 'last_audio';
+const RETAINED_AUDIO_PREFIX = 'recording:';
+
+function retainedAudioId(fingerprint: string): string {
+  return `${RETAINED_AUDIO_PREFIX}${fingerprint}`;
+}
+
+/** Preserve source recordings by content identity while updating the active alias. */
+export async function retainAudioBlob(
+  blob: Blob,
+  name: string,
+  type = blob.type,
+): Promise<{ fingerprint: string; id: string }> {
+  const fingerprint = await fingerprintFile(blob);
+  const id = retainedAudioId(fingerprint);
+  const savedAt = Date.now();
+  const previous = await db.audioBlobs.get(LAST_AUDIO_ALIAS);
+  const previousId = previous?.blob
+    ? retainedAudioId(await fingerprintFile(previous.blob))
+    : null;
+
+  await db.transaction('rw', db.audioBlobs, async () => {
+    // Upgrade an existing installation that only has the legacy alias.
+    if (previous?.blob && previousId) {
+      if (!(await db.audioBlobs.get(previousId))) {
+        await db.audioBlobs.put({ ...previous, id: previousId });
+      }
+    }
+
+    const retained: LocalAudioBlob = { id, blob, type, name, saved_at: savedAt };
+    await db.audioBlobs.put(retained);
+    await db.audioBlobs.put({ ...retained, id: LAST_AUDIO_ALIAS });
+  });
+
+  return { fingerprint, id };
+}
+
+/** Remove only the active pointer; retained recordings remain reusable. */
+export async function clearLastAudioAlias(): Promise<void> {
+  await db.audioBlobs.delete(LAST_AUDIO_ALIAS);
+}
+
+export async function getRetainedAudioBlob(fingerprint: string): Promise<LocalAudioBlob | undefined> {
+  return db.audioBlobs.get(retainedAudioId(fingerprint));
+}
 
 // ─── Helper: check if DB is available ────────────────────────────
 let dbAvailable: boolean | null = null;

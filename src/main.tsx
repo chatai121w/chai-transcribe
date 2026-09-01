@@ -30,6 +30,15 @@ try {
   });
 } catch { /* non-fatal */ }
 
+// Merge the built-in Torah lexicon into the existing personal vocabulary.
+// Canonical terms are deduplicated and existing user metadata always wins.
+try {
+  void import("./utils/customVocabulary").then(({ seedTorahLexicon }) => {
+    const n = seedTorahLexicon();
+    if (n > 0) debugLog.info("Boot", `Seeded ${n} canonical Torah terms`);
+  });
+} catch { /* non-fatal */ }
+
 debugLog.info('Boot', `🚀 אתחול אפליקציה — ${new Date().toLocaleTimeString('he-IL')}`, {
   url: location.href,
   userAgent: navigator.userAgent,

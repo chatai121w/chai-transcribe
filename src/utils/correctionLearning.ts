@@ -64,7 +64,7 @@ function saveCorrections(corrections: CorrectionEntry[]): void {
     .sort((a, b) => (b.confidence * b.frequency) - (a.confidence * a.frequency))
     .slice(0, 2000);
   localStorage.setItem(CORRECTIONS_KEY, JSON.stringify(sorted));
-  window.dispatchEvent(new CustomEvent(CORRECTIONS_CHANGED_EVENT));
+  try { window.dispatchEvent(new CustomEvent(CORRECTIONS_CHANGED_EVENT)); } catch { /* non-browser/test */ }
 }
 
 /**

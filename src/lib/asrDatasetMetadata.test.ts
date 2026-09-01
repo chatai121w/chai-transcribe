@@ -15,6 +15,7 @@ describe('buildApprovedAsrMetadata', () => {
     expect(metadata.qualityTier).toBe('gold');
     expect(metadata.labelSource).toBe('human-approved');
     expect(metadata.groupId).toBe('recording-123');
+    expect(metadata.sourceRecordingId).toBe('recording-123');
     expect(metadata.teacherEngines).toBe('gemini:flash|local:ivrit');
   });
 

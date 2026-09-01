@@ -2,7 +2,11 @@ import { buildLoshonKodeshHotwords } from '@/lib/loshonKodesh';
 import { isPersonalPronunciationEnabled } from '@/lib/personalPronunciationModel';
 import { buildProfileHotwords } from '@/lib/pronunciationProfiles';
 import { getLearnedHotwords } from '@/utils/correctionLearning';
-import { getAllTerms, isCustomVocabularyEnabled } from '@/utils/customVocabulary';
+import {
+  getRankedVocabularyTerms,
+  isCustomVocabularyEnabled,
+  normalizeVocabularyKey,
+} from '@/utils/customVocabulary';
 
 interface HotwordCandidate {
   value: string;
@@ -27,7 +31,7 @@ export function buildTranscriptionHotwords(options: {
 
   const add = (value: string, baseScore: number) => {
     for (const term of splitTerms(value)) {
-      const key = term.toLocaleLowerCase('he');
+      const key = normalizeVocabularyKey(term);
       const contextBoost = context.includes(key) ? 500 : 0;
       const score = baseScore + contextBoost;
       const existing = scores.get(key);
@@ -37,10 +41,16 @@ export function buildTranscriptionHotwords(options: {
 
   add(options.manual || '', 1000);
   if (isCustomVocabularyEnabled()) {
-    for (const entry of getAllTerms()) add(entry.term, 300 + Math.min(100, entry.usageCount || 0));
+    for (const entry of getRankedVocabularyTerms(options.context, options.limit ?? 60)) {
+      const key = normalizeVocabularyKey(entry.term);
+      const isPersonal = entry.source === 'user' || entry.source === 'approved-correction' || entry.source === 'import';
+      const matchesContext = key.length >= 2 && normalizeVocabularyKey(options.context || '').includes(key);
+      if (!isPersonal && !matchesContext) continue;
+      add(entry.term, (matchesContext ? 600 : 500) + Math.min(100, entry.usageCount || 0));
+    }
   }
-  if (isPersonalPronunciationEnabled()) add(getLearnedHotwords(120), 220);
-  add(buildProfileHotwords(), 260);
+  if (isPersonalPronunciationEnabled()) add(getLearnedHotwords(120), 450);
+  add(buildProfileHotwords(), 550);
   if (options.loshonKodesh) add(buildLoshonKodeshHotwords(), 100);
 
   const selected = Array.from(scores.values())

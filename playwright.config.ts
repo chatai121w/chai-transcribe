@@ -53,7 +53,7 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
+  webServer: process.env.PLAYWRIGHT_BASE_URL ? undefined : {
     command: 'npx vite --force --port 8091',
     port: 8091,
     reuseExistingServer: !process.env.CI,

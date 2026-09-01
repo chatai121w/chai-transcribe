@@ -17,7 +17,9 @@ import {
   type RetranscriptionResult,
   type TranscriptionEngineId,
 } from "@/lib/retranscriptionRunner";
-import { normalizeSourceLanguage, resolveCudaModel } from "@/lib/transcriptionLanguages";
+import { normalizeSourceLanguage, resolveCudaModel, shouldUseHebrewKnowledge } from "@/lib/transcriptionLanguages";
+import { buildTranscriptionHotwords } from "@/lib/transcriptionHotwords";
+import { applyTranscriptionKnowledge } from "@/lib/transcriptionKnowledge";
 
 const CUDA_MODELS = [
   { value: "ivrit-ai/whisper-large-v3-turbo-ct2", label: "Ivrit.ai Turbo V3 - מומלץ" },
@@ -217,7 +219,11 @@ export function RetranscribeDialog({
           noConditionOnPrevious: preferences.cuda_no_condition_prev,
           vadAggressive: preferences.cuda_vad_aggressive,
           paragraphThreshold: preferences.cuda_paragraph_threshold,
-          hotwords: preferences.cuda_hotwords,
+          hotwords: buildTranscriptionHotwords({
+            manual: preferences.cuda_hotwords,
+            context: audioFileName || file.name,
+            loshonKodesh: preferences.loshon_kodesh_enabled,
+          }),
           loshonKodesh: preferences.loshon_kodesh_enabled,
         }, (streamStatus) => {
           if (streamStatus.type === "uploading") {
@@ -289,6 +295,13 @@ export function RetranscribeDialog({
           },
           onPartial: (partial, value) => void persistJobProgress(jobId, value, partial),
         });
+      }
+
+      if (shouldUseHebrewKnowledge(sourceLanguage, result.detectedLanguage)) {
+        result = {
+          ...result,
+          text: applyTranscriptionKnowledge(result.text, result.engineLabel).text,
+        };
       }
 
       setProgress(100);

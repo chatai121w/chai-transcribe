@@ -24,6 +24,7 @@ export function buildApprovedAsrMetadata(input: ApprovedAsrMetadataInput): Recor
     sourceKind: input.sourceKind.trim() || 'unknown',
     sourceRef: input.sourceRef.trim() || 'unknown',
     sourceLabel: input.sourceLabel.trim() || 'untitled',
+    sourceRecordingId: fingerprint,
     groupId: fingerprint,
     teacherEngines: teachers.join('|'),
     approvedAt: input.approvedAt || new Date().toISOString(),

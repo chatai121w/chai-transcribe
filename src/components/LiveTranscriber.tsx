@@ -21,7 +21,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCloudApiKeys } from "@/hooks/useCloudApiKeys";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { isLoshonKodeshEnabled } from "@/lib/loshonKodesh";
-import { buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
+import { getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
+import { buildTranscriptionHotwords } from "@/lib/transcriptionHotwords";
 import { LiveChunkQueue, type LiveChunkJob } from "@/lib/liveChunkQueue";
 import {
   getBrowserLanguage,
@@ -332,17 +333,17 @@ export const LiveTranscriber = ({ onTranscriptComplete, serverConnected }: LiveT
     if (sourceLanguage !== "he") {
       return { hotwords: "", initialPrompt: "", loshonKodesh: false };
     }
-    const profileHotwords = buildProfileHotwords();
     const profilePrompt = getProfileInitialPrompt();
     const profileForcesLk = isProfileLoshonKodesh();
-    const mergedHotwords = [preferences.cuda_hotwords || "", profileHotwords]
-      .filter(Boolean)
-      .join(", ")
-      .trim();
+    const loshonKodesh = isLoshonKodeshEnabled() || profileForcesLk;
+    const mergedHotwords = buildTranscriptionHotwords({
+      manual: preferences.cuda_hotwords || "",
+      loshonKodesh,
+    }) || "";
     return {
       hotwords: mergedHotwords,
       initialPrompt: profilePrompt,
-      loshonKodesh: isLoshonKodeshEnabled() || profileForcesLk,
+      loshonKodesh,
     };
   }, [preferences.cuda_hotwords, sourceLanguage]);
 

@@ -1,13 +1,80 @@
 import json
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
-from training_routes import _evaluation_fingerprint, _finalize_dataset, _model_quality_gate, resolve_trained_model
+from flask import Flask
+
+from training_routes import (
+    _evaluation_fingerprint,
+    _finalize_dataset,
+    _model_quality_gate,
+    register_training_routes,
+    resolve_trained_model,
+)
+
+
+class DatasetUploadTests(unittest.TestCase):
+    def test_upload_requires_recording_identity_before_writing_files(self):
+        with tempfile.TemporaryDirectory() as tmp, patch('training_routes.DATASETS_DIR', Path(tmp)), patch(
+            'training_routes._audio_duration', return_value=1.0,
+        ):
+            dataset = Path(tmp) / 'test-dataset'
+            (dataset / 'audio').mkdir(parents=True)
+            (dataset / 'texts').mkdir()
+            app = Flask(__name__)
+            register_training_routes(app)
+
+            response = app.test_client().post('/training/dataset/upload-pair', data={
+                'dataset_id': 'test-dataset',
+                'text': 'טקסט',
+                'audio': (BytesIO(b'audio'), 'clip.wav'),
+            })
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn('groupId', response.get_json()['error'])
+            self.assertEqual(list((dataset / 'audio').iterdir()), [])
+
 
 
 class DatasetSplitTests(unittest.TestCase):
+    @patch('training_routes._audio_duration', return_value=5.0)
+    def test_missing_recording_identity_blocks_training(self, _duration):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for folder in ('audio', 'texts'):
+                (root / folder).mkdir()
+            for index in range(20):
+                stem = f'{index:05d}'
+                (root / 'audio' / f'{stem}.wav').write_bytes(f'audio-{index}'.encode())
+                (root / 'texts' / f'{stem}.txt').write_text(f'text {index}', encoding='utf-8')
+
+            stats = _finalize_dataset(root)
+
+            self.assertEqual(stats['unknown_group_count'], 20)
+            self.assertEqual(stats['recording_groups'], 0)
+            self.assertFalse(stats['ready_for_training'])
+            self.assertTrue(any('provenance' in warning for warning in stats['warnings']))
+
+    @patch('training_routes._audio_duration', return_value=5.0)
+    def test_source_recording_id_is_canonical(self, _duration):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for folder in ('audio', 'texts', 'metadata'):
+                (root / folder).mkdir()
+            (root / 'audio' / '00001.wav').write_bytes(b'audio')
+            (root / 'texts' / '00001.txt').write_text('text', encoding='utf-8')
+            (root / 'metadata' / '00001.json').write_text(json.dumps({
+                'sourceRecordingId': 'content-fingerprint',
+                'groupId': 'legacy-name',
+            }), encoding='utf-8')
+
+            _finalize_dataset(root)
+            row = json.loads((root / 'manifest.jsonl').read_text(encoding='utf-8'))
+            self.assertEqual(row['group_id'], 'content-fingerprint')
+
     @patch('training_routes._audio_duration', return_value=5.0)
     def test_recording_groups_never_cross_train_and_eval(self, _duration):
         with tempfile.TemporaryDirectory() as tmp:
@@ -69,6 +136,29 @@ class DatasetSplitTests(unittest.TestCase):
             self.assertEqual(stats['train_count'], 22)
             self.assertEqual(stats['eval_count'], 8)
 
+    @patch('training_routes._audio_duration', return_value=5.0)
+    def test_frozen_benchmark_group_is_never_used_for_training(self, _duration):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for folder in ('audio', 'texts', 'metadata'):
+                (root / folder).mkdir()
+            for index in range(30):
+                stem = f'{index:05d}'
+                (root / 'audio' / f'{stem}.wav').write_bytes(f'audio-{index}'.encode())
+                (root / 'texts' / f'{stem}.txt').write_text(f'text {index}', encoding='utf-8')
+                metadata = {'groupId': 'training-recording' if index < 22 else 'holdout-recording'}
+                if index >= 22:
+                    metadata['benchmarkRole'] = 'failure-holdout'
+                (root / 'metadata' / f'{stem}.json').write_text(json.dumps(metadata), encoding='utf-8')
+
+            stats = _finalize_dataset(root)
+            train = [json.loads(line) for line in (root / 'manifest.train.jsonl').read_text(encoding='utf-8').splitlines()]
+            evaluation = [json.loads(line) for line in (root / 'manifest.eval.jsonl').read_text(encoding='utf-8').splitlines()]
+
+            self.assertEqual(stats['reserved_benchmark_groups'], 1)
+            self.assertEqual({row['group_id'] for row in train}, {'training-recording'})
+            self.assertEqual({row['group_id'] for row in evaluation}, {'holdout-recording'})
+
 
 class ModelQualityGateTests(unittest.TestCase):
     def test_requires_comparable_wer_and_cer(self):
@@ -95,6 +185,16 @@ class ModelQualityGateTests(unittest.TestCase):
         })
         self.assertTrue(passed)
         self.assertEqual(reasons, [])
+
+    def test_rejects_terminology_regression(self):
+        passed, reasons = _model_quality_gate({
+            'wer_before': 30.0, 'wer_after': 25.0,
+            'cer_before': 10.0, 'cer_after': 9.0,
+            'eval_sample_count': 12, 'eval_fingerprint': 'fixed-holdout',
+            'eval_term_count': 8, 'term_recall_before': 75.0, 'term_recall_after': 62.5,
+        })
+        self.assertFalse(passed)
+        self.assertIn('holdout terminology recall regressed', reasons)
 
     def test_legacy_registry_model_without_comparable_metrics_cannot_resolve(self):
         with tempfile.TemporaryDirectory() as tmp:

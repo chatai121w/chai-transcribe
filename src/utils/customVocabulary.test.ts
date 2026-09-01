@@ -14,7 +14,11 @@ import {
   applyVocabularyCorrections,
   isCustomVocabularyEnabled,
   setCustomVocabularyEnabled,
+  mergeVocabularyEntries,
+  normalizeVocabularyKey,
+  seedTorahLexicon,
 } from './customVocabulary';
+import { TORAH_LEXICON_SEED } from '@/data/torahLexiconSeed';
 
 // Mock localStorage
 const store: Record<string, string> = {};
@@ -158,6 +162,17 @@ describe('clearVocabulary', () => {
     clearVocabulary();
     expect(getAllTerms()).toHaveLength(0);
   });
+
+  it('preserves the built-in Torah corpus and removes only personal terms', () => {
+    seedTorahLexicon(true);
+    addTerm('מונח אישי');
+    clearVocabulary();
+
+    const remaining = getAllTerms();
+    expect(remaining.length).toBeGreaterThan(50);
+    expect(remaining.every(entry => entry.source === 'built-in')).toBe(true);
+    expect(remaining.some(entry => entry.term === 'מונח אישי')).toBe(false);
+  });
 });
 
 describe('export / import', () => {
@@ -194,5 +209,67 @@ describe('applyVocabularyCorrections', () => {
     const result = applyVocabularyCorrections('שלום עולם');
     expect(result.text).toBe('שלום עולם');
     expect(result.appliedCount).toBe(0);
+  });
+
+  it('does not apply an unapproved candidate as an automatic correction', () => {
+    addTerm('תא שמע', 'aramaic', ['תה שמע'], { approvalStatus: 'candidate', confidence: 0.7 });
+    expect(applyVocabularyCorrections('תה שמע').text).toBe('תה שמע');
+  });
+});
+
+describe('Torah lexicon seed and canonical deduplication', () => {
+  it('contains no duplicate canonical keys', () => {
+    const keys = TORAH_LEXICON_SEED.map(entry => normalizeVocabularyKey(entry.term));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('preserves an existing user term instead of creating a built-in duplicate', () => {
+    addTerm('רבי עקיבא', 'name', ['רבי עקיבה'], { notes: 'העדפת משתמש' });
+    const added = seedTorahLexicon(true);
+    const matching = getAllTerms().filter(entry => normalizeVocabularyKey(entry.term) === normalizeVocabularyKey('רבי עקיבא'));
+
+    expect(added).toBeGreaterThan(50);
+    expect(matching).toHaveLength(1);
+    expect(matching[0].source).toBe('user');
+    expect(matching[0].notes).toBe('העדפת משתמש');
+  });
+
+  it('replaces a stale built-in corpus without touching personal entries', () => {
+    addTerm('מסכת בבא בתרא', 'tractate', [], { source: 'built-in' });
+    addTerm('מונח אישי', 'other', [], { source: 'user' });
+    seedTorahLexicon(true);
+
+    const entries = getAllTerms();
+    expect(entries.some(entry => entry.term === 'מסכת בבא בתרא' && entry.source === 'built-in')).toBe(false);
+    expect(entries.some(entry => entry.term === 'בבא בתרא' && entry.source === 'built-in')).toBe(true);
+    expect(entries.some(entry => entry.term === 'מונח אישי' && entry.source === 'user')).toBe(true);
+  });
+
+  it('merges Hebrew and ASCII quote spellings into one canonical entry', () => {
+    const now = Date.now();
+    const base = {
+      variants: [], usageCount: 0, createdAt: now, updatedAt: now,
+      contextTags: [], source: 'user' as const, approvalStatus: 'verified' as const, confidence: 1,
+    };
+    const merged = mergeVocabularyEntries(
+      [{ ...base, term: 'רש״י', category: 'commentator' }],
+      [{ ...base, term: 'רש"י', category: 'name' }],
+    );
+    expect(merged).toHaveLength(1);
+  });
+
+  it('allows only one canonical entry to own a correction variant', () => {
+    const now = Date.now();
+    const base = {
+      usageCount: 0, createdAt: now, updatedAt: now,
+      contextTags: [], approvalStatus: 'verified' as const, confidence: 1,
+    };
+    const merged = mergeVocabularyEntries(
+      [{ ...base, term: 'מונח מובנה', variants: ['שיבוש משותף'], category: 'concept', source: 'built-in' }],
+      [{ ...base, term: 'מונח מאושר', variants: ['שיבוש משותף'], category: 'concept', source: 'approved-correction' }],
+    );
+
+    expect(merged.flatMap(entry => entry.variants).filter(variant => variant === 'שיבוש משותף')).toHaveLength(1);
+    expect(merged.find(entry => entry.term === 'מונח מאושר')?.variants).toContain('שיבוש משותף');
   });
 });

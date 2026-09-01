@@ -89,7 +89,8 @@ import {
   preservesTranscriptWords,
   requiresExactWordPreservation,
 } from "@/lib/transcriptFormatting";
-import { db, buildAudioFingerprint } from "@/lib/localDb";
+import { db, buildAudioFingerprint, clearLastAudioAlias, retainAudioBlob } from "@/lib/localDb";
+import { fingerprintFile } from "@/lib/recordingFingerprint";
 import { useCorrectionLearning } from "@/hooks/useCorrectionLearning";
 import { getServerUrl } from "@/lib/serverConfig";
 import {
@@ -341,6 +342,23 @@ const TextEditor = () => {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioFileName, setAudioFileName] = useState<string>("");
+  const [sourceRecordingId, setSourceRecordingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!audioBlob) {
+      setSourceRecordingId(null);
+      return () => { cancelled = true; };
+    }
+    fingerprintFile(audioBlob)
+      .then((fingerprint) => {
+        if (!cancelled) setSourceRecordingId(fingerprint);
+      })
+      .catch(() => {
+        if (!cancelled) setSourceRecordingId(null);
+      });
+    return () => { cancelled = true; };
+  }, [audioBlob]);
   const [wordTimings, setWordTimings] = useState<WordTiming[]>([]);
   const wordTimingsRef = useRef<WordTiming[]>([]);
   const wordTimingsRevisionRef = useRef(0);
@@ -690,7 +708,7 @@ const TextEditor = () => {
           setAudioBlob(blob);
           // Also persist to Dexie for diarization recovery
           try {
-            await db.audioBlobs.put({ id: 'last_audio', blob, type: blob.type, name: audioFileName || 'audio', saved_at: Date.now() });
+            await retainAudioBlob(blob, audioFileName || 'audio', blob.type);
           } catch { /* Dexie not available */ }
         }
       } catch { /* fetch failed */ }
@@ -808,7 +826,7 @@ const TextEditor = () => {
             const blob = await resp.blob();
             setOwnedAudioFromBlob(blob, location.state?.audioFileName || undefined);
             try {
-              await db.audioBlobs.put({ id: 'last_audio', blob, type: blob.type, name: location.state?.audioFileName || 'audio', saved_at: Date.now() });
+              await retainAudioBlob(blob, location.state?.audioFileName || 'audio', blob.type);
             } catch { /* Dexie not available */ }
           })
           .catch(() => {
@@ -1610,7 +1628,7 @@ const TextEditor = () => {
       const context = next.slice(contextStart, contextEnd);
       const candidate: AudioLearningCandidate = {
         id: crypto.randomUUID(),
-        recordingKey: transcriptId || audioFileName || 'current-transcript',
+        recordingKey: sourceRecordingId || transcriptId || audioFileName || 'current-transcript',
         original: originalTiming.word,
         corrected: correctedValue,
         operation: getAudioLearningOperation(originalTiming.word, correctedValue),
@@ -1634,7 +1652,7 @@ const TextEditor = () => {
       localStorage.setItem('last_word_timings', JSON.stringify(next));
     } catch { /* quota/unavailable */ }
     addVersion(nextText, 'manual', isDelete ? 'מחיקת מילה' : `תיקון ידני: ${originalTiming.word} → ${fixed}`);
-  }, [audioBlob, audioFileName, handleEditorChange, transcriptId, updateAudioLearningCandidates]);
+  }, [audioBlob, audioFileName, handleEditorChange, sourceRecordingId, transcriptId, updateAudioLearningCandidates]);
 
   const buildSyncedTimings = useCallback((editedText: string): WordTiming[] | null => {
     if (!wordTimings.length) return null;
@@ -2361,7 +2379,7 @@ const TextEditor = () => {
                 setAudioFileName("");
                 transcriptIdRef.current = null;
                 setTranscriptId(null);
-                try { await db.audioBlobs.delete('last_audio'); } catch { /* noop */ }
+                try { await clearLastAudioAlias(); } catch { /* noop */ }
                 try { localStorage.removeItem('current_transcript_id'); } catch { /* noop */ }
                 try { localStorage.removeItem('editor_text'); } catch { /* noop */ }
                 try { localStorage.removeItem('editor_word_timings'); } catch { /* noop */ }
@@ -2564,7 +2582,7 @@ const TextEditor = () => {
                         audioBlob={audioBlob}
                         audioFileName={audioFileName}
                         currentText={text}
-                        recordingKey={transcriptId || audioFileName || 'current-transcript'}
+                        recordingKey={sourceRecordingId || transcriptId || audioFileName || 'current-transcript'}
                         onCandidateReady={(candidateText, label) => addVersion(candidateText, 'manual', label)}
                       />
                       <AudioLearningQueue

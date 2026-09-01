@@ -9,7 +9,7 @@ describe('Talmudic correction seed', () => {
     seedTalmudicCorrections();
 
     const result = applyLearnedCorrections(
-      'ורישמע בשם רב היגאון כי דאמר בברבטרה',
+      'ורישמע בשם רב הייגאון כי דאמר בברא בתרא',
     );
 
     expect(result.text).toBe('ורישמע בשם רב האי גאון כי דאמר בבא בתרא');

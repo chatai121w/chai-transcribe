@@ -1,17 +1,15 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { GitCompareArrows, Users, FileAudio, TrendingUp, Wand2, Target, Loader2 } from "lucide-react";
+import { GitCompareArrows, Users, FileAudio, TrendingUp, Wand2, Loader2 } from "lucide-react";
 import CompareReport from "./CompareReport";
 import DiarizationComparePage from "./DiarizationComparePage";
 import TrendsTab from "./compare/TrendsTab";
 
 // Lazy-load the heavy pages so they only mount when their tab is opened
 const Benchmark = lazy(() => import("./Benchmark"));
-const AsrTraining = lazy(() => import("./AsrTraining"));
-
-type TabId = "trends" | "enhance" | "transcripts" | "ground-truth" | "diarization";
-const VALID: TabId[] = ["trends", "enhance", "transcripts", "ground-truth", "diarization"];
+type TabId = "trends" | "enhance" | "transcripts" | "diarization";
+const VALID: TabId[] = ["trends", "enhance", "transcripts", "diarization"];
 
 // Back-compat for old query params
 const LEGACY_MAP: Record<string, TabId> = {
@@ -31,6 +29,7 @@ const ComparisonsHub = () => {
 
   const initial = (): TabId => {
     const raw = new URLSearchParams(location.search).get("tab");
+    if (raw === "ground-truth") return "trends";
     if (!raw) return "trends";
     if (VALID.includes(raw as TabId)) return raw as TabId;
     if (LEGACY_MAP[raw]) return LEGACY_MAP[raw];
@@ -41,6 +40,10 @@ const ComparisonsHub = () => {
 
   useEffect(() => {
     const raw = new URLSearchParams(location.search).get("tab");
+    if (raw === "ground-truth") {
+      navigate('/transcription-lab', { replace: true });
+      return;
+    }
     const next = raw && VALID.includes(raw as TabId) ? (raw as TabId) : null;
     if (next && next !== tab) setTab(next);
   }, [location.search]);
@@ -65,7 +68,7 @@ const ComparisonsHub = () => {
       </div>
 
       <Tabs value={tab} onValueChange={onChange} dir="rtl">
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5">
+        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
           <TabsTrigger value="trends" className="gap-1.5">
             <TrendingUp className="w-4 h-4" />
             <span className="hidden sm:inline">מגמות</span>
@@ -77,10 +80,6 @@ const ComparisonsHub = () => {
           <TabsTrigger value="transcripts" className="gap-1.5">
             <FileAudio className="w-4 h-4" />
             <span className="hidden sm:inline">הגדרות תמלול</span>
-          </TabsTrigger>
-          <TabsTrigger value="ground-truth" className="gap-1.5">
-            <Target className="w-4 h-4" />
-            <span className="hidden sm:inline">מול טקסט אמת</span>
           </TabsTrigger>
           <TabsTrigger value="diarization" className="gap-1.5">
             <Users className="w-4 h-4" />
@@ -96,9 +95,6 @@ const ComparisonsHub = () => {
         </TabsContent>
         <TabsContent value="transcripts" className="mt-4">
           <CompareReport />
-        </TabsContent>
-        <TabsContent value="ground-truth" className="mt-4">
-          <Suspense fallback={<TabFallback />}><AsrTraining /></Suspense>
         </TabsContent>
         <TabsContent value="diarization" className="mt-4">
           <DiarizationComparePage />

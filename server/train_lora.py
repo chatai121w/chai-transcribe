@@ -32,7 +32,41 @@ import os
 import sys
 import time
 import traceback
+import unicodedata
 from pathlib import Path
+
+
+TARGET_TERMS_PATH = Path(__file__).resolve().parent.parent / "tools" / "asr_eval" / "target_terms.txt"
+
+
+def _normalize_hebrew_metric_text(value: str) -> str:
+    value = unicodedata.normalize("NFKC", value)
+    value = "".join(char for char in value if not 0x0591 <= ord(char) <= 0x05C7)
+    return " ".join("".join(char if char.isalnum() else " " for char in value).split())
+
+
+def _load_target_terms() -> list[str]:
+    if not TARGET_TERMS_PATH.is_file():
+        return []
+    return [
+        _normalize_hebrew_metric_text(line)
+        for line in TARGET_TERMS_PATH.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def _term_recall(references: list[str], predictions: list[str], terms: list[str]) -> tuple[float | None, int]:
+    reference = _normalize_hebrew_metric_text(" ".join(references))
+    prediction = _normalize_hebrew_metric_text(" ".join(predictions))
+    total = 0
+    matched = 0
+    for term in terms:
+        occurrences = reference.count(term)
+        if not occurrences:
+            continue
+        total += occurrences
+        matched += min(occurrences, prediction.count(term))
+    return ((100.0 * matched / total) if total else None), total
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -268,6 +302,7 @@ def main():
         # ── 6. Metrics (WER/CER) ───────────────────────────────────────
         metric_wer = evaluate.load("wer")
         metric_cer = evaluate.load("cer")
+        target_terms = _load_target_terms()
 
         def compute_metrics(pred):
             pred_ids = pred.predictions
@@ -277,7 +312,11 @@ def main():
             label_str = tokenizer.batch_decode(label_ids, skip_special_tokens=True)
             wer = 100 * metric_wer.compute(predictions=pred_str, references=label_str)
             cer = 100 * metric_cer.compute(predictions=pred_str, references=label_str)
-            return {"wer": wer, "cer": cer}
+            recall, term_count = _term_recall(label_str, pred_str, target_terms)
+            metrics = {"wer": wer, "cer": cer, "term_count": term_count}
+            if recall is not None:
+                metrics["term_recall"] = recall
+            return metrics
 
         # ── 7. Baseline eval (WER/CER before training) ─────────────────
         if eval_ds is not None:
@@ -295,8 +334,14 @@ def main():
                         base_refs.append(tokenizer.decode(labels, skip_special_tokens=True))
                 wer_before = 100 * metric_wer.compute(predictions=base_preds, references=base_refs)
                 cer_before = 100 * metric_cer.compute(predictions=base_preds, references=base_refs)
+                term_recall_before, eval_term_count = _term_recall(base_refs, base_preds, target_terms)
                 progress.log(f"Baseline  WER={wer_before:.2f}%  CER={cer_before:.2f}%")
-                progress.update(wer_before=wer_before, cer_before=cer_before)
+                progress.update(
+                    wer_before=wer_before,
+                    cer_before=cer_before,
+                    term_recall_before=term_recall_before,
+                    eval_term_count=eval_term_count,
+                )
             except Exception as e:
                 progress.log(f"Baseline eval skipped: {e}")
 
@@ -373,6 +418,8 @@ def main():
             progress.update(
                 wer_after=metrics.get("eval_wer"),
                 cer_after=metrics.get("eval_cer"),
+                term_recall_after=metrics.get("eval_term_recall"),
+                eval_term_count=metrics.get("eval_term_count", 0),
                 eval_loss=metrics.get("eval_loss"),
             )
             progress.log(f"Final  WER={metrics.get('eval_wer'):.2f}%  CER={metrics.get('eval_cer'):.2f}%")

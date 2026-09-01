@@ -33,10 +33,8 @@ import {
   Video,
   Youtube,
   Bot,
-  ScrollText,
-  GraduationCap,
-  BookOpen,
   Languages,
+  FlaskConical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -69,14 +67,13 @@ const navItems: NavItem[] = [
   { label: "תיקיות", icon: FolderOpen, path: "/folders" },
   { label: "עורך טקסט", icon: FileText, path: "/text-editor" },
   { label: "תרגום", icon: Languages, path: "/translation" },
-  { label: "מילון ולמידה אישית", icon: BookOpen, path: "/personal-learning" },
+  { label: "מעבדת תמלול", icon: FlaskConical, path: "/transcription-lab" },
   { label: "זיהוי דוברים", icon: Users, path: "/diarization" },
   { label: "השוואות", icon: GitCompareArrows, path: "/compare" },
   { label: "מרכז אודיו וחיתוך", icon: Music, path: "/video-to-mp3" },
   { label: "הרמוניקיה", icon: AudioLines, path: "/harmonika" },
   { label: "התקנת שרת", icon: Server, path: "/setup" },
   { label: "לוח בקרה", icon: Bot, path: "/system-dashboard" },
-  { label: "לשון הקודש", icon: ScrollText, path: "/lashon-kodesh" },
   { label: "הגדרות", icon: Settings, path: "/settings" },
 ];
 

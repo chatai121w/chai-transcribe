@@ -5,7 +5,12 @@
  */
 
 import { db } from "@/lib/localDb";
-import { getAllTerms, type VocabularyEntry } from "@/utils/customVocabulary";
+import {
+  getAllTerms,
+  mergeVocabularyFromExternal,
+  normalizeVocabularyKey,
+  type VocabularyEntry,
+} from "@/utils/customVocabulary";
 import { getAllCorrections, type CorrectionEntry } from "@/utils/correctionLearning";
 import { debugLog } from "@/lib/debugLogger";
 
@@ -113,15 +118,9 @@ export async function restoreBackup(file: File): Promise<{ transcripts: number; 
   // 2. Restore vocabulary
   if (data.vocabulary?.length) {
     const existing = getAllTerms();
-    const existingSet = new Set(existing.map(v => v.term));
-    const merged = [...existing];
-    for (const item of data.vocabulary) {
-      if (!existingSet.has(item.term)) {
-        merged.push(item);
-        vocabRestored++;
-      }
-    }
-    localStorage.setItem("custom_vocabulary", JSON.stringify(merged));
+    const existingKeys = new Set(existing.map(entry => normalizeVocabularyKey(entry.term)));
+    vocabRestored = data.vocabulary.filter(entry => !existingKeys.has(normalizeVocabularyKey(entry.term))).length;
+    mergeVocabularyFromExternal(data.vocabulary);
   }
 
   // 3. Restore correction rules

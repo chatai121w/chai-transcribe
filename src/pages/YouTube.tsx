@@ -26,7 +26,7 @@ import { startYoutubeJob, resumeYoutubeJob } from "@/lib/jobs/pipelines/youtubeP
 import { YoutubeJobProgress } from "@/components/YoutubeJobProgress";
 import { VideoTranscriptViewer } from "@/components/VideoTranscriptViewer";
 import type { JobRecord } from "@/lib/jobs/types";
-import { db } from "@/lib/localDb";
+import { retainAudioBlob } from "@/lib/localDb";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 import { getServerUrl } from "@/lib/serverConfig";
 import { useNavigate } from "react-router-dom";
@@ -285,7 +285,7 @@ export default function YouTubePage() {
       const { text, wordTimings, audioBlob, audioFileName } = await loadYoutubeEditorPayload(job.output_files ?? []);
       // Persist for recovery, exactly like a normal transcription would.
       try {
-        await db.audioBlobs.put({ id: 'last_audio', blob: audioBlob, type: audioBlob.type, name: audioFileName, saved_at: Date.now() });
+        await retainAudioBlob(audioBlob, audioFileName, audioBlob.type);
       } catch { /* Dexie unavailable */ }
 
       navigate('/text-editor', {

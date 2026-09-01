@@ -111,9 +111,25 @@ def _model_quality_gate(progress: dict) -> tuple[bool, list[str]]:
         reasons.append("holdout WER regressed")
     if progress["cer_after"] > progress["cer_before"]:
         reasons.append("holdout CER regressed")
+    if progress.get("eval_term_count", 0) > 0:
+        if progress.get("term_recall_before") is None or progress.get("term_recall_after") is None:
+            reasons.append("terminology recall is missing")
+        elif progress["term_recall_after"] < progress["term_recall_before"]:
+            reasons.append("holdout terminology recall regressed")
     if progress["wer_after"] == progress["wer_before"] and progress["cer_after"] == progress["cer_before"]:
         reasons.append("model did not improve WER or CER")
     return not reasons, reasons
+
+
+def _recording_group_id(metadata: dict) -> str:
+    """Return the canonical full-recording identity used for leakage-safe splits."""
+    return str(
+        metadata.get("sourceRecordingId")
+        or metadata.get("source_recording_id")
+        or metadata.get("groupId")
+        or metadata.get("group_id")
+        or ""
+    ).strip()
 
 
 def _finalize_dataset(ds_dir: Path) -> dict:
@@ -136,7 +152,7 @@ def _finalize_dataset(ds_dir: Path) -> dict:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             except Exception:
                 metadata = {}
-        group_id = str(metadata.get("groupId") or metadata.get("group_id") or audio_path.stem)
+        group_id = _recording_group_id(metadata)
         rows.append({
             "audio": str(audio_path.resolve()), "text": text, "duration": duration,
             "audio_sha256": hashlib.sha256(audio_path.read_bytes()).hexdigest(),
@@ -146,22 +162,37 @@ def _finalize_dataset(ds_dir: Path) -> dict:
     rows.sort(key=lambda row: hashlib.sha256(f'{row["group_id"]}|{row["audio"]}|{row["text"]}'.encode()).hexdigest())
     groups = {}
     for row in rows:
-        groups.setdefault(row["group_id"], []).append(row)
+        if row["group_id"]:
+            groups.setdefault(row["group_id"], []).append(row)
+    reserved_groups = {
+        row["group_id"]
+        for row in rows
+        if row["group_id"] and str(row["metadata"].get("benchmarkRole") or "").strip()
+    }
+    fixed_eval_groups = {
+        row["group_id"]
+        for row in rows
+        if row["group_id"] and row["metadata"].get("benchmarkRole") == "failure-holdout"
+    }
     # Prefer smaller recordings for holdout so most approved audio remains
     # available for training while every recording stays entirely in one split.
+    trainable_groups = {key: value for key, value in groups.items() if key not in reserved_groups}
     ordered_groups = sorted(
-        groups.items(),
+        trainable_groups.items(),
         key=lambda item: (len(item[1]), hashlib.sha256(item[0].encode()).hexdigest()),
     )
-    eval_rows = []
-    if len(rows) >= 10 and len(ordered_groups) >= 2:
+    eval_rows = [row for row in rows if row["group_id"] in fixed_eval_groups]
+    if not eval_rows and len(rows) >= 10 and len(ordered_groups) >= 2:
         target_eval_count = max(1, round(len(rows) * 0.15))
         for _, group_rows in ordered_groups[:-1]:
             eval_rows.extend(group_rows)
             if len(eval_rows) >= target_eval_count:
                 break
     eval_audio = {row["audio"] for row in eval_rows}
-    train_rows = [row for row in rows if row["audio"] not in eval_audio]
+    train_rows = [
+        row for row in rows
+        if row["audio"] not in eval_audio and row["group_id"] not in reserved_groups
+    ]
     eval_count = len(eval_rows)
     quality_counts = {"gold": 0, "silver": 0, "bronze": 0, "unknown": 0}
     label_source_counts = {}
@@ -179,23 +210,34 @@ def _finalize_dataset(ds_dir: Path) -> dict:
         return path
 
     manifest = write_manifest("manifest.jsonl", rows)
-    write_manifest("manifest.train.jsonl", train_rows if eval_rows else rows)
+    write_manifest("manifest.train.jsonl", train_rows)
     eval_path = ds_dir / "manifest.eval.jsonl"
     if eval_rows:
         write_manifest(eval_path.name, eval_rows)
     elif eval_path.exists():
         eval_path.unlink()
     warnings = []
+    unknown_group_count = sum(1 for row in rows if not row["group_id"])
     if len(rows) < 20:
         warnings.append("At least 20 approved clips are required for a real training run")
+    if unknown_group_count:
+        warnings.append(
+            f"{unknown_group_count} legacy clips have no source recording identity; "
+            "recover or review their provenance before training"
+        )
     if not eval_rows:
         warnings.append("At least 10 clips from 2 different recordings are required for a leakage-safe holdout split")
+    if reserved_groups:
+        warnings.append(f"{len(reserved_groups)} frozen benchmark recording groups are excluded from training")
     meta = {
-        "count": len(rows), "train_count": len(train_rows) if eval_rows else len(rows),
+        "count": len(rows), "train_count": len(train_rows),
         "eval_count": eval_count, "recording_groups": len(groups), "duration_seconds": round(total_duration, 2),
         "eval_fingerprint": _evaluation_fingerprint(eval_rows) if eval_rows else None,
         "quality_counts": quality_counts, "label_source_counts": label_source_counts,
-        "ready_for_training": len(rows) >= 20 and bool(eval_rows), "warnings": warnings,
+        "unknown_group_count": unknown_group_count,
+        "reserved_benchmark_groups": len(reserved_groups),
+        "ready_for_training": (len(train_rows) + len(eval_rows)) >= 20 and bool(eval_rows) and unknown_group_count == 0,
+        "warnings": warnings,
     }
     (ds_dir / "dataset_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"manifest": str(manifest), "rows": len(rows), **meta}
@@ -242,6 +284,18 @@ def register_training_routes(app):
         ds_dir = DATASETS_DIR / ds_id
         if not ds_dir.is_dir():
             return jsonify({"error": "unknown dataset"}), 404
+        raw_metadata = request.form.get("metadata")
+        try:
+            metadata = json.loads(raw_metadata) if raw_metadata else {}
+            if not isinstance(metadata, dict):
+                raise ValueError("metadata is not an object")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return jsonify({"error": "metadata must be a valid JSON object"}), 400
+        if not _recording_group_id(metadata):
+            return jsonify({
+                "error": "metadata.sourceRecordingId or metadata.groupId is required "
+                         "so clips from one recording cannot leak across train and evaluation"
+            }), 400
         idx = len(list((ds_dir / "audio").glob("*"))) + 1
         suffix = Path(audio.filename or "clip.wav").suffix.lower() or ".wav"
         if suffix not in {".wav", ".mp3", ".m4a", ".webm", ".ogg", ".flac", ".mp4"}:
@@ -260,18 +314,8 @@ def register_training_routes(app):
                 audio_path.unlink(missing_ok=True)
                 return jsonify({"error": "this audio clip is already in the dataset"}), 409
         text_path.write_text(text, encoding="utf-8")
-        raw_metadata = request.form.get("metadata")
-        if raw_metadata:
-            try:
-                metadata = json.loads(raw_metadata)
-                if not isinstance(metadata, dict):
-                    raise ValueError("metadata is not an object")
-                metadata_path.parent.mkdir(parents=True, exist_ok=True)
-                metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                audio_path.unlink(missing_ok=True)
-                text_path.unlink(missing_ok=True)
-                return jsonify({"error": "metadata must be a valid JSON object"}), 400
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         stats = _finalize_dataset(ds_dir)
         return jsonify({"index": idx, "audio": str(audio_path), "text": str(text_path), "duration": duration, **stats})
 
@@ -333,23 +377,13 @@ def register_training_routes(app):
         if not manifest and dataset_id:
             ds_dir = DATASETS_DIR / _safe_id(dataset_id)
             manifest_path = ds_dir / "manifest.train.jsonl"
-            # Auto-finalize if dataset dir exists but manifest hasn't been written yet
-            if not manifest_path.is_file() and (ds_dir / "audio").is_dir():
-                rows = 0
-                with open(manifest_path, "w", encoding="utf-8") as mf:
-                    for audio_path in sorted((ds_dir / "audio").glob("*")):
-                        stem = audio_path.stem
-                        text_path = ds_dir / "texts" / f"{stem}.txt"
-                        if not text_path.is_file():
-                            continue
-                        text = text_path.read_text(encoding="utf-8").strip()
-                        if not text:
-                            continue
-                        mf.write(json.dumps({"audio": str(audio_path.resolve()), "text": text}, ensure_ascii=False) + "\n")
-                        rows += 1
-                if rows == 0:
-                    return jsonify({"error": "dataset is empty — upload audio+text pairs first"}), 400
-            _finalize_dataset(ds_dir)
+            if not (ds_dir / "audio").is_dir():
+                return jsonify({"error": "dataset not found"}), 404
+            stats = _finalize_dataset(ds_dir)
+            if not stats["rows"]:
+                return jsonify({"error": "dataset is empty — upload audio+text pairs first"}), 400
+            if not smoke_test and not stats["ready_for_training"]:
+                return jsonify({"error": "; ".join(stats["warnings"])}), 400
             manifest = str(manifest_path)
             count_manifest = str(ds_dir / "manifest.jsonl")
             eval_path = ds_dir / "manifest.eval.jsonl"

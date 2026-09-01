@@ -7,12 +7,10 @@ import { evaluateLearningRegression, type LearningRegressionResult, type Learnin
 import { getServerUrl } from '@/lib/serverConfig';
 import { fingerprintFile } from '@/lib/recordingFingerprint';
 import { recordRun } from '@/lib/comparisonRuns';
-import { applyLearnedCorrections, getLearnedHotwords } from '@/utils/correctionLearning';
-import { applyVocabularyCorrections, getHotwordsString, isCustomVocabularyEnabled } from '@/utils/customVocabulary';
-import { applyDefinitiveRulesToText, areDefinitiveRulesEnabled } from '@/utils/hebrewRuleEngine';
-import { isPersonalPronunciationEnabled } from '@/lib/personalPronunciationModel';
-import { applyProfileCorrections, buildProfileHotwords, getProfileInitialPrompt, isProfileLoshonKodesh } from '@/lib/pronunciationProfiles';
-import { applyLoshonKodeshReplacements, buildLoshonKodeshHotwords, getLoshonKodeshPrompt, isLoshonKodeshEnabled } from '@/lib/loshonKodesh';
+import { buildTranscriptionHotwords } from '@/lib/transcriptionHotwords';
+import { applyTranscriptionKnowledge } from '@/lib/transcriptionKnowledge';
+import { getLoshonKodeshPrompt, isLoshonKodeshEnabled } from '@/lib/loshonKodesh';
+import { isProfileLoshonKodesh } from '@/lib/pronunciationProfiles';
 
 const GROUND_TRUTH_KEY = 'learning_regression_ground_truth_v1';
 const HISTORY_KEY = 'learning_regression_history_v1';
@@ -51,16 +49,9 @@ async function transcribe(file: File, learning: boolean): Promise<{ text: string
   if (model) form.append('model', model);
 
   if (learning) {
-    const personal = isPersonalPronunciationEnabled();
-    const vocabulary = isCustomVocabularyEnabled();
     const lkActive = isLoshonKodeshEnabled() || isProfileLoshonKodesh();
-    const baseHotwords = [
-      vocabulary ? getHotwordsString() : '',
-      personal ? getLearnedHotwords() : '',
-      personal ? buildProfileHotwords() : '',
-    ].filter(Boolean).join(', ');
-    const hotwords = lkActive ? buildLoshonKodeshHotwords(baseHotwords) : baseHotwords;
-    const prompt = lkActive ? getLoshonKodeshPrompt() : getProfileInitialPrompt();
+    const hotwords = buildTranscriptionHotwords({ loshonKodesh: lkActive });
+    const prompt = lkActive ? getLoshonKodeshPrompt() : '';
     if (hotwords) form.append('hotwords', hotwords);
     if (prompt) form.append('initial_prompt', prompt);
     if (lkActive) form.append('loshon_kodesh', '1');
@@ -76,28 +67,8 @@ async function transcribe(file: File, learning: boolean): Promise<{ text: string
 }
 
 function applyLearningStack(raw: string): { text: string; corrections: number } {
-  let text = raw;
-  let corrections = 0;
-  if (areDefinitiveRulesEnabled()) {
-    const result = applyDefinitiveRulesToText(text);
-    text = result.fixedText;
-    corrections += result.hits.length;
-  }
-  if (isPersonalPronunciationEnabled()) {
-    const learned = applyLearnedCorrections(text, { engine: 'Local CUDA' });
-    text = learned.text;
-    corrections += learned.appliedCount;
-    const profile = applyProfileCorrections(text);
-    text = profile.text;
-    corrections += profile.appliedCount;
-  }
-  if (isCustomVocabularyEnabled()) {
-    const vocabulary = applyVocabularyCorrections(text);
-    text = vocabulary.text;
-    corrections += vocabulary.appliedCount;
-  }
-  if (isLoshonKodeshEnabled() || isProfileLoshonKodesh()) text = applyLoshonKodeshReplacements(text);
-  return { text, corrections };
+  const result = applyTranscriptionKnowledge(raw, 'Local CUDA');
+  return { text: result.text, corrections: result.totalApplied };
 }
 
 const statusClass: Record<LearningWordStatus, string> = {

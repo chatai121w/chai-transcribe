@@ -282,8 +282,11 @@ def _resolve_prompt_and_hotwords(language, user_initial_prompt, user_hotwords, l
         for source in sources:
             for w in source.split(','):
                 w = w.strip()
-                if w and w not in seen:
-                    seen.add(w)
+                key = unicodedata.normalize("NFKC", w)
+                key = re.sub(r"[\u05f3\u05f4\"']", "", key)
+                key = re.sub(r"\s+", " ", key).strip().casefold()
+                if key and key not in seen:
+                    seen.add(key)
                     merged.append(w)
         hotwords = ', '.join(merged) if merged else None
     else:
@@ -5487,31 +5490,22 @@ CREATE TABLE IF NOT EXISTS lk_sessions (
 
 # Built-in Ashkenazi grammar rules seeded on first run
 _LK_BUILTIN_RULES = [
-    ("תו-ללא-דגש → ס (אשכנז)",
-     r'\bת(?=[אוּוּ])', "ס",
-     "ashkenazi", 1, 100),
-    ("שַׁבָּת → שַׁבָּס",
-     r'\bשַׁבָּת\b', "שַׁבָּס",
-     "ashkenazi", 1, 90),
-    ("מִצְוָה → מִצְוָה (maintain)",
-     r'\bמִצְוָה\b', "מִצְוָה",
-     "ashkenazi", 1, 80),
-    ("ברכות → ברוכות (blessing-form)",
-     r'\bבְּרָכוֹת\b', "ברוכות",
-     "ashkenazi", 0, 70),
-    ("תורה → תוירה",
-     r'\bתּוֹרָה\b', "תּוֹירָה",
-     "ashkenazi", 0, 60),
-    ("שבת → שבס",
-     r'\bשבת\b', "שבס",
-     "ashkenazi", 1, 50),
-    ("מצוה → מצוה",
-     r'\bמצוה\b', "מצוה",
-     "ashkenazi", 1, 40),
-    ("יום טוב → יום טויב",
-     r'\bיום טוב\b', "יום טויב",
-     "ashkenazi", 0, 30),
+    ("תוירה → תורה", r'\bתוירה\b', "תורה", "ashkenazi", 1, 100),
+    ("קוידש → קודש", r'\bקוידש\b', "קודש", "ashkenazi", 1, 95),
+    ("מוישה → משה", r'\bמוישה\b', "משה", "ashkenazi", 1, 90),
+    ("שאבעס → שבת", r'\bשאבעס\b', "שבת", "ashkenazi", 1, 85),
+    ("שאבס → שבת", r'\bשאבס\b', "שבת", "ashkenazi", 1, 80),
+    ("אמעס → אמת", r'\bאמעס\b', "אמת", "ashkenazi", 1, 75),
 ]
+
+_LK_UNSAFE_LEGACY_RULE_NAMES = (
+    "תו-ללא-דגש → ס (אשכנז)",
+    "שַׁבָּת → שַׁבָּס",
+    "ברכות → ברוכות (blessing-form)",
+    "תורה → תוירה",
+    "שבת → שבס",
+    "יום טוב → יום טויב",
+)
 
 
 def _lk_db():
@@ -5533,6 +5527,12 @@ def _lk_init():
                 "VALUES (?,?,?,?,?,?)",
                 (name, pattern, replacement, tradition, enabled, priority)
             )
+        # Old builds seeded rules that converted canonical Hebrew into phonetic
+        # Ashkenazi spelling. Keep the rows for audit, but never apply them.
+        conn.executemany(
+            "UPDATE lk_grammar_rules SET enabled=0 WHERE name=?",
+            [(name,) for name in _LK_UNSAFE_LEGACY_RULE_NAMES],
+        )
         conn.commit()
 
 # Initialise on import
@@ -6293,10 +6293,13 @@ def lk_benchmark_stats():
     if recent and older:
         r_avg = _st.mean(recent)
         o_avg = _st.mean(older)
-        if r_avg > o_avg * 1.1:
-            trend, trend_label = "improving", "מגמת שיפור 📈"
-        elif r_avg < o_avg * 0.9:
-            trend, trend_label = "declining", "מגמת ירידה 📉"
+        # Fewer deterministic fixes for comparable recordings is the only
+        # direction that can be described as improvement here. This remains a
+        # heuristic, not an accuracy metric; WER/CER require ground truth.
+        if r_avg < o_avg * 0.9:
+            trend, trend_label = "improving", "נדרשו פחות תיקונים"
+        elif r_avg > o_avg * 1.1:
+            trend, trend_label = "declining", "נדרשו יותר תיקונים"
         else:
             trend, trend_label = "stable", "יציב 📊"
     else:
@@ -6394,15 +6397,15 @@ def lk_benchmark_run():
         probs = [wt["probability"] for wt in word_timings if wt["probability"] > 0]
         avg_prob = _st.mean(probs) if probs else 0.0
         total_words = len(word_timings) or 1
-        pronunciation_score = round(avg_prob * 100, 1)
+        recognition_confidence_score = round(avg_prob * 100, 1)
         rtf = round(processing_time / max(duration, 0.1), 3)
 
         # Grade
-        if pronunciation_score >= 88:
+        if recognition_confidence_score >= 88:
             grade, grade_color = "מצוין 🏆", "green"
-        elif pronunciation_score >= 74:
+        elif recognition_confidence_score >= 74:
             grade, grade_color = "טוב 👍", "blue"
-        elif pronunciation_score >= 60:
+        elif recognition_confidence_score >= 60:
             grade, grade_color = "בסדר 📚", "amber"
         else:
             grade, grade_color = "צריך שיפור 💪", "red"
@@ -6411,12 +6414,12 @@ def lk_benchmark_run():
         strong_words = [wt["word"] for wt in word_timings if wt["probability"] > 0.9 and len(wt["word"]) > 1]
         strong_pct = round(len(strong_words) / total_words * 100)
 
-        if pronunciation_score >= 88:
-            feedback = f"הגייה ברמה גבוהה מאוד! Whisper זיהה {strong_pct}% מהמילים ברמת ביטחון גבוהה."
-        elif pronunciation_score >= 74:
-            feedback = f"הגייה טובה. {strong_pct}% מהמילים זוהו בביטחון גבוה. {len(weak_words)} מילים צריכות חיזוק."
-        elif pronunciation_score >= 60:
-            feedback = f"הגייה ממוצעת. מומלץ לאמן את המילים: {', '.join(weak_words[:5]) if weak_words else '—'}."
+        if recognition_confidence_score >= 88:
+            feedback = f"ביטחון הזיהוי של Whisper גבוה ב-{strong_pct}% מהמילים. זה אינו מדד הגייה ואינו מדד דיוק."
+        elif recognition_confidence_score >= 74:
+            feedback = f"ביטחון הזיהוי בינוני-גבוה. {len(weak_words)} מילים דורשות בדיקה מול האודיו."
+        elif recognition_confidence_score >= 60:
+            feedback = f"ביטחון הזיהוי בינוני. יש לבדוק מול האודיו את: {', '.join(weak_words[:5]) if weak_words else '—'}."
         else:
             feedback = f"קצב דיבור מהיר מדי, רעש רקע, או הגייה לא מוכרת. {len(weak_words)} מילים ברמת ביטחון נמוכה."
 
@@ -6450,7 +6453,8 @@ def lk_benchmark_run():
             "processing_time": processing_time,
             "rtf": rtf,
             "total_words": total_words,
-            "pronunciation_score": pronunciation_score,
+            "recognition_confidence_score": recognition_confidence_score,
+            "pronunciation_score": recognition_confidence_score,
             "avg_probability": round(avg_prob, 3),
             "grade": grade,
             "grade_color": grade_color,

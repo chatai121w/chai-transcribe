@@ -89,12 +89,11 @@ const Harmonika = lazyWithLog('Harmonika', () => import("./pages/Harmonika"));
 const MeetingRecorder = lazyWithLog('MeetingRecorder', () => import("./pages/MeetingRecorder"));
 const VoiceCommandAdmin = lazyWithLog('VoiceCommandAdmin', () => import("./pages/VoiceCommandAdmin"));
 const SystemDashboard   = lazyWithLog('SystemDashboard',   () => import("./pages/SystemDashboard"));
-const LashoKodesh       = lazyWithLog('LashoKodesh',       () => import("./pages/LashoKodesh"));
 const PersonalLearning = lazyWithLog('PersonalLearning', () => import("./pages/PersonalLearning"));
 const Translation = lazyWithLog('Translation', () => import("./pages/Translation"));
 const CompareReport     = lazyWithLog('CompareReport',     () => import("./pages/CompareReport"));
 const ComparisonsHub    = lazyWithLog('ComparisonsHub',    () => import("./pages/ComparisonsHub"));
-const AsrTraining       = lazyWithLog('AsrTraining',       () => import("./pages/AsrTraining"));
+const TranscriptionLab  = lazyWithLog('TranscriptionLab',  () => import("./pages/TranscriptionLab"));
 
 // Lazy non-critical UI widgets — defer past first paint
 const SmartConsoleLazy = lazy(() => import("./components/SmartConsole").then(m => ({ default: m.SmartConsole })));
@@ -295,11 +294,12 @@ const App = () => {
                 <Route path="/meeting-recorder" element={<ProtectedRoute><MeetingRecorder /></ProtectedRoute>} />
                 <Route path="/voice-command-admin" element={<ProtectedRoute><VoiceCommandAdmin /></ProtectedRoute>} />
                 <Route path="/system-dashboard" element={<ProtectedRoute><SystemDashboard /></ProtectedRoute>} />
-                <Route path="/lashon-kodesh" element={<ProtectedRoute><LashoKodesh /></ProtectedRoute>} />
-                <Route path="/loshon-kodesh-rules" element={<Navigate to="/lashon-kodesh?tab=settings" replace />} />
+                <Route path="/transcription-lab" element={<ProtectedRoute><TranscriptionLab /></ProtectedRoute>} />
+                <Route path="/lashon-kodesh" element={<Navigate to="/transcription-lab?mode=lashon-kodesh" replace />} />
+                <Route path="/loshon-kodesh-rules" element={<Navigate to="/personal-learning?tab=loshon-kodesh" replace />} />
                 <Route path="/personal-learning" element={<ProtectedRoute><PersonalLearning /></ProtectedRoute>} />
                 <Route path="/translation" element={<ProtectedRoute><Translation /></ProtectedRoute>} />
-                <Route path="/asr-training" element={<Navigate to="/compare?tab=ground-truth" replace />} />
+                <Route path="/asr-training" element={<Navigate to="/transcription-lab" replace />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
