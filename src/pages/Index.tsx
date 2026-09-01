@@ -1976,6 +1976,7 @@ const Index = () => {
     const partial = recoverPartial();
     const source = partial?.sourceFile;
     if (!source?.cloudAudioPath) return;
+    let downloadedFile: File | null = null;
     try {
       toast({ title: 'מוריד את קובץ השחזור מהענן', description: source.name });
       const signedUrl = await getAudioUrl(source.cloudAudioPath);
@@ -1983,16 +1984,13 @@ const Index = () => {
       const response = await fetch(signedUrl);
       if (!response.ok) throw new Error(`הורדת הקובץ נכשלה (${response.status})`);
       const blob = await response.blob();
-      const file = new File([blob], source.name, {
+      downloadedFile = new File([blob], source.name, {
         type: source.type || blob.type || 'application/octet-stream',
         lastModified: source.lastModified,
       });
-      await handleResumeTranscription(file);
+      await handleResumeTranscription(downloadedFile);
     } catch (error) {
-      await backupPartialAudioToCloud(new File([blob], source.name, {
-        type: source.type || blob.type || 'application/octet-stream',
-        lastModified: source.lastModified,
-      }));
+      if (downloadedFile) await backupPartialAudioToCloud(downloadedFile);
       debugLog.error('Recovery', 'Cloud resume failed', error instanceof Error ? error.message : String(error));
       toast({
         title: 'לא ניתן להמשיך מהענן',
