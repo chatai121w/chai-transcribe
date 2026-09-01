@@ -211,8 +211,18 @@ export const useCloudVersions = (transcriptId: string | null) => {
     };
     setVersions(prev => [...prev, optimistic]);
 
-    if (await isDbAvailable()) {
-      await db.versions.put(localVersion);
+    // The IndexedDB copy is a cache/offline fallback. A closed, upgrading or
+    // quota-limited local database must never prevent the Supabase write.
+    try {
+      if (await isDbAvailable()) {
+        await db.versions.put(localVersion);
+      }
+    } catch (localError) {
+      debugLog.warn(
+        'Versions',
+        'Local version cache failed; continuing with cloud save',
+        localError instanceof Error ? localError.message : String(localError),
+      );
     }
 
     try {
@@ -246,14 +256,24 @@ export const useCloudVersions = (transcriptId: string | null) => {
 
       setVersions(prev => prev.map(v => v.id === localId ? cloudVersion : v));
 
-      if (await isDbAvailable()) {
-        await db.versions.delete(localId);
-        await db.versions.put({
-          ...localVersion,
-          id: cloudVersion.id,
-          ai_usage_event_id: cloudVersion.ai_usage_event_id ?? null,
-          _dirty: false,
-        });
+      // Supabase is already committed at this point. Keep local cache cleanup
+      // best-effort so it cannot turn a successful cloud save into a failure.
+      try {
+        if (await isDbAvailable()) {
+          await db.versions.delete(localId);
+          await db.versions.put({
+            ...localVersion,
+            id: cloudVersion.id,
+            ai_usage_event_id: cloudVersion.ai_usage_event_id ?? null,
+            _dirty: false,
+          });
+        }
+      } catch (localError) {
+        debugLog.warn(
+          'Versions',
+          'Cloud version saved but local cache refresh failed',
+          localError instanceof Error ? localError.message : String(localError),
+        );
       }
 
       debugLog.info('Versions', `Saved version #${nextNumber} (${source})`);

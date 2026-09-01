@@ -38,6 +38,7 @@ import {
   Languages,
   Palette,
   Sparkles,
+  ReplaceAll,
   Trash2,
   Delete,
   Wand2,
@@ -72,6 +73,8 @@ export interface WordContextMenuProps {
    * or the inline custom input).
    */
   onReplace: (newWord: string) => void;
+  /** Replaces every exact occurrence in the current editable text. */
+  onReplaceAll?: (newWord: string) => void;
   /** Called when the user clicks "אשר כנכון". */
   onApproveAsCorrect?: () => void;
   /** Whether this word is currently marked as a timing anchor. */
@@ -86,12 +89,14 @@ export const WordContextMenu = ({
   word,
   suggestions = [],
   onReplace,
+  onReplaceAll,
   onApproveAsCorrect,
   isAnchor = false,
   onToggleAnchor,
   children,
 }: WordContextMenuProps) => {
   const [customInput, setCustomInput] = useState(word);
+  const [replaceAllInput, setReplaceAllInput] = useState(word);
   const [verifyInput, setVerifyInput] = useState('');
   // The synced transcript wraps every word in one of these — over eleven
   // thousand of them on a long recording. The menu body is around fifty
@@ -105,6 +110,7 @@ export const WordContextMenu = ({
   // the menu was opened on rather than keeping the first one they ever saw.
   useEffect(() => {
     setCustomInput(word);
+    setReplaceAllInput(word);
     setVerifyInput('');
   }, [word]);
 
@@ -126,6 +132,12 @@ export const WordContextMenu = ({
     const edited = customInput.trim();
     if (edited === word) return;
     onReplace(edited || '__DELETE__');
+  };
+
+  const applyEverywhere = () => {
+    const edited = replaceAllInput.trim();
+    if (!onReplaceAll || !edited || edited === word) return;
+    onReplaceAll(edited);
   };
 
   const handleVerify = (corrected: string) => {
@@ -172,13 +184,72 @@ export const WordContextMenu = ({
     <ContextMenu onOpenChange={setOpen}>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       {open && word && (
-      <ContextMenuContent className="w-64">
+      <ContextMenuContent dir="rtl" className="w-72 text-right">
         <ContextMenuLabel className="text-xs flex items-center justify-between gap-2">
           <span className="truncate">{word}</span>
           {isCorrectionVerified(word, word) && (
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
           )}
         </ContextMenuLabel>
+        <ContextMenuSeparator />
+
+        {/* Similar words are the primary correction path. */}
+        <ContextMenuSub>
+          <ContextMenuSubTrigger className="gap-2 text-xs text-right">
+            <Languages className="w-3.5 h-3.5 text-blue-500" />
+            מילים דומות
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent dir="rtl" className="w-56 text-right">
+            {similar.length === 0 ? (
+              <ContextMenuItem disabled className="text-xs text-muted-foreground text-right">
+                אין הצעות
+              </ContextMenuItem>
+            ) : (
+              similar.map((s) => (
+                <ContextMenuItem key={s} className="text-xs text-right" onSelect={() => handleReplace(s)}>
+                  {s}
+                </ContextMenuItem>
+              ))
+            )}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+
+        {onReplaceAll && (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger className="gap-2 text-xs text-right">
+              <ReplaceAll className="h-3.5 w-3.5 text-emerald-600" />
+              תקן בכל הטקסט
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent dir="rtl" className="w-72 p-2 text-right">
+              <p className="mb-1.5 text-[10px] text-muted-foreground">
+                כל המופעים המדויקים של "{word}" יוחלפו בטקסט הנוכחי.
+              </p>
+              <Input
+                value={replaceAllInput}
+                onChange={(event) => setReplaceAllInput(event.target.value)}
+                className="h-8 text-sm text-right"
+                dir="rtl"
+                autoFocus
+                onKeyDown={(event) => {
+                  if (event.key !== 'Escape') event.stopPropagation();
+                  if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    applyEverywhere();
+                  }
+                }}
+              />
+              <ContextMenuItem
+                className="mt-2 justify-center gap-2 bg-primary text-xs text-primary-foreground focus:bg-primary/90 focus:text-primary-foreground"
+                disabled={!replaceAllInput.trim() || replaceAllInput.trim() === word}
+                onSelect={applyEverywhere}
+              >
+                <ReplaceAll className="h-3.5 w-3.5" />
+                החלף הכל
+              </ContextMenuItem>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        )}
+
         <ContextMenuSeparator />
 
         <ContextMenuItem className="gap-2 text-xs text-destructive" onSelect={() => onReplace('__DELETE__')}>
@@ -191,7 +262,7 @@ export const WordContextMenu = ({
             <Delete className="h-3.5 w-3.5 text-amber-600" />
             עריכת תווים ופיסוק
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-72 p-2">
+          <ContextMenuSubContent dir="rtl" className="w-72 p-2 text-right">
             <p className="mb-1.5 text-[10px] text-muted-foreground">אפשר להוסיף או למחוק אות, נקודה, פסיק או כל תו אחר.</p>
             <div className="flex gap-1.5">
               <Input
@@ -232,7 +303,7 @@ export const WordContextMenu = ({
               <Wand2 className="w-3.5 h-3.5 text-primary" />
               הצעות תיקון ({uniqueSuggestions.length})
             </ContextMenuSubTrigger>
-            <ContextMenuSubContent className="w-56">
+            <ContextMenuSubContent dir="rtl" className="w-56 text-right">
               {uniqueSuggestions.map((s, i) => (
                 <ContextMenuItem
                   key={`${s}-${i}`}
@@ -245,27 +316,6 @@ export const WordContextMenu = ({
             </ContextMenuSubContent>
           </ContextMenuSub>
         )}
-
-        {/* ─── Similar (phonetic neighbors) ─── */}
-        <ContextMenuSub>
-          <ContextMenuSubTrigger className="gap-2 text-xs">
-            <Languages className="w-3.5 h-3.5 text-blue-500" />
-            מילים דומות
-          </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-56">
-            {similar.length === 0 ? (
-              <ContextMenuItem disabled className="text-xs text-muted-foreground">
-                אין הצעות
-              </ContextMenuItem>
-            ) : (
-              similar.map((s) => (
-                <ContextMenuItem key={s} className="text-xs" onSelect={() => handleReplace(s)}>
-                  {s}
-                </ContextMenuItem>
-              ))
-            )}
-          </ContextMenuSubContent>
-        </ContextMenuSub>
 
         <ContextMenuSeparator />
 
@@ -281,7 +331,7 @@ export const WordContextMenu = ({
             <Brain className="w-3.5 h-3.5 text-purple-500" />
             הטמע ללמידת AI
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-64 p-2">
+          <ContextMenuSubContent dir="rtl" className="w-64 p-2 text-right">
             <p className="text-[10px] text-muted-foreground mb-1.5">
               הקלד את ההגייה/האיות הנכון. המערכת תזכור ש-"{word}" צריך להיכתב כך:
             </p>
@@ -352,7 +402,7 @@ export const WordContextMenu = ({
               />
             )}
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-48">
+          <ContextMenuSubContent dir="rtl" className="w-48 text-right">
             <div className="grid grid-cols-4 gap-1 p-1.5">
               {WORD_HIGHLIGHT_PALETTE.map((p) => (
                 <button

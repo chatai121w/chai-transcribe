@@ -91,6 +91,40 @@ function normalizeWord(w: string) {
   return w.replace(/[.,;:!?"'׳״()\[\]{}<>\-–—]/g, "").trim();
 }
 
+export function findTextareaWordRange(value: string, selectionStart: number, selectionEnd: number) {
+  let start = Math.max(0, Math.min(selectionStart, value.length));
+  let end = Math.max(start, Math.min(selectionEnd, value.length));
+
+  if (end > start) {
+    while (start < end && /\s/.test(value[start] || "")) start += 1;
+    while (end > start && /\s/.test(value[end - 1] || "")) end -= 1;
+  } else {
+    if (start === value.length || /\s/.test(value[start] || "")) start -= 1;
+    if (start < 0 || /\s/.test(value[start] || "")) return null;
+    end = start + 1;
+    while (start > 0 && !/\s/.test(value[start - 1])) start -= 1;
+    while (end < value.length && !/\s/.test(value[end])) end += 1;
+  }
+
+  const word = value.slice(start, end);
+  return word ? { start, end, word } : null;
+}
+
+export function replaceAllTextareaWordOccurrences(value: string, target: string, replacement: string) {
+  const normalizedTarget = normalizeWord(target);
+  if (!normalizedTarget) return { text: value, count: 0 };
+
+  let count = 0;
+  const text = value.split(/(\s+)/).map((part) => {
+    if (!part || /^\s+$/.test(part) || normalizeWord(part) !== normalizedTarget) return part;
+    const start = part.indexOf(normalizedTarget);
+    if (start < 0) return part;
+    count += 1;
+    return `${part.slice(0, start)}${replacement}${part.slice(start + normalizedTarget.length)}`;
+  }).join("");
+  return { text, count };
+}
+
 const FONT_FAMILIES = [
   { value: "Assistant",        label: "Assistant" },
   { value: "Rubik",            label: "Rubik" },
@@ -241,6 +275,11 @@ export const SyncMirrorLayout = ({
   const effectiveRichEdit = enableRichEdit && !preciseAlign;
 
   const [fullEditMode, setFullEditMode] = useState(false);
+  const [fullEditWordTarget, setFullEditWordTarget] = useState<{
+    start: number;
+    end: number;
+    word: string;
+  } | null>(null);
   const [editDraft, setEditDraft] = useState(text);
   const [followPlayback, setFollowPlayback] = useState(() => {
     try { return localStorage.getItem('sync_mirror_follow_playback_v2') !== '0'; } catch { return true; }
@@ -807,6 +846,106 @@ export const SyncMirrorLayout = ({
     setFullEditMode(false);
   };
 
+  const captureFullEditWord = useCallback((event: React.MouseEvent<HTMLTextAreaElement>) => {
+    const textarea = event.currentTarget;
+    setFullEditWordTarget(findTextareaWordRange(
+      textarea.value,
+      textarea.selectionStart,
+      textarea.selectionEnd,
+    ));
+  }, []);
+
+  const openFullEditWordMenu = useCallback((event: React.MouseEvent<HTMLTextAreaElement>) => {
+    const textarea = event.currentTarget;
+    const clientX = event.clientX;
+    const clientY = event.clientY;
+    captureFullEditWord(event);
+    window.setTimeout(() => {
+      textarea.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX,
+        clientY,
+      }));
+    }, 0);
+  }, [captureFullEditWord]);
+
+  const applyFullEditWordCorrection = useCallback((replacement: string) => {
+    if (!fullEditWordTarget) return;
+    const { start, end, word } = fullEditWordTarget;
+    const corrected = replacement === "__DELETE__" ? "" : replacement.trim();
+    if (replacement !== "__DELETE__" && (!corrected || corrected === word)) return;
+
+    let before = editDraft.slice(0, start);
+    let after = editDraft.slice(end);
+    if (!corrected) {
+      if (/^\s/.test(after)) after = after.slice(1);
+      else if (/\s$/.test(before)) before = before.slice(0, -1);
+    }
+    const nextDraft = `${before}${corrected}${after}`;
+    setEditDraft(nextDraft);
+    flushTextSync(nextDraft);
+
+    const original = normalizeWord(word);
+    if (corrected && original) {
+      const now = Date.now();
+      addDictionaryReplacement(original, corrected);
+      learnFromCorrections([{
+        original,
+        corrected,
+        frequency: 1,
+        engine: "context-menu",
+        category: corrected.includes(" ") ? "phrase" : "word",
+        confidence: 0.75,
+        lastUsed: now,
+        createdAt: now,
+        note: "תיקון ידני בעריכה מלאה",
+      }]);
+      onWordCorrected?.(word, corrected);
+    } else if (original) {
+      addIgnoredWord(original);
+    }
+
+    toast({
+      title: corrected ? "המילה תוקנה ונשמרה" : "המילה נמחקה ונשמרה",
+      description: corrected ? `${word} → ${corrected}` : word,
+    });
+    setFullEditWordTarget(null);
+  }, [editDraft, flushTextSync, fullEditWordTarget, onWordCorrected]);
+
+  const applyFullEditCorrectionEverywhere = useCallback((replacement: string) => {
+    if (!fullEditWordTarget) return;
+    const corrected = replacement.trim();
+    const original = normalizeWord(fullEditWordTarget.word);
+    if (!corrected || !original || corrected === original) return;
+
+    const result = replaceAllTextareaWordOccurrences(editDraft, fullEditWordTarget.word, corrected);
+    if (!result.count) return;
+    setEditDraft(result.text);
+    flushTextSync(result.text);
+
+    const now = Date.now();
+    addDictionaryReplacement(original, corrected);
+    learnFromCorrections([{
+      original,
+      corrected,
+      frequency: result.count,
+      engine: "context-menu-replace-all",
+      category: corrected.includes(" ") ? "phrase" : "word",
+      confidence: 0.8,
+      lastUsed: now,
+      createdAt: now,
+      note: `תיקון ידני בכל הטקסט (${result.count} מופעים)`,
+    }]);
+    onWordCorrected?.(fullEditWordTarget.word, corrected);
+    toast({
+      title: "התיקון הוחל בכל הטקסט",
+      description: `${original} → ${corrected} · ${result.count} מופעים`,
+    });
+    setFullEditWordTarget(null);
+  }, [editDraft, flushTextSync, fullEditWordTarget, onWordCorrected]);
+
   // ── Shared text style ───────────────────────────────────────────────────────
   // Shared horizontal alignment — controlled here so BOTH columns (left RichTextEditor
   // and right renderLine column) get the same alignment. When set to 'justify', each
@@ -1342,15 +1481,25 @@ export const SyncMirrorLayout = ({
                   />
                 </div>
               )}
-              <Textarea
-                value={editDraft}
-                onChange={(e) => { setEditDraft(e.target.value); scheduleTextSync(e.target.value); }}
-                onBlur={(e) => flushTextSync(e.target.value)}
-                className="flex-1 resize-none text-right border-none rounded-none focus-visible:ring-0 focus-visible:ring-offset-0"
-                dir="rtl"
-                style={{ ...textStyle, padding: '8px 12px', boxSizing: 'border-box' } as React.CSSProperties}
-                autoFocus
-              />
+              <WordContextMenu
+                word={fullEditWordTarget?.word ?? ""}
+                onReplace={applyFullEditWordCorrection}
+                onReplaceAll={applyFullEditCorrectionEverywhere}
+              >
+                <Textarea
+                  value={editDraft}
+                  onChange={(e) => { setEditDraft(e.target.value); scheduleTextSync(e.target.value); }}
+                  onBlur={(e) => flushTextSync(e.target.value)}
+                  onContextMenuCapture={captureFullEditWord}
+                  onDoubleClick={openFullEditWordMenu}
+                  className="flex-1 resize-none text-right border-none rounded-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                  dir="rtl"
+                  style={{ ...textStyle, padding: '8px 12px', boxSizing: 'border-box' } as React.CSSProperties}
+                  data-testid="full-edit-textarea"
+                  title="לחיצה ימנית על מילה פותחת אפשרויות תיקון"
+                  autoFocus
+                />
+              </WordContextMenu>
             </div>
           </div>
         </div>
