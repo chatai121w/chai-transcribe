@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { extractAudioSegments } from "@/lib/audioSegment";
 import { getPersonalGeminiKey, getPersonalGeminiModel } from "@/lib/personalGemini";
+import { recoverGeminiKeyFromCloud } from "@/lib/cloudKeyFallback";
 import {
   getProviderApiKeyPool,
   getProviderStartIndex,
@@ -26,6 +27,9 @@ export interface RetranscriptionResult {
   engineLabel: string;
   detectedLanguage?: string;
   model?: string;
+  requestedModel?: string;
+  provider?: "personal" | "lovable";
+  fallbackReason?: string | null;
 }
 
 interface RunCloudOptions {
@@ -87,11 +91,13 @@ function invokeMultipart(
 }
 
 async function runGemini(options: RunCloudOptions): Promise<RetranscriptionResult> {
-  const personalKey = getPersonalGeminiKey();
+  const personalKey = getPersonalGeminiKey() || await recoverGeminiKeyFromCloud();
   const model = (options.model || localStorage.getItem("gemini_transcription_model") || getPersonalGeminiModel() || "gemini-2.5-flash").replace(/^google\//, "");
   const { segments } = await extractAudioSegments(options.file, 8 * 60);
   const completed: string[] = [];
   let provider = personalKey ? "personal" : "lovable";
+  let usedModel = model;
+  let fallbackReason: string | null = null;
 
   for (let index = 0; index < segments.length; index++) {
     if (options.signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -110,13 +116,26 @@ async function runGemini(options: RunCloudOptions): Promise<RetranscriptionResul
     if (!data.text) throw new Error(`לא התקבל תמלול מ-Gemini למקטע ${index + 1}`);
     completed.push(String(data.text).trim());
     provider = data.provider || provider;
+    usedModel = String(data.model || usedModel);
+    fallbackReason = data.fallbackReason || fallbackReason;
     const progress = Math.round(((index + 1) / segments.length) * 100);
     options.onPartial?.(completed.join("\n\n"), progress);
   }
 
   const text = completed.join("\n\n").trim();
   if (!text) throw new Error("לא התקבל תמלול מ-Gemini");
-  return { text, wordTimings: [], engine: "gemini", engineLabel: `Gemini (${model}, ${provider === "personal" ? "מפתח אישי" : "Lovable AI"})`, model };
+  const routeLabel = provider === "personal" ? "מפתח אישי" : "Lovable AI";
+  const fallbackLabel = usedModel !== model ? ` · חלופה ל-${model}` : "";
+  return {
+    text,
+    wordTimings: [],
+    engine: "gemini",
+    engineLabel: `Gemini (${usedModel}, ${routeLabel}${fallbackLabel})`,
+    model: usedModel,
+    requestedModel: model,
+    provider: provider as "personal" | "lovable",
+    fallbackReason,
+  };
 }
 
 export async function runCloudRetranscription(options: RunCloudOptions): Promise<RetranscriptionResult> {

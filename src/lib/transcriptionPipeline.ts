@@ -166,6 +166,10 @@ export async function runTranscriptionPipeline(options: PipelineRunOptions): Pro
     await emit(options, fingerprint, 'transcription', 'success', 'transcription-completed', 'המנוע החזיר תמלול', {
       rawWordCount: rawText.split(/\s+/).filter(Boolean).length,
       timingCount: transcription.wordTimings.length,
+      requestedModel: transcription.requestedModel || options.model || null,
+      usedModel: transcription.model || options.model || null,
+      provider: transcription.provider || null,
+      fallbackReason: transcription.fallbackReason || null,
     });
 
     const knowledge = options.useKnowledge

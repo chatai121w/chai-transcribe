@@ -65,3 +65,25 @@ export async function recoverProviderKeysFromCloud(provider: string): Promise<st
   if (keys.length) debugLog.info('CloudKeyFallback', `Recovered ${keys.length} ${provider} key(s) from cloud ✓`);
   return keys;
 }
+
+/**
+ * Restore the canonical Gemini key on demand. The dedicated Gemini field wins,
+ * while the existing Google AI key remains a valid fallback for users who
+ * configured only the shared Google/Gemini credential.
+ */
+export async function recoverGeminiKeyFromCloud(): Promise<string> {
+  const row = await fetchRow();
+  if (!row) return '';
+
+  const dedicated = typeof row.gemini_key === 'string' ? row.gemini_key.trim() : '';
+  const google = typeof row.google_key === 'string' ? row.google_key.trim() : '';
+  const key = dedicated || google;
+  if (!key) return '';
+
+  localStorage.setItem('gemini_api_key', key);
+  if (localStorage.getItem('use_personal_gemini') === null) {
+    localStorage.setItem('use_personal_gemini', '1');
+  }
+  debugLog.info('CloudKeyFallback', `Recovered Gemini key from ${dedicated ? 'dedicated' : 'Google'} cloud field ✓`);
+  return key;
+}

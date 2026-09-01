@@ -1,5 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { extractInteractionTranscript } from "./interaction-response.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 
 const corsHeaders = {
@@ -169,7 +170,7 @@ async function callGemini35Transcribe(params: {
       throw error;
     }
     const interaction = await response.json();
-    const text = String(interaction?.output_text || "").trim();
+    const text = extractInteractionTranscript(interaction);
     if (!text) throw new Error("Gemini Transcribe returned an empty transcript");
     return { text, usage: interaction?.usage || interaction?.usage_metadata };
   } finally {
