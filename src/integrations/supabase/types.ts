@@ -865,6 +865,60 @@ export type Database = {
         }
         Relationships: []
       }
+      torah_lexicon_terms: {
+        Row: {
+          approval_status: string
+          canonical_term: string
+          category: string
+          confidence: number
+          context_tags: string[]
+          created_at: string
+          id: string
+          normalized_term: string
+          notes: string | null
+          pronunciation: string | null
+          source: string
+          updated_at: string
+          usage_count: number
+          user_id: string
+          variants: string[]
+        }
+        Insert: {
+          approval_status?: string
+          canonical_term: string
+          category?: string
+          confidence?: number
+          context_tags?: string[]
+          created_at?: string
+          id?: string
+          normalized_term: string
+          notes?: string | null
+          pronunciation?: string | null
+          source?: string
+          updated_at?: string
+          usage_count?: number
+          user_id: string
+          variants?: string[]
+        }
+        Update: {
+          approval_status?: string
+          canonical_term?: string
+          category?: string
+          confidence?: number
+          context_tags?: string[]
+          created_at?: string
+          id?: string
+          normalized_term?: string
+          notes?: string | null
+          pronunciation?: string | null
+          source?: string
+          updated_at?: string
+          usage_count?: number
+          user_id?: string
+          variants?: string[]
+        }
+        Relationships: []
+      }
       transcript_versions: {
         Row: {
           action_label: string | null
@@ -877,8 +931,8 @@ export type Database = {
           id: string
           source: string
           text: string
-          transcription_job_id: string | null
           transcript_id: string
+          transcription_job_id: string | null
           user_id: string
           version_number: number
           word_count: number | null
@@ -895,8 +949,8 @@ export type Database = {
           id?: string
           source?: string
           text: string
-          transcription_job_id?: string | null
           transcript_id: string
+          transcription_job_id?: string | null
           user_id: string
           version_number?: number
           word_count?: number | null
@@ -913,8 +967,8 @@ export type Database = {
           id?: string
           source?: string
           text?: string
-          transcription_job_id?: string | null
           transcript_id?: string
+          transcription_job_id?: string | null
           user_id?: string
           version_number?: number
           word_count?: number | null
@@ -936,17 +990,17 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "transcript_versions_transcription_job_id_fkey"
-            columns: ["transcription_job_id"]
-            isOneToOne: false
-            referencedRelation: "transcription_jobs"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "transcript_versions_transcript_id_fkey"
             columns: ["transcript_id"]
             isOneToOne: false
             referencedRelation: "transcripts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transcript_versions_transcription_job_id_fkey"
+            columns: ["transcription_job_id"]
+            isOneToOne: false
+            referencedRelation: "transcription_jobs"
             referencedColumns: ["id"]
           },
         ]
@@ -1428,6 +1482,7 @@ export type Database = {
         Returns: boolean
       }
       is_primary_admin_email: { Args: { _email: string }; Returns: boolean }
+      normalize_torah_lexicon_term: { Args: { value: string }; Returns: string }
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
