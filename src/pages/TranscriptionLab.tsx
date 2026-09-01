@@ -55,6 +55,30 @@ const CUDA_MODELS = [
   { value: 'large-v3', label: 'Whisper Large V3' },
 ];
 
+const GEMINI_MODELS = [
+  { value: 'gemini-3.5-transcribe', label: 'Gemini 3.5 Transcribe (ייעודי)' },
+  { value: 'gemini-flash-latest', label: 'Gemini Flash Latest' },
+  { value: 'gemini-pro-latest', label: 'Gemini Pro Latest' },
+  { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+];
+
+const PROVIDER_DEFAULT_MODEL = 'provider-default';
+
+function modelsForEngine(engine: TranscriptionEngineId) {
+  if (engine === 'local-server') return CUDA_MODELS;
+  if (engine === 'gemini') return GEMINI_MODELS;
+  return [{ value: PROVIDER_DEFAULT_MODEL, label: 'ברירת המחדל של הספק' }];
+}
+
+function defaultModelForEngine(engine: TranscriptionEngineId) {
+  return modelsForEngine(engine)[0].value;
+}
+
+function resolvedModel(model: string): string | undefined {
+  return model === PROVIDER_DEFAULT_MODEL ? undefined : model;
+}
+
 const stageLabels: Record<string, string> = {
   source: 'מקור',
   configuration: 'הגדרות',
@@ -98,7 +122,8 @@ export default function TranscriptionLab() {
       return crypto.randomUUID();
     }
   });
-  const [engine, setEngine] = useState<TranscriptionEngineId>('local-server');
+  const [baselineEngine, setBaselineEngine] = useState<TranscriptionEngineId>('local-server');
+  const [candidateEngine, setCandidateEngine] = useState<TranscriptionEngineId>('local-server');
   const [baselineModel, setBaselineModel] = useState('ivrit-ai/whisper-large-v3-turbo-ct2');
   const [candidateModel, setCandidateModel] = useState('ivrit-ai/whisper-large-v3-turbo-ct2');
   const [loshonKodesh, setLoshonKodesh] = useState(initialLk);
@@ -160,8 +185,8 @@ export default function TranscriptionLab() {
         experimentId,
         variant: 'baseline',
         file,
-        engine,
-        model: baselineModel,
+        engine: baselineEngine,
+        model: resolvedModel(baselineModel),
         language: 'he',
         groundTruth,
         useKnowledge: false,
@@ -176,8 +201,8 @@ export default function TranscriptionLab() {
         experimentId,
         variant: 'candidate',
         file,
-        engine,
-        model: candidateModel,
+        engine: candidateEngine,
+        model: resolvedModel(candidateModel),
         language: 'he',
         groundTruth,
         useKnowledge: true,
@@ -358,10 +383,11 @@ export default function TranscriptionLab() {
         <AccordionItem value="configuration">
           <AccordionTrigger className="text-right hover:no-underline"><span className="flex items-center gap-3"><Badge>2</Badge><Settings2 className="h-5 w-5" />הגדרות הניסוי</span></AccordionTrigger>
           <AccordionContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="space-y-2"><Label>מנוע</Label><Select value={engine} onValueChange={(value) => setEngine(value as TranscriptionEngineId)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TRANSCRIPTION_ENGINE_OPTIONS.filter((option) => option.id !== 'local').map((option) => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}</SelectContent></Select></div>
-              <div className="space-y-2"><Label>מודל A - בסיס</Label><Select value={baselineModel} onValueChange={setBaselineModel}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{CUDA_MODELS.map((model) => <SelectItem key={model.value} value={model.value}>{model.label}</SelectItem>)}</SelectContent></Select></div>
-              <div className="space-y-2"><Label>מודל B - מועמד</Label><Select value={candidateModel} onValueChange={setCandidateModel}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{CUDA_MODELS.map((model) => <SelectItem key={model.value} value={model.value}>{model.label}</SelectItem>)}</SelectContent></Select></div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="space-y-2"><Label>מנוע A - בסיס</Label><Select value={baselineEngine} onValueChange={(value) => { const next = value as TranscriptionEngineId; setBaselineEngine(next); setBaselineModel(defaultModelForEngine(next)); }}><SelectTrigger aria-label="מנוע A - בסיס"><SelectValue /></SelectTrigger><SelectContent>{TRANSCRIPTION_ENGINE_OPTIONS.filter((option) => option.id !== 'local').map((option) => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>מודל A</Label><Select value={baselineModel} onValueChange={setBaselineModel}><SelectTrigger aria-label="מודל A"><SelectValue /></SelectTrigger><SelectContent>{modelsForEngine(baselineEngine).map((model) => <SelectItem key={model.value} value={model.value}>{model.label}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>מנוע B - מועמד</Label><Select value={candidateEngine} onValueChange={(value) => { const next = value as TranscriptionEngineId; setCandidateEngine(next); setCandidateModel(defaultModelForEngine(next)); }}><SelectTrigger aria-label="מנוע B - מועמד"><SelectValue /></SelectTrigger><SelectContent>{TRANSCRIPTION_ENGINE_OPTIONS.filter((option) => option.id !== 'local').map((option) => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>מודל B</Label><Select value={candidateModel} onValueChange={setCandidateModel}><SelectTrigger aria-label="מודל B"><SelectValue /></SelectTrigger><SelectContent>{modelsForEngine(candidateEngine).map((model) => <SelectItem key={model.value} value={model.value}>{model.label}</SelectItem>)}</SelectContent></Select></div>
             </div>
             <div className="flex flex-wrap items-center gap-5 border-y py-3">
               <label className="flex items-center gap-2"><Checkbox checked={loshonKodesh} onCheckedChange={(value) => setLoshonKodesh(Boolean(value))} />הפעל מצב לשון הקודש בריצה B</label>

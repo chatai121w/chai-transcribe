@@ -2,6 +2,11 @@ import { expect, injectAuthSession, mockSupabase, test } from './helpers';
 
 test.describe('Unified transcription lab', () => {
   test.beforeEach(async ({ page }) => {
+    await page.route('https://fonts.googleapis.com/**', route => route.fulfill({
+      status: 200,
+      contentType: 'text/css',
+      body: '',
+    }));
     await mockSupabase(page);
     await injectAuthSession(page);
   });
@@ -12,9 +17,11 @@ test.describe('Unified transcription lab', () => {
     let transcriptionCall = 0;
     page.on('pageerror', error => pageErrors.push(error.message));
     page.on('requestfailed', request => {
-      if (!request.url().includes('/realtime/')) failedRequests.push(request.url());
+      const url = request.url();
+      const isApiRequest = request.resourceType() === 'fetch' || request.resourceType() === 'xhr';
+      if (isApiRequest && !url.includes('/realtime/') && !url.includes('/rnnoise-wasm/')) failedRequests.push(url);
     });
-    await page.route('**/transcribe', async route => {
+    const handleTranscription = async (route: Parameters<Parameters<typeof page.route>[1]>[0]) => {
       transcriptionCall += 1;
       await route.fulfill({
         status: 200,
@@ -25,9 +32,10 @@ test.describe('Unified transcription lab', () => {
           word_timings: [],
         },
       });
-    });
+    };
+    await page.route('**/whisper/transcribe', handleTranscription);
 
-    await page.goto('/transcription-lab', { waitUntil: 'domcontentloaded' });
+    await page.goto('/transcription-lab', { waitUntil: 'commit' });
     await expect(page.getByRole('heading', { name: 'מעבדת תמלול מתקדמת' })).toBeVisible();
     await page.locator('#lab-audio').setInputFiles({
       name: 'shiur-test.wav',
@@ -65,7 +73,7 @@ test.describe('Unified transcription lab', () => {
     ]));
     expect(audit.hasReasons).toBe(true);
 
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.reload({ waitUntil: 'commit' });
     await expect(page.getByText(new RegExp(`${audit.count} אירועים בריצה זו`))).toBeVisible();
     await expect(page.getByText('מדדי האיכות חושבו מול טקסט האמת').first()).toBeVisible();
     expect(pageErrors).toEqual([]);
@@ -74,7 +82,7 @@ test.describe('Unified transcription lab', () => {
 
   test('is readable in RTL mobile layout and legacy routes use the same lab', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/lashon-kodesh', { waitUntil: 'domcontentloaded' });
+    await page.goto('/lashon-kodesh', { waitUntil: 'commit' });
 
     await expect(page).toHaveURL(/\/transcription-lab\?mode=lashon-kodesh/);
     await expect(page.getByRole('heading', { name: 'מעבדת תמלול מתקדמת' })).toBeVisible();
@@ -86,5 +94,12 @@ test.describe('Unified transcription lab', () => {
     }));
     expect(layout.direction).toBe('rtl');
     expect(layout.contentWidth).toBeLessThanOrEqual(layout.viewportWidth + 1);
+  });
+
+  test('offers Gemini 3.5 Transcribe as an A/B engine model', async ({ page }) => {
+    await page.goto('/transcription-lab', { waitUntil: 'commit' });
+    await page.getByRole('combobox', { name: 'מנוע B - מועמד' }).click();
+    await page.getByRole('option', { name: 'Gemini' }).click();
+    await expect(page.getByRole('combobox', { name: 'מודל B' })).toContainText('Gemini 3.5 Transcribe');
   });
 });

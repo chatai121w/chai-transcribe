@@ -154,6 +154,7 @@ export async function runTranscriptionPipeline(options: PipelineRunOptions): Pro
           file: options.file,
           language: options.language || 'he',
           model: options.model,
+          customVocabulary: hotwords?.split(',').map((term) => term.trim()).filter(Boolean),
           signal: options.signal,
           onProgress: (progress, status) => options.onProgress?.(progress, status || 'מתמלל בענן'),
         });

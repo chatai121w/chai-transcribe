@@ -155,7 +155,7 @@ async function callGemini35Transcribe(params: {
         generation_config: {
           transcription_config: {
             language_codes: languageCodes,
-            custom_vocabulary: params.customVocabulary.slice(0, 100),
+            custom_vocabulary: params.customVocabulary.slice(0, 1000),
             mode: { type: "verbatim" },
           },
         },
@@ -258,7 +258,7 @@ serve(async (req) => {
     let customVocabulary: string[] = [];
     try {
       const parsed = JSON.parse((form.get("customVocabulary") as string | null) || "[]");
-      if (Array.isArray(parsed)) customVocabulary = [...new Set(parsed.map(String).map((term) => term.trim()).filter(Boolean))].slice(0, 100);
+    if (Array.isArray(parsed)) customVocabulary = [...new Set(parsed.map(String).map((term) => term.trim()).filter(Boolean))].slice(0, 1000);
     } catch { /* invalid optional vocabulary is ignored */ }
 
     console.log(`[transcribe-gemini] req=${requestId} user=${userId} model=${model} lang=${lang} personal=${!!personalKey} size=${file.size}`);

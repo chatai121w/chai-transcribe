@@ -33,6 +33,7 @@ interface RunCloudOptions {
   file: File;
   language: string;
   model?: string;
+  customVocabulary?: string[];
   signal?: AbortSignal;
   onProgress?: (progress: number, status?: string) => void;
   onPartial?: (text: string, progress: number) => void;
@@ -99,6 +100,9 @@ async function runGemini(options: RunCloudOptions): Promise<RetranscriptionResul
     form.append("file", segment.file, segment.file.name);
     form.append("model", model);
     form.append("language", options.language);
+    if (options.customVocabulary?.length) {
+      form.append("customVocabulary", JSON.stringify(options.customVocabulary.slice(0, 1000)));
+    }
     if (personalKey) form.append("apiKey", personalKey);
     const data = await invokeMultipart("transcribe-gemini", form, options.signal, (uploadProgress) => {
       options.onProgress?.(Math.min(99, Math.round(((index + uploadProgress / 100) / segments.length) * 100)), `Gemini: מקטע ${index + 1} מתוך ${segments.length}`);
