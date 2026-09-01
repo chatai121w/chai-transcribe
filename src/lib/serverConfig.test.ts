@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchLocalServer, isLoopbackUrl, setDiscoveredServerPort } from './serverConfig';
+import {
+  fetchLocalServer,
+  isLoopbackUrl,
+  setDiscoveredServerPort,
+  shouldAutoCheckLocalServer,
+} from './serverConfig';
 
 describe('local server network configuration', () => {
   afterEach(() => {
@@ -27,5 +32,11 @@ describe('local server network configuration', () => {
     expect(url).toBe('http://127.0.0.1:3007');
     expect(localStorage.getItem('whisper_discovered_server_url')).toBe(url);
     expect(localStorage.getItem('whisper_server_url')).toBeNull();
+  });
+
+  it('waits for a user gesture before a hosted page polls loopback', () => {
+    expect(shouldAutoCheckLocalServer('http://localhost:3000', 'chai-transcribe.lovable.app', false)).toBe(false);
+    expect(shouldAutoCheckLocalServer('http://localhost:3000', 'chai-transcribe.lovable.app', true)).toBe(true);
+    expect(shouldAutoCheckLocalServer('/whisper', 'localhost', false)).toBe(true);
   });
 });

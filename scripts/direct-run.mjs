@@ -78,6 +78,20 @@ async function runMigrationViaEdge(accessToken, sql, fileName) {
   }
 }
 
+async function findSuccessfulMigration(fileName) {
+  const { data, error } = await supabase
+    .from('migration_logs')
+    .select('file_name, created_at, execution_time_ms')
+    .eq('file_name', fileName)
+    .eq('status', 'success')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(`Could not check migration history: ${error.message}`);
+  return data;
+}
+
 async function main() {
   console.log('═'.repeat(50));
   console.log('   🔧 Direct Migration Runner');
@@ -106,12 +120,14 @@ async function main() {
       }
       console.log(`\n🚀 Running SQL: ${name}`);
       console.log('─'.repeat(50));
-      await runMigrationViaEdge(token, sql, name);
+      const result = await runMigrationViaEdge(token, sql, name);
+      if (!result.success) process.exitCode = 1;
       break;
     }
 
     case 'file': {
       const filePath = args[1];
+      const force = args.includes('--force');
       if (!filePath) {
         console.error('❌ Please provide file path');
         process.exit(1);
@@ -123,16 +139,26 @@ async function main() {
       }
       const fileSql = fs.readFileSync(fullPath, 'utf-8');
       const fileName = path.basename(filePath, '.sql');
+
+      const previousSuccess = await findSuccessfulMigration(fileName);
+      if (previousSuccess && !force) {
+        console.log(`\n⏭️  Skipping migration already completed successfully: ${fileName}`);
+        console.log(`   Last success: ${previousSuccess.created_at}`);
+        console.log('   Use --force only when an intentional idempotent rerun is required.');
+        break;
+      }
+
       console.log(`\n🚀 Running migration: ${fileName}`);
       console.log('─'.repeat(50));
-      await runMigrationViaEdge(token, fileSql, fileName);
+      const result = await runMigrationViaEdge(token, fileSql, fileName);
+      if (!result.success) process.exitCode = 1;
       break;
     }
 
     default:
       console.log('Commands:');
       console.log('  sql "..." [name]  - Run direct SQL');
-      console.log('  file <path>       - Run SQL from file');
+      console.log('  file <path> [--force] - Run SQL from file');
       console.log('');
       console.log('Environment:');
       console.log('  ADMIN_EMAIL     - Override admin email');

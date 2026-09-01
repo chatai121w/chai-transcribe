@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Server, Loader2, Power } from "lucide-react";
-import { fetchLocalServer, getServerUrl } from "@/lib/serverConfig";
+import {
+  fetchLocalServer,
+  getServerUrl,
+  markLocalServerAccessRequested,
+  shouldAutoCheckLocalServer,
+} from "@/lib/serverConfig";
 import { startLocalTranscriptionServer } from "@/lib/localServerLauncher";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -52,6 +57,11 @@ export function LocalServerIndicator() {
   }, []);
 
   useEffect(() => {
+    if (!shouldAutoCheckLocalServer(getServerUrl())) {
+      setState('down');
+      return;
+    }
+
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const loop = async () => {
@@ -73,6 +83,7 @@ export function LocalServerIndicator() {
     if (state === 'starting' || state === 'up') return;
     setState('starting');
     startingSince.current = Date.now();
+    markLocalServerAccessRequested(true);
     try {
       const data = await startLocalTranscriptionServer();
       toast({
@@ -83,6 +94,7 @@ export function LocalServerIndicator() {
       });
       window.setTimeout(() => { void check(); }, 1500);
     } catch (e) {
+      markLocalServerAccessRequested(false);
       setState('down');
       startingSince.current = 0;
       toast({

@@ -6,6 +6,7 @@
 const DEFAULT_SERVER_URL = '/whisper';
 const DEFAULT_REMOTE_SERVER_URL = 'http://localhost:3000';
 const DISCOVERED_SERVER_URL_KEY = 'whisper_discovered_server_url';
+const LOCAL_SERVER_ACCESS_SESSION_KEY = 'whisper_local_access_requested';
 
 export function isLoopbackUrl(value: string): boolean {
   try {
@@ -98,6 +99,28 @@ export function fetchLocalServer(input: RequestInfo | URL, init: RequestInit = {
   const requestInit: LoopbackRequestInit = { ...init };
   if (isLoopbackUrl(raw)) requestInit.targetAddressSpace = 'loopback';
   return fetch(input, requestInit);
+}
+
+/**
+ * Public HTTPS pages may only request loopback access after a user gesture.
+ * Avoid noisy, guaranteed-to-fail health polls until the user clicks the
+ * local-server control in this browser session.
+ */
+export function shouldAutoCheckLocalServer(
+  serverUrl: string,
+  hostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost',
+  accessRequested = typeof window !== 'undefined'
+    ? sessionStorage.getItem(LOCAL_SERVER_ACCESS_SESSION_KEY) === '1'
+    : false,
+): boolean {
+  const isLocalPage = hostname === 'localhost' || hostname === '127.0.0.1';
+  return isLocalPage || !isLoopbackUrl(serverUrl) || accessRequested;
+}
+
+export function markLocalServerAccessRequested(requested: boolean): void {
+  if (typeof window === 'undefined') return;
+  if (requested) sessionStorage.setItem(LOCAL_SERVER_ACCESS_SESSION_KEY, '1');
+  else sessionStorage.removeItem(LOCAL_SERVER_ACCESS_SESSION_KEY);
 }
 
 /** The default proxy path for local whisper server. */

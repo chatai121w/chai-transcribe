@@ -22,6 +22,14 @@ node scripts/direct-run.mjs file "supabase/migrations/20260405143000_add_compare
 ```
 
 זה השימוש הכי מומלץ למיגרציות אמיתיות.
+לפני ההרצה הכלי בודק את `migration_logs`. אם אותה מיגרציה כבר הסתיימה
+בהצלחה, היא תידלג אוטומטית כדי למנוע הרצה ולוג כפולים.
+
+רק כאשר נדרשת במכוון הרצה חוזרת של SQL שהוא idempotent:
+
+```powershell
+node scripts/direct-run.mjs file "supabase/migrations/<file>.sql" --force
+```
 
 ## שלב 3: הרצת SQL ישיר (מהיר)
 
@@ -53,6 +61,7 @@ $env:ADMIN_EMAIL="jj1212t@gmail.com"
 
 1. `file <path>`
 2. `sql "..." [name]`
+3. `file <path> --force` — הרצה חוזרת מכוונת בלבד
 
 הערה חשובה: הפקודה `pending` לא נתמכת בגרסה הנוכחית של הכלי בפרויקט הזה.
 
