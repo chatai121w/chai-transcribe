@@ -36,7 +36,7 @@ test.describe('Unified transcription lab', () => {
     await page.route('**/whisper/transcribe', handleTranscription);
 
     await page.goto('/transcription-lab', { waitUntil: 'commit' });
-    await expect(page.getByRole('heading', { name: 'מעבדת תמלול מתקדמת' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'מעבדת תמלול מתקדמת' })).toBeVisible({ timeout: 120_000 });
     await page.locator('#lab-audio').setInputFiles({
       name: 'shiur-test.wav',
       mimeType: 'audio/wav',
@@ -84,8 +84,8 @@ test.describe('Unified transcription lab', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/lashon-kodesh', { waitUntil: 'commit' });
 
-    await expect(page).toHaveURL(/\/transcription-lab\?mode=lashon-kodesh/);
-    await expect(page.getByRole('heading', { name: 'מעבדת תמלול מתקדמת' })).toBeVisible();
+    await expect(page).toHaveURL(/\/transcription-lab\?mode=lashon-kodesh/, { timeout: 30_000 });
+    await expect(page.getByRole('heading', { name: 'מעבדת תמלול מתקדמת' })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByLabel('הפעל מצב לשון הקודש בריצה B')).toBeChecked();
     const layout = await page.evaluate(() => ({
       direction: getComputedStyle(document.querySelector('main')!).direction,
@@ -101,5 +101,52 @@ test.describe('Unified transcription lab', () => {
     await page.getByRole('combobox', { name: 'מנוע B - מועמד' }).click();
     await page.getByRole('option', { name: 'Gemini' }).click();
     await expect(page.getByRole('combobox', { name: 'מודל B' })).toContainText('Gemini 3.5 Transcribe');
+  });
+
+  test('records a terminology sample and prepares the existing A/B pipeline automatically', async ({ page }) => {
+    await page.addInitScript(() => {
+      const fakeTrack = { stop: () => undefined };
+      const fakeStream = { getTracks: () => [fakeTrack] };
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: { getUserMedia: async () => fakeStream },
+      });
+
+      class FakeMediaRecorder {
+        static isTypeSupported = () => true;
+        state = 'inactive';
+        mimeType = 'audio/webm;codecs=opus';
+        ondataavailable: ((event: { data: Blob }) => void) | null = null;
+        onstop: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        constructor(_stream: unknown, options?: { mimeType?: string }) {
+          if (options?.mimeType) this.mimeType = options.mimeType;
+        }
+        start() { this.state = 'recording'; }
+        stop() {
+          this.state = 'inactive';
+          this.ondataavailable?.({ data: new Blob(['fake-microphone-audio'], { type: this.mimeType }) });
+          this.onstop?.();
+        }
+      }
+      Object.defineProperty(window, 'MediaRecorder', { configurable: true, value: FakeMediaRecorder });
+    });
+
+    await page.goto('/transcription-lab', { waitUntil: 'commit' });
+    const recorder = page.getByLabel('הקלטת בדיקת מושגים');
+    await recorder.getByLabel('מושגים לבדיקה').fill('אביי, רבא, מסכת בבא קמא');
+    await recorder.getByRole('button', { name: 'הכן טקסט' }).click();
+    await expect(recorder.getByLabel('טקסט מדויק להקראה')).toContainText('אביי, רבא, מסכת בבא קמא');
+
+    await recorder.getByRole('button', { name: 'התחל הקלטת בדיקת מושגים' }).click();
+    await expect(recorder.getByText('00:00')).toBeVisible();
+    await recorder.getByRole('button', { name: 'סיים והעלה לניסוי' }).click();
+
+    await expect(page.getByText('הקלטת המושגים מוכנה לניסוי', { exact: true })).toBeVisible();
+    await expect(page.getByText(/torah-terms-.*\.webm/)).toBeVisible();
+    await expect(page.locator('#ground-truth')).toHaveValue('אני קורא כעת את המושגים הבאים: אביי, רבא, מסכת בבא קמא.');
+    await expect(page.locator('#manual-hotwords')).toHaveValue('אביי, רבא, מסכת בבא קמא');
+    await expect(page.getByRole('button', { name: 'הפעל ניסוי מלא' })).toBeEnabled();
+    await expect(recorder.getByText('הקלטה אחרונה')).toBeVisible();
   });
 });

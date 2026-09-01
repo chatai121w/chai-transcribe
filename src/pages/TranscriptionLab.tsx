@@ -29,6 +29,7 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
+import { TermRecordingPanel, type RecordedPracticeSource } from '@/components/transcription/TermRecordingPanel';
 import { toast } from '@/hooks/use-toast';
 import { useCustomVocabulary } from '@/hooks/useCustomVocabulary';
 import { addApprovedLoraPair } from '@/hooks/useLoraTraining';
@@ -137,6 +138,7 @@ export default function TranscriptionLab() {
   const [events, setEvents] = useState<PipelineAuditEvent[]>([]);
   const [goldApproved, setGoldApproved] = useState(false);
   const [importingLegacy, setImportingLegacy] = useState(false);
+  const [recordingSource, setRecordingSource] = useState<RecordedPracticeSource | null>(null);
   const vocabulary = useCustomVocabulary();
 
   useEffect(() => {
@@ -158,6 +160,7 @@ export default function TranscriptionLab() {
 
   const handleFile = (next: File | null) => {
     setFile(next);
+    setRecordingSource(null);
     const nextExperimentId = crypto.randomUUID();
     localStorage.setItem(ACTIVE_EXPERIMENT_KEY, nextExperimentId);
     setExperimentId(nextExperimentId);
@@ -167,6 +170,14 @@ export default function TranscriptionLab() {
     setGoldApproved(false);
     setProgress(0);
     setStatus(next ? 'קובץ המקור מוכן' : 'ממתין לקובץ');
+  };
+
+  const handleRecordedSource = (source: RecordedPracticeSource) => {
+    handleFile(source.file);
+    setRecordingSource(source);
+    setGroundTruth(source.groundTruth);
+    setManualHotwords(source.hotwords);
+    setStatus('הקלטת המושגים מוכנה לניסוי');
   };
 
   const appendEvent = (event: PipelineAuditEvent) => setEvents((current) => [event, ...current.filter((item) => item.id !== event.id)]);
@@ -370,13 +381,14 @@ export default function TranscriptionLab() {
                 <div className="flex gap-2">
                   <Input id="lab-audio" ref={fileInputRef} type="file" accept="audio/*,video/*" onChange={(event) => handleFile(event.target.files?.[0] || null)} />
                 </div>
-                {file && <p className="text-xs text-muted-foreground">{file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB</p>}
+                {file && <p className="text-xs text-muted-foreground">{file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB{recordingSource ? ` · ${recordingSource.durationSeconds} שניות · ${recordingSource.mode === 'terms' ? 'קריאת מושגים' : 'דיבור טבעי'}` : ''}</p>}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="ground-truth">טקסט אמת מאושר</Label>
                 <Textarea id="ground-truth" value={groundTruth} onChange={(event) => setGroundTruth(event.target.value)} rows={5} dir="rtl" placeholder="הדבק כאן תמלול שנבדק מול האודיו. בלי טקסט אמת תתבצע השוואה חזותית בלבד." />
               </div>
             </div>
+            <TermRecordingPanel onReady={handleRecordedSource} />
           </AccordionContent>
         </AccordionItem>
 
