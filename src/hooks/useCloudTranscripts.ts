@@ -25,6 +25,8 @@ export interface CloudTranscript {
   category: string;
   is_favorite: boolean;
   audio_file_path: string | null;
+  /** Local-only audio blob (IndexedDB-sourced transcripts) */
+  audio_blob?: Blob;
   local_only?: boolean;
   /** Word-level timings for audio-sync player */
   word_timings?: Array<{word: string; start: number; end: number; probability?: number}> | null;

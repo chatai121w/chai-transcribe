@@ -1939,7 +1939,7 @@ const Index = () => {
         return;
       }
       await transcribeWithLocalServer(file, undefined, {
-        startFrom: partial.lastSegEnd,
+        startFrom: partial.lastSegEnd ?? 0,
         existingText: partial.text,
         existingWords: partial.wordTimings,
       });
@@ -1989,7 +1989,10 @@ const Index = () => {
       });
       await handleResumeTranscription(file);
     } catch (error) {
-      await backupPartialAudioToCloud(file);
+      await backupPartialAudioToCloud(new File([blob], source.name, {
+        type: source.type || blob.type || 'application/octet-stream',
+        lastModified: source.lastModified,
+      }));
       debugLog.error('Recovery', 'Cloud resume failed', error instanceof Error ? error.message : String(error));
       toast({
         title: 'לא ניתן להמשיך מהענן',

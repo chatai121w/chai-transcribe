@@ -235,7 +235,7 @@ export function assessAudioQuality(
 }
 
 async function decodeMono(blob: Blob): Promise<{ samples: Float32Array; sampleRate: number }> {
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const context = new AudioContextClass();
   try {
     const decoded = await context.decodeAudioData(await blob.arrayBuffer());
