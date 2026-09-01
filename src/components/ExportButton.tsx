@@ -260,7 +260,7 @@ export const ExportButton = ({ text, title = "תמלול", disabled, wordTimings
           ייצוא
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64 text-right" dir="rtl">
+      <DropdownMenuContent align="end" className="w-64 text-right" style={{ direction: "rtl" }}>
         <DropdownMenuItem onClick={exportToPDF}>
           <File className="w-4 h-4 ml-2" />
           ייצוא ל-PDF

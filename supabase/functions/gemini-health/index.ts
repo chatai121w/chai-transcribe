@@ -132,7 +132,7 @@ async function checkAudioFormat(personalKey: string | null, model: string) {
 }
 
 function resolveGatewayModel(m: string): string {
-  if (m === "gemini-flash-latest" || m === "gemini-2.0-flash") return "gemini-2.5-flash";
+  if (m === "gemini-flash-latest" || m === "gemini-2.0-flash" || m === "gemini-3.5-transcribe") return "gemini-2.5-flash";
   if (m === "gemini-pro-latest" || m === "gemini-1.5-pro") return "gemini-2.5-pro";
   return m;
 }
