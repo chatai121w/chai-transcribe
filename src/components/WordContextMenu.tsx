@@ -15,13 +15,12 @@
  * and exposes the menu through `<ContextMenuTrigger asChild>`.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
@@ -37,7 +36,6 @@ import {
   Highlighter,
   Languages,
   Palette,
-  Sparkles,
   ReplaceAll,
   Trash2,
   Delete,
@@ -45,6 +43,10 @@ import {
   XCircle,
   BookPlus,
   Anchor,
+  GripHorizontal,
+  Minus,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { addTerm } from '@/utils/customVocabulary';
 import {
@@ -105,6 +107,22 @@ export const WordContextMenu = ({
   // measured at ~2.2s per render and made playback impossible. Nothing below
   // the trigger is built until the menu is actually opened.
   const [open, setOpen] = useState(false);
+  const quickInputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+  } | null>(null);
+  const [panelOffset, setPanelOffset] = useState({ x: 0, y: 0 });
+  const [minimized, setMinimized] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   // A single instance now serves every word, so the inputs must follow the word
   // the menu was opened on rather than keeping the first one they ever saw.
@@ -113,6 +131,15 @@ export const WordContextMenu = ({
     setReplaceAllInput(word);
     setVerifyInput('');
   }, [word]);
+
+  useEffect(() => {
+    if (!open || !word) return;
+    const timeoutId = window.setTimeout(() => {
+      quickInputRef.current?.focus();
+      quickInputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [open, word]);
 
   const similar = useMemo(() => (open ? getSimilarWords(word, 8) : []), [word, open]);
   const uniqueSuggestions = useMemo(
@@ -132,6 +159,13 @@ export const WordContextMenu = ({
     const edited = customInput.trim();
     if (edited === word) return;
     onReplace(edited || '__DELETE__');
+  };
+
+  const applyQuickEdit = () => {
+    const edited = customInput.trim();
+    if (!edited || edited === word) return;
+    onReplace(edited);
+    setOpen(false);
   };
 
   const applyEverywhere = () => {
@@ -180,17 +214,137 @@ export const WordContextMenu = ({
     toast({ title: 'הוסרה הדגשה', description: word });
   };
 
+  const handleDragStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || expanded) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    const baseLeft = rect.left - panelOffset.x;
+    const baseTop = rect.top - panelOffset.y;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: panelOffset.x,
+      originY: panelOffset.y,
+      minX: 8 - baseLeft,
+      maxX: window.innerWidth - 8 - baseLeft - rect.width,
+      minY: 8 - baseTop,
+      maxY: window.innerHeight - 8 - baseTop - rect.height,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  };
+
+  const handleDragMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setPanelOffset({
+      x: Math.min(drag.maxX, Math.max(drag.minX, drag.originX + event.clientX - drag.startX)),
+      y: Math.min(drag.maxY, Math.max(drag.minY, drag.originY + event.clientY - drag.startY)),
+    });
+  };
+
+  const handleDragEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
   return (
-    <ContextMenu onOpenChange={setOpen}>
+    <ContextMenu modal={false} onOpenChange={setOpen}>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       {open && word && (
-      <ContextMenuContent dir="rtl" className="w-72 text-right">
-        <ContextMenuLabel className="text-xs flex items-center justify-between gap-2">
-          <span className="truncate">{word}</span>
+      <ContextMenuContent
+        ref={panelRef}
+        dir="rtl"
+        data-testid="floating-word-correction"
+        className="p-0 text-right"
+        style={{
+          width: expanded ? 'min(36rem, calc(100vw - 2rem))' : '20rem',
+          height: expanded ? 'min(42rem, calc(100vh - 2rem))' : undefined,
+          minWidth: minimized ? '16rem' : '18rem',
+          minHeight: minimized ? undefined : '11rem',
+          maxWidth: 'calc(100vw - 1rem)',
+          maxHeight: 'calc(100vh - 1rem)',
+          resize: minimized || expanded ? 'none' : 'both',
+          overflow: minimized ? 'hidden' : 'auto',
+          translate: `${panelOffset.x}px ${panelOffset.y}px`,
+        }}
+      >
+        <div
+          className="flex h-8 cursor-move select-none items-center gap-1 border-b bg-muted/50 px-1.5"
+          onPointerDown={handleDragStart}
+          onPointerMove={handleDragMove}
+          onPointerUp={handleDragEnd}
+          onPointerCancel={handleDragEnd}
+          data-testid="word-correction-drag-handle"
+        >
+          <GripHorizontal className="h-4 w-4 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-xs font-medium">
+            {minimized ? `תיקון: ${word}` : 'תיקון מילה'}
+          </span>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => setMinimized((value) => !value)}
+            aria-label={minimized ? 'שחזר חלון תיקון' : 'מזער חלון תיקון'}
+            title={minimized ? 'שחזר' : 'מזער'}
+          >
+            {minimized ? <Maximize2 className="h-3.5 w-3.5" /> : <Minus className="h-3.5 w-3.5" />}
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6"
+            disabled={minimized}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => setExpanded((value) => !value)}
+            aria-label={expanded ? 'החזר לגודל רגיל' : 'הגדל חלון תיקון'}
+            title={expanded ? 'גודל רגיל' : 'הגדל'}
+          >
+            {expanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          </Button>
+        </div>
+
+        {!minimized && <div className="p-1">
+        <div className="flex items-center gap-1.5 p-1.5" dir="rtl">
+          <Input
+            ref={quickInputRef}
+            value={customInput}
+            onChange={(event) => setCustomInput(event.target.value)}
+            onFocus={(event) => event.currentTarget.select()}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') event.stopPropagation();
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                applyQuickEdit();
+              }
+            }}
+            aria-label="תיקון מהיר"
+            className="h-9 flex-1 text-right text-sm"
+            dir="rtl"
+          />
           {isCorrectionVerified(word, word) && (
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" aria-label="מילה מאומתת" />
           )}
-        </ContextMenuLabel>
+          <Button
+            type="button"
+            size="icon"
+            className="h-9 w-9 shrink-0"
+            disabled={!customInput.trim() || customInput.trim() === word}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={applyQuickEdit}
+            aria-label="אשר תיקון"
+            title="אשר תיקון"
+          >
+            <Check className="h-4 w-4" />
+          </Button>
+        </div>
         <ContextMenuSeparator />
 
         {/* Similar words are the primary correction path. */}
@@ -451,43 +605,7 @@ export const WordContextMenu = ({
           </ContextMenuItem>
         )}
 
-        <ContextMenuSeparator />
-
-        {/* ─── Inline custom replacement ─── */}
-        <div className="p-1.5">
-          <p className="text-[10px] text-muted-foreground mb-1">החלף ידנית:</p>
-          <div className="flex gap-1.5">
-            <Input
-              value={customInput}
-              onChange={(e) => setCustomInput(e.target.value)}
-              placeholder={word}
-              className="h-7 text-xs"
-             
-              onKeyDown={(e) => {
-                // Prevent the parent menu's typeahead from stealing input focus.
-                if (e.key !== 'Escape') e.stopPropagation();
-                if (e.key === 'Enter' && !e.nativeEvent.isComposing && customInput.trim()) {
-                  e.preventDefault();
-                  handleReplace(customInput);
-                  setCustomInput('');
-                }
-              }}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs"
-              onClick={() => {
-                if (customInput.trim()) {
-                  handleReplace(customInput);
-                  setCustomInput('');
-                }
-              }}
-            >
-              <Sparkles className="w-3 h-3" />
-            </Button>
-          </div>
-        </div>
+        </div>}
       </ContextMenuContent>
       )}
     </ContextMenu>

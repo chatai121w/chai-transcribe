@@ -246,7 +246,10 @@ export function comparePipelineResults(baseline: PipelineRunResult, candidate: P
   if (!baseline.metrics || !candidate.metrics) return null;
   const werImprovement = baseline.metrics.wer - candidate.metrics.wer;
   const cerImprovement = baseline.metrics.cer - candidate.metrics.cer;
-  const termRecallImprovement = candidate.metrics.termRecall - baseline.metrics.termRecall;
+  const hasTermRecall = Number.isFinite(baseline.metrics.termRecall) && Number.isFinite(candidate.metrics.termRecall);
+  const termRecallImprovement = hasTermRecall
+    ? candidate.metrics.termRecall - baseline.metrics.termRecall
+    : 0;
   const regressed = werImprovement < -0.0001 || cerImprovement < -0.0001 || termRecallImprovement < -0.0001;
   const improved = !regressed && (werImprovement > 0.0001 || cerImprovement > 0.0001 || termRecallImprovement > 0.0001);
   return {
@@ -259,7 +262,7 @@ export function comparePipelineResults(baseline: PipelineRunResult, candidate: P
     reason: regressed
       ? 'לפחות מדד איכות אחד הורע לעומת ריצת הבסיס'
       : improved
-        ? 'נמצא שיפור ללא הרעה במדדי WER, CER וזכירת מונחים'
+        ? `נמצא שיפור ללא הרעה במדדי WER ו-CER${hasTermRecall ? ' וזכירת מונחים' : ''}`
         : 'לא נמצא שינוי מדיד מול ריצת הבסיס',
   };
 }

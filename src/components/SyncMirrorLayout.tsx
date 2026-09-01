@@ -91,13 +91,32 @@ function normalizeWord(w: string) {
   return w.replace(/[.,;:!?"'׳״()\[\]{}<>\-–—]/g, "").trim();
 }
 
-export function findTextareaWordRange(value: string, selectionStart: number, selectionEnd: number) {
+export function findTextareaWordRange(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  selectionDirection: 'forward' | 'backward' | 'none' = 'none',
+) {
   let start = Math.max(0, Math.min(selectionStart, value.length));
   let end = Math.max(start, Math.min(selectionEnd, value.length));
 
   if (end > start) {
     while (start < end && /\s/.test(value[start] || "")) start += 1;
     while (end > start && /\s/.test(value[end - 1] || "")) end -= 1;
+
+    // A correction target must always be a single word. RTL browsers can
+    // retain a previous drag selection, so reduce a multi-word range to the
+    // word at the selection anchor instead of passing the whole phrase on.
+    if (/\s/.test(value.slice(start, end))) {
+      let anchor = selectionDirection === 'backward' ? end - 1 : start;
+      while (anchor > start && /\s/.test(value[anchor] || "")) anchor -= 1;
+      while (anchor < end && /\s/.test(value[anchor] || "")) anchor += 1;
+      if (anchor >= end || /\s/.test(value[anchor] || "")) return null;
+      start = anchor;
+      end = anchor + 1;
+      while (start > 0 && !/\s/.test(value[start - 1])) start -= 1;
+      while (end < value.length && !/\s/.test(value[end])) end += 1;
+    }
   } else {
     if (start === value.length || /\s/.test(value[start] || "")) start -= 1;
     if (start < 0 || /\s/.test(value[start] || "")) return null;
@@ -704,6 +723,10 @@ export const SyncMirrorLayout = ({
       setMenuTarget(null);
       return;
     }
+    // The menu always acts on the indexed span under the pointer. Clear any
+    // stale browser selection so a previous drag cannot look like the whole
+    // phrase is the active correction target.
+    window.getSelection()?.removeAllRanges();
     setMenuTarget({
       globalIdx,
       word: el.dataset.word ?? '',
@@ -852,6 +875,7 @@ export const SyncMirrorLayout = ({
       textarea.value,
       textarea.selectionStart,
       textarea.selectionEnd,
+      textarea.selectionDirection,
     ));
   }, []);
 
@@ -1232,6 +1256,23 @@ export const SyncMirrorLayout = ({
                 }
                 if (hasAudioTimings) onWordClick(wt.start);
               }}
+              onMouseDown={(event) => {
+                // Keep a double click from expanding the browser's native
+                // selection across adjacent RTL words.
+                if (event.detail > 1) event.preventDefault();
+              }}
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                window.getSelection()?.removeAllRanges();
+                event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', {
+                  bubbles: true,
+                  cancelable: true,
+                  button: 2,
+                  clientX: event.clientX,
+                  clientY: event.clientY,
+                }));
+              }}
               title={wasManuallyCorrected
                 ? `תוקן ידנית: ${correctionOriginal} ← ${correctionResult}`
                 : trustedSuggestion
@@ -1445,6 +1486,7 @@ export const SyncMirrorLayout = ({
                   <React.Fragment key={i}>
                     <span
                       data-word-index={i}
+                      data-full-edit-original-word="true"
                       data-active-word={i === activeIdx ? 'true' : undefined}
                       style={i === activeIdx ? getActiveWordStyle(wordHighlightMode) : undefined}
                       className={cn(
@@ -1453,7 +1495,14 @@ export const SyncMirrorLayout = ({
                         i === activeIdx && wordHighlightMode === 'underline' && "font-semibold pb-px",
                         i === activeIdx && wordHighlightMode === 'glow' && "rounded-sm font-bold",
                         i === activeIdx && wordHighlightMode === 'line' && "font-bold",
+                        hasAudioTimings && "cursor-pointer hover:bg-primary/10",
                       )}
+                      onClick={() => {
+                        if (hasAudioTimings) onWordClick(wt.start);
+                      }}
+                      title={hasAudioTimings
+                        ? `קפוץ לנגינה (${wt.start.toFixed(1)}s)`
+                        : 'אין תזמון אודיו מאומת למילה זו'}
                     >
                       {wt.word}
                     </span>

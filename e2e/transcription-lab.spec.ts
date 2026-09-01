@@ -1,5 +1,23 @@
 import { expect, injectAuthSession, mockSupabase, test } from './helpers';
 
+function silentWav(durationSeconds = 2, sampleRate = 16_000): Buffer {
+  const samples = Math.floor(durationSeconds * sampleRate);
+  const buffer = Buffer.alloc(44 + samples * 2);
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(buffer.length - 8, 4);
+  buffer.write('WAVEfmt ', 8);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * 2, 28);
+  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(samples * 2, 40);
+  return buffer;
+}
+
 test.describe('Unified transcription lab', () => {
   test.beforeEach(async ({ page }) => {
     await page.route('https://fonts.googleapis.com/**', route => route.fulfill({
@@ -29,24 +47,37 @@ test.describe('Unified transcription lab', () => {
           text: transcriptionCall === 1 ? 'אמר רבי עקיבה' : 'אמר רבי עקיבא',
           language: 'he',
           model: 'ivrit-ai/whisper-large-v3-turbo-ct2',
-          word_timings: [],
+          word_timings: [
+            { word: 'אמר', start: 0, end: 0.4 },
+            { word: 'רבי', start: 0.4, end: 0.8 },
+            { word: transcriptionCall === 1 ? 'עקיבה' : 'עקיבא', start: 0.8, end: 1.35 },
+          ],
         },
       });
     };
     await page.route('**/whisper/transcribe', handleTranscription);
+    await page.route('**/training/dataset/approved-pair', route => route.fulfill({ status: 200, json: { rows: 1 } }));
 
     await page.goto('/transcription-lab', { waitUntil: 'commit' });
     await expect(page.getByRole('heading', { name: 'מעבדת תמלול מתקדמת' })).toBeVisible({ timeout: 120_000 });
     await page.locator('#lab-audio').setInputFiles({
       name: 'shiur-test.wav',
       mimeType: 'audio/wav',
-      buffer: Buffer.from('RIFF-test-audio'),
+      buffer: silentWav(),
     });
     await page.locator('#ground-truth').fill('אמר רבי עקיבא');
     await page.getByRole('button', { name: 'הפעל ניסוי מלא' }).click();
 
     await expect(page.getByLabel('השוואה ושער איכות').getByText('נמצא שיפור', { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText('הניסוי הושלם', { exact: true })).toBeVisible();
+
+    await page.getByTestId('asr-review-unit-2').click();
+    await expect(page.getByTestId('asr-review-decision-panel')).toBeVisible();
+    await page.getByRole('button', { name: /מנוע B נכון/ }).click();
+    await page.getByRole('button', { name: 'שמור Human Review' }).click();
+    await expect(page.getByText('הבדיקה האנושית נשמרה', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'אשר קטע ל-Gold' }).click();
+    await expect(page.getByText('הקטע אושר ל-Gold', { exact: true })).toBeVisible();
 
     const audit = await page.evaluate(() => {
       const id = localStorage.getItem('asr_pipeline_active_experiment_v1');
@@ -62,6 +93,8 @@ test.describe('Unified transcription lab', () => {
         count: current.length,
         stages: [...new Set(current.map(event => event.stage))],
         hasReasons: current.some(event => typeof event.details.reason === 'string'),
+        hasHumanReview: current.some(event => event.eventType === 'human-review-saved'),
+        hasTimedGold: current.some(event => event.eventType === 'human-review-gold-approved'),
       };
     });
 
@@ -72,6 +105,8 @@ test.describe('Unified transcription lab', () => {
       'metrics', 'quality-gate', 'review', 'complete',
     ]));
     expect(audit.hasReasons).toBe(true);
+    expect(audit.hasHumanReview).toBe(true);
+    expect(audit.hasTimedGold).toBe(true);
 
     await page.reload({ waitUntil: 'commit' });
     await expect(page.getByText(new RegExp(`${audit.count} אירועים בריצה זו`))).toBeVisible();

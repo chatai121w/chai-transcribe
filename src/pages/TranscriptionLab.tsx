@@ -30,12 +30,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { TermRecordingPanel, type RecordedPracticeSource } from '@/components/transcription/TermRecordingPanel';
+import { AsrHumanReviewWorkspace } from '@/components/transcription/AsrHumanReviewWorkspace';
 import { toast } from '@/hooks/use-toast';
 import { useCloudTranscripts } from '@/hooks/useCloudTranscripts';
 import { useCustomVocabulary } from '@/hooks/useCustomVocabulary';
 import { addApprovedLoraPair } from '@/hooks/useLoraTraining';
 import { extractCorrectionCandidates, wordDiff } from '@/lib/asrMetrics';
+import type { AsrHumanReviewRecord } from '@/lib/asrHumanReview';
 import { buildApprovedAsrMetadata } from '@/lib/asrDatasetMetadata';
+import { extractAudioSegment } from '@/lib/audioSegment';
 import { importLegacyLkDictionary } from '@/lib/legacyLkMigration';
 import { debugLog } from '@/lib/debugLogger';
 import { listPipelineEvents, logPipelineEvent, type PipelineAuditEvent } from '@/lib/pipelineAudit';
@@ -106,7 +109,7 @@ const stageLabels: Record<string, string> = {
 };
 
 function formatMetric(value: number | undefined): string {
-  return value == null ? 'לא נמדד' : `${(value * 100).toFixed(2)}%`;
+  return value == null || !Number.isFinite(value) ? 'לא נמדד' : `${(value * 100).toFixed(2)}%`;
 }
 
 function MetricRow({ label, baseline, candidate, lowerIsBetter = true }: { label: string; baseline?: number; candidate?: number; lowerIsBetter?: boolean }) {
@@ -170,11 +173,6 @@ export default function TranscriptionLab() {
     () => baseline && candidate ? comparePipelineResults(baseline, candidate) : null,
     [baseline, candidate],
   );
-  const correctionCandidates = useMemo(() => {
-    if (!groundTruth.trim() || !candidate?.text) return [];
-    return extractCorrectionCandidates(wordDiff(groundTruth, candidate.text)).slice(0, 50);
-  }, [candidate?.text, groundTruth]);
-
   const handleFile = useCallback((next: File | null, preserveLinkedSource = false) => {
     setFile(next);
     setRecordingSource(null);
@@ -439,6 +437,47 @@ export default function TranscriptionLab() {
     }
   };
 
+  const saveHumanReview = async (review: AsrHumanReviewRecord) => {
+    const event = await logPipelineEvent({
+      experimentId,
+      recordingFingerprint: candidate?.recordingFingerprint,
+      comparisonRunId: candidate?.comparisonRunId,
+      stage: 'review',
+      level: 'success',
+      eventType: 'human-review-saved',
+      message: 'הכרעת Human Review נשמרה עם מקור ופרטי מנועים',
+      details: review,
+    });
+    appendEvent(event);
+  };
+
+  const approveReviewGold = async (review: AsrHumanReviewRecord) => {
+    if (!file || !candidate || !Number.isFinite(review.start) || !Number.isFinite(review.end)) {
+      throw new Error('לא ניתן לאשר Gold ללא קובץ מקור ותזמון תקין');
+    }
+    const clip = await extractAudioSegment(file, review.start as number, review.end as number);
+    const result = await addApprovedLoraPair(clip, review.correctedText, 'approved-ground-truth', buildApprovedAsrMetadata({
+      recordingFingerprint: candidate.recordingFingerprint,
+      sourceKind: 'transcription-lab-human-review',
+      sourceRef: `${file.name}#${review.start}-${review.end}`,
+      sourceLabel: file.name,
+      teacherEngines: [review.baselineEngine, review.candidateEngine],
+      startSeconds: review.start,
+      endSeconds: review.end,
+    }));
+    const event = await logPipelineEvent({
+      experimentId,
+      recordingFingerprint: candidate.recordingFingerprint,
+      comparisonRunId: candidate.comparisonRunId,
+      stage: 'training',
+      level: 'success',
+      eventType: 'human-review-gold-approved',
+      message: 'קטע מתוזמן שאושר בבדיקה אנושית נוסף ל-Gold',
+      details: { ...review, approvedForGold: true, rows: result.rows, clipName: clip.name },
+    });
+    appendEvent(event);
+  };
+
   const importLegacy = async () => {
     setImportingLegacy(true);
     try {
@@ -478,7 +517,7 @@ export default function TranscriptionLab() {
         <Progress value={progress} className="h-2" />
       </div>
 
-      <Accordion type="multiple" defaultValue={['source', 'configuration', 'run', 'compare', 'logs']} className="w-full">
+      <Accordion type="multiple" defaultValue={['source', 'configuration', 'run', 'compare', 'review', 'logs']} className="w-full">
         <AccordionItem value="source">
           <AccordionTrigger className="text-right hover:no-underline"><span className="flex items-center gap-3"><Badge>1</Badge><FileAudio className="h-5 w-5" />מקור וטקסט אמת</span></AccordionTrigger>
           <AccordionContent className="space-y-4">
@@ -568,15 +607,24 @@ export default function TranscriptionLab() {
 
         <AccordionItem value="review">
           <AccordionTrigger className="text-right hover:no-underline"><span className="flex items-center gap-3"><Badge>5</Badge><ShieldCheck className="h-5 w-5" />בדיקה אנושית ומועמדים למילון</span></AccordionTrigger>
-          <AccordionContent className="space-y-3">
-            {!correctionCandidates.length ? <p className="text-sm text-muted-foreground">מועמדים יוצגו לאחר השוואת תוצאת B לטקסט אמת.</p> : correctionCandidates.map((item, index) => (
-              <div key={`${item.wrong}-${item.correct}-${index}`} className="flex flex-wrap items-center gap-3 border-b py-2 last:border-b-0">
-                <span className="text-red-700 line-through">{item.wrong || 'חסר'}</span><ChevronLeft className="h-4 w-4" /><span className="font-semibold text-emerald-700">{item.correct || 'מחיקה'}</span>
-                <Button size="sm" variant="outline" className="ms-auto" onClick={() => void addCorrectionToLexicon(item.wrong, item.correct)}><BookOpen className="me-1 h-4 w-4" />הוסף כמועמד</Button>
-              </div>
-            ))}
+          <AccordionContent className="space-y-4">
+            {!file || !baseline || !candidate || !groundTruth.trim()
+              ? <p className="text-sm text-muted-foreground">סביבת הבדיקה תיפתח לאחר שתי ריצות וטקסט אמת.</p>
+              : <AsrHumanReviewWorkspace
+                  experimentId={experimentId}
+                  file={file}
+                  sourceText={groundTruth}
+                  baseline={baseline}
+                  candidate={candidate}
+                  onSaveReview={saveHumanReview}
+                  onApproveGold={approveReviewGold}
+                  onAddToLexicon={addCorrectionToLexicon}
+                />}
             <Separator />
-            <Button onClick={() => void approveGold()} disabled={!file || !groundTruth.trim() || !candidate || goldApproved}>{goldApproved ? <CheckCircle2 className="me-2 h-4 w-4" /> : <Save className="me-2 h-4 w-4" />}{goldApproved ? 'אושר למאגר Gold' : 'אשר אודיו וטקסט אמת ל-Gold'}</Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="outline" onClick={() => void approveGold()} disabled={!file || !groundTruth.trim() || !candidate || goldApproved}>{goldApproved ? <CheckCircle2 className="me-2 h-4 w-4" /> : <Save className="me-2 h-4 w-4" />}{goldApproved ? 'כל ההקלטה אושרה ל-Gold' : 'אשר את כל ההקלטה וטקסט האמת ל-Gold'}</Button>
+              <span className="text-xs text-muted-foreground">אישור מלא מתאים רק לאחר בדיקה ידנית של כל ההקלטה; לבדיקת מילים בודדות השתמש באישור הקטע המתוזמן.</span>
+            </div>
           </AccordionContent>
         </AccordionItem>
 

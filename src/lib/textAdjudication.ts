@@ -3,6 +3,14 @@ export type AdjudicationUnit = {
   kind: "equal" | "conflict";
   leftText: string;
   rightText: string;
+  leftStart: number;
+  leftEnd: number;
+  rightStart: number;
+  rightEnd: number;
+};
+
+export type BuildAdjudicationOptions = {
+  mergeEqual?: boolean;
 };
 
 export type AdjudicationResolution = {
@@ -43,15 +51,36 @@ function tokenize(text: string): AlignmentToken[] {
   }));
 }
 
-function appendUnit(units: AdjudicationUnit[], kind: AdjudicationUnit["kind"], leftText: string, rightText: string) {
+function appendUnit(
+  units: AdjudicationUnit[],
+  kind: AdjudicationUnit["kind"],
+  leftText: string,
+  rightText: string,
+  leftStart: number,
+  leftEnd: number,
+  rightStart: number,
+  rightEnd: number,
+  mergeEqual: boolean,
+) {
   if (!leftText && !rightText) return;
   const previous = units.at(-1);
-  if (kind === "equal" && previous?.kind === "equal") {
+  if (mergeEqual && kind === "equal" && previous?.kind === "equal") {
     previous.leftText += leftText;
     previous.rightText += rightText;
+    previous.leftEnd = leftEnd;
+    previous.rightEnd = rightEnd;
     return;
   }
-  units.push({ id: `conflict-${units.length}`, kind, leftText, rightText });
+  units.push({
+    id: `conflict-${units.length}`,
+    kind,
+    leftText,
+    rightText,
+    leftStart,
+    leftEnd,
+    rightStart,
+    rightEnd,
+  });
 }
 
 /**
@@ -59,7 +88,12 @@ function appendUnit(units: AdjudicationUnit[], kind: AdjudicationUnit["kind"], l
  * possible, and a phrase only when insertions/deletions make one-to-one
  * alignment impossible.
  */
-export function buildAdjudicationUnits(left: string, right: string): AdjudicationUnit[] {
+export function buildAdjudicationUnits(
+  left: string,
+  right: string,
+  options: BuildAdjudicationOptions = {},
+): AdjudicationUnit[] {
+  const mergeEqual = options.mergeEqual !== false;
   const leftTokens = tokenize(left);
   const rightTokens = tokenize(right);
   const dp = Array.from(
@@ -83,7 +117,17 @@ export function buildAdjudicationUnits(left: string, right: string): Adjudicatio
     if (i < leftTokens.length && j < rightTokens.length && leftTokens[i].key === rightTokens[j].key) {
       const leftText = leftTokens[i].text;
       const rightText = rightTokens[j].text;
-      appendUnit(units, leftText === rightText ? "equal" : "conflict", leftText, rightText);
+      appendUnit(
+        units,
+        leftText === rightText ? "equal" : "conflict",
+        leftText,
+        rightText,
+        i,
+        i + 1,
+        j,
+        j + 1,
+        mergeEqual,
+      );
       i++;
       j++;
       continue;
@@ -102,6 +146,11 @@ export function buildAdjudicationUnits(left: string, right: string): Adjudicatio
       "conflict",
       leftTokens.slice(leftStart, i).map((token) => token.text).join(""),
       rightTokens.slice(rightStart, j).map((token) => token.text).join(""),
+      leftStart,
+      i,
+      rightStart,
+      j,
+      mergeEqual,
     );
   }
 

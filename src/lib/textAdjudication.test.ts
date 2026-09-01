@@ -10,6 +10,13 @@ describe("text adjudication", () => {
     expect(composeAdjudicatedText(units, {})).toBe("אמר בבא בתרא היום");
   });
 
+  it("can keep equal words separate and exposes both token ranges", () => {
+    const units = buildAdjudicationUnits("אמר רבי עקיבא", "אמר רבי עקיבה", { mergeEqual: false });
+    expect(units).toHaveLength(3);
+    expect(units[1]).toMatchObject({ leftStart: 1, leftEnd: 2, rightStart: 1, rightEnd: 2 });
+    expect(units[2]).toMatchObject({ kind: "conflict", leftStart: 2, rightStart: 2 });
+  });
+
   it("supports a phrase replacing one word", () => {
     const units = buildAdjudicationUnits("שמע האיגון היום", "שמע רב האי גאון היום");
     const conflict = units.find((unit) => unit.kind === "conflict");

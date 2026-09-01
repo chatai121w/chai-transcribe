@@ -59,9 +59,83 @@ describe('SyncMirrorLayout padded alignment', () => {
     });
   });
 
+  it('reduces an accidental multi-word selection to one anchored word', () => {
+    expect(findTextareaWordRange('מומן אמר ממון', 0, 8, 'forward')).toEqual({
+      start: 0,
+      end: 4,
+      word: 'מומן',
+    });
+    expect(findTextareaWordRange('מומן אמר ממון', 0, 8, 'backward')).toEqual({
+      start: 5,
+      end: 8,
+      word: 'אמר',
+    });
+  });
+
+  it('opens one precise word on double click without native multi-word selection', async () => {
+    const text = 'שלום עולם טוב';
+    const user = userEvent.setup();
+    const onWordReplace = vi.fn();
+    const view = render(
+      <SyncMirrorLayout
+        wordTimings={makeTimings(text.split(' '))}
+        currentTime={0}
+        text={text}
+        syncEnabled={false}
+        onTextChange={vi.fn()}
+        onWordReplace={onWordReplace}
+        onWordClick={vi.fn()}
+      />,
+    );
+
+    const word = await waitFor(() => {
+      const element = view.container.querySelector<HTMLElement>('[data-word-index="1"][data-word-side="left"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    expect(fireEvent.mouseDown(word, { detail: 2, button: 0 })).toBe(false);
+    fireEvent.doubleClick(word, { clientX: 40, clientY: 40 });
+
+    const menu = await screen.findByRole('menu');
+    const panel = screen.getByTestId('floating-word-correction');
+    const dragHandle = screen.getByTestId('word-correction-drag-handle');
+    expect(panel).toHaveStyle({ resize: 'both' });
+    fireEvent.pointerDown(dragHandle, { pointerId: 1, button: 0, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(dragHandle, { pointerId: 1, clientX: 40, clientY: 30 });
+    fireEvent.pointerUp(dragHandle, { pointerId: 1, clientX: 40, clientY: 30 });
+    expect(panel.style.translate).not.toBe('0px 0px');
+
+    await user.click(screen.getByRole('button', { name: 'מזער חלון תיקון' }));
+    expect(screen.queryByRole('textbox', { name: 'תיקון מהיר' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'שחזר חלון תיקון' }));
+    expect(await screen.findByRole('textbox', { name: 'תיקון מהיר' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'הגדל חלון תיקון' }));
+    expect(panel).toHaveStyle({ resize: 'none' });
+    await user.click(screen.getByRole('button', { name: 'החזר לגודל רגיל' }));
+    expect(panel).toHaveStyle({ resize: 'both' });
+
+    expect(within(menu).getByRole('textbox', { name: 'תיקון מהיר' })).toHaveValue('עולם');
+    expect(within(menu).queryByText('שלום עולם טוב', { exact: true })).not.toBeInTheDocument();
+
+    const nextWord = view.container.querySelector<HTMLElement>('[data-word-index="2"][data-word-side="left"]');
+    expect(nextWord).not.toBeNull();
+    fireEvent.mouseDown(nextWord!, { detail: 2, button: 0 });
+    fireEvent.doubleClick(nextWord!, { clientX: 80, clientY: 40 });
+
+    await waitFor(() => {
+      expect(within(screen.getByRole('menu')).getByRole('textbox', { name: 'תיקון מהיר' })).toHaveValue('טוב');
+    });
+
+    const quickInput = screen.getByRole('textbox', { name: 'תיקון מהיר' });
+    await waitFor(() => expect(quickInput).toHaveFocus());
+    await user.keyboard('חדש{Enter}');
+    expect(onWordReplace).toHaveBeenCalledWith(2, 'חדש');
+  });
+
   it('opens the shared correction menu in full edit mode', async () => {
     const text = 'שלום עולם טוב';
     const onTextChange = vi.fn();
+    const onWordClick = vi.fn();
     render(
       <SyncMirrorLayout
         wordTimings={makeTimings(text.split(' '))}
@@ -70,17 +144,25 @@ describe('SyncMirrorLayout padded alignment', () => {
         syncEnabled={false}
         onTextChange={onTextChange}
         onWordReplace={vi.fn()}
-        onWordClick={vi.fn()}
+        onWordClick={onWordClick}
       />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'עריכה מלאה' }));
+    const originalWord = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[data-full-edit-original-word="true"][data-word-index="1"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    fireEvent.click(originalWord);
+    expect(onWordClick).toHaveBeenCalledWith(0.25);
+
     const textarea = await screen.findByTestId('full-edit-textarea') as HTMLTextAreaElement;
     textarea.setSelectionRange(5, 9);
     fireEvent.contextMenu(textarea);
 
     expect(await screen.findByText('מחק מילה', { exact: true })).toBeVisible();
-    expect(within(screen.getByRole('menu')).getByText('עולם', { exact: true })).toBeVisible();
+    expect(within(screen.getByRole('menu')).getByRole('textbox', { name: 'תיקון מהיר' })).toHaveValue('עולם');
     expect(within(screen.getByRole('menu')).getAllByRole('menuitem')[0]).toHaveTextContent('מילים דומות');
     fireEvent.click(screen.getByText('מחק מילה', { exact: true }));
     expect(onTextChange).toHaveBeenCalledWith('שלום טוב');
