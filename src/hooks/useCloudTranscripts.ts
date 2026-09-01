@@ -69,6 +69,7 @@ let activeUserId: string | null = null;
 let inflightFetch: Promise<void> | null = null;
 let lastFetchAt = 0;
 const FETCH_COOLDOWN_MS = 4000;
+const transcriptAudioUploads = new Map<string, Promise<string>>();
 
 function transcriptsEqual(a: CloudTranscript[], b: CloudTranscript[]): boolean {
   if (a === b) return true;
@@ -280,9 +281,33 @@ export const useCloudTranscripts = () => {
   }, []);
 
   const ensureTranscriptAudioUploaded = useCallback(async (id: string): Promise<string | null> => {
+    const activeUpload = transcriptAudioUploads.get(id);
+    if (activeUpload) return activeUpload;
+
     const cloudTranscript = state.transcripts.find((transcript) => transcript.id === id);
     if (cloudTranscript?.audio_file_path) return cloudTranscript.audio_file_path;
-    if (!user || !(await isDbAvailable())) return null;
+
+    if (!user) return null;
+    const { data: remoteTranscript, error: remoteError } = await supabase
+      .from('transcripts')
+      .select('audio_file_path')
+      .eq('id', id)
+      .maybeSingle();
+    if (remoteError) throw remoteError;
+    if (remoteTranscript?.audio_file_path) {
+      const audioPath = remoteTranscript.audio_file_path;
+      if (await isDbAvailable()) {
+        await db.transcripts.update(id, { audio_file_path: audioPath, _dirty: false });
+      }
+      setState({
+        transcripts: state.transcripts.map((transcript) =>
+          transcript.id === id ? { ...transcript, audio_file_path: audioPath } : transcript,
+        ),
+      });
+      return audioPath;
+    }
+
+    if (!(await isDbAvailable())) return null;
 
     const localTranscript = await db.transcripts.get(id);
     if (!localTranscript?.audio_blob) return null;
@@ -294,30 +319,38 @@ export const useCloudTranscripts = () => {
       : new File([blob], `${localTranscript.title || `audio-${id}`}.${extension}`, {
           type: blob.type || 'audio/wav',
         });
-    const audioPath = await uploadAudioFile(audioFile);
-    if (!audioPath) throw new Error('העלאת קובץ האודיו לענן נכשלה');
+    const uploadPromise = (async () => {
+      const audioPath = await uploadAudioFile(audioFile);
+      if (!audioPath) throw new Error('העלאת קובץ האודיו לענן נכשלה');
 
-    const updatedAt = new Date().toISOString();
-    const { error } = await supabase
-      .from('transcripts')
-      .update({ audio_file_path: audioPath, updated_at: updatedAt })
-      .eq('id', id);
-    if (error) throw error;
+      const updatedAt = new Date().toISOString();
+      const { error } = await supabase
+        .from('transcripts')
+        .update({ audio_file_path: audioPath, updated_at: updatedAt })
+        .eq('id', id);
+      if (error) throw error;
 
-    await db.transcripts.update(id, {
-      audio_file_path: audioPath,
-      updated_at: updatedAt,
-      _dirty: false,
-    });
-    setState({
-      transcripts: state.transcripts.map((transcript) =>
-        transcript.id === id
-          ? { ...transcript, audio_file_path: audioPath, updated_at: updatedAt }
-          : transcript,
-      ),
-    });
-    debugLog.info('Cloud', `Audio upload complete before folder move: ${audioPath}`);
-    return audioPath;
+      await db.transcripts.update(id, {
+        audio_file_path: audioPath,
+        updated_at: updatedAt,
+        _dirty: false,
+      });
+      setState({
+        transcripts: state.transcripts.map((transcript) =>
+          transcript.id === id
+            ? { ...transcript, audio_file_path: audioPath, updated_at: updatedAt }
+            : transcript,
+        ),
+      });
+      debugLog.info('Cloud', `Audio upload complete before dependent action: ${audioPath}`);
+      return audioPath;
+    })();
+    transcriptAudioUploads.set(id, uploadPromise);
+    try {
+      return await uploadPromise;
+    } finally {
+      if (transcriptAudioUploads.get(id) === uploadPromise) transcriptAudioUploads.delete(id);
+    }
   }, [user, uploadAudioFile]);
 
   const saveTranscript = useCallback(async (
@@ -421,11 +454,22 @@ export const useCloudTranscripts = () => {
           return audioPath;
         };
 
+        const startAudioUpload = () => {
+          const activeUpload = transcriptAudioUploads.get(cloudId);
+          if (activeUpload) return activeUpload;
+          const uploadPromise = persistAudio();
+          transcriptAudioUploads.set(cloudId, uploadPromise);
+          void uploadPromise.finally(() => {
+            if (transcriptAudioUploads.get(cloudId) === uploadPromise) transcriptAudioUploads.delete(cloudId);
+          }).catch(() => undefined);
+          return uploadPromise;
+        };
+
         if (options?.waitForAudioUpload) {
-          const audioPath = await persistAudio();
+          const audioPath = await startAudioUpload();
           (data as CloudTranscript).audio_file_path = audioPath;
         } else {
-          void persistAudio().catch((err) => {
+          void startAudioUpload().catch((err) => {
             debugLog.error('Cloud', 'Background audio upload failed', err instanceof Error ? err.message : String(err));
           });
         }

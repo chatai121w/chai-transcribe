@@ -172,6 +172,24 @@ export async function mockSupabase(page: Page, options?: {
 
   // ── Storage: permanent-audio ──
   await page.route(`**/${SUPABASE_HOST}/storage/v1/**`, async (route) => {
+    const url = route.request().url();
+    if (url.includes('/storage/v1/object/sign/permanent-audio/')) {
+      return route.fulfill({
+        status: 200,
+        json: { signedURL: '/object/public/permanent-audio/mock-audio.wav?token=test' },
+      });
+    }
+    if (url.includes('/storage/v1/object/public/permanent-audio/')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'audio/wav',
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Length': String('RIFF-existing-cloud-audio'.length),
+        },
+        body: 'RIFF-existing-cloud-audio',
+      });
+    }
     return route.fulfill({ status: 200, json: { Key: 'test-audio.webm' } });
   });
 

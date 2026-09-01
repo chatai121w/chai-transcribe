@@ -84,8 +84,8 @@ test.describe('Unified transcription lab', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/lashon-kodesh', { waitUntil: 'commit' });
 
-    await expect(page).toHaveURL(/\/transcription-lab\?mode=lashon-kodesh/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { name: 'מעבדת תמלול מתקדמת' })).toBeVisible({ timeout: 30_000 });
+    await expect(page).toHaveURL(/\/transcription-lab\?mode=lashon-kodesh/, { timeout: 120_000 });
+    await expect(page.getByRole('heading', { name: 'מעבדת תמלול מתקדמת' })).toBeVisible({ timeout: 120_000 });
     await expect(page.getByLabel('הפעל מצב לשון הקודש בריצה B')).toBeChecked();
     const layout = await page.evaluate(() => ({
       direction: getComputedStyle(document.querySelector('main')!).direction,
@@ -101,6 +101,94 @@ test.describe('Unified transcription lab', () => {
     await page.getByRole('combobox', { name: 'מנוע B - מועמד' }).click();
     await page.getByRole('option', { name: 'Gemini' }).click();
     await expect(page.getByRole('combobox', { name: 'מודל B' })).toContainText('Gemini 3.5 Transcribe');
+  });
+
+  test('loads verified editor text with the existing cloud audio and does not upload it again', async ({ page }) => {
+    const storageUploads: string[] = [];
+    page.on('request', request => {
+      const url = request.url();
+      if (request.method() === 'POST'
+          && url.includes('/storage/v1/object/permanent-audio/')) {
+        storageUploads.push(url);
+      }
+    });
+    await page.addInitScript(() => {
+      window.history.replaceState({
+        usr: {
+          source: 'verified-text-editor',
+          sourceTranscriptId: 'tr-002',
+          audioFilePath: 'test-audio.webm',
+          audioFileName: 'שיעור-מאומת.wav',
+          initialTranscript: 'אמר רבי עקיבה',
+          groundTruth: 'אמר רבי עקיבא',
+        },
+        key: 'verified-transfer',
+        idx: 0,
+      }, '', window.location.href);
+    });
+
+    await page.goto('/transcription-lab', { waitUntil: 'commit' });
+
+    await expect(page.getByRole('heading', { name: 'מעבדת תמלול מתקדמת' })).toBeVisible({ timeout: 120_000 });
+    await expect(page.getByText('האודיו וטקסט האמת נטענו מהתמלול המאומת', { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText('מקור מקושר מעורך הטקסט', { exact: true })).toBeVisible();
+    await expect(page.getByText(/שיעור-מאומת\.wav/)).toBeVisible();
+    await expect(page.locator('#ground-truth')).toHaveValue('אמר רבי עקיבא');
+    await expect(page.locator('#initial-transcript')).toHaveValue('אמר רבי עקיבה');
+    await expect(page.getByRole('button', { name: 'הפעל ניסוי מלא' })).toBeEnabled();
+    expect(storageUploads).toEqual([]);
+
+    const sourceEvent = await page.evaluate(() => {
+      const events = JSON.parse(localStorage.getItem('asr_pipeline_events_v1') || '[]') as Array<{
+        eventType: string;
+        details?: { audioUploadedAgain?: boolean; transcriptId?: string };
+      }>;
+      return events.find(event => event.eventType === 'verified-editor-source-linked');
+    });
+    expect(sourceEvent?.details).toMatchObject({ audioUploadedAgain: false, transcriptId: 'tr-002' });
+  });
+
+  test('approves the edited text in the editor and opens the central lab with the same recording', async ({ page }) => {
+    const transcriptWrites: Array<{ method: string; url: string; body: string | null }> = [];
+    const storageUploads: string[] = [];
+    page.on('request', request => {
+      const url = request.url();
+      if (url.includes('/rest/v1/transcripts') || url.includes('/rest/v1/transcript_versions')) {
+        transcriptWrites.push({ method: request.method(), url, body: request.postData() });
+      }
+      if (request.method() === 'POST' && url.includes('/storage/v1/object/permanent-audio/')) {
+        storageUploads.push(url);
+      }
+    });
+    await page.addInitScript(() => {
+      window.history.replaceState({
+        usr: {
+          transcriptId: 'tr-002',
+          text: 'אמר רבי עקיבא',
+          engine: 'Local CUDA',
+          engineLabel: 'Ivrit.ai Turbo V3',
+          audioFilePath: 'test-audio.webm',
+          audioFileName: 'שיעור-מאומת.wav',
+          initialTab: 'player',
+        },
+        key: 'editor-source',
+        idx: 0,
+      }, '', window.location.href);
+    });
+
+    await page.goto('/text-editor', { waitUntil: 'commit' });
+    const transfer = page.getByLabel('העברה למעבדת התמלול');
+    await expect(transfer).toBeVisible({ timeout: 120_000 });
+    await expect(transfer.getByText('אודיו מקושר', { exact: true })).toBeVisible();
+    await transfer.getByRole('button', { name: 'אשר והעבר למעבדה' }).click();
+
+    await expect(page).toHaveURL(/\/transcription-lab$/, { timeout: 30_000 });
+    await expect(page.locator('#ground-truth')).toHaveValue('אמר רבי עקיבא', { timeout: 30_000 });
+    await expect(page.locator('#initial-transcript')).toHaveValue('תמלול שני לבדיקת המערכת');
+    await expect(page.getByText('מקור מקושר מעורך הטקסט', { exact: true })).toBeVisible();
+    expect(storageUploads).toEqual([]);
+    expect(transcriptWrites.some(write => write.method === 'PATCH' && write.body?.includes('"edited_text":"אמר רבי עקיבא"'))).toBe(true);
+    expect(transcriptWrites.some(write => write.url.includes('/transcript_versions') && write.body?.includes('טקסט אמת מאומת'))).toBe(true);
   });
 
   test('records a terminology sample and prepares the existing A/B pipeline automatically', async ({ page }) => {

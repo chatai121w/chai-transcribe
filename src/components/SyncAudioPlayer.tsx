@@ -4814,7 +4814,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                 title="גרור לשינוי מיקום הווידג'ט"
               >
                 <GripVertical className="w-3.5 h-3.5 no-theme-icon" />
-                <span>הוכחת למידה</span>
+                <span>טקסט אמת ומעבדה</span>
               </div>
               {learningWidget}
             </div>

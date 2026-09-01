@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import {
   Activity,
   BarChart3,
@@ -31,11 +31,13 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { TermRecordingPanel, type RecordedPracticeSource } from '@/components/transcription/TermRecordingPanel';
 import { toast } from '@/hooks/use-toast';
+import { useCloudTranscripts } from '@/hooks/useCloudTranscripts';
 import { useCustomVocabulary } from '@/hooks/useCustomVocabulary';
 import { addApprovedLoraPair } from '@/hooks/useLoraTraining';
 import { extractCorrectionCandidates, wordDiff } from '@/lib/asrMetrics';
 import { buildApprovedAsrMetadata } from '@/lib/asrDatasetMetadata';
 import { importLegacyLkDictionary } from '@/lib/legacyLkMigration';
+import { debugLog } from '@/lib/debugLogger';
 import { listPipelineEvents, logPipelineEvent, type PipelineAuditEvent } from '@/lib/pipelineAudit';
 import { TRANSCRIPTION_ENGINE_OPTIONS, type TranscriptionEngineId } from '@/lib/retranscriptionRunner';
 import { normalizeVocabularyKey } from '@/utils/customVocabulary';
@@ -48,6 +50,15 @@ import {
 const VocabularyPanel = lazy(() => import('@/components/VocabularyPanel').then((module) => ({ default: module.VocabularyPanel })));
 const LoraFineTuningPanel = lazy(() => import('@/components/training/LoraFineTuningPanel'));
 const ACTIVE_EXPERIMENT_KEY = 'asr_pipeline_active_experiment_v1';
+
+interface VerifiedEditorTransferState {
+  source?: 'verified-text-editor';
+  sourceTranscriptId?: string;
+  audioFilePath?: string;
+  audioFileName?: string;
+  initialTranscript?: string;
+  groundTruth?: string;
+}
 
 const CUDA_MODELS = [
   { value: 'ivrit-ai/whisper-large-v3-turbo-ct2', label: 'Ivrit.ai Turbo V3' },
@@ -111,10 +122,14 @@ function MetricRow({ label, baseline, candidate, lowerIsBetter = true }: { label
 }
 
 export default function TranscriptionLab() {
+  const location = useLocation();
   const [searchParams] = useSearchParams();
+  const { getAudioUrl } = useCloudTranscripts();
+  const editorTransfer = location.state as VerifiedEditorTransferState | null;
   const initialLk = searchParams.get('mode') === 'lashon-kodesh';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const importedSourceRef = useRef<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [experimentId, setExperimentId] = useState(() => {
     try {
@@ -130,6 +145,8 @@ export default function TranscriptionLab() {
   const [loshonKodesh, setLoshonKodesh] = useState(initialLk);
   const [manualHotwords, setManualHotwords] = useState('');
   const [groundTruth, setGroundTruth] = useState('');
+  const [initialTranscript, setInitialTranscript] = useState('');
+  const [linkedTranscriptId, setLinkedTranscriptId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('ממתין לקובץ');
@@ -158,9 +175,13 @@ export default function TranscriptionLab() {
     return extractCorrectionCandidates(wordDiff(groundTruth, candidate.text)).slice(0, 50);
   }, [candidate?.text, groundTruth]);
 
-  const handleFile = (next: File | null) => {
+  const handleFile = useCallback((next: File | null, preserveLinkedSource = false) => {
     setFile(next);
     setRecordingSource(null);
+    if (!preserveLinkedSource) {
+      setLinkedTranscriptId(null);
+      setInitialTranscript('');
+    }
     const nextExperimentId = crypto.randomUUID();
     localStorage.setItem(ACTIVE_EXPERIMENT_KEY, nextExperimentId);
     setExperimentId(nextExperimentId);
@@ -170,7 +191,93 @@ export default function TranscriptionLab() {
     setGoldApproved(false);
     setProgress(0);
     setStatus(next ? 'קובץ המקור מוכן' : 'ממתין לקובץ');
-  };
+    return nextExperimentId;
+  }, []);
+
+  useEffect(() => {
+    if (editorTransfer?.source !== 'verified-text-editor'
+        || !editorTransfer.sourceTranscriptId
+        || !editorTransfer.audioFilePath
+        || !editorTransfer.groundTruth?.trim()) return;
+
+    const sourceKey = `${editorTransfer.sourceTranscriptId}:${editorTransfer.audioFilePath}`;
+    if (importedSourceRef.current === sourceKey) return;
+    importedSourceRef.current = sourceKey;
+    setStatus('טוען את האודיו השמור מהענן');
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const signedUrl = await getAudioUrl(editorTransfer.audioFilePath!);
+        if (!signedUrl) throw new Error('לא ניתן ליצור קישור מאובטח לאודיו השמור');
+        debugLog.info('TranscriptionLab', 'Signed audio URL resolved for verified editor transfer', {
+          transcriptId: editorTransfer.sourceTranscriptId,
+        });
+        const response = await fetch(signedUrl);
+        if (!response.ok) throw new Error(`טעינת האודיו נכשלה (${response.status})`);
+        debugLog.info('TranscriptionLab', 'Verified editor audio response received', {
+          status: response.status,
+          contentType: response.headers.get('content-type'),
+        });
+        const blob = await response.blob();
+        debugLog.info('TranscriptionLab', 'Verified editor audio downloaded', {
+          bytes: blob.size,
+          cancelled,
+        });
+        if (cancelled) return;
+
+        const sourceFile = new File(
+          [blob],
+          editorTransfer.audioFileName || 'recording',
+          { type: blob.type || 'audio/wav' },
+        );
+        const importedExperimentId = handleFile(sourceFile, true);
+        setGroundTruth(editorTransfer.groundTruth!.trim());
+        setInitialTranscript(editorTransfer.initialTranscript?.trim() || '');
+        setLinkedTranscriptId(editorTransfer.sourceTranscriptId!);
+        setStatus('האודיו וטקסט האמת נטענו מהתמלול המאומת');
+
+        const event = await logPipelineEvent({
+          experimentId: importedExperimentId,
+          stage: 'source',
+          level: 'success',
+          eventType: 'verified-editor-source-linked',
+          message: 'אותו קובץ ענן וטקסט אמת מאומת נטענו מעורך הטקסט',
+          details: {
+            transcriptId: editorTransfer.sourceTranscriptId,
+            audioFilePath: editorTransfer.audioFilePath,
+            audioUploadedAgain: false,
+            hasInitialTranscript: Boolean(editorTransfer.initialTranscript?.trim()),
+            groundTruthCharacters: editorTransfer.groundTruth!.trim().length,
+          },
+        });
+        if (!cancelled) setEvents((current) => [event, ...current.filter((item) => item.id !== event.id)]);
+      } catch (error) {
+        debugLog.error('TranscriptionLab', 'Verified editor transfer failed', error instanceof Error ? error.message : String(error));
+        importedSourceRef.current = null;
+        setStatus('טעינת המקור מהעורך נכשלה');
+        toast({
+          title: 'טעינת האודיו מהענן נכשלה',
+          description: error instanceof Error ? error.message : String(error),
+          variant: 'destructive',
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (importedSourceRef.current === sourceKey) importedSourceRef.current = null;
+    };
+  }, [
+    editorTransfer?.audioFileName,
+    editorTransfer?.audioFilePath,
+    editorTransfer?.groundTruth,
+    editorTransfer?.initialTranscript,
+    editorTransfer?.source,
+    editorTransfer?.sourceTranscriptId,
+    getAudioUrl,
+    handleFile,
+  ]);
 
   const handleRecordedSource = (source: RecordedPracticeSource) => {
     handleFile(source.file);
@@ -375,6 +482,14 @@ export default function TranscriptionLab() {
         <AccordionItem value="source">
           <AccordionTrigger className="text-right hover:no-underline"><span className="flex items-center gap-3"><Badge>1</Badge><FileAudio className="h-5 w-5" />מקור וטקסט אמת</span></AccordionTrigger>
           <AccordionContent className="space-y-4">
+            {linkedTranscriptId && (
+              <div className="flex flex-wrap items-center gap-2 border-y bg-emerald-50/70 px-3 py-2 text-sm text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
+                <CloudDownload className="h-4 w-4" />
+                <span className="font-medium">מקור מקושר מעורך הטקסט</span>
+                <Badge variant="outline" className="font-mono text-xs">{linkedTranscriptId.slice(0, 8)}</Badge>
+                <span>האודיו נטען מהרשומה הקיימת ולא הועלה שוב לענן.</span>
+              </div>
+            )}
             <div className="grid gap-4 md:grid-cols-[minmax(16rem,0.8fr)_minmax(20rem,1.2fr)]">
               <div className="space-y-2">
                 <Label htmlFor="lab-audio">קובץ האודיו המקורי</Label>
@@ -388,6 +503,13 @@ export default function TranscriptionLab() {
                 <Textarea id="ground-truth" value={groundTruth} onChange={(event) => setGroundTruth(event.target.value)} rows={5} dir="rtl" placeholder="הדבק כאן תמלול שנבדק מול האודיו. בלי טקסט אמת תתבצע השוואה חזותית בלבד." />
               </div>
             </div>
+            {initialTranscript && (
+              <div className="space-y-2">
+                <Label htmlFor="initial-transcript">התמלול הראשוני השמור</Label>
+                <Textarea id="initial-transcript" readOnly value={initialTranscript} rows={4} dir="rtl" />
+                <p className="text-xs text-muted-foreground">נשמר להיסטוריה ולהשוואת מקור. הוא אינו נדרס על ידי טקסט האמת.</p>
+              </div>
+            )}
             <TermRecordingPanel onReady={handleRecordedSource} />
           </AccordionContent>
         </AccordionItem>

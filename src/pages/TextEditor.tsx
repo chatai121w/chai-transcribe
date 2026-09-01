@@ -33,7 +33,7 @@ const EditPipeline = lazy(() => import("@/components/EditPipeline").then(m => ({
 const OllamaManager = lazy(() => import("@/components/OllamaManager").then(m => ({ default: m.OllamaManager })));
 const SyncEditableView = lazy(() => import("@/components/SyncEditableView").then(m => ({ default: m.SyncEditableView })));
 const SyncTranscriptView = lazy(() => import("@/components/SyncTranscriptView").then(m => ({ default: m.SyncTranscriptView })));
-const LearningRegressionPanel = lazy(() => import("@/components/LearningRegressionPanel").then(m => ({ default: m.LearningRegressionPanel })));
+const VerifiedTranscriptLabTransfer = lazy(() => import("@/components/VerifiedTranscriptLabTransfer").then(m => ({ default: m.VerifiedTranscriptLabTransfer })));
 const AudioLearningQueue = lazy(() => import("@/components/AudioLearningQueue").then(m => ({ default: m.AudioLearningQueue })));
 const DictionaryValidator = lazy(() => import("@/components/DictionaryValidator").then(m => ({ default: m.DictionaryValidator })));
 const AutoSummaryCard = lazy(() => import("@/components/AutoSummaryCard").then(m => ({ default: m.AutoSummaryCard })));
@@ -374,7 +374,8 @@ const TextEditor = () => {
   const clockStats = useRef({ ticks: 0, renders: 0, wordChanges: 0, since: 0 });
   const transcriptIdRef = useRef<string | null>(null);
   const manualVersionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { updateTranscript, getAudioUrl, saveTranscript, transcripts } = useCloudTranscripts();
+  const { updateTranscript, getAudioUrl, saveTranscript, transcripts, ensureTranscriptAudioUploaded } = useCloudTranscripts();
+  const [labTransferBusy, setLabTransferBusy] = useState(false);
   const [syncEnabled, setSyncEnabled] = useState(true);
   const [forcedAlignmentState, setForcedAlignmentState] = useState<{
     status: 'idle' | 'aligning' | 'aligned' | 'partial' | 'error';
@@ -1098,7 +1099,16 @@ const TextEditor = () => {
     const navEngine = (location.state as any)?.engine;
     const engineName = typeof navEngine === 'string' && navEngine ? navEngine : 'manual';
     try {
-      const created = await saveTranscript(baseText, engineName);
+      const audioFile = audioBlob
+        ? new File([audioBlob], audioFileName || 'recording.wav', { type: audioBlob.type || 'audio/wav' })
+        : undefined;
+      const created = await saveTranscript(
+        baseText,
+        engineName,
+        audioFileName || undefined,
+        audioFile,
+        wordTimingsRef.current,
+      );
       if (created?.id) {
         transcriptIdRef.current = created.id;
         setTranscriptId(created.id);
@@ -1110,7 +1120,77 @@ const TextEditor = () => {
       toast({ title: 'שמירה לענן נכשלה', description: e?.message, variant: 'destructive' });
     }
     return null;
-  }, [transcriptId, text, saveTranscript, location.state]);
+  }, [transcriptId, text, saveTranscript, location.state, audioBlob, audioFileName]);
+
+  const approveAndOpenTranscriptionLab = useCallback(async () => {
+    if (!text.trim() || labTransferBusy) return;
+    setLabTransferBusy(true);
+    try {
+      const id = transcriptIdRef.current || transcriptId || await ensureCloudTranscript();
+      if (!id) throw new Error('לא ניתן ליצור רשומת מקור עבור התמלול');
+
+      const current = transcripts.find((item) => item.id === id);
+      await updateTranscript(id, {
+        edited_text: text.trim(),
+        word_timings: wordTimingsRef.current,
+      });
+
+      const audioPath = current?.audio_file_path || await ensureTranscriptAudioUploaded(id);
+      if (!audioPath) throw new Error('לא נמצא אודיו מקושר. יש לשמור או לטעון את ההקלטה לפני המעבר למעבדה');
+
+      const alreadySaved = cloudVersions.some((version) =>
+        version.source === 'manual'
+        && version.action_label === 'טקסט אמת מאומת'
+        && typeof version.text === 'string'
+        && version.text.trim() === text.trim(),
+      );
+      if (!alreadySaved) {
+        await saveCloudVersion(text.trim(), 'manual', 'בדיקה אנושית', 'טקסט אמת מאומת', {
+          transcriptId: id,
+          audioFilePath: audioPath,
+          folderId: current?.folder_id || null,
+          wordTimings: wordTimingsRef.current,
+        });
+      }
+
+      debugLog.info('TextEditor', 'Verified text linked to the central transcription lab', {
+        transcriptId: id,
+        audioFilePath: audioPath,
+        reusedCloudAudio: Boolean(current?.audio_file_path),
+      });
+      navigate('/transcription-lab', {
+        state: {
+          source: 'verified-text-editor',
+          sourceTranscriptId: id,
+          audioFilePath: audioPath,
+          audioFileName: audioFileName || current?.title || 'recording',
+          initialTranscript: current?.text || originalTextRef.current,
+          groundTruth: text.trim(),
+        },
+      });
+    } catch (error) {
+      debugLog.error('TextEditor', 'Failed to open verified transcript in lab', error instanceof Error ? error.message : String(error));
+      toast({
+        title: 'העברה למעבדה נכשלה',
+        description: error instanceof Error ? error.message : 'שגיאה לא ידועה',
+        variant: 'destructive',
+      });
+    } finally {
+      setLabTransferBusy(false);
+    }
+  }, [
+    audioFileName,
+    cloudVersions,
+    ensureCloudTranscript,
+    ensureTranscriptAudioUploaded,
+    labTransferBusy,
+    navigate,
+    saveCloudVersion,
+    text,
+    transcriptId,
+    transcripts,
+    updateTranscript,
+  ]);
 
   const openRetranscriptionDialog = useCallback(async () => {
     const id = transcriptIdRef.current || transcriptId || await ensureCloudTranscript();
@@ -1182,7 +1262,8 @@ const TextEditor = () => {
     const originalText = currentCloudTranscript?.text || originalTextRef.current || text;
     if (originalText?.trim()) {
       const matchingOriginalVersion = cloudVersions.find((version) => (
-        version.text.normalize('NFKC').replace(/\s+/g, ' ').trim()
+        typeof version.text === 'string'
+        && version.text.normalize('NFKC').replace(/\s+/g, ' ').trim()
           === originalText.normalize('NFKC').replace(/\s+/g, ' ').trim()
         && Boolean(version.engine_label)
       ));
@@ -1215,6 +1296,7 @@ const TextEditor = () => {
     }
 
     for (const v of versions) {
+      if (typeof v.text !== 'string' || !v.text.trim()) continue;
       byId.set(v.id, {
         ...v,
         wordCount: v.wordCount ?? v.text.split(/\s+/).filter(Boolean).length,
@@ -1223,7 +1305,7 @@ const TextEditor = () => {
     }
 
     for (const cv of cloudVersions) {
-      if (byId.has(cv.id)) continue;
+      if (byId.has(cv.id) || typeof cv.text !== 'string' || !cv.text.trim()) continue;
       byId.set(cv.id, {
         id: cv.id,
         text: cv.text,
@@ -1275,6 +1357,7 @@ const TextEditor = () => {
     const uniqueByText = new Map<string, TextVersion>();
     const duplicateCounts = new Map<string, number>();
     for (const version of sorted) {
+      if (typeof version.text !== 'string' || !version.text.trim()) continue;
       const signature = version.text.normalize("NFKC").replace(/\s+/g, " ").trim();
       if (!uniqueByText.has(signature)) {
         uniqueByText.set(signature, { ...version });
@@ -2576,24 +2659,25 @@ const TextEditor = () => {
                   eqPortalTarget={eqPortalTarget}
                   studioLayoutJson={studioLayoutJson}
                   onStudioLayoutChange={cloudPreferencesLoaded ? handleStudioLayoutChange : undefined}
-                  learningWidget={!shouldUseFastEditor ? (
+                  learningWidget={(
                     <>
-                      <LearningRegressionPanel
-                        audioBlob={audioBlob}
-                        audioFileName={audioFileName}
-                        currentText={text}
-                        recordingKey={sourceRecordingId || transcriptId || audioFileName || 'current-transcript'}
-                        onCandidateReady={(candidateText, label) => addVersion(candidateText, 'manual', label)}
+                      <VerifiedTranscriptLabTransfer
+                        hasAudio={Boolean(audioBlob || audioUrl || transcripts.find((item) => item.id === (transcriptIdRef.current || transcriptId))?.audio_file_path)}
+                        hasText={Boolean(text.trim())}
+                        busy={labTransferBusy}
+                        onApproveAndOpenLab={() => void approveAndOpenTranscriptionLab()}
                       />
-                      <AudioLearningQueue
-                        audioBlob={audioBlob}
-                        audioFileName={audioFileName}
-                        candidates={audioLearningCandidates}
-                        onRemove={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
-                        onApproved={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
-                      />
+                      {!shouldUseFastEditor && (
+                        <AudioLearningQueue
+                          audioBlob={audioBlob}
+                          audioFileName={audioFileName}
+                          candidates={audioLearningCandidates}
+                          onRemove={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
+                          onApproved={(id) => updateAudioLearningCandidates((current) => current.filter((item) => item.id !== id))}
+                        />
+                      )}
                     </>
-                  ) : undefined}
+                  )}
                 />
               </div>
               </Suspense>
