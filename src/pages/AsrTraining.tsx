@@ -1102,7 +1102,11 @@ export default function AsrTraining() {
         engine: r.engine as Engine,
         model: r.model,
         hyp: r.hyp,
-        metrics: r.metrics,
+        metrics: {
+          ...r.metrics,
+          orthographicWer: r.metrics.orthographicWer ?? 0,
+          orthographicCer: r.metrics.orthographicCer ?? 0,
+        },
         diff: evalRes.diff,
         candidates: r.candidates,
       };

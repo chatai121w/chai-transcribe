@@ -217,6 +217,7 @@ const useCloudPreferencesImpl = () => {
         const localDiarize = localStorage.getItem('diarize_enabled');
 
         const loaded: UserPreferences = {
+          youtube_save_to_cloud: (data as any).youtube_save_to_cloud ?? DEFAULT_PREFERENCES.youtube_save_to_cloud,
           font_size: data.font_size ?? DEFAULT_PREFERENCES.font_size,
           font_family: data.font_family ?? DEFAULT_PREFERENCES.font_family,
           text_color: data.text_color ?? DEFAULT_PREFERENCES.text_color,

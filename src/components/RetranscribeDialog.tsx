@@ -199,7 +199,7 @@ export function RetranscribeDialog({
         } else {
           setStatus("משתמש בקובץ שכבר הועלה לשרת CUDA");
         }
-        localStorage.setItem("preferred_local_model", cudaModel);
+        localStorage.setItem("preferred_local_model", cudaModel ?? "");
         localStorage.setItem("preferred_local_model_runtime", "server");
         patchTabSettings({ preferredLocalTranscriptionModel: cudaModel });
         const serverResult = await localServer.transcribeStream(file, cudaModel, sourceLanguage, (partial) => {
