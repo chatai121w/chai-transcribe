@@ -87,7 +87,7 @@ describe('useCloudVersions', () => {
       transcript_id: 'transcript-1',
       text: 'טקסט מתוקן',
     }));
-    expect(saved?.id).toBe('cloud-version-1');
+    expect((saved as { id?: string } | null)?.id).toBe('cloud-version-1');
     expect(mocks.warn).toHaveBeenCalledWith(
       'Versions',
       'Local version cache failed; continuing with cloud save',
