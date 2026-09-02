@@ -52,8 +52,11 @@ test.describe('דף תמלול - UI בסיסי', () => {
       buffer: createTestAudioBuffer(),
     });
 
-    await expect(page.getByText('זה אינו קובץ המקור')).toBeVisible();
-    await expect(page.getByText(/יש לבחור את source-recording\.m4a/)).toBeVisible();
+    await expect(page.getByText('זה אינו קובץ המקור', { exact: true })).toBeVisible();
+    await expect(page.getByText(
+      'יש לבחור את source-recording.m4a (4KB). הקובץ שנבחר לא תואם ולכן התמלול לא חודש.',
+      { exact: true },
+    )).toBeVisible();
     await expect(page.getByText(/קובץ מקור: source-recording\.m4a/)).toBeVisible();
   });
 
