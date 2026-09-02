@@ -246,6 +246,7 @@ export const WordContextMenu = ({
 
   return (
     <ContextMenu
+      dir="rtl"
       modal={false}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
