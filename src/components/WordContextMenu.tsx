@@ -255,10 +255,10 @@ export const WordContextMenu = ({
       {open && word && (
       <ContextMenuContent
         ref={panelRef}
-        dir="rtl"
         data-testid="floating-word-correction"
         className="z-[100] p-0 text-right pointer-events-auto"
         style={{
+          direction: 'rtl',
           width: expanded ? 'min(36rem, calc(100vw - 2rem))' : '20rem',
           height: expanded ? 'min(42rem, calc(100vh - 2rem))' : undefined,
           minWidth: minimized ? '16rem' : '18rem',

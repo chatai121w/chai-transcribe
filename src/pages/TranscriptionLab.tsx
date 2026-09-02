@@ -603,7 +603,7 @@ export default function TranscriptionLab() {
       level: 'success',
       eventType: 'human-review-saved',
       message: 'הכרעת Human Review נשמרה עם מקור ופרטי מנועים',
-      details: review,
+      details: review as unknown as Record<string, unknown>,
     });
     appendEvent(event);
   };

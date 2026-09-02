@@ -183,7 +183,7 @@ export async function runTranscriptionPipeline(options: PipelineRunOptions): Pro
     const text = knowledge.text.trim();
     const metrics = options.groundTruth?.trim() ? calculateMetrics(options.groundTruth.trim(), text) : undefined;
     if (metrics) {
-      await emit(options, fingerprint, 'metrics', 'success', 'metrics-calculated', 'מדדי האיכות חושבו מול טקסט האמת', metrics);
+      await emit(options, fingerprint, 'metrics', 'success', 'metrics-calculated', 'מדדי האיכות חושבו מול טקסט האמת', metrics as unknown as Record<string, unknown>);
     } else {
       await emit(options, fingerprint, 'metrics', 'warning', 'metrics-skipped', 'לא הוגדר טקסט אמת ולכן לא חושבו WER ו-CER');
     }

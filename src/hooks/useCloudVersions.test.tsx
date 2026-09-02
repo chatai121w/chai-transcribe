@@ -75,7 +75,7 @@ describe('useCloudVersions', () => {
 
   it('continues saving to Supabase when the local version cache fails', async () => {
     const { result } = renderHook(() => useCloudVersions(null));
-    let saved: Awaited<ReturnType<typeof result.current.saveVersion>> = null;
+    let saved: { id?: string } | null = null;
 
     await act(async () => {
       saved = await result.current.saveVersion('טקסט מתוקן', 'manual', null, 'תיקון ידני', {
