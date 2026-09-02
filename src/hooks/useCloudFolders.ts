@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { debugLog } from '@/lib/debugLogger';
+import { isExpectedNavigationAbort } from '@/lib/navigationAbort';
 
 interface FolderInfo {
   name: string;
@@ -27,7 +28,9 @@ export const useCloudFolders = () => {
         .filter(f => f && f.trim() !== '');
       setRawFolders(folderNames);
     } catch (error) {
-      debugLog.error('Cloud', 'Error fetching folders', error instanceof Error ? error.message : String(error));
+      if (!isExpectedNavigationAbort(error)) {
+        debugLog.error('Cloud', 'Error fetching folders', error instanceof Error ? error.message : String(error));
+      }
     }
   }, [user]);
 

@@ -1,19 +1,31 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const runSmokeSuite = process.env.CI === 'true' || process.env.CI === '1' || process.env.PLAYWRIGHT_SUITE !== 'full';
+const requestedSuite = process.env.PLAYWRIGHT_SUITE || 'smoke';
+const runSmokeSuite = process.env.CI === 'true' || process.env.CI === '1' || requestedSuite === 'smoke';
+const runLiveSuite = requestedSuite === 'live';
+const runProductionSuite = requestedSuite === 'production';
+const useBuiltPreview = process.env.PLAYWRIGHT_USE_PREVIEW === '1';
 
-const smokeIgnore = runSmokeSuite ? [
+const externalOrManualTests = [
   '**/_quick-nav.spec.ts',
   '**/check-live-connection.spec.ts',
   '**/cuda-live-*.spec.ts',
   '**/health-check-debug.spec.ts',
-  '**/live-transcription.spec.ts',
+  '**/harmonika-studio.spec.ts',
   '**/real-transcription.spec.ts',
-  '**/server-lifecycle.spec.ts',
-  '**/server-thorough.spec.ts',
   '**/studio-layout-recovery-real.spec.ts',
   '**/transcribe-wav-live.spec.ts',
-] : [];
+  '**/video-diarization-demo.spec.ts',
+  '**/video-transcription-demo.spec.ts',
+];
+
+const liveTests = [
+  'cuda-live-debug.spec.ts',
+  'harmonika-studio.spec.ts',
+  'real-transcription.spec.ts',
+  'video-diarization-demo.spec.ts',
+  'video-transcription-demo.spec.ts',
+];
 
 const ciSmokeTests = [
   'api-mocks.spec.ts',
@@ -26,8 +38,15 @@ const ciSmokeTests = [
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: runSmokeSuite ? ciSmokeTests : '**/*.spec.ts',
-  testIgnore: smokeIgnore,
+  outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR || 'test-results',
+  testMatch: runSmokeSuite
+    ? ciSmokeTests
+    : runLiveSuite
+      ? liveTests
+      : runProductionSuite
+        ? 'transcription-lab.production.spec.ts'
+        : '**/*.spec.ts',
+  testIgnore: runLiveSuite || runProductionSuite ? [] : externalOrManualTests,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -37,7 +56,8 @@ export default defineConfig({
   globalTimeout: process.env.CI ? 15 * 60_000 : undefined,
 
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8091',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL
+      || (runProductionSuite ? process.env.PRODUCTION_APP_URL || 'https://chai-transcribe.lovable.app' : 'http://localhost:8091'),
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: process.env.RECORD_VIDEO ? 'on' : 'off',
@@ -53,8 +73,8 @@ export default defineConfig({
     },
   ],
 
-  webServer: process.env.PLAYWRIGHT_BASE_URL ? undefined : {
-    command: 'npx vite --force --port 8091',
+  webServer: process.env.PLAYWRIGHT_BASE_URL || runProductionSuite || runLiveSuite ? undefined : {
+    command: useBuiltPreview ? 'npx vite preview --port 8091 --strictPort' : 'npx vite --port 8091',
     port: 8091,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

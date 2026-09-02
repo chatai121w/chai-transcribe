@@ -1,12 +1,22 @@
 import { spawnSync } from 'node:child_process';
 
-const suite = process.argv[2] === 'full' ? 'full' : 'smoke';
-const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-const result = spawnSync(command, ['playwright', 'test'], {
+const requestedSuite = process.argv[2];
+const suite = ['smoke', 'full', 'live', 'production'].includes(requestedSuite)
+  ? requestedSuite
+  : 'smoke';
+const command = process.platform === 'win32' ? 'cmd.exe' : 'npx';
+const commandArgs = process.platform === 'win32'
+  ? ['/d', '/s', '/c', 'npx playwright test']
+  : ['playwright', 'test'];
+const result = spawnSync(command, commandArgs, {
   cwd: process.cwd(),
-  env: { ...process.env, PLAYWRIGHT_SUITE: suite },
+  env: {
+    ...process.env,
+    PLAYWRIGHT_SUITE: suite,
+    ...(suite === 'production' ? { RUN_PRODUCTION_LAB: '1' } : {}),
+  },
   stdio: 'inherit',
-  shell: process.platform === 'win32',
+  shell: false,
 });
 
 if (result.error) console.error(result.error.message);

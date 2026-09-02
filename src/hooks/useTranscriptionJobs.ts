@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
 import { validateBackgroundTranscriptionFile } from '@/lib/backgroundTranscriptionLimits';
 import { debugLog } from '@/lib/debugLogger';
+import { isExpectedNavigationAbort } from '@/lib/navigationAbort';
 
 export interface TranscriptionJob {
   id: string;
@@ -44,7 +45,9 @@ export const useTranscriptionJobs = () => {
       if (error) throw error;
       setJobs((data as TranscriptionJob[]) || []);
     } catch (err) {
-      debugLog.error('Jobs', 'Error loading jobs', err instanceof Error ? err.message : String(err));
+      if (!isExpectedNavigationAbort(err)) {
+        debugLog.error('Jobs', 'Error loading jobs', err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setIsLoading(false);
     }

@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
 import { debugLog } from '@/lib/debugLogger';
+import { isExpectedNavigationAbort } from '@/lib/navigationAbort';
 import { db, isDbAvailable } from '@/lib/localDb';
 import {
   getLocalTranscripts,
@@ -142,7 +143,11 @@ async function doFetch(userId: string, force = false) {
         debugLog.info('Cloud', `Synced ${cloud.length} transcripts to local DB`);
       }
     } catch (err) {
-      debugLog.error('Cloud', 'Error fetching transcripts', err instanceof Error ? err.message : String(err));
+      // A document reload cancels its outstanding fetches. This is expected and
+      // must not be reported as a cloud failure in diagnostics or acceptance QA.
+      if (!isExpectedNavigationAbort(err)) {
+        debugLog.error('Cloud', 'Error fetching transcripts', err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setState({ isLoading: false });
       inflightFetch = null;

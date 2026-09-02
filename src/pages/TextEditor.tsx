@@ -1130,7 +1130,17 @@ const TextEditor = () => {
       const id = transcriptIdRef.current || transcriptId || await ensureCloudTranscript();
       if (!id) throw new Error('לא ניתן ליצור רשומת מקור עבור התמלול');
 
-      const current = transcripts.find((item) => item.id === id);
+      let current = transcripts.find((item) => item.id === id);
+      if (!current) {
+        const { data, error } = await supabase
+          .from('transcripts')
+          .select('*')
+          .eq('id', id)
+          .limit(1);
+        if (error) throw error;
+        current = data?.find((item) => item.id === id);
+      }
+      if (!current) throw new Error('רשומת המקור לא נמצאה. יש לרענן את התמלולים ולנסות שוב');
       await updateTranscript(id, {
         edited_text: text.trim(),
         word_timings: wordTimingsRef.current,
@@ -1165,7 +1175,7 @@ const TextEditor = () => {
           sourceTranscriptId: id,
           audioFilePath: audioPath,
           audioFileName: audioFileName || current?.title || 'recording',
-          initialTranscript: current?.text || originalTextRef.current,
+          initialTranscript: current.text || originalTextRef.current,
           groundTruth: text.trim(),
           sampleType: inferAsrSampleType(current?.tags, current?.title || audioFileName),
         },
