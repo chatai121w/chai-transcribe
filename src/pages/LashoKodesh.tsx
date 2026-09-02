@@ -1453,7 +1453,9 @@ interface BenchmarkRunResult {
   processing_time: number;
   rtf: number;
   total_words: number;
-  pronunciation_score: number;
+  recognition_confidence_score: number;
+  pronunciation_score: number | null;
+  pronunciation_score_available: boolean;
   avg_probability: number;
   grade: string;
   grade_color: string;
@@ -1723,20 +1725,20 @@ function TabBenchmark() {
                     fill="none"
                     stroke={result.grade_color === "green" ? "#22c55e" : result.grade_color === "blue" ? "#3b82f6" : result.grade_color === "amber" ? "#f59e0b" : "#ef4444"}
                     strokeWidth="3.5"
-                    strokeDasharray={`${(result.pronunciation_score / 100) * 99.9} ${99.9 - (result.pronunciation_score / 100) * 99.9}`}
+                    strokeDasharray={`${(result.recognition_confidence_score / 100) * 99.9} ${99.9 - (result.recognition_confidence_score / 100) * 99.9}`}
                     strokeLinecap="round"
                     transform="rotate(-90 18 18)"
                   />
                 </svg>
                 <div className="absolute flex flex-col items-center">
                   <span className={`text-2xl font-black ${gradeColors[result.grade_color]}`}>
-                    {result.pronunciation_score}
+                    {result.recognition_confidence_score}
                   </span>
-                  <span className="text-xs text-muted-foreground">/ 100</span>
+                  <span className="text-xs text-muted-foreground">ביטחון זיהוי</span>
                 </div>
               </div>
               <div className={`text-lg font-bold mt-2 ${gradeColors[result.grade_color]}`}>
-                {result.grade}
+                ביטחון המנוע: {result.grade}
               </div>
             </Card>
 

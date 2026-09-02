@@ -20,6 +20,7 @@ interface EditTranscriptParams {
   toneStyle?: string;
   targetLanguage?: string;
   signal?: AbortSignal;
+  personalGeminiTimeoutMs?: number;
 }
 
 /**
@@ -60,6 +61,16 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
     else systemPrompt = (ACTION_PROMPTS as Record<string, string>)[action] || ACTION_PROMPTS.improve;
     if (targetLanguage) systemPrompt += `\nהחזר את הטקסט בשפה: ${targetLanguage}`;
     systemPrompt += '\nהחזר את הטקסט הסופי בלבד, ללא הסברים.';
+    const personalController = new AbortController();
+    const abortPersonal = () => personalController.abort();
+    signal?.addEventListener('abort', abortPersonal, { once: true });
+    let personalTimedOut = false;
+    const personalTimeoutId = params.personalGeminiTimeoutMs
+      ? window.setTimeout(() => {
+          personalTimedOut = true;
+          personalController.abort();
+        }, params.personalGeminiTimeoutMs)
+      : undefined;
     try {
       return await callPersonalGemini({
         systemPrompt,
@@ -67,19 +78,24 @@ export async function editTranscriptCloud(params: EditTranscriptParams): Promise
         model: model || getPersonalGeminiModel(),
         temperature: 0.3,
         surface: "editing",
-        signal,
+        signal: personalController.signal,
       });
 
     } catch (e) {
-      if (signal?.aborted || (e instanceof DOMException && e.name === 'AbortError')) throw e;
+      if (signal?.aborted) throw e;
       forceLovableGateway = true;
       try {
-        toast.warning(e instanceof PersonalGeminiTransientError
+        toast.warning(personalTimedOut
+          ? "Gemini האישי לא הגיב בזמן — עוברים אוטומטית לקרדיטים של Lovable"
+          : e instanceof PersonalGeminiTransientError
           ? "Gemini עמוס זמנית — עוברים אוטומטית לקרדיטים של Lovable"
           : e instanceof PersonalGeminiExhaustedError
             ? "מפתח Gemini האישי אינו זמין — עוברים אוטומטית לקרדיטים של Lovable"
             : "Gemini האישי נכשל — עוברים אוטומטית לקרדיטים של Lovable");
       } catch { /* noop */ }
+    } finally {
+      if (personalTimeoutId !== undefined) window.clearTimeout(personalTimeoutId);
+      signal?.removeEventListener('abort', abortPersonal);
     }
   }
 

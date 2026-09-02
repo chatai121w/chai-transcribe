@@ -7,6 +7,10 @@ export interface ApprovedAsrMetadataInput {
   sourceRef: string;
   sourceLabel: string;
   teacherEngines: string[];
+  qualityTier?: AsrQualityTier;
+  labelSource?: AsrLabelSource;
+  reviewStatus?: string;
+  benchmarkRole?: 'failure-holdout';
   approvedAt?: string;
   startSeconds?: number;
   endSeconds?: number;
@@ -19,8 +23,8 @@ export function buildApprovedAsrMetadata(input: ApprovedAsrMetadataInput): Recor
   const teachers = [...new Set(input.teacherEngines.map((value) => value.trim()).filter(Boolean))];
   const metadata: Record<string, string | number> = {
     schemaVersion: 1,
-    qualityTier: 'gold',
-    labelSource: 'human-approved',
+    qualityTier: input.qualityTier || 'gold',
+    labelSource: input.labelSource || 'human-approved',
     sourceKind: input.sourceKind.trim() || 'unknown',
     sourceRef: input.sourceRef.trim() || 'unknown',
     sourceLabel: input.sourceLabel.trim() || 'untitled',
@@ -29,6 +33,8 @@ export function buildApprovedAsrMetadata(input: ApprovedAsrMetadataInput): Recor
     teacherEngines: teachers.join('|'),
     approvedAt: input.approvedAt || new Date().toISOString(),
   };
+  if (input.reviewStatus?.trim()) metadata.reviewStatus = input.reviewStatus.trim();
+  if (input.benchmarkRole) metadata.benchmarkRole = input.benchmarkRole;
   if (Number.isFinite(input.startSeconds)) metadata.start = input.startSeconds as number;
   if (Number.isFinite(input.endSeconds)) metadata.end = input.endSeconds as number;
   return metadata;

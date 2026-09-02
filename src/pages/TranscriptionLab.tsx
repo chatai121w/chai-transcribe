@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useLocation, useSearchParams } from 'react-router-dom';
 import {
   Activity,
+  AudioWaveform,
   BarChart3,
   BookOpen,
   CheckCircle2,
@@ -42,6 +43,14 @@ import { addApprovedLoraPair } from '@/hooks/useLoraTraining';
 import { extractCorrectionCandidates, wordDiff } from '@/lib/asrMetrics';
 import type { AsrHumanReviewRecord } from '@/lib/asrHumanReview';
 import { buildApprovedAsrMetadata } from '@/lib/asrDatasetMetadata';
+import {
+  ASR_SAMPLE_TYPE_OPTIONS,
+  asrSampleSourceKind,
+  asrSampleTypeLabel,
+  asrSampleTypeTag,
+  inferAsrSampleType,
+  type AsrSampleType,
+} from '@/lib/asrSampleType';
 import { extractAudioSegment } from '@/lib/audioSegment';
 import { assessReferenceSegment, buildReferenceSegments } from '@/lib/referenceAudioLearning';
 import { importLegacyLkDictionary } from '@/lib/legacyLkMigration';
@@ -49,6 +58,15 @@ import { debugLog } from '@/lib/debugLogger';
 import { listPipelineEvents, logPipelineEvent, type PipelineAuditEvent } from '@/lib/pipelineAudit';
 import { TRANSCRIPTION_ENGINE_OPTIONS, type TranscriptionEngineId } from '@/lib/retranscriptionRunner';
 import { normalizeVocabularyKey } from '@/utils/customVocabulary';
+import { splitPracticeTerms } from '@/lib/termPracticeScript';
+import { enhanceAudioOnServer, type EnhancementPreset } from '@/lib/audioEnhancement';
+import { fingerprintFile } from '@/lib/recordingFingerprint';
+import {
+  ASR_AUDIO_PREPROCESSING_MODES,
+  ASR_AUDIO_PRESET_OPTIONS,
+  buildAsrAudioComparisonPlan,
+  type AsrAudioPreprocessingMode,
+} from '@/lib/asrAudioPreprocessing';
 import {
   comparePipelineResults,
   runTranscriptionPipeline,
@@ -66,6 +84,7 @@ interface VerifiedEditorTransferState {
   audioFileName?: string;
   initialTranscript?: string;
   groundTruth?: string;
+  sampleType?: AsrSampleType;
 }
 
 const CUDA_MODELS = [
@@ -101,6 +120,7 @@ function resolvedModel(model: string): string | undefined {
 
 const stageLabels: Record<string, string> = {
   source: 'מקור',
+  'audio-preprocessing': 'עיבוד אודיו',
   configuration: 'הגדרות',
   upload: 'העלאה',
   transcription: 'תמלול',
@@ -159,6 +179,7 @@ export default function TranscriptionLab() {
   const [baselineModel, setBaselineModel] = useState('ivrit-ai/whisper-large-v3-turbo-ct2');
   const [candidateModel, setCandidateModel] = useState('ivrit-ai/whisper-large-v3-turbo-ct2');
   const [loshonKodesh, setLoshonKodesh] = useState(initialLk);
+  const [useAiKnowledge, setUseAiKnowledge] = useState(false);
   const [manualHotwords, setManualHotwords] = useState('');
   const [groundTruth, setGroundTruth] = useState('');
   const [initialTranscript, setInitialTranscript] = useState('');
@@ -172,6 +193,9 @@ export default function TranscriptionLab() {
   const [goldApproved, setGoldApproved] = useState(false);
   const [importingLegacy, setImportingLegacy] = useState(false);
   const [recordingSource, setRecordingSource] = useState<RecordedPracticeSource | null>(null);
+  const [sampleType, setSampleType] = useState<AsrSampleType>('other');
+  const [audioPreprocessingMode, setAudioPreprocessingMode] = useState<AsrAudioPreprocessingMode>('off');
+  const [audioEnhancementPreset, setAudioEnhancementPreset] = useState<EnhancementPreset>('ai_transcription');
   const [sourceDialogOpen, setSourceDialogOpen] = useState(false);
   const vocabulary = useCustomVocabulary();
 
@@ -194,9 +218,10 @@ export default function TranscriptionLab() {
     ),
     [transcripts],
   );
-  const handleFile = useCallback((next: File | null, preserveLinkedSource = false) => {
+  const handleFile = useCallback((next: File | null, preserveLinkedSource = false, nextSampleType: AsrSampleType = 'other') => {
     setFile(next);
     setRecordingSource(null);
+    setSampleType(next ? nextSampleType : 'other');
     if (!preserveLinkedSource) {
       setLinkedTranscriptId(null);
       setInitialTranscript('');
@@ -250,7 +275,7 @@ export default function TranscriptionLab() {
           editorTransfer.audioFileName || 'recording',
           { type: blob.type || 'audio/wav' },
         );
-        const importedExperimentId = handleFile(sourceFile, true);
+        const importedExperimentId = handleFile(sourceFile, true, editorTransfer.sampleType || 'other');
         setGroundTruth(editorTransfer.groundTruth!.trim());
         setInitialTranscript(editorTransfer.initialTranscript?.trim() || '');
         setLinkedTranscriptId(editorTransfer.sourceTranscriptId!);
@@ -294,16 +319,17 @@ export default function TranscriptionLab() {
     editorTransfer?.initialTranscript,
     editorTransfer?.source,
     editorTransfer?.sourceTranscriptId,
+    editorTransfer?.sampleType,
     getAudioUrl,
     handleFile,
   ]);
 
   const handleRecordedSource = (source: RecordedPracticeSource) => {
-    handleFile(source.file);
+    handleFile(source.file, false, source.sampleType);
     setRecordingSource(source);
     setGroundTruth(source.groundTruth);
     setManualHotwords(source.hotwords);
-    setStatus('הקלטת המושגים מוכנה לניסוי');
+    setStatus(`${asrSampleTypeLabel(source.sampleType)} מוכנה לניסוי`);
   };
 
   const loadStoredAudioSource = async (transcript: CloudTranscript) => {
@@ -328,7 +354,7 @@ export default function TranscriptionLab() {
         : new File([blob], fallbackName, { type: blob.type || 'audio/wav' });
       const verified = transcript.tags?.includes('human-approved') || transcript.tags?.includes('asr-gold-source');
       const storedText = (transcript.edited_text || transcript.text || '').trim();
-      handleFile(sourceFile, true);
+      handleFile(sourceFile, true, inferAsrSampleType(transcript.tags, transcript.title));
       setLinkedTranscriptId(transcript.id);
       setGroundTruth(verified ? storedText : '');
       setInitialTranscript(storedText);
@@ -349,6 +375,7 @@ export default function TranscriptionLab() {
 
   const runExperiment = async () => {
     if (!file || running) return;
+    const targetTerms = splitPracticeTerms(manualHotwords);
     setRunning(true);
     setBaseline(null);
     setCandidate(null);
@@ -357,33 +384,144 @@ export default function TranscriptionLab() {
     setGoldApproved(false);
     abortRef.current = new AbortController();
     try {
+      const originalFingerprint = await fingerprintFile(file);
+      const preprocessingPlan = buildAsrAudioComparisonPlan(audioPreprocessingMode);
+      let processedFile: File | null = null;
+
+      if (audioPreprocessingMode === 'off') {
+        const preprocessingEvent = await logPipelineEvent({
+          experimentId,
+          recordingFingerprint: originalFingerprint,
+          stage: 'audio-preprocessing',
+          level: 'info',
+          eventType: 'audio-preprocessing-skipped',
+          message: 'עיבוד האודיו כבוי; שתי הריצות משתמשות במקור',
+          details: { mode: audioPreprocessingMode, preset: null, retainedOriginal: true },
+        });
+        appendEvent(preprocessingEvent);
+      } else {
+        setProgress(3);
+        setStatus(`מעבד אודיו: ${ASR_AUDIO_PRESET_OPTIONS.find((option) => option.value === audioEnhancementPreset)?.label || audioEnhancementPreset}`);
+        const startedEvent = await logPipelineEvent({
+          experimentId,
+          recordingFingerprint: originalFingerprint,
+          stage: 'audio-preprocessing',
+          level: 'info',
+          eventType: 'audio-preprocessing-started',
+          message: 'התחיל עיבוד מקדים של עותק האודיו',
+          details: {
+            mode: audioPreprocessingMode,
+            preset: audioEnhancementPreset,
+            originalFileName: file.name,
+            originalBytes: file.size,
+            retainedOriginal: true,
+          },
+        });
+        appendEvent(startedEvent);
+        try {
+          const processed = await enhanceAudioOnServer(file, {
+            preset: audioEnhancementPreset,
+            outputFormat: 'mp3',
+            signal: abortRef.current.signal,
+          });
+          processedFile = new File([processed.blob], processed.fileName, {
+            type: processed.mimeType || processed.blob.type || 'audio/mpeg',
+          });
+          const completedEvent = await logPipelineEvent({
+            experimentId,
+            recordingFingerprint: originalFingerprint,
+            stage: 'audio-preprocessing',
+            level: 'success',
+            eventType: 'audio-preprocessing-completed',
+            message: 'עותק האודיו עובד ונשמר בזיכרון לצורך הניסוי',
+            details: {
+              mode: audioPreprocessingMode,
+              preset: audioEnhancementPreset,
+              originalFileName: file.name,
+              processedFileName: processedFile.name,
+              originalBytes: file.size,
+              processedBytes: processedFile.size,
+              retainedOriginal: true,
+              reusedForBothRuns: audioPreprocessingMode === 'shared',
+            },
+          });
+          appendEvent(completedEvent);
+          setProgress(15);
+        } catch (error) {
+          const failedEvent = await logPipelineEvent({
+            experimentId,
+            recordingFingerprint: originalFingerprint,
+            stage: 'audio-preprocessing',
+            level: 'error',
+            eventType: 'audio-preprocessing-failed',
+            message: 'העיבוד המקדים נכשל והניסוי נעצר',
+            details: {
+              mode: audioPreprocessingMode,
+              preset: audioEnhancementPreset,
+              retainedOriginal: true,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          });
+          appendEvent(failedEvent);
+          throw error;
+        }
+      }
+
+      const baselineFile = preprocessingPlan.baselineInput === 'processed' ? processedFile! : file;
+      const candidateFile = preprocessingPlan.candidateInput === 'processed' ? processedFile! : file;
+      const preprocessingOffset = audioPreprocessingMode === 'off' ? 0 : 15;
+      const baselineProgressScale = audioPreprocessingMode === 'off' ? 0.48 : 0.35;
+      const candidateRunEngine = preprocessingPlan.isolateAudioChange ? baselineEngine : candidateEngine;
+      const candidateRunModel = preprocessingPlan.isolateAudioChange ? baselineModel : candidateModel;
+      const candidateUsesKnowledge = !preprocessingPlan.isolateAudioChange;
+
       const base = await runTranscriptionPipeline({
         experimentId,
         variant: 'baseline',
-        file,
+        file: baselineFile,
         engine: baselineEngine,
         model: resolvedModel(baselineModel),
         language: 'he',
         groundTruth,
+        sampleType,
+        targetTerms,
+        recordingFingerprint: originalFingerprint,
+        recordingLabel: file.name,
+        audioPreprocessing: {
+          mode: audioPreprocessingMode,
+          preset: audioPreprocessingMode === 'off' ? null : audioEnhancementPreset,
+          input: preprocessingPlan.baselineInput,
+        },
         useKnowledge: false,
         loshonKodesh: false,
+        useAiKnowledge: false,
         signal: abortRef.current.signal,
         onEvent: appendEvent,
-        onProgress: (value, message) => { setProgress(value * 0.48); setStatus(`A: ${message}`); },
+        onProgress: (value, message) => { setProgress(preprocessingOffset + value * baselineProgressScale); setStatus(`A: ${message}`); },
       });
       setBaseline(base);
 
       const enhanced = await runTranscriptionPipeline({
         experimentId,
         variant: 'candidate',
-        file,
-        engine: candidateEngine,
-        model: resolvedModel(candidateModel),
+        file: candidateFile,
+        engine: candidateRunEngine,
+        model: resolvedModel(candidateRunModel),
         language: 'he',
         groundTruth,
-        useKnowledge: true,
-        loshonKodesh,
-        manualHotwords,
+        sampleType,
+        targetTerms,
+        recordingFingerprint: originalFingerprint,
+        recordingLabel: file.name,
+        audioPreprocessing: {
+          mode: audioPreprocessingMode,
+          preset: audioPreprocessingMode === 'off' ? null : audioEnhancementPreset,
+          input: preprocessingPlan.candidateInput,
+        },
+        useKnowledge: candidateUsesKnowledge,
+        loshonKodesh: candidateUsesKnowledge ? loshonKodesh : false,
+        useAiKnowledge: candidateUsesKnowledge && loshonKodesh && useAiKnowledge,
+        manualHotwords: candidateUsesKnowledge ? manualHotwords : undefined,
         signal: abortRef.current.signal,
         onEvent: appendEvent,
         onProgress: (value, message) => { setProgress(50 + value * 0.5); setStatus(`B: ${message}`); },
@@ -398,7 +536,12 @@ export default function TranscriptionLab() {
         level: verdict?.regressed ? 'error' : verdict?.improved ? 'success' : 'warning',
         eventType: verdict?.verdict || 'not-measured',
         message: verdict?.reason || 'אין טקסט אמת ולכן לא ניתן לקבוע שיפור או רגרסיה',
-        details: verdict || { hasGroundTruth: false },
+        details: {
+          ...(verdict || { hasGroundTruth: false }),
+          audioPreprocessingMode,
+          audioEnhancementPreset: audioPreprocessingMode === 'off' ? null : audioEnhancementPreset,
+          isolatedAudioComparison: preprocessingPlan.isolateAudioChange,
+        },
       });
       appendEvent(event);
       const reviewEvent = await logPipelineEvent({
@@ -414,6 +557,10 @@ export default function TranscriptionLab() {
             ? extractCorrectionCandidates(wordDiff(groundTruth.trim(), enhanced.text)).length
             : 0,
           reason: 'שינוי במילון או במאגר Gold חייב אישור אנושי',
+          sampleType,
+          targetTermsCount: targetTerms.length,
+          audioPreprocessingMode,
+          audioEnhancementPreset: audioPreprocessingMode === 'off' ? null : audioEnhancementPreset,
         },
       });
       appendEvent(reviewEvent);
@@ -483,7 +630,7 @@ export default function TranscriptionLab() {
   const persistGoldSource = async (): Promise<{ transcriptId: string | null; audioFilePath: string | null; reused: boolean }> => {
     if (!file || !candidate || !isCloud) return { transcriptId: null, audioFilePath: null, reused: false };
 
-    const tags = ['asr-gold-source', 'human-approved', 'transcription-lab'];
+    const tags = ['asr-gold-source', 'human-approved', 'transcription-lab', asrSampleTypeTag(sampleType)];
     const title = `Gold · ${candidate.recordingFingerprint} · ${file.name}`;
     const linked = linkedTranscriptId ? transcripts.find((transcript) => transcript.id === linkedTranscriptId) : null;
     const existing = linked || transcripts.find((transcript) => transcript.title === title);
@@ -550,7 +697,7 @@ export default function TranscriptionLab() {
         const clip = await extractAudioSegment(file, segment.start, segment.end, { forceWav: true });
         const result = await addApprovedLoraPair(clip, segment.text, 'approved-ground-truth', buildApprovedAsrMetadata({
           recordingFingerprint: candidate.recordingFingerprint,
-          sourceKind: 'transcription-lab',
+          sourceKind: asrSampleSourceKind(sampleType),
           sourceRef: `${file.name}#${segment.start.toFixed(3)}-${segment.end.toFixed(3)}`,
           sourceLabel: file.name,
           teacherEngines: [baseline?.engineLabel, candidate.engineLabel].filter(Boolean) as string[],
@@ -579,6 +726,7 @@ export default function TranscriptionLab() {
           cloudTranscriptId: cloudSource.transcriptId,
           audioFilePath: cloudSource.audioFilePath,
           reusedCloudSource: cloudSource.reused,
+          sampleType,
         },
       });
       appendEvent(event);
@@ -615,7 +763,7 @@ export default function TranscriptionLab() {
     const clip = await extractAudioSegment(file, review.start as number, review.end as number, { forceWav: true });
     const result = await addApprovedLoraPair(clip, review.correctedText, 'approved-ground-truth', buildApprovedAsrMetadata({
       recordingFingerprint: candidate.recordingFingerprint,
-      sourceKind: 'transcription-lab-human-review',
+      sourceKind: `${asrSampleSourceKind(sampleType)}:human-review`,
       sourceRef: `${file.name}#${review.start}-${review.end}`,
       sourceLabel: file.name,
       teacherEngines: [review.baselineEngine, review.candidateEngine],
@@ -630,7 +778,7 @@ export default function TranscriptionLab() {
       level: 'success',
       eventType: 'human-review-gold-approved',
       message: 'קטע מתוזמן שאושר בבדיקה אנושית נוסף ל-Gold',
-      details: { ...review, approvedForGold: true, rows: result.rows, clipName: clip.name },
+      details: { ...review, approvedForGold: true, rows: result.rows, clipName: clip.name, sampleType },
     });
     appendEvent(event);
   };
@@ -717,7 +865,21 @@ export default function TranscriptionLab() {
                     בחר מהתיקיות
                   </Button>
                 </div>
-                {file && <p className="text-xs text-muted-foreground">{file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB{recordingSource ? ` · ${recordingSource.durationSeconds} שניות · ${recordingSource.mode === 'terms' ? 'קריאת מושגים' : 'דיבור טבעי'}` : ''}</p>}
+                <div className="space-y-2 border-t pt-3">
+                  <Label>סוג חומר הבדיקה</Label>
+                  <Select value={sampleType} onValueChange={(value) => setSampleType(value as AsrSampleType)}>
+                    <SelectTrigger aria-label="סוג חומר הבדיקה"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {ASR_SAMPLE_TYPE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {ASR_SAMPLE_TYPE_OPTIONS.find((option) => option.value === sampleType)?.description}
+                  </p>
+                </div>
+                {file && <p className="text-xs text-muted-foreground">{file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB{recordingSource ? ` · ${recordingSource.durationSeconds} שניות` : ''} · {asrSampleTypeLabel(sampleType)}</p>}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="ground-truth">טקסט אמת מאושר</Label>
@@ -741,15 +903,70 @@ export default function TranscriptionLab() {
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div className="space-y-2"><Label>מנוע A - בסיס</Label><Select value={baselineEngine} onValueChange={(value) => { const next = value as TranscriptionEngineId; setBaselineEngine(next); setBaselineModel(defaultModelForEngine(next)); }}><SelectTrigger aria-label="מנוע A - בסיס"><SelectValue /></SelectTrigger><SelectContent>{TRANSCRIPTION_ENGINE_OPTIONS.filter((option) => option.id !== 'local').map((option) => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}</SelectContent></Select></div>
               <div className="space-y-2"><Label>מודל A</Label><Select value={baselineModel} onValueChange={setBaselineModel}><SelectTrigger aria-label="מודל A"><SelectValue /></SelectTrigger><SelectContent>{modelsForEngine(baselineEngine).map((model) => <SelectItem key={model.value} value={model.value}>{model.label}</SelectItem>)}</SelectContent></Select></div>
-              <div className="space-y-2"><Label>מנוע B - מועמד</Label><Select value={candidateEngine} onValueChange={(value) => { const next = value as TranscriptionEngineId; setCandidateEngine(next); setCandidateModel(defaultModelForEngine(next)); }}><SelectTrigger aria-label="מנוע B - מועמד"><SelectValue /></SelectTrigger><SelectContent>{TRANSCRIPTION_ENGINE_OPTIONS.filter((option) => option.id !== 'local').map((option) => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}</SelectContent></Select></div>
-              <div className="space-y-2"><Label>מודל B</Label><Select value={candidateModel} onValueChange={setCandidateModel}><SelectTrigger aria-label="מודל B"><SelectValue /></SelectTrigger><SelectContent>{modelsForEngine(candidateEngine).map((model) => <SelectItem key={model.value} value={model.value}>{model.label}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>מנוע B - מועמד</Label><Select disabled={audioPreprocessingMode === 'compare'} value={audioPreprocessingMode === 'compare' ? baselineEngine : candidateEngine} onValueChange={(value) => { const next = value as TranscriptionEngineId; setCandidateEngine(next); setCandidateModel(defaultModelForEngine(next)); }}><SelectTrigger aria-label="מנוע B - מועמד"><SelectValue /></SelectTrigger><SelectContent>{TRANSCRIPTION_ENGINE_OPTIONS.filter((option) => option.id !== 'local').map((option) => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>מודל B</Label><Select disabled={audioPreprocessingMode === 'compare'} value={audioPreprocessingMode === 'compare' ? baselineModel : candidateModel} onValueChange={setCandidateModel}><SelectTrigger aria-label="מודל B"><SelectValue /></SelectTrigger><SelectContent>{modelsForEngine(audioPreprocessingMode === 'compare' ? baselineEngine : candidateEngine).map((model) => <SelectItem key={model.value} value={model.value}>{model.label}</SelectItem>)}</SelectContent></Select></div>
             </div>
+            <section className="space-y-3 border-y bg-muted/20 px-3 py-3" aria-label="עיבוד מקדים לאודיו">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="flex items-center gap-2 text-sm font-semibold"><AudioWaveform className="h-4 w-4" />עיבוד מקדים לאודיו</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">המקור נשמר תמיד. נוצר עותק זמני אחד בלבד לצורך הניסוי.</p>
+                </div>
+                <Badge variant={audioPreprocessingMode === 'off' ? 'outline' : 'secondary'}>
+                  {ASR_AUDIO_PREPROCESSING_MODES.find((option) => option.value === audioPreprocessingMode)?.label}
+                </Badge>
+              </div>
+              <div className="inline-flex w-full flex-wrap gap-1 border p-1 sm:w-auto" role="group" aria-label="מצב עיבוד האודיו">
+                {ASR_AUDIO_PREPROCESSING_MODES.map((option) => (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    size="sm"
+                    variant={audioPreprocessingMode === option.value ? 'default' : 'ghost'}
+                    onClick={() => setAudioPreprocessingMode(option.value)}
+                    disabled={running}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {ASR_AUDIO_PREPROCESSING_MODES.find((option) => option.value === audioPreprocessingMode)?.description}
+              </p>
+              {audioPreprocessingMode !== 'off' && (
+                <div className="grid gap-3 sm:grid-cols-[minmax(14rem,20rem)_1fr] sm:items-end">
+                  <div className="space-y-2">
+                    <Label>תבנית עיבוד</Label>
+                    <Select value={audioEnhancementPreset} onValueChange={(value) => setAudioEnhancementPreset(value as EnhancementPreset)} disabled={running}>
+                      <SelectTrigger aria-label="תבנית עיבוד אודיו"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {ASR_AUDIO_PRESET_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {ASR_AUDIO_PRESET_OPTIONS.find((option) => option.value === audioEnhancementPreset)?.description}
+                  </p>
+                </div>
+              )}
+              {audioPreprocessingMode === 'compare' && (
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <Badge variant="outline">A: מקור</Badge>
+                  <Badge variant="secondary">B: עותק משופר</Badge>
+                  <span className="text-muted-foreground">מנוע B, המודל וצינור הידע ננעלו ל-A כדי למדוד רק את השפעת האודיו.</span>
+                </div>
+              )}
+            </section>
             <div className="flex flex-wrap items-center gap-5 border-y py-3">
-              <label className="flex items-center gap-2"><Checkbox checked={loshonKodesh} onCheckedChange={(value) => setLoshonKodesh(Boolean(value))} />הפעל מצב לשון הקודש בריצה B</label>
-              <Badge variant="outline">A ללא מילון וכללים</Badge>
-              <Badge variant="secondary">B עם צינור הידע המרכזי</Badge>
+              <label className="flex items-center gap-2"><Checkbox disabled={audioPreprocessingMode === 'compare'} checked={loshonKodesh} onCheckedChange={(value) => setLoshonKodesh(Boolean(value))} />הפעל מצב לשון הקודש בריצה B</label>
+              <label className="flex items-center gap-2"><Checkbox disabled={audioPreprocessingMode === 'compare' || !loshonKodesh} checked={useAiKnowledge} onCheckedChange={(value) => setUseAiKnowledge(Boolean(value))} />הפעל גם תיקון AI בריצה B</label>
+              {audioPreprocessingMode === 'compare' ? (
+                <Badge variant="outline">A ו-B ללא צינור ידע לצורך בידוד עיבוד האודיו</Badge>
+              ) : (
+                <><Badge variant="outline">A ללא מילון וכללים</Badge><Badge variant="secondary">B עם צינור הידע המרכזי</Badge></>
+              )}
             </div>
-            <div className="space-y-2"><Label htmlFor="manual-hotwords">מונחים מיוחדים להקלטה זו</Label><Input id="manual-hotwords" value={manualHotwords} onChange={(event) => setManualHotwords(event.target.value)} dir="rtl" placeholder="מונחים מופרדים בפסיקים" /></div>
+            <div className="space-y-2"><Label htmlFor="manual-hotwords">מונחים מיוחדים להקלטה זו</Label><Input id="manual-hotwords" disabled={audioPreprocessingMode === 'compare'} value={manualHotwords} onChange={(event) => setManualHotwords(event.target.value)} dir="rtl" placeholder="מונחים מופרדים בפסיקים" /></div>
           </AccordionContent>
         </AccordionItem>
 
@@ -759,7 +976,13 @@ export default function TranscriptionLab() {
             <div className="flex flex-wrap items-center gap-3">
               <Button onClick={() => void runExperiment()} disabled={!file || running}>{running ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Play className="me-2 h-4 w-4" />}{running ? 'מריץ את שתי הגרסאות...' : 'הפעל ניסוי מלא'}</Button>
               {running && <Button variant="outline" onClick={() => abortRef.current?.abort()}>עצור</Button>}
-              <span className="text-sm text-muted-foreground">הקובץ נשאר זהה; רק המודל וצינור הידע משתנים.</span>
+              <span className="text-sm text-muted-foreground">
+                {audioPreprocessingMode === 'compare'
+                  ? 'A מקבל את המקור ו-B עותק משופר; שאר ההגדרות זהות.'
+                  : audioPreprocessingMode === 'shared'
+                    ? 'אותו עותק משופר נשלח לשתי הריצות; רק המודל וצינור הידע משתנים.'
+                    : 'קובץ המקור זהה בשתי הריצות; רק המודל וצינור הידע משתנים.'}
+              </span>
             </div>
           </AccordionContent>
         </AccordionItem>

@@ -6,6 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useLoraTraining } from '@/hooks/useLoraTraining';
 import { cropLearningAudio, getAudioLearningOperation, type AudioLearningCandidate } from '@/lib/audioLearning';
 import { classifyAsrEdit } from '@/lib/asrEvidence';
+import { buildApprovedAsrMetadata } from '@/lib/asrDatasetMetadata';
 import { toast } from '@/hooks/use-toast';
 
 interface AudioLearningQueueProps {
@@ -64,17 +65,21 @@ export function AudioLearningQueue({ audioBlob, audioFileName, candidates, onRem
     const file = new File([clip], `${audioFileName || 'recording'}-${candidate.id}.wav`, { type: 'audio/wav' });
     const evidence = classifyAsrEdit(candidate);
     return addApprovedPair(file, candidate.referenceText, 'approved-ground-truth', {
-        sourceRecordingId: candidate.recordingKey,
-        groupId: candidate.recordingKey,
-        source: 'text-editor-correction',
-        original: candidate.original,
-        corrected: candidate.corrected,
-        operation: candidate.operation || getAudioLearningOperation(candidate.original, candidate.corrected),
-        start: candidate.start,
-        end: candidate.end,
-        editClassification: evidence.classification,
-        acousticEvidence: evidence.hasAcousticEvidence ? 1 : 0,
+      ...buildApprovedAsrMetadata({
+        recordingFingerprint: candidate.recordingKey,
+        sourceKind: 'text-editor-correction',
+        sourceRef: `${audioFileName || 'recording'}#${candidate.start.toFixed(3)}-${candidate.end.toFixed(3)}`,
+        sourceLabel: audioFileName || 'recording',
+        teacherEngines: [],
         reviewStatus: 'human-approved-after-listening',
+        startSeconds: candidate.start,
+        endSeconds: candidate.end,
+      }),
+      original: candidate.original,
+      corrected: candidate.corrected,
+      operation: candidate.operation || getAudioLearningOperation(candidate.original, candidate.corrected),
+      editClassification: evidence.classification,
+      acousticEvidence: evidence.hasAcousticEvidence ? 1 : 0,
     });
   };
 

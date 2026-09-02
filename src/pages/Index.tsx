@@ -42,7 +42,7 @@ import {
   type CloudTranscriptionProvider as CloudProvider,
 } from "@/lib/providerApiKeys";
 import { recordKeyUsage } from "@/lib/apiKeyUsage";
-import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, isLkAiEnabled, isLkAiAuto, applyLkAiFix } from "@/lib/loshonKodesh";
+import { isLoshonKodeshEnabled, setLoshonKodeshEnabled, getLoshonKodeshPrompt, isLkAiEnabled, isLkAiAuto } from "@/lib/loshonKodesh";
 import { isPersonalPronunciationEnabled, setPersonalPronunciationEnabled } from "@/lib/personalPronunciationModel";
 import { getProfileInitialPrompt, isProfileLoshonKodesh } from "@/lib/pronunciationProfiles";
 import { setCurrentAudioFilename, recordProfileUsage } from "@/lib/profileSuggestion";
@@ -50,7 +50,8 @@ import { PronunciationProfileSelector } from "@/components/PronunciationProfileS
 import { PronunciationStack } from "@/components/PronunciationStack";
 import { isCustomVocabularyEnabled, setCustomVocabularyEnabled } from "@/utils/customVocabulary";
 import { addRecentFile } from "@/components/RecentFiles";
-import { applyTranscriptionKnowledge } from '@/lib/transcriptionKnowledge';
+import { applyTranscriptionKnowledgeWithAi } from '@/lib/transcriptionKnowledge';
+import { logKnowledgeTrace } from '@/lib/pipelineAudit';
 import { buildTranscriptionHotwords } from '@/lib/transcriptionHotwords';
 import { getExpectedProcessingSeconds, asymptoticProgress, formatProcessingStatus } from '@/lib/cloudProgressEstimator';
 import {
@@ -440,28 +441,35 @@ const Index = () => {
   // Save to cloud history (respects cloud save mode for CUDA engine)
   const saveToHistory = async (text: string, engineUsed: string, skipCloud?: boolean, timings?: Array<{word: string, start: number, end: number, probability?: number}>, audioFile?: File, folder?: string, textOnly = false, detectedLanguage?: string) => {
     const useHebrewKnowledge = shouldUseHebrewKnowledge(sourceLanguage, detectedLanguage);
+    const lkActive = useHebrewKnowledge && (isLoshonKodeshEnabled() || isProfileLoshonKodesh());
     const knowledge = useHebrewKnowledge
-      ? applyTranscriptionKnowledge(text, engineUsed)
+      ? await applyTranscriptionKnowledgeWithAi(text, engineUsed, {
+          loshonKodesh: isLoshonKodeshEnabled() || isProfileLoshonKodesh(),
+          ai: lkActive && isLkAiEnabled() && isLkAiAuto(),
+        })
       : {
           text,
           totalApplied: 0,
           deterministicApplied: 0,
           learnedApplied: [],
-          counts: { definitive: 0, learned: 0, profile: 0, vocabulary: 0, loshonKodesh: 0 },
+          changes: [],
+          counts: { definitive: 0, learned: 0, profile: 0, vocabulary: 0, loshonKodesh: 0, orthography: 0, ai: 0 },
+          trace: [],
+          traceValidationErrors: [],
+          traceOverlaps: [],
         };
-    const lkActive = useHebrewKnowledge && (isLoshonKodeshEnabled() || isProfileLoshonKodesh());
-    let finalText = knowledge.text;
-    // Layer 2: optional AI fix when auto-mode is on
-    if (lkActive && isLkAiEnabled() && isLkAiAuto()) {
-      try {
-        const aiFixed = await applyLkAiFix(finalText);
-        if (aiFixed && aiFixed.trim()) {
-          finalText = aiFixed;
-          debugLog.info('Index', 'Applied Loshon Kodesh AI layer');
-        }
-      } catch (e) {
-        debugLog.warn('Index', 'LK AI fix failed, keeping rules-only result', e);
-      }
+    if (useHebrewKnowledge) {
+      await logKnowledgeTrace({
+        experimentId: crypto.randomUUID(),
+        surface: 'transcribe',
+        engine: engineUsed,
+        knowledge,
+        initialText: text,
+      });
+    }
+    const finalText = knowledge.text;
+    if (knowledge.aiError) {
+      debugLog.warn('Index', 'LK AI fix failed, keeping rules-only result', knowledge.aiError);
     }
     const nonLkAppliedCount = knowledge.deterministicApplied;
     if (finalText !== text) {

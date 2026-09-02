@@ -9,7 +9,16 @@
  * Falls back to localStorage if IndexedDB unavailable.
  */
 
-import { replaceWholeTextOccurrences } from '@/lib/hebrewTextReplacement';
+import { replaceWholeTextOccurrences, type TextReplacementOccurrence } from '@/lib/hebrewTextReplacement';
+import {
+  CORRECTIONS_CHANGED_EVENT,
+  getScopedCorrections,
+  removeScopedCorrections,
+  replaceScopedCorrections,
+} from '@/lib/correctionRepository';
+import { createTraceOperation, type TranscriptionTraceOperation } from '@/lib/transcriptionTrace';
+
+export { CORRECTIONS_CHANGED_EVENT } from '@/lib/correctionRepository';
 
 // ─── Types ───
 
@@ -44,18 +53,12 @@ export interface CorrectionStats {
 }
 
 // ─── Storage Keys ───
-const CORRECTIONS_KEY = 'transcription_corrections';
 const CORRECTIONS_STATS_KEY = 'transcription_corrections_stats';
-export const CORRECTIONS_CHANGED_EVENT = 'transcription-corrections-changed';
 
 // ─── Helpers ───
 
 function loadCorrections(): CorrectionEntry[] {
-  try {
-    return JSON.parse(localStorage.getItem(CORRECTIONS_KEY) || '[]');
-  } catch {
-    return [];
-  }
+  return getScopedCorrections('global');
 }
 
 function saveCorrections(corrections: CorrectionEntry[]): void {
@@ -63,8 +66,7 @@ function saveCorrections(corrections: CorrectionEntry[]): void {
   const sorted = corrections
     .sort((a, b) => (b.confidence * b.frequency) - (a.confidence * a.frequency))
     .slice(0, 2000);
-  localStorage.setItem(CORRECTIONS_KEY, JSON.stringify(sorted));
-  try { window.dispatchEvent(new CustomEvent(CORRECTIONS_CHANGED_EVENT)); } catch { /* non-browser/test */ }
+  replaceScopedCorrections('global', sorted);
 }
 
 /**
@@ -313,7 +315,7 @@ export function applyLearnedCorrections(
     confidenceThreshold?: number;
     maxCorrections?: number;
   }
-): { text: string; appliedCount: number; applied: Array<{ original: string; corrected: string }> } {
+): ApplyLearnedCorrectionsResult {
   const {
     engine,
     confidenceThreshold = getCorrectionThreshold(),
@@ -354,17 +356,60 @@ export function applyLearnedCorrections(
   }
 
   let result = text;
-  const applied: Array<{ original: string; corrected: string }> = [];
+  const applied: AppliedLearnedCorrection[] = [];
+  const traceOperations: TranscriptionTraceOperation[] = [];
 
   for (const c of selected.values()) {
+    const beforeText = result;
     const replacement = replaceWholeTextOccurrences(result, c.original, c.corrected);
     if (replacement.count > 0) {
       result = replacement.text;
-      applied.push({ original: c.original, corrected: c.corrected });
+      applied.push({
+        original: c.original,
+        corrected: c.corrected,
+        count: replacement.count,
+      });
+      traceOperations.push(createTraceOperation({
+        sequence: traceOperations.length,
+        ruleId: `learned:${c.id ?? `${c.original}->${c.corrected}`}`,
+        source: {
+          system: 'correction-learning',
+          file: 'src/utils/correctionLearning.ts',
+          function: 'applyLearnedCorrections',
+          store: 'localStorage:transcription_corrections_v2(scope=global)',
+        },
+        beforeText,
+        afterText: result,
+        occurrences: replacement.occurrences,
+        metadata: {
+          confidence: c.confidence,
+          frequency: c.frequency,
+          engine: c.engine,
+          category: c.category,
+        },
+      }));
     }
   }
 
-  return { text: result, appliedCount: applied.length, applied };
+  return {
+    text: result,
+    appliedCount: applied.reduce((sum, change) => sum + change.count, 0),
+    applied,
+    traceOperations,
+  };
+}
+
+export interface AppliedLearnedCorrection {
+  original: string;
+  corrected: string;
+  count: number;
+}
+
+export interface ApplyLearnedCorrectionsResult {
+  text: string;
+  appliedCount: number;
+  applied: AppliedLearnedCorrection[];
+  traceOperations: TranscriptionTraceOperation[];
 }
 
 /**
@@ -437,9 +482,8 @@ export function deleteCorrection(original: string, corrected: string): void {
  * Clear all learned corrections
  */
 export function clearAllCorrections(): void {
-  localStorage.removeItem(CORRECTIONS_KEY);
+  removeScopedCorrections('global');
   localStorage.removeItem(CORRECTIONS_STATS_KEY);
-  window.dispatchEvent(new CustomEvent(CORRECTIONS_CHANGED_EVENT));
 }
 
 /**

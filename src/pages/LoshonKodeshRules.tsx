@@ -175,6 +175,18 @@ export default function LoshonKodeshRules({ embeddedText, defaultTab = 'rules', 
   // ── Dictionaries ───────────────────
   const persistDicts = (next: LkDictionary[]) => { setDicts(next); setDictionaries(next); };
   const activeDict = dicts.find(d => d.id === activeDictId);
+  const categoryRuleCounts = useMemo(() => {
+    const counts = Object.fromEntries(CATEGORY_OPTIONS.map((category) => [category, 0])) as Record<LkCategory, number>;
+    const activeReplacements = [
+      ...replacements,
+      ...dicts.filter((dictionary) => dictionary.enabled).flatMap((dictionary) => dictionary.replacements),
+    ];
+    for (const replacement of activeReplacements) {
+      const category = replacement.category || 'general';
+      if (replacement.from && replacement.from !== replacement.to) counts[category] += 1;
+    }
+    return counts;
+  }, [dicts, replacements]);
 
   const toggleDict = (id: string, v: boolean) => persistDicts(dicts.map(d => d.id === id ? { ...d, enabled: v } : d));
   const addDict = () => {
@@ -331,8 +343,16 @@ export default function LoshonKodeshRules({ embeddedText, defaultTab = 'rules', 
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {CATEGORY_OPTIONS.map(c => (
                 <div key={c} className="flex items-center justify-between gap-2 bg-muted/30 rounded p-2">
-                  <span className="text-sm">{LK_CATEGORY_LABELS[c]}</span>
-                  <Switch checked={categories[c] !== false} onCheckedChange={(v) => toggleCategory(c, v)} />
+                  <span className="flex items-center gap-2 text-sm">
+                    {LK_CATEGORY_LABELS[c]}
+                    <Badge variant="secondary">{categoryRuleCounts[c]}</Badge>
+                  </span>
+                  <Switch
+                    aria-label={`${LK_CATEGORY_LABELS[c]}: ${categoryRuleCounts[c]} כללים`}
+                    disabled={categoryRuleCounts[c] === 0}
+                    checked={categoryRuleCounts[c] > 0 && categories[c] !== false}
+                    onCheckedChange={(v) => toggleCategory(c, v)}
+                  />
                 </div>
               ))}
             </div>

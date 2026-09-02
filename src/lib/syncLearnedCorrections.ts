@@ -1,8 +1,9 @@
 /**
  * Sync the locally learned ASR corrections dictionary to the cloud.
  *
- * Local store: localStorage `transcription_corrections` (utils/correctionLearning).
- * Cloud table: public.asr_learned_corrections (one row per user × original × corrected).
+ * Local store: canonical scoped correction repository.
+ * Cloud table: public.asr_learned_corrections (one row per user × scope ×
+ * profile × original × corrected).
  *
  * Strategy: bidirectional merge — pull cloud rows, merge with local using
  * (max frequency, max confidence, latest lastUsed), persist merged back to
@@ -11,8 +12,12 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import type { CorrectionEntry } from '@/utils/correctionLearning';
+import {
+  getScopedCorrections,
+  replaceScopedCorrections,
+  type CorrectionScope,
+} from './correctionRepository';
 
-const LOCAL_KEY = 'transcription_corrections';
 const LAST_SYNC_KEY = 'asr_learned_corrections_last_sync';
 
 export type SyncState = 'idle' | 'syncing' | 'synced' | 'error' | 'offline';
@@ -24,16 +29,20 @@ export interface SyncResult {
   at: number;
 }
 
-function loadLocal(): CorrectionEntry[] {
-  try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]'); }
-  catch { return []; }
+export interface CorrectionSyncScope {
+  scope?: CorrectionScope;
+  profileId?: string;
 }
 
-function saveLocal(entries: CorrectionEntry[]): void {
+function loadLocal(scope: CorrectionScope, profileId?: string): CorrectionEntry[] {
+  return getScopedCorrections(scope, profileId);
+}
+
+function saveLocal(scope: CorrectionScope, profileId: string | undefined, entries: CorrectionEntry[]): void {
   const sorted = entries
     .sort((a, b) => (b.confidence * b.frequency) - (a.confidence * a.frequency))
     .slice(0, 2000);
-  localStorage.setItem(LOCAL_KEY, JSON.stringify(sorted));
+  replaceScopedCorrections(scope, sorted, profileId);
 }
 
 function keyOf(e: { original: string; corrected: string }): string {
@@ -51,19 +60,38 @@ export function getLastSyncAt(): number | null {
  * Pull cloud rows + push local rows in a single merge.
  * Returns counts. If no authenticated user, returns counts of 0.
  */
-export async function syncLearnedCorrections(userId: string | null | undefined): Promise<SyncResult> {
+export async function syncLearnedCorrections(
+  userId: string | null | undefined,
+  options: CorrectionSyncScope = {},
+): Promise<SyncResult> {
   const now = Date.now();
+  const scope = options.scope ?? 'global';
+  const profileId = scope === 'profile' ? options.profileId : undefined;
+  if (scope === 'profile' && !profileId) throw new Error('profileId is required for profile correction sync');
   if (!userId) {
-    return { pushed: 0, pulled: 0, total: loadLocal().length, at: now };
+    return { pushed: 0, pulled: 0, total: loadLocal(scope, profileId).length, at: now };
   }
 
   // 1) Pull
-  const { data: cloudRows, error: pullErr } = await (supabase as any)
+  let { data: cloudRows, error: pullErr } = await (supabase as any)
     .from('asr_learned_corrections')
-    .select('original,corrected,note,frequency,confidence,engine,category,last_used,created_at')
+    .select('original,corrected,note,frequency,confidence,engine,category,last_used,created_at,scope,profile_id')
     .eq('user_id', userId)
+    .eq('scope', scope)
+    .eq('profile_id', profileId || '')
     .limit(2000);
 
+  let legacyCloudSchema = false;
+  if (pullErr && scope === 'global') {
+    const legacy = await (supabase as any)
+      .from('asr_learned_corrections')
+      .select('original,corrected,note,frequency,confidence,engine,category,last_used,created_at')
+      .eq('user_id', userId)
+      .limit(2000);
+    cloudRows = legacy.data;
+    pullErr = legacy.error;
+    legacyCloudSchema = !legacy.error;
+  }
   if (pullErr) throw pullErr;
 
   const cloud: CorrectionEntry[] = (cloudRows || []).map((r: any) => ({
@@ -79,7 +107,7 @@ export async function syncLearnedCorrections(userId: string | null | undefined):
   }));
 
   // 2) Merge with local
-  const local = loadLocal();
+  const local = loadLocal(scope, profileId);
   const merged = new Map<string, CorrectionEntry>();
   for (const e of local) merged.set(keyOf(e), { ...e });
   let pulled = 0;
@@ -100,7 +128,7 @@ export async function syncLearnedCorrections(userId: string | null | undefined):
   }
 
   const mergedList = Array.from(merged.values());
-  saveLocal(mergedList);
+  saveLocal(scope, profileId, mergedList);
 
   // 3) Push entries that differ from cloud (or are new)
   const cloudByKey = new Map(cloud.map((c) => [keyOf(c), c] as const));
@@ -123,6 +151,7 @@ export async function syncLearnedCorrections(userId: string | null | undefined):
       const slice = toPush.slice(i, i + chunkSize);
       const rows = slice.map((e) => ({
         user_id: userId,
+        ...(legacyCloudSchema ? {} : { scope, profile_id: profileId || '' }),
         original: e.original,
         corrected: e.corrected,
         note: e.note ?? null,
@@ -134,7 +163,12 @@ export async function syncLearnedCorrections(userId: string | null | undefined):
       }));
       const { error: upErr } = await (supabase as any)
         .from('asr_learned_corrections')
-        .upsert(rows, { onConflict: 'user_id,original,corrected', ignoreDuplicates: false });
+        .upsert(rows, {
+          onConflict: legacyCloudSchema
+            ? 'user_id,original,corrected'
+            : 'user_id,scope,profile_id,original,corrected',
+          ignoreDuplicates: false,
+        });
       if (upErr) throw upErr;
       pushed += rows.length;
     }

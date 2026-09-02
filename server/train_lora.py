@@ -88,6 +88,11 @@ class ProgressMirror:
             "wer_after": None,
             "cer_before": None,
             "cer_after": None,
+            "quality_counts": None,
+            "label_source_counts": None,
+            "recording_groups": 0,
+            "train_recording_groups": 0,
+            "eval_recording_groups": 0,
             "log_tail": "",
             "error": None,
             "updated_at": time.time(),
@@ -150,6 +155,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", required=True, help="Path to manifest.jsonl")
     parser.add_argument("--eval-dataset", default="", help="Optional leakage-safe evaluation manifest")
+    parser.add_argument("--dataset-meta", default="", help="Canonical dataset_meta.json with provenance and split identity")
     parser.add_argument("--base-model", default="ivrit-ai/whisper-large-v3")
     parser.add_argument("--job-name", required=True)
     parser.add_argument("--output-dir", default="server/lora_adapters")
@@ -200,6 +206,21 @@ def main():
             raise RuntimeError(f"Dataset too small: {len(rows)} valid rows. Need at least 1.")
         progress.log(f"Loaded {len(rows)} valid (audio,text) pairs")
         progress.update(dataset_size=len(rows))
+        if args.dataset_meta:
+            dataset_meta_path = Path(args.dataset_meta)
+            if not dataset_meta_path.is_file():
+                raise RuntimeError(f"Dataset metadata not found: {dataset_meta_path}")
+            dataset_meta = json.loads(dataset_meta_path.read_text(encoding="utf-8"))
+            if not dataset_meta.get("ready_for_training"):
+                raise RuntimeError("Dataset metadata is not approved for real training")
+            progress.update(
+                quality_counts=dataset_meta.get("quality_counts"),
+                label_source_counts=dataset_meta.get("label_source_counts"),
+                recording_groups=dataset_meta.get("recording_groups", 0),
+                train_recording_groups=dataset_meta.get("train_recording_groups", 0),
+                eval_recording_groups=dataset_meta.get("eval_recording_groups", 0),
+                dataset_fingerprint=dataset_meta.get("eval_fingerprint"),
+            )
 
         # Keep paths as strings and decode with librosa below. Hugging Face's
         # Audio feature requires torchcodec in newer releases, which is not

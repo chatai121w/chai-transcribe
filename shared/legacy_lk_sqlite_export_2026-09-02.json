@@ -1,0 +1,24 @@
+{
+  "exportedAt": "2026-09-02",
+  "source": "server/lk_data.db",
+  "status": "legacy-read-only-backup",
+  "counts": { "lk_dictionary": 0, "lk_grammar_rules": 14, "lk_sessions": 0 },
+  "grammarRules": [
+    { "id": 1, "name": "תו-ללא-דגש → ס (אשכנז)", "pattern": "\\bת(?=[אוּוּ])", "replacement": "ס", "tradition": "ashkenazi", "enabled": 0, "priority": 100, "created_at": "2026-06-19 15:37:32" },
+    { "id": 2, "name": "שַׁבָּת → שַׁבָּס", "pattern": "\\bשַׁבָּת\\b", "replacement": "שַׁבָּס", "tradition": "ashkenazi", "enabled": 0, "priority": 90, "created_at": "2026-06-19 15:37:32" },
+    { "id": 3, "name": "מִצְוָה → מִצְוָה (maintain)", "pattern": "\\bמִצְוָה\\b", "replacement": "מִצְוָה", "tradition": "ashkenazi", "enabled": 0, "priority": 80, "created_at": "2026-06-19 15:37:32" },
+    { "id": 4, "name": "ברכות → ברוכות (blessing-form)", "pattern": "\\bבְּרָכוֹת\\b", "replacement": "ברוכות", "tradition": "ashkenazi", "enabled": 0, "priority": 70, "created_at": "2026-06-19 15:37:32" },
+    { "id": 5, "name": "תורה → תוירה", "pattern": "\\bתּוֹרָה\\b", "replacement": "תּוֹירָה", "tradition": "ashkenazi", "enabled": 0, "priority": 60, "created_at": "2026-06-19 15:37:32" },
+    { "id": 6, "name": "שבת → שבס", "pattern": "\\bשבת\\b", "replacement": "שבס", "tradition": "ashkenazi", "enabled": 0, "priority": 50, "created_at": "2026-06-19 15:37:32" },
+    { "id": 7, "name": "מצוה → מצוה", "pattern": "\\bמצוה\\b", "replacement": "מצוה", "tradition": "ashkenazi", "enabled": 0, "priority": 40, "created_at": "2026-06-19 15:37:32" },
+    { "id": 8, "name": "יום טוב → יום טויב", "pattern": "\\bיום טוב\\b", "replacement": "יום טויב", "tradition": "ashkenazi", "enabled": 0, "priority": 30, "created_at": "2026-06-19 15:37:32" },
+    { "id": 1641, "name": "תוירה → תורה", "pattern": "\\bתוירה\\b", "replacement": "תורה", "tradition": "ashkenazi", "enabled": 1, "priority": 100, "created_at": "2026-09-01 13:50:29" },
+    { "id": 1642, "name": "קוידש → קודש", "pattern": "\\bקוידש\\b", "replacement": "קודש", "tradition": "ashkenazi", "enabled": 1, "priority": 95, "created_at": "2026-09-01 13:50:29" },
+    { "id": 1643, "name": "מוישה → משה", "pattern": "\\bמוישה\\b", "replacement": "משה", "tradition": "ashkenazi", "enabled": 1, "priority": 90, "created_at": "2026-09-01 13:50:29" },
+    { "id": 1644, "name": "שאבעס → שבת", "pattern": "\\bשאבעס\\b", "replacement": "שבת", "tradition": "ashkenazi", "enabled": 1, "priority": 85, "created_at": "2026-09-01 13:50:29" },
+    { "id": 1645, "name": "שאבס → שבת", "pattern": "\\bשאבס\\b", "replacement": "שבת", "tradition": "ashkenazi", "enabled": 1, "priority": 80, "created_at": "2026-09-01 13:50:29" },
+    { "id": 1646, "name": "אמעס → אמת", "pattern": "\\bאמעס\\b", "replacement": "אמת", "tradition": "ashkenazi", "enabled": 1, "priority": 75, "created_at": "2026-09-01 13:50:29" }
+  ],
+  "dictionary": [],
+  "sessions": []
+}

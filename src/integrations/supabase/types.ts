@@ -107,6 +107,8 @@ export type Database = {
           last_used: string
           note: string | null
           original: string
+          profile_id: string
+          scope: string
           updated_at: string
           user_id: string
         }
@@ -121,6 +123,8 @@ export type Database = {
           last_used?: string
           note?: string | null
           original: string
+          profile_id?: string
+          scope?: string
           updated_at?: string
           user_id: string
         }
@@ -135,6 +139,8 @@ export type Database = {
           last_used?: string
           note?: string | null
           original?: string
+          profile_id?: string
+          scope?: string
           updated_at?: string
           user_id?: string
         }

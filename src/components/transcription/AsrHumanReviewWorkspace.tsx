@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, Check, CheckCheck, Headphones, Pause, Play, RotateCcw, Save, ShieldCheck, BadgeCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -76,6 +77,7 @@ export function AsrHumanReviewWorkspace({
   const [savedReview, setSavedReview] = useState<AsrHumanReviewRecord | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedUnitChoices, setSavedUnitChoices] = useState<Record<string, AsrReviewChoice>>({});
+  const [goldUnitIds, setGoldUnitIds] = useState<string[]>([]);
   const [playing, setPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const stopAtRef = useRef<number | null>(null);
@@ -253,12 +255,78 @@ export function AsrHumanReviewWorkspace({
     }
   };
 
+  const saveQuickUnitReview = async (
+    unitIndex: number,
+    quickChoice: 'source' | 'baseline' | 'candidate',
+    approveAsGold = false,
+  ) => {
+    const unit = units[unitIndex];
+    if (!unit || saving) return;
+    if (approveAsGold && goldUnitIds.includes(unit.id)) {
+      toast({ title: 'הקטע כבר אושר ל-Gold', description: 'לא נוצר קטע Gold כפול.' });
+      return;
+    }
+    if (!approveAsGold && savedUnitChoices[unit.id] === quickChoice) {
+      toast({ title: 'ההכרעה כבר נשמרה', description: 'לא נוצרה הכרעה כפולה.' });
+      return;
+    }
+    const unitSelection = mergeAsrReviewSelection(units, [unit.id]);
+    const unitCorrectedText = reviewChoiceText(quickChoice, unitSelection, '').trim();
+    if (!unitCorrectedText) return;
+    const unitHasTiming = Number.isFinite(unitSelection.start) && Number.isFinite(unitSelection.end)
+      && (unitSelection.end as number) > (unitSelection.start as number);
+    if (approveAsGold && !unitHasTiming) {
+      toast({ title: 'אין תזמון לאודיו', description: 'לא ניתן לאשר שורה זו ל-Gold.', variant: 'destructive' });
+      return;
+    }
+    const evidence = classifyAsrEdit({
+      original: unitSelection.candidateText,
+      corrected: unitCorrectedText,
+      start: unitSelection.start,
+      end: unitSelection.end,
+    });
+    setSaving(true);
+    try {
+      const review: AsrHumanReviewRecord = {
+        schemaVersion: 1,
+        id: crypto.randomUUID(),
+        experimentId,
+        unitIds: [unit.id],
+        choice: quickChoice,
+        correctedText: unitCorrectedText,
+        sourceText: unitSelection.sourceText,
+        baselineText: unitSelection.baselineText,
+        candidateText: unitSelection.candidateText,
+        errorType: 'asr-word',
+        notes: [`הכרעה מהירה: ${choiceLabel[quickChoice]}`, evidence.reason].filter(Boolean).join(' | '),
+        start: unitSelection.start,
+        end: unitSelection.end,
+        timingSource: unitSelection.timingSource,
+        baselineEngine: `${baseline.engineLabel}${baseline.model ? ` · ${baseline.model}` : ''}`,
+        candidateEngine: `${candidate.engineLabel}${candidate.model ? ` · ${candidate.model}` : ''}`,
+        approvedForGold: false,
+        createdAt: new Date().toISOString(),
+      };
+      if (savedUnitChoices[unit.id] !== quickChoice) await onSaveReview(review);
+      if (approveAsGold) await onApproveGold(review);
+      setSavedUnitChoices((current) => ({ ...current, [unit.id]: quickChoice }));
+      if (approveAsGold) setGoldUnitIds((current) => [...current, unit.id]);
+      toast({
+        title: approveAsGold ? 'השורה אושרה ל-Gold' : 'ההכרעה המהירה נשמרה',
+        description: `${choiceLabel[quickChoice]} נשמר עבור שורה ${unitIndex + 1}.`,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const approveGold = async () => {
     if (!savedReview || !hasTiming) return;
     setSaving(true);
     try {
       await onApproveGold(savedReview);
       setSavedReview({ ...savedReview, approvedForGold: true });
+      setGoldUnitIds((current) => [...new Set([...current, ...savedReview.unitIds])]);
       toast({ title: 'הקטע אושר ל-Gold', description: 'נשמרו האודיו המתוזמן, הטקסט המאומת ופרטי המנועים.' });
     } finally {
       setSaving(false);
@@ -308,48 +376,101 @@ export function AsrHumanReviewWorkspace({
       </div>
 
       <div className="max-h-[34rem] overflow-y-auto border-y" data-testid="asr-review-unit-list">
-        <div className="sticky top-0 z-10 grid grid-cols-[2rem_repeat(3,minmax(0,1fr))] gap-2 border-b bg-background px-2 py-2 text-xs font-semibold">
-          <span>#</span><span>טקסט אמת</span><span>מנוע A</span><span>מנוע B</span>
+        <div className="sticky top-0 z-10 grid min-w-[50rem] grid-cols-[2rem_repeat(3,minmax(0,1fr))_12.5rem] gap-2 border-b bg-background px-2 py-2 text-xs font-semibold">
+          <span>#</span><span>טקסט אמת</span><span>מנוע A</span><span>מנוע B</span><span>שמירה מהירה</span>
         </div>
         {units.map((unit, index) => {
           const selected = selectedIds.includes(unit.id);
           return (
-            <button
+            <div
               key={unit.id}
-              type="button"
-              onClick={(event) => selectUnit(index, event.shiftKey)}
               className={cn(
-                'grid w-full grid-cols-[2rem_repeat(3,minmax(0,1fr))] gap-2 border-b px-2 py-2 text-right text-sm transition-colors last:border-b-0 hover:bg-muted/40',
+                'grid min-w-[50rem] w-full grid-cols-[2rem_repeat(3,minmax(0,1fr))_12.5rem] items-center gap-2 border-b px-2 py-2 text-right text-sm transition-colors last:border-b-0 hover:bg-muted/40',
                 selected && 'bg-primary/10 ring-1 ring-inset ring-primary',
                 unit.kind === 'conflict' && !selected && 'bg-amber-500/[0.04]',
               )}
-              aria-pressed={selected}
-              data-testid={`asr-review-unit-${index}`}
             >
-              <span className="flex flex-col items-center gap-1 text-xs tabular-nums text-muted-foreground">
-                {index + 1}
-                {savedUnitChoices[unit.id] && (
-                  <span title={`נשמר: ${choiceLabel[savedUnitChoices[unit.id]]}`}>
-                    <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
-                  </span>
-                )}
+              <button
+                type="button"
+                onClick={(event) => selectUnit(index, event.shiftKey)}
+                className="col-span-4 grid grid-cols-[2rem_repeat(3,minmax(0,1fr))] items-center gap-2 text-right"
+                aria-pressed={selected}
+                aria-label={`בחר שורת בדיקה ${index + 1}`}
+                data-testid={`asr-review-unit-${index}`}
+              >
+                <span className="flex flex-col items-center gap-1 text-xs tabular-nums text-muted-foreground">
+                  {index + 1}
+                  {savedUnitChoices[unit.id] && (
+                    <span title={`נשמר: ${choiceLabel[savedUnitChoices[unit.id]]}`}>
+                      <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+                    </span>
+                  )}
+                </span>
+                <span className="min-w-0 whitespace-pre-wrap break-words">{unit.sourceText.trim() || '∅'}</span>
+                <span className={cn(
+                  'min-w-0 whitespace-pre-wrap break-words',
+                  normalizedReviewText(unit.baselineText) !== normalizedReviewText(unit.sourceText) && 'bg-red-100 px-1 text-red-900',
+                )}>{unit.baselineText.trim() || '∅'}</span>
+                <span className={cn(
+                  'min-w-0 whitespace-pre-wrap break-words',
+                  normalizedReviewText(unit.candidateText) !== normalizedReviewText(unit.sourceText) && 'bg-red-100 px-1 text-red-900',
+                )}>{unit.candidateText.trim() || '∅'}</span>
+              </button>
+              <span className="flex items-center gap-1" role="group" aria-label={`שמירה מהירה לשורה ${index + 1}`}>
+                {(['source', 'baseline', 'candidate'] as const).map((quickChoice) => (
+                  <Button
+                    key={quickChoice}
+                    type="button"
+                    size="sm"
+                    variant={savedUnitChoices[unit.id] === quickChoice ? 'default' : 'outline'}
+                    className="h-7 min-w-0 flex-1 px-2 text-xs"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void saveQuickUnitReview(index, quickChoice);
+                    }}
+                    disabled={saving}
+                    title={`שמור מיד: ${choiceLabel[quickChoice]}`}
+                    aria-label={`שמור מיד ${choiceLabel[quickChoice]} בשורה ${index + 1}`}
+                  >
+                    {quickChoice === 'source' ? 'אמת' : quickChoice === 'baseline' ? 'A' : 'B'}
+                  </Button>
+                ))}
+                <Button
+                  type="button"
+                  size="icon"
+                  variant={goldUnitIds.includes(unit.id) ? 'default' : 'outline'}
+                  className="h-7 w-7 shrink-0"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void saveQuickUnitReview(index, 'source', true);
+                  }}
+                  disabled={saving}
+                  title="אשר את טקסט האמת של השורה ל-Gold"
+                  aria-label={`אשר שורה ${index + 1} ל-Gold`}
+                >
+                  {goldUnitIds.includes(unit.id)
+                    ? <Check className="h-3.5 w-3.5" />
+                    : <ShieldCheck className="h-3.5 w-3.5" />}
+                </Button>
               </span>
-              <span className="min-w-0 whitespace-pre-wrap break-words">{unit.sourceText.trim() || '∅'}</span>
-              <span className={cn(
-                'min-w-0 whitespace-pre-wrap break-words',
-                normalizedReviewText(unit.baselineText) !== normalizedReviewText(unit.sourceText) && 'bg-red-100 px-1 text-red-900',
-              )}>{unit.baselineText.trim() || '∅'}</span>
-              <span className={cn(
-                'min-w-0 whitespace-pre-wrap break-words',
-                normalizedReviewText(unit.candidateText) !== normalizedReviewText(unit.sourceText) && 'bg-red-100 px-1 text-red-900',
-              )}>{unit.candidateText.trim() || '∅'}</span>
-            </button>
+            </div>
           );
         })}
       </div>
 
-      {selectedIds.length > 0 && (
-        <div className="space-y-4 border-y px-3 py-4" data-testid="asr-review-decision-panel">
+      <Dialog modal={false} open={selectedIds.length > 0} onOpenChange={(open) => { if (!open) clearSelection(); }}>
+        <DialogContent
+          hideOverlay
+          dir="rtl"
+          className="!top-3 max-h-[calc(100vh-1.5rem)] w-[min(58rem,calc(100vw-1.5rem))] max-w-none !translate-y-0 overflow-y-auto p-4 text-right shadow-2xl"
+          onInteractOutside={(event) => event.preventDefault()}
+          data-testid="asr-review-decision-panel"
+        >
+          <DialogHeader className="pe-8 text-right">
+            <DialogTitle>בדיקה והכרעה</DialogTitle>
+            <DialogDescription>בחר את הנוסח הנכון, תקן ידנית או שמור החלטה מרוכזת עבור השורות שסומנו.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2 border-b pb-4">
             <Button type="button" onClick={() => void saveBulkReviews('candidate')} disabled={saving}>
               <CheckCheck className="me-1 h-4 w-4" />שמור B כנכון למסומנים
@@ -432,8 +553,9 @@ export function AsrHumanReviewWorkspace({
             <p className="text-sm text-amber-700">לבחירה לא רציפה השתמש בשמירה המרובה למעלה. אישור קטע יחיד דורש מילים סמוכות.</p>
           )}
           <p className="text-xs text-muted-foreground">מועמד משמש כהטיה למנוע. תיקון מאומת מוחל גם לאחר התמלול ולכן יופיע באופן עקבי בניסוי הבא.</p>
-        </div>
-      )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

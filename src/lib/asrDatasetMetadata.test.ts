@@ -24,4 +24,20 @@ describe('buildApprovedAsrMetadata', () => {
       recordingFingerprint: ' ', sourceKind: 'text', sourceRef: '', sourceLabel: '', teacherEngines: [],
     })).toThrow('recording fingerprint is required');
   });
+
+  it('preserves an explicit label source without weakening the Gold decision', () => {
+    const metadata = buildApprovedAsrMetadata({
+      recordingFingerprint: 'recording-456',
+      sourceKind: 'reference-audio-import',
+      sourceRef: 'psalms.mp3',
+      sourceLabel: 'תהילים',
+      teacherEngines: ['local:alignment-source'],
+      labelSource: 'reference-audio-import',
+      reviewStatus: 'reference-segment-approved',
+    });
+
+    expect(metadata.qualityTier).toBe('gold');
+    expect(metadata.labelSource).toBe('reference-audio-import');
+    expect(metadata.reviewStatus).toBe('reference-segment-approved');
+  });
 });

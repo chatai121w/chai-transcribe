@@ -19,7 +19,9 @@ import {
 } from "@/lib/retranscriptionRunner";
 import { normalizeSourceLanguage, resolveCudaModel, shouldUseHebrewKnowledge } from "@/lib/transcriptionLanguages";
 import { buildTranscriptionHotwords } from "@/lib/transcriptionHotwords";
-import { applyTranscriptionKnowledge } from "@/lib/transcriptionKnowledge";
+import { isLkAiAuto, isLkAiEnabled } from "@/lib/loshonKodesh";
+import { applyTranscriptionKnowledgeWithAi } from "@/lib/transcriptionKnowledge";
+import { logKnowledgeTrace } from "@/lib/pipelineAudit";
 
 const CUDA_MODELS = [
   { value: "ivrit-ai/whisper-large-v3-turbo-ct2", label: "Ivrit.ai Turbo V3 - מומלץ" },
@@ -298,9 +300,21 @@ export function RetranscribeDialog({
       }
 
       if (shouldUseHebrewKnowledge(sourceLanguage, result.detectedLanguage)) {
+        const rawText = result.text;
+        const knowledge = await applyTranscriptionKnowledgeWithAi(rawText, result.engineLabel, {
+          loshonKodesh: preferences.loshon_kodesh_enabled,
+          ai: preferences.loshon_kodesh_enabled && isLkAiEnabled() && isLkAiAuto(),
+        });
+        await logKnowledgeTrace({
+          experimentId: crypto.randomUUID(),
+          surface: 'retranscribe-dialog',
+          engine: result.engineLabel,
+          knowledge,
+          initialText: rawText,
+        });
         result = {
           ...result,
-          text: applyTranscriptionKnowledge(result.text, result.engineLabel).text,
+          text: knowledge.text,
         };
       }
 

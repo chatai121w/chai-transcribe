@@ -1,23 +1,19 @@
 /**
  * Personal Pronunciation Profiles
  * ───────────────────────────────
- * Multiple named pronunciation memories on top of the existing global
- * `personalPronunciationModel`. Use case:
+ * Multiple named pronunciation memories stored in the canonical correction
+ * repository with an explicit profile scope. Use case:
  *
- *   - Global model: trained from EVERY correction the user ever makes.
- *     Acts as the user's "default" personal layer on top of any engine.
- *   - Named profiles: per-speaker memories (e.g. "הרב כהן", "הרב שמואל").
- *     When a profile is active, its corrections are applied AS AN EXTRA
- *     LAYER on top of the engine + global model. Right-click learning
- *     ("הטמע ללמידת AI") writes to BOTH the global model AND the active
- *     profile, so training a specific Rabbi also improves the general
- *     model — but only the profile-specific corrections are applied
- *     when that Rabbi is selected.
+ *   - Global scope: corrections that are valid for every speaker.
+ *   - Profile scope: corrections that are valid only for one speaker.
+ *   - A user action writes to exactly one scope. It is never duplicated into
+ *     both scopes implicitly.
  *
  * Storage layout (localStorage):
  *   pp_profiles_index           → [{ id, name, description, createdAt }]
  *   pp_active_profile           → string | "" (empty = no profile)
- *   pp_profile_<id>_corrections → CorrectionEntry[]
+ *   transcription_corrections_v2 → global + profile-scoped corrections
+ *   pp_profile_<id>_corrections → preserved legacy rollback backup only
  *   pp_profile_<id>_verified    → VerifiedRecord[]
  *   pp_profile_<id>_approved    → string[]   (normalized words)
  *   pp_profile_<id>_highlights  → Record<string, WordHighlight>
@@ -25,8 +21,15 @@
  */
 
 import type { CorrectionEntry } from '@/utils/correctionLearning';
+import {
+  getScopedCorrections,
+  removeScopedCorrections,
+  replaceScopedCorrections,
+} from './correctionRepository';
 import type { WordHighlight, WordHighlightColor } from './personalPronunciationModel';
 import { normalizeHebrewWord } from './personalPronunciationModel';
+import type { TextReplacementOccurrence } from './hebrewTextReplacement';
+import { createTraceOperation, type TranscriptionTraceOperation } from './transcriptionTrace';
 
 // ─── Keys ──────────────────────────────────────────────────────────
 const INDEX_KEY = 'pp_profiles_index';
@@ -175,7 +178,8 @@ export function updateProfileSettings(id: string, settings: PronunciationProfile
 
 export function deleteProfile(id: string): void {
   saveProfiles(listProfiles().filter((p) => p.id !== id));
-  for (const k of ['corrections', 'verified', 'approved', 'highlights', 'samples'] as const) {
+  removeScopedCorrections('profile', id);
+  for (const k of ['verified', 'approved', 'highlights', 'samples'] as const) {
     try {
       localStorage.removeItem(profileKey(id, k));
     } catch { /* ignore */ }
@@ -212,11 +216,11 @@ export function getActiveProfile(): PronunciationProfile | undefined {
 
 // ─── Per-profile correction store ──────────────────────────────────
 export function getProfileCorrections(id: string): CorrectionEntry[] {
-  return readJSON<CorrectionEntry[]>(profileKey(id, 'corrections'), []);
+  return getScopedCorrections('profile', id);
 }
 
 function saveProfileCorrections(id: string, list: CorrectionEntry[]): void {
-  writeJSON(profileKey(id, 'corrections'), list.slice(0, 5000));
+  replaceScopedCorrections('profile', list.slice(0, 5000), id);
 }
 
 /**
@@ -416,6 +420,12 @@ export function addProfileLearningSample(
 export interface ApplyProfileResult {
   text: string;
   appliedCount: number;
+  applied: Array<{
+    original: string;
+    corrected: string;
+    count: number;
+  }>;
+  traceOperations: TranscriptionTraceOperation[];
 }
 
 /**
@@ -428,7 +438,7 @@ export function applyProfileCorrections(
   options: { profileId?: string; confidenceThreshold?: number; maxCorrections?: number } = {}
 ): ApplyProfileResult {
   const profileId = options.profileId ?? getActiveProfileId();
-  if (!profileId) return { text, appliedCount: 0 };
+  if (!profileId) return { text, appliedCount: 0, applied: [], traceOperations: [] };
   const threshold = options.confidenceThreshold ?? 0.6;
   const max = options.maxCorrections ?? 50;
 
@@ -439,18 +449,62 @@ export function applyProfileCorrections(
 
   let result = text;
   let applied = 0;
+  const appliedChanges: ApplyProfileResult['applied'] = [];
+  const traceOperations: TranscriptionTraceOperation[] = [];
   for (const c of corrections) {
     if (!c.original || !c.corrected || c.original === c.corrected) continue;
     // Word-boundary replacement that respects Hebrew letters.
     const escaped = c.original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`(^|[^\\u0590-\\u05FFa-zA-Z0-9])${escaped}(?=$|[^\\u0590-\\u05FFa-zA-Z0-9])`, 'g');
-    const next = result.replace(re, (_m, lead) => `${lead}${c.corrected}`);
-    if (next !== result) {
-      applied += 1;
-      result = next;
-    }
+    const re = new RegExp(`(^|[^\\u0590-\\u05FFa-zA-Z0-9])(${escaped})(?=$|[^\\u0590-\\u05FFa-zA-Z0-9])`, 'g');
+    let count = 0;
+    let outputDelta = 0;
+    const occurrences: TextReplacementOccurrence[] = [];
+    const beforeText = result;
+    const next = result.replace(re, (_m, lead: string, matchedOriginal: string, matchOffset: number) => {
+      const inputStart = matchOffset + lead.length;
+      const outputStart = inputStart + outputDelta;
+      occurrences.push({
+        inputStart,
+        inputEnd: inputStart + matchedOriginal.length,
+        outputStart,
+        outputEnd: outputStart + c.corrected.length,
+        before: matchedOriginal,
+        after: c.corrected,
+      });
+      outputDelta += c.corrected.length - matchedOriginal.length;
+      count += 1;
+      return `${lead}${c.corrected}`;
+    });
+    if (count === 0) continue;
+    applied += count;
+    appliedChanges.push({
+      original: c.original,
+      corrected: c.corrected,
+      count,
+    });
+    result = next;
+    traceOperations.push(createTraceOperation({
+      sequence: traceOperations.length,
+      ruleId: `profile:${profileId}:${c.id ?? `${c.original}->${c.corrected}`}`,
+      source: {
+        system: 'pronunciation-profile',
+        file: 'src/lib/pronunciationProfiles.ts',
+        function: 'applyProfileCorrections',
+        store: `localStorage:transcription_corrections_v2(scope=profile,profileId=${profileId})`,
+      },
+      beforeText,
+      afterText: result,
+      occurrences,
+      metadata: {
+        profileId,
+        confidence: c.confidence,
+        frequency: c.frequency,
+        engine: c.engine,
+        category: c.category,
+      },
+    }));
   }
-  return { text: result, appliedCount: applied };
+  return { text: result, appliedCount: applied, applied: appliedChanges, traceOperations };
 }
 
 function normalizeHotwordToken(word: string): string {

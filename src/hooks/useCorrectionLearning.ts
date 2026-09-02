@@ -13,6 +13,7 @@ import {
   type CorrectionStats,
   CORRECTIONS_CHANGED_EVENT,
 } from '@/utils/correctionLearning';
+import { CORRECTIONS_LEGACY_KEY, CORRECTIONS_V2_KEY } from '@/lib/correctionRepository';
 
 export function useCorrectionLearning() {
   const [stats, setStats] = useState<CorrectionStats>(() => getCorrectionStats());
@@ -25,7 +26,11 @@ export function useCorrectionLearning() {
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === 'transcription_corrections' || event.key === 'transcription_corrections_stats') {
+      if (
+        event.key === CORRECTIONS_V2_KEY ||
+        event.key === CORRECTIONS_LEGACY_KEY ||
+        event.key === 'transcription_corrections_stats'
+      ) {
         refresh();
       }
     };

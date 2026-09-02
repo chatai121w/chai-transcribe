@@ -1,3 +1,11 @@
+import type { TextReplacementOccurrence } from '@/lib/hebrewTextReplacement';
+import { createTraceOperation, type TranscriptionTraceOperation } from '@/lib/transcriptionTrace';
+import {
+  FINAL_TO_MEDIAL as NORMAL_MAP,
+  MEDIAL_TO_FINAL as FINAL_MAP,
+  normalizeHebrewFinalLettersDetailed,
+} from '@/lib/hebrewOrthography';
+
 /**
  * Hebrew Rule Engine — דטרמיניסטי, ללא AI
  *
@@ -17,6 +25,7 @@ export interface RuleHit {
   ruleId: string;     // מזהה החוק שהפעיל
   confidence: number; // 0-100
   reason: string;     // הסבר קצר בעברית
+  occurrence?: TextReplacementOccurrence;
 }
 
 const DEFINITIVE_RULES_KEY = 'definitive_hebrew_rules_enabled';
@@ -34,22 +43,6 @@ export const DEFINITIVE_RULES = [
   { id: 'final-letter-misplaced', title: 'אות סופית רק בסוף מילה', description: 'ך, ם, ן, ף, ץ באמצע מילה חוזרות לצורה הרגילה', examples: ['ךתב → כתב', 'םילה → מילה'] },
   { id: 'normalize-spacing', title: 'רווחים ופיסוק', description: 'מסיר רווחים כפולים ורווח מיותר לפני סימן פיסוק', examples: ['שלום  עולם → שלום עולם'] },
 ] as const;
-
-// אותיות סופיות וגרסאותיהן הרגילות
-const FINAL_MAP: Record<string, string> = {
-  'כ': 'ך',
-  'מ': 'ם',
-  'נ': 'ן',
-  'פ': 'ף',
-  'צ': 'ץ',
-};
-const NORMAL_MAP: Record<string, string> = {
-  'ך': 'כ',
-  'ם': 'מ',
-  'ן': 'נ',
-  'ף': 'פ',
-  'ץ': 'צ',
-};
 
 // סטריפ ניקוד/טעמים לבדיקת אותיות בלבד
 const stripNikud = (s: string): string => s.replace(/[\u0591-\u05C7]/g, '');
@@ -81,24 +74,18 @@ const countFinalOnlyDifferences = (wrong: string, correct: string): number => {
  *   "מלכ" → "מלך".
  */
 export function ruleFinalLetterRequired(word: string): RuleHit | null {
-  const stripped = stripNikud(word);
-  if (stripped.length < 2) return null;
-  const last = stripped.slice(-1);
-  if (FINAL_MAP[last]) {
-    // אם האות הקודמת היא אות עברית רגילה — סביר שזו טעות סופית
-    const prev = stripped.slice(-2, -1);
-    if (isHebrewLetter(prev)) {
-      const corrected = word.slice(0, -1) + FINAL_MAP[last];
-      return {
-        from: word,
-        to: corrected,
-        ruleId: 'final-letter-required',
-        confidence: 95,
-        reason: `אות "${last}" בסוף מילה חייבת להיות "${FINAL_MAP[last]}"`,
-      };
-    }
-  }
-  return null;
+  if (stripNikud(word).length < 2) return null;
+  const normalized = normalizeHebrewFinalLettersDetailed(word);
+  const operation = normalized.traceOperations.find(item => item.ruleId === 'final-letter-required');
+  if (!operation) return null;
+  return {
+    from: word,
+    to: normalized.text,
+    ruleId: 'final-letter-required',
+    confidence: 100,
+    reason: 'אות רגילה בסוף מילה הומרה לצורה הסופית המחייבת',
+    occurrence: operation.occurrences[0],
+  };
 }
 
 /**
@@ -106,28 +93,17 @@ export function ruleFinalLetterRequired(word: string): RuleHit | null {
  *   "ךתב" → "כתב", "םילה" → "מילה".
  */
 export function ruleFinalLetterMisplaced(word: string): RuleHit | null {
-  const stripped = stripNikud(word);
-  if (stripped.length < 2) return null;
-  let corrected = '';
-  let hit = false;
-  for (let i = 0; i < word.length; i += 1) {
-    const ch = word[i];
-    const sChar = stripNikud(ch);
-    const isLast = i === word.length - 1;
-    if (!isLast && NORMAL_MAP[sChar]) {
-      corrected += NORMAL_MAP[sChar];
-      hit = true;
-    } else {
-      corrected += ch;
-    }
-  }
-  if (!hit) return null;
+  if (stripNikud(word).length < 2) return null;
+  const normalized = normalizeHebrewFinalLettersDetailed(word);
+  const operation = normalized.traceOperations.find(item => item.ruleId === 'final-letter-misplaced');
+  if (!operation) return null;
   return {
     from: word,
-    to: corrected,
+    to: normalized.text,
     ruleId: 'final-letter-misplaced',
-    confidence: 95,
+    confidence: 100,
     reason: 'אות סופית הופיעה באמצע מילה',
+    occurrence: operation.occurrences[0],
   };
 }
 
@@ -135,16 +111,72 @@ export function ruleFinalLetterMisplaced(word: string): RuleHit | null {
  * חוק #3: רווחים כפולים ופיסוק.
  *   רץ על המשפט כולו, לא על מילה.
  */
-export function ruleNormalizeSpacing(text: string): { text: string; changed: boolean } {
+export function ruleNormalizeSpacing(text: string): {
+  text: string;
+  changed: boolean;
+  traceOperations: TranscriptionTraceOperation[];
+} {
   let next = text;
-  let changed = false;
-  const before = next;
-  next = next.replace(/[ \t]{2,}/g, ' ');
-  next = next.replace(/\s+([,.!?;:׃])/g, '$1');
-  next = next.replace(/([(\[])\s+/g, '$1');
-  next = next.replace(/\s+([)\]])/g, '$1');
-  if (next !== before) changed = true;
-  return { text: next, changed };
+  const traceOperations: TranscriptionTraceOperation[] = [];
+  const source = {
+    system: 'definitive-hebrew-rules',
+    file: 'src/utils/hebrewRuleEngine.ts',
+    function: 'ruleNormalizeSpacing',
+    store: 'hardcoded:DEFINITIVE_RULES',
+  };
+
+  const replaceExact = (
+    ruleId: string,
+    expression: RegExp,
+    replacementFor: (match: string, captures: string[]) => { text: string; startWithinMatch: number; before: string; after: string },
+  ) => {
+    const beforeText = next;
+    const occurrences: TextReplacementOccurrence[] = [];
+    let outputDelta = 0;
+    next = next.replace(expression, (match: string, ...args: unknown[]) => {
+      const matchOffset = args[args.length - 2] as number;
+      const captures = args.slice(0, -2) as string[];
+      const replacement = replacementFor(match, captures);
+      const inputStart = matchOffset + replacement.startWithinMatch;
+      const outputStart = inputStart + outputDelta;
+      occurrences.push({
+        inputStart,
+        inputEnd: inputStart + replacement.before.length,
+        outputStart,
+        outputEnd: outputStart + replacement.after.length,
+        before: replacement.before,
+        after: replacement.after,
+        ruleId,
+      });
+      outputDelta += replacement.text.length - match.length;
+      return replacement.text;
+    });
+    if (occurrences.length > 0) {
+      traceOperations.push(createTraceOperation({
+        sequence: traceOperations.length,
+        ruleId,
+        source,
+        beforeText,
+        afterText: next,
+        occurrences,
+      }));
+    }
+  };
+
+  replaceExact('normalize-spacing:collapse-horizontal', /[ \t]{2,}/g, (match) => ({
+    text: ' ', startWithinMatch: 0, before: match, after: ' ',
+  }));
+  replaceExact('normalize-spacing:before-punctuation', /(\s+)([,.!?;:׃])/g, (_match, [spaces, punctuation]) => ({
+    text: punctuation, startWithinMatch: 0, before: spaces, after: '',
+  }));
+  replaceExact('normalize-spacing:after-opening', /([(\[])(\s+)/g, (_match, [opening, spaces]) => ({
+    text: opening, startWithinMatch: opening.length, before: spaces, after: '',
+  }));
+  replaceExact('normalize-spacing:before-closing', /(\s+)([)\]])/g, (_match, [spaces, closing]) => ({
+    text: closing, startWithinMatch: 0, before: spaces, after: '',
+  }));
+
+  return { text: next, changed: next !== text, traceOperations };
 }
 
 /**
@@ -239,24 +271,33 @@ export function applyRulesToText(text: string): { fixedText: string; hits: RuleH
 }
 
 /** Applies only grammar rules that are safe enough to run unconditionally. */
-export function applyDefinitiveRulesToText(text: string): { fixedText: string; hits: RuleHit[] } {
+export function applyDefinitiveRulesToText(text: string): {
+  fixedText: string;
+  hits: RuleHit[];
+  traceOperations: TranscriptionTraceOperation[];
+} {
   const spacing = ruleNormalizeSpacing(text);
-  const tokens = spacing.text.split(/(\s+)/);
-  const hits: RuleHit[] = [];
-  const out = tokens.map((token) => {
-    if (!token || /^\s+$/.test(token)) return token;
-    const match = token.match(/^(\p{P}*)(.*?)(\p{P}*)$/u);
-    if (!match) return token;
-    const [, prefix, core, suffix] = match;
-    const hit = ruleFinalLetterMisplaced(core) ?? ruleFinalLetterRequired(core);
-    if (!hit) return token;
-    hits.push(hit);
-    return prefix + hit.to + suffix;
-  });
+  const orthography = normalizeHebrewFinalLettersDetailed(spacing.text);
+  const hits: RuleHit[] = orthography.applied.flatMap(change =>
+    Array.from({ length: change.count }, () => ({
+      from: change.from,
+      to: change.to,
+      ruleId: 'mandatory-hebrew-orthography',
+      confidence: 100,
+      reason: 'צורת מנצפך תוקנה לפי מיקום האות במילה',
+    })),
+  );
   if (spacing.changed) {
     hits.push({ from: text, to: spacing.text, ruleId: 'normalize-spacing', confidence: 100, reason: 'רווחים ופיסוק תקניים' });
   }
-  return { fixedText: out.join(''), hits };
+  const traceOperations = [
+    ...spacing.traceOperations,
+    ...orthography.traceOperations.map((operation, index) => ({
+      ...operation,
+      sequence: spacing.traceOperations.length + index,
+    })),
+  ];
+  return { fixedText: orthography.text, hits, traceOperations };
 }
 
 /**

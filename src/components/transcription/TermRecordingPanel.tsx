@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AudioLines, Mic, Sparkles, Square, X } from 'lucide-react';
+import { AudioLines, Loader2, Mic, Sparkles, Square, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,14 +7,25 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import { useMicrophoneRecording } from '@/hooks/useMicrophoneRecording';
+import { editTranscriptCloud } from '@/utils/editTranscriptApi';
+import {
+  buildFallbackPracticeScript,
+  buildPracticeScriptPrompt,
+  cleanGeneratedPracticeScript,
+  findMissingPracticeTerms,
+  splitPracticeTerms,
+  type TermPracticeMode,
+} from '@/lib/termPracticeScript';
+import type { AsrSampleType } from '@/lib/asrSampleType';
 
-export type RecordingPracticeMode = 'terms' | 'natural';
+export type RecordingPracticeMode = TermPracticeMode;
 
 export interface RecordedPracticeSource {
   file: File;
   groundTruth: string;
   hotwords: string;
   mode: RecordingPracticeMode;
+  sampleType: AsrSampleType;
   durationSeconds: number;
 }
 
@@ -22,9 +33,7 @@ interface TermRecordingPanelProps {
   onReady: (source: RecordedPracticeSource) => void;
 }
 
-function splitTerms(value: string): string[] {
-  return [...new Set(value.split(/[,;\n]+/).map((term) => term.trim()).filter(Boolean))];
-}
+const SCRIPT_GENERATION_TIMEOUT_MS = 20_000;
 
 function formatElapsed(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
@@ -36,8 +45,9 @@ export function TermRecordingPanel({ onReady }: TermRecordingPanelProps) {
   const [mode, setMode] = useState<RecordingPracticeMode>('terms');
   const [termsInput, setTermsInput] = useState('');
   const [script, setScript] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
   const [previewUrl, setPreviewUrl] = useState('');
-  const terms = useMemo(() => splitTerms(termsInput), [termsInput]);
+  const terms = useMemo(() => splitPracticeTerms(termsInput), [termsInput]);
 
   useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -53,6 +63,7 @@ export function TermRecordingPanel({ onReady }: TermRecordingPanelProps) {
       groundTruth: script.trim(),
       hotwords: terms.join(', '),
       mode,
+      sampleType: mode === 'terms' ? 'term-reading' : 'natural-speech',
       durationSeconds,
     });
     toast({
@@ -67,19 +78,68 @@ export function TermRecordingPanel({ onReady }: TermRecordingPanelProps) {
     onError: (message) => toast({ title: 'ההקלטה לא התחילה', description: message, variant: 'destructive' }),
   });
 
-  const prepareScript = () => {
+  const prepareScript = async () => {
     if (!terms.length) {
       toast({ title: 'יש להזין לפחות מושג אחד', variant: 'destructive' });
       return;
     }
-    const next = mode === 'terms'
-      ? `אני קורא כעת את המושגים הבאים: ${terms.join(', ')}.`
-      : `בשיעור זה נעסוק ב${terms.join(', וב')} ונשלב את המושגים בתוך דיבור טבעי.`;
-    if (script.trim() && script.trim() !== next && !window.confirm('להחליף את טקסט ההקראה הקיים?')) return;
-    setScript(next);
+    if (mode === 'terms') {
+      setScript(buildFallbackPracticeScript(terms, mode));
+      toast({
+        title: 'נוצר טקסט מיידי לקריאת המושגים',
+        description: 'לכל מושג נוצר משפט נפרד; אין צורך להמתין לשירות AI.',
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+    const controller = new AbortController();
+    let didTimeout = false;
+    let rejectTimeout: ((reason: Error) => void) | undefined;
+    const timeoutPromise = new Promise<never>((_resolve, reject) => { rejectTimeout = reject; });
+    const timeoutId = window.setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+      rejectTimeout?.(new Error('SCRIPT_GENERATION_TIMEOUT'));
+    }, SCRIPT_GENERATION_TIMEOUT_MS);
+    try {
+      const generated = cleanGeneratedPracticeScript(await Promise.race([
+        editTranscriptCloud({
+          text: terms.map((term) => `- ${term}`).join('\n'),
+          action: 'custom',
+          model: 'google/gemini-2.5-flash',
+          customPrompt: buildPracticeScriptPrompt(mode),
+          signal: controller.signal,
+          personalGeminiTimeoutMs: 6_000,
+        }),
+        timeoutPromise,
+      ]));
+      const missing = findMissingPracticeTerms(generated, terms);
+      if (missing.length) {
+        setScript(buildFallbackPracticeScript(terms, mode));
+        toast({
+          title: 'נוצר טקסט חלופי בטוח',
+          description: `ה-AI השמיט את המושגים: ${missing.join(', ')}`,
+        });
+        return;
+      }
+      setScript(generated);
+      toast({ title: 'נוצר טקסט הקשרי נפרד', description: 'כל מושגי היעד נמצאים בטקסט ההקראה' });
+    } catch (error) {
+      setScript(buildFallbackPracticeScript(terms, mode));
+      toast({
+        title: didTimeout ? 'הענן לא הגיב בזמן' : 'נוצר טקסט מקומי',
+        description: didTimeout
+          ? 'לאחר 20 שניות הבקשה בוטלה ונוצר טקסט הקשרי מקומי שאפשר לערוך.'
+          : `שירות ה-AI לא היה זמין: ${error instanceof Error ? error.message : 'שגיאה לא ידועה'}`,
+      });
+    } finally {
+      window.clearTimeout(timeoutId);
+      setIsGenerating(false);
+    }
   };
 
-  const canRecord = script.trim().length > 0 && terms.length > 0;
+  const canRecord = script.trim().length > 0 && terms.length > 0 && !isGenerating;
 
   return (
     <section aria-label="הקלטת בדיקת מושגים" className="border-y bg-muted/20 px-3 py-4 sm:px-4">
@@ -95,18 +155,23 @@ export function TermRecordingPanel({ onReady }: TermRecordingPanelProps) {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(20rem,1.2fr)]">
         <div className="space-y-2">
-          <Label htmlFor="practice-terms">מושגים לבדיקה</Label>
-          <Input id="practice-terms" value={termsInput} onChange={(event) => setTermsInput(event.target.value)} disabled={recorder.isRecording} dir="rtl" placeholder="אביי, רבא, מסכת בבא קמא" />
+          <Label htmlFor="practice-terms">מושגי יעד למדידה</Label>
+          <p className="text-xs text-muted-foreground">מילה או ביטוי בכל פסיק או שורה. הרשימה נשמרת בנפרד לחישוב זיהוי המושגים.</p>
+          <Input id="practice-terms" value={termsInput} onChange={(event) => setTermsInput(event.target.value)} disabled={recorder.isRecording || isGenerating} dir="rtl" placeholder="אביי, רבא, מסכת בבא קמא" />
           <div className="flex min-h-6 flex-wrap gap-1.5">
             {terms.map((term) => <Badge key={term} variant="outline">{term}</Badge>)}
           </div>
         </div>
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Label htmlFor="practice-script">טקסט מדויק להקראה</Label>
-            <Button type="button" size="sm" variant="outline" onClick={prepareScript} disabled={recorder.isRecording}><Sparkles className="me-1 h-4 w-4" />הכן טקסט</Button>
+            <Label htmlFor="practice-script">טקסט אמת מלא להקלטה</Label>
+            <Button type="button" size="sm" variant="outline" onClick={() => void prepareScript()} disabled={recorder.isRecording || isGenerating}>
+              {isGenerating ? <Loader2 className="me-1 h-4 w-4 animate-spin" /> : <Sparkles className="me-1 h-4 w-4" />}
+              {isGenerating ? 'יוצר הקשר...' : 'צור טקסט הקשרי'}
+            </Button>
           </div>
-          <Textarea id="practice-script" value={script} onChange={(event) => setScript(event.target.value)} disabled={recorder.isRecording} rows={4} dir="rtl" placeholder="הטקסט שיוקרא ויישמר כטקסט האמת" />
+          <p className="text-xs text-muted-foreground">הנוסח השלם שתקריא נשמר כטקסט האמת להשוואה. אפשר לערוך אותו לפני ההקלטה.</p>
+          <Textarea id="practice-script" value={script} onChange={(event) => setScript(event.target.value)} disabled={recorder.isRecording || isGenerating} rows={4} dir="rtl" placeholder="צור טקסט הקשרי או כתוב כאן את הנוסח המדויק שתקריא" />
         </div>
       </div>
 

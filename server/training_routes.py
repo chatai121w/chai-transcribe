@@ -44,6 +44,8 @@ DATASETS_DIR = BASE_DIR / "datasets"
 JOBS_DIR = BASE_DIR / "jobs"
 ACTIVE_MODEL_FILE = BASE_DIR / "active_model.json"
 TRAINED_MODELS_FILE = BASE_DIR / "trained_models.json"
+MIN_REAL_TRAINING_CLIPS = 20
+MIN_REAL_TRAINING_RECORDINGS = 3
 for _d in (BASE_DIR, DATASETS_DIR, JOBS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
@@ -107,6 +109,20 @@ def _model_quality_gate(progress: dict) -> tuple[bool, list[str]]:
         return False, reasons
     if not progress.get("eval_fingerprint") or not progress.get("eval_sample_count"):
         reasons.append("evaluation set identity is missing")
+    quality_counts = progress.get("quality_counts")
+    if not isinstance(quality_counts, dict):
+        reasons.append("training label quality evidence is missing")
+    else:
+        non_gold = sum(int(quality_counts.get(tier, 0) or 0) for tier in ("silver", "bronze", "unknown"))
+        if non_gold:
+            reasons.append("training contains non-Gold or unknown labels")
+        if int(quality_counts.get("gold", 0) or 0) < MIN_REAL_TRAINING_CLIPS:
+            reasons.append("training has too few human-approved Gold clips")
+    label_source_counts = progress.get("label_source_counts")
+    if not isinstance(label_source_counts, dict) or int(label_source_counts.get("unknown", 0) or 0) > 0:
+        reasons.append("training label provenance is missing")
+    if int(progress.get("recording_groups", 0) or 0) < MIN_REAL_TRAINING_RECORDINGS:
+        reasons.append("training uses too few independent source recordings")
     if progress["wer_after"] > progress["wer_before"]:
         reasons.append("holdout WER regressed")
     if progress["cer_after"] > progress["cer_before"]:
@@ -130,6 +146,20 @@ def _recording_group_id(metadata: dict) -> str:
         or metadata.get("group_id")
         or ""
     ).strip()
+
+
+def _label_metadata_errors(metadata: dict) -> list[str]:
+    """Validate the canonical provenance fields required for trainable evidence."""
+    errors = []
+    quality_tier = str(metadata.get("qualityTier") or metadata.get("quality_tier") or "").strip().lower()
+    label_source = str(metadata.get("labelSource") or metadata.get("label_source") or "").strip()
+    if quality_tier not in {"gold", "silver", "bronze"}:
+        errors.append("metadata.qualityTier must be gold, silver, or bronze")
+    if not label_source or label_source == "unknown":
+        errors.append("metadata.labelSource is required")
+    if not _recording_group_id(metadata):
+        errors.append("metadata.sourceRecordingId or metadata.groupId is required")
+    return errors
 
 
 def _finalize_dataset(ds_dir: Path) -> dict:
@@ -194,6 +224,8 @@ def _finalize_dataset(ds_dir: Path) -> dict:
         if row["audio"] not in eval_audio and row["group_id"] not in reserved_groups
     ]
     eval_count = len(eval_rows)
+    train_group_count = len({row["group_id"] for row in train_rows if row["group_id"]})
+    eval_group_count = len({row["group_id"] for row in eval_rows if row["group_id"]})
     quality_counts = {"gold": 0, "silver": 0, "bronze": 0, "unknown": 0}
     label_source_counts = {}
     for row in rows:
@@ -227,16 +259,37 @@ def _finalize_dataset(ds_dir: Path) -> dict:
         )
     if not eval_rows:
         warnings.append("At least 10 clips from 2 different recordings are required for a leakage-safe holdout split")
+    if len(groups) < MIN_REAL_TRAINING_RECORDINGS:
+        warnings.append(
+            f"At least {MIN_REAL_TRAINING_RECORDINGS} independent source recordings are required "
+            "so training and evaluation are not each represented by only one recording"
+        )
+    non_gold_count = sum(quality_counts[tier] for tier in ("silver", "bronze", "unknown"))
+    if non_gold_count:
+        warnings.append(f"{non_gold_count} clips are not human-approved Gold and cannot enter real training")
+    unknown_label_count = int(label_source_counts.get("unknown", 0) or 0)
+    if unknown_label_count:
+        warnings.append(f"{unknown_label_count} clips have no canonical label provenance")
     if reserved_groups:
         warnings.append(f"{len(reserved_groups)} frozen benchmark recording groups are excluded from training")
     meta = {
         "count": len(rows), "train_count": len(train_rows),
-        "eval_count": eval_count, "recording_groups": len(groups), "duration_seconds": round(total_duration, 2),
+        "eval_count": eval_count, "recording_groups": len(groups),
+        "train_recording_groups": train_group_count, "eval_recording_groups": eval_group_count,
+        "duration_seconds": round(total_duration, 2),
         "eval_fingerprint": _evaluation_fingerprint(eval_rows) if eval_rows else None,
         "quality_counts": quality_counts, "label_source_counts": label_source_counts,
         "unknown_group_count": unknown_group_count,
         "reserved_benchmark_groups": len(reserved_groups),
-        "ready_for_training": (len(train_rows) + len(eval_rows)) >= 20 and bool(eval_rows) and unknown_group_count == 0,
+        "ready_for_training": (
+            (len(train_rows) + len(eval_rows)) >= MIN_REAL_TRAINING_CLIPS
+            and bool(eval_rows)
+            and unknown_group_count == 0
+            and len(groups) >= MIN_REAL_TRAINING_RECORDINGS
+            and train_group_count >= 2
+            and non_gold_count == 0
+            and unknown_label_count == 0
+        ),
         "warnings": warnings,
     }
     (ds_dir / "dataset_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -291,11 +344,9 @@ def register_training_routes(app):
                 raise ValueError("metadata is not an object")
         except (TypeError, ValueError, json.JSONDecodeError):
             return jsonify({"error": "metadata must be a valid JSON object"}), 400
-        if not _recording_group_id(metadata):
-            return jsonify({
-                "error": "metadata.sourceRecordingId or metadata.groupId is required "
-                         "so clips from one recording cannot leak across train and evaluation"
-            }), 400
+        metadata_errors = _label_metadata_errors(metadata)
+        if metadata_errors:
+            return jsonify({"error": "; ".join(metadata_errors), "metadata_errors": metadata_errors}), 400
         idx = len(list((ds_dir / "audio").glob("*"))) + 1
         suffix = Path(audio.filename or "clip.wav").suffix.lower() or ".wav"
         if suffix not in {".wav", ".mp3", ".m4a", ".webm", ".ogg", ".flac", ".mp4"}:
@@ -403,8 +454,13 @@ def register_training_routes(app):
             eval_path = ds_dir / "manifest.eval.jsonl"
             if eval_path.is_file():
                 eval_manifest = str(eval_path)
+            dataset_meta_path = ds_dir / "dataset_meta.json"
+        else:
+            dataset_meta_path = None
         if not manifest or not Path(manifest).is_file():
             return jsonify({"error": "manifest not found (provide 'manifest' or 'dataset_id' first)"}), 400
+        if not dataset_id and not smoke_test:
+            return jsonify({"error": "real training requires a finalized dataset_id with canonical provenance and recording-group holdout"}), 400
         row_count_path = Path(count_manifest or manifest)
         row_count = sum(1 for line in row_count_path.read_text(encoding="utf-8").splitlines() if line.strip())
         if row_count < 20 and not smoke_test:
@@ -447,6 +503,8 @@ def register_training_routes(app):
         ]
         if eval_manifest and not smoke_test:
             cmd.extend(["--eval-dataset", eval_manifest, "--eval-split", "0"])
+        if dataset_meta_path and dataset_meta_path.is_file():
+            cmd.extend(["--dataset-meta", str(dataset_meta_path)])
         if body.get("merge_and_convert"):
             cmd.append("--merge-and-convert")
         if body.get("max_samples"):
@@ -582,6 +640,14 @@ def register_training_routes(app):
             "cer_before": progress["cer_before"], "cer_after": progress["cer_after"],
             "eval_sample_count": progress.get("eval_sample_count"),
             "eval_fingerprint": progress.get("eval_fingerprint"),
+            "quality_counts": progress.get("quality_counts"),
+            "label_source_counts": progress.get("label_source_counts"),
+            "recording_groups": progress.get("recording_groups"),
+            "train_recording_groups": progress.get("train_recording_groups"),
+            "eval_recording_groups": progress.get("eval_recording_groups"),
+            "eval_term_count": progress.get("eval_term_count"),
+            "term_recall_before": progress.get("term_recall_before"),
+            "term_recall_after": progress.get("term_recall_after"),
         })
         TRAINED_MODELS_FILE.write_text(json.dumps(models, ensure_ascii=False, indent=2), encoding="utf-8")
         ACTIVE_MODEL_FILE.write_text(json.dumps({

@@ -104,6 +104,8 @@ export function ReferenceAudioImporter({ datasetId }: { datasetId: string }) {
           sourceRef: audio.name,
           sourceLabel: audio.name,
           teacherEngines: ['local:alignment-source'],
+          labelSource: 'reference-audio-import',
+          reviewStatus: 'reference-segment-approved',
           startSeconds: segment.start,
           endSeconds: segment.end,
         }));

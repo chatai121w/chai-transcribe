@@ -87,23 +87,34 @@ export function computeTermRecall(
 ): { recall: number; total: number; matched: number; missed: string[] } {
   const refWords = tokenizeHebrew(ref);
   const hypWords = tokenizeHebrew(hyp);
-  const refCount = new Map<string, number>();
-  const hypCount = new Map<string, number>();
-  for (const w of refWords) refCount.set(w, (refCount.get(w) ?? 0) + 1);
-  for (const w of hypWords) hypCount.set(w, (hypCount.get(w) ?? 0) + 1);
+  const countSequence = (words: string[], sequence: string[]): number => {
+    if (!sequence.length || sequence.length > words.length) return 0;
+    let count = 0;
+    for (let index = 0; index <= words.length - sequence.length; index += 1) {
+      if (sequence.every((word, offset) => words[index + offset] === word)) count += 1;
+    }
+    return count;
+  };
 
-  const normTerms = terms.map((t) => normalizeHebrew(t)).filter(Boolean);
+  const seen = new Set<string>();
+  const normalizedTerms = terms.flatMap((term) => {
+    const words = tokenizeHebrew(term);
+    const key = words.join('\u0000');
+    if (!key || seen.has(key)) return [];
+    seen.add(key);
+    return [{ label: normalizeHebrew(term), words }];
+  });
 
   let total = 0;
   let matched = 0;
   const missed: string[] = [];
-  for (const t of normTerms) {
-    const rc = refCount.get(t) ?? 0;
+  for (const term of normalizedTerms) {
+    const rc = countSequence(refWords, term.words);
     if (rc === 0) continue;
-    const hc = hypCount.get(t) ?? 0;
+    const hc = countSequence(hypWords, term.words);
     total += rc;
     matched += Math.min(rc, hc);
-    if (hc < rc) missed.push(t);
+    if (hc < rc) missed.push(term.label);
   }
   const recall = total === 0 ? NaN : matched / total;
   return { recall, total, matched, missed };

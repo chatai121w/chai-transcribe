@@ -1,3 +1,13 @@
+import type { TextReplacementOccurrence } from '@/lib/hebrewTextReplacement';
+import { createTraceOperation, type TranscriptionTraceOperation } from '@/lib/transcriptionTrace';
+import {
+  normalizeHebrewFinalLettersDetailed as normalizeCanonicalFinalLetters,
+  type HebrewFinalLettersResult,
+} from '@/lib/hebrewOrthography';
+import hebrewTranscriptionDefaults from '../../shared/hebrew_transcription_defaults.json';
+
+export type { HebrewFinalLettersResult } from '@/lib/hebrewOrthography';
+
 /**
  * Loshon Kodesh (לשון הקודש) — Ashkenazi pronunciation transcription support.
  *
@@ -37,6 +47,21 @@ export interface LkReplacement {
   category?: LkCategory;
 }
 
+export interface LkAppliedChange {
+  from: string;
+  to: string;
+  category: LkCategory;
+  count: number;
+  source: 'base' | 'dictionary' | 'orthography';
+}
+
+export interface ApplyLoshonKodeshResult {
+  text: string;
+  appliedCount: number;
+  applied: LkAppliedChange[];
+  traceOperations: TranscriptionTraceOperation[];
+}
+
 export interface LkDictionary {
   id: string;
   name: string;
@@ -50,23 +75,14 @@ export interface LkDictionary {
 // DEFAULTS — Prompt
 // ─────────────────────────────────────────────────────────────────────
 
-export const DEFAULT_LOSHON_KODESH_PROMPT =
-  'שיעור תורה בלשון הקודש בהגייה אשכנזית. יש לתמלל בכתיב עברי תקני מלא, להתעלם מההגייה האשכנזית של החולם (אוֹי), הצירה (יי), הקמץ והת\' הרפה. ' +
-  'דוגמאות לכתיב התקני שיש להעדיף: תורה, קודש, משה, אהרון, יעקב, יוסף, שלמה, שבת, יום טוב, ברוך, ברכה, מקום, מצוה, פסוק, פרשה, ' +
-  'הקדוש ברוך הוא, הקב"ה, רבי, גמרא, משנה, תוספות, רש"י, רמב"ם, הלכה, סוגיא, מסכת, דף, ישיבה, בית מדרש, תפילה, אמונה, יראת שמים, חסידות, מוסר, תשובה.';
+export const DEFAULT_LOSHON_KODESH_PROMPT = hebrewTranscriptionDefaults.loshonKodeshPrompt;
 
 // ─────────────────────────────────────────────────────────────────────
 // DEFAULTS — Base hotwords (kept for backwards-compat / non-dictionary path)
 // ─────────────────────────────────────────────────────────────────────
 
 export const DEFAULT_LOSHON_KODESH_HOTWORDS: string[] = [
-  'הקדוש ברוך הוא', 'הקב"ה', 'השם יתברך', 'בורא עולם',
-  'תורה', 'קודש', 'משה', 'אהרון', 'יעקב', 'יוסף', 'יצחק', 'אברהם', 'שלמה', 'דוד',
-  'ברוך', 'ברכה', 'שבת', 'שמים', 'ארץ', 'אדם', 'עולם', 'שלום', 'אומר', 'רוצה',
-  'פסוק', 'מקום', 'דבר', 'אמת', 'תפילה', 'מצוה', 'נשמה', 'בורא',
-  'פטר רחם', 'פדה תפדה', 'בכור האדם', 'בכור הבהמה הטמאה',
-  'פדיון הקדש', 'מעשר שני', 'ממון גבוה', 'ממון הדיוט', 'קדושת הגוף', 'קדושת דמים',
-  'רבי יוחנן וריש לקיש', 'מטלטלין', 'למאן דאמר', 'שדות בכסף יקנו',
+  ...hebrewTranscriptionDefaults.loshonKodeshHotwords,
 ];
 
 // ─────────────────────────────────────────────────────────────────────
@@ -98,9 +114,7 @@ export const DEFAULT_LOSHON_KODESH_REPLACEMENTS: LkReplacement[] = [
   // ── ת' רפה (s → t) ────────────────────────────
   { from: 'שאבס',   to: 'שבת',   category: 'tav_rafa' },
   { from: 'שאבעס',  to: 'שבת',   category: 'tav_rafa' },
-  { from: 'בייס',   to: 'בית',   category: 'tav_rafa' },
   { from: 'אמעס',   to: 'אמת',   category: 'tav_rafa' },
-  { from: 'דעת',    to: 'דעת',   category: 'tav_rafa' },
 
   // ── שמות פרטיים (Ashkenazi nicknames) ────────
   { from: 'מויישע', to: 'משה',   category: 'names' },
@@ -312,8 +326,16 @@ export function getLoshonKodeshReplacements(): LkReplacement[] {
     if (!raw) return DEFAULT_LOSHON_KODESH_REPLACEMENTS;
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return DEFAULT_LOSHON_KODESH_REPLACEMENTS;
-    const saved = parsed.filter(x => x && typeof x.from === 'string' && typeof x.to === 'string' && x.from);
-    const savedKeys = new Set(saved.map(x => x.from));
+    const savedBySource = new Map<string, LkReplacement>();
+    for (const entry of parsed) {
+      if (!entry || typeof entry.from !== 'string' || typeof entry.to !== 'string') continue;
+      const from = entry.from.replace(/\s+/g, ' ').trim();
+      const to = entry.to.replace(/\s+/g, ' ').trim();
+      if (!from || from === to) continue;
+      savedBySource.set(from, { ...entry, from, to });
+    }
+    const saved = [...savedBySource.values()];
+    const savedKeys = new Set(savedBySource.keys());
     return [...saved, ...DEFAULT_LOSHON_KODESH_REPLACEMENTS.filter(x => !savedKeys.has(x.from))];
   } catch { return DEFAULT_LOSHON_KODESH_REPLACEMENTS; }
 }
@@ -428,26 +450,49 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** Backwards-compatible export; the sole implementation lives in hebrewOrthography. */
+export function normalizeHebrewFinalLettersDetailed(text: string): HebrewFinalLettersResult {
+  return normalizeCanonicalFinalLetters(text);
+}
+
 /**
  * Apply ALL configured replacements (base list + enabled dictionaries),
  * respecting category toggles. Runs only when post-processing is enabled.
  */
-export function applyLoshonKodeshReplacements(text: string): string {
-  if (!text) return text;
-  if (!isLoshonKodeshPostProcessEnabled()) return text;
+export function applyLoshonKodeshReplacementsDetailed(text: string): ApplyLoshonKodeshResult {
+  if (!text || !isLoshonKodeshPostProcessEnabled()) {
+    return { text, appliedCount: 0, applied: [], traceOperations: [] };
+  }
 
   const categories = getCategoryEnabled();
   const baseReplacements = getLoshonKodeshReplacements();
-  const dictReplacements = getDictionaries().filter(d => d.enabled).flatMap(d => d.replacements);
-  const all = [...baseReplacements, ...dictReplacements];
+  const dictionaries = getDictionaries().filter(d => d.enabled);
+  const all = [
+    ...baseReplacements.map((replacement, index) => ({
+      replacement,
+      source: 'base' as const,
+      ruleId: `lk:base:${index}:${replacement.from}`,
+      store: 'localStorage:lk_rules_replacements + built-in defaults',
+    })),
+    ...dictionaries.flatMap(dictionary => dictionary.replacements.map((replacement, index) => ({
+      replacement,
+      source: 'dictionary' as const,
+      ruleId: `lk:dictionary:${dictionary.id}:${index}:${replacement.from}`,
+      store: `localStorage:lk_rules_dictionaries:${dictionary.id}`,
+    }))),
+  ];
 
   let out = text;
-  for (const r of all) {
+  const applied: LkAppliedChange[] = [];
+  const traceOperations: TranscriptionTraceOperation[] = [];
+  for (const { replacement: r, source, ruleId, store } of all) {
     if (!r.from || r.from === r.to) continue;
     const cat: LkCategory = (r.category as LkCategory) || 'general';
     if (categories[cat] === false) continue;
 
     const whole = r.wholeWord !== false;
+    const beforeText = out;
+    const occurrences: TextReplacementOccurrence[] = [];
     if (whole) {
       // Allow optional Hebrew one-letter prefix (ו ה ב ל מ ש כ) — repeated up to 2 (e.g. וה, ול, וב, וכ, ומ, שה)
       // and optional Hebrew suffix letters (ה י ו ת ם ן ך) up to 3 (covers feminine ה, plural ים/ות, possessive י/ך/ו, etc.)
@@ -458,19 +503,96 @@ export function applyLoshonKodeshReplacements(text: string): string {
         `(?<![A-Za-z0-9\\u05D0-\\u05EA])${prefix}${escapeRegex(r.from)}${suffix}(?![A-Za-z0-9])`,
         'g'
       );
-      out = out.replace(pattern, (_m, pre: string, suf: string) => `${pre || ''}${r.to}${suf || ''}`);
+      let count = 0;
+      let outputDelta = 0;
+      out = out.replace(pattern, (_m, pre: string, suf: string, matchOffset: number) => {
+        const inputStart = matchOffset + (pre || '').length;
+        const outputStart = inputStart + outputDelta;
+        occurrences.push({
+          inputStart,
+          inputEnd: inputStart + r.from.length,
+          outputStart,
+          outputEnd: outputStart + r.to.length,
+          before: r.from,
+          after: r.to,
+        });
+        outputDelta += r.to.length - r.from.length;
+        count += 1;
+        return `${pre || ''}${r.to}${suf || ''}`;
+      });
+      if (count > 0) applied.push({ from: r.from, to: r.to, category: cat, count, source });
     } else {
-      out = out.replace(new RegExp(escapeRegex(r.from), 'g'), r.to);
+      let count = 0;
+      let outputDelta = 0;
+      out = out.replace(new RegExp(escapeRegex(r.from), 'g'), (_match, matchOffset: number) => {
+        const outputStart = matchOffset + outputDelta;
+        occurrences.push({
+          inputStart: matchOffset,
+          inputEnd: matchOffset + r.from.length,
+          outputStart,
+          outputEnd: outputStart + r.to.length,
+          before: r.from,
+          after: r.to,
+        });
+        outputDelta += r.to.length - r.from.length;
+        count += 1;
+        return r.to;
+      });
+      if (count > 0) applied.push({ from: r.from, to: r.to, category: cat, count, source });
+    }
+    if (occurrences.length > 0) {
+      traceOperations.push(createTraceOperation({
+        sequence: traceOperations.length,
+        ruleId,
+        source: {
+          system: 'loshon-kodesh-replacements',
+          file: 'src/lib/loshonKodesh.ts',
+          function: 'applyLoshonKodeshReplacementsDetailed',
+          store,
+        },
+        beforeText,
+        afterText: out,
+        occurrences,
+        metadata: {
+          category: cat,
+          replacementSource: source,
+          wholeWord: whole,
+        },
+      }));
     }
   }
-  return out;
+
+  const orthography = normalizeHebrewFinalLettersDetailed(out);
+  out = orthography.text;
+  applied.push(...orthography.applied.map(change => ({
+    ...change,
+    category: 'general' as const,
+    source: 'orthography' as const,
+  })));
+  traceOperations.push(...orthography.traceOperations.map(operation => ({
+    ...operation,
+    sequence: traceOperations.length + operation.sequence,
+  })));
+  return {
+    text: out,
+    appliedCount: applied.reduce((sum, change) => sum + change.count, 0),
+    applied,
+    traceOperations,
+  };
+}
+
+export function applyLoshonKodeshReplacements(text: string): string {
+  return applyLoshonKodeshReplacementsDetailed(text).text;
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // AI Layer (Layer 2) — calls the edge function
 // ─────────────────────────────────────────────────────────────────────
 
-export async function applyLkAiFix(text: string): Promise<string> {
+export async function applyLkAiFix(
+  text: string,
+  options: { normalizeFinalLetters?: boolean } = {},
+): Promise<string> {
   if (!text || !text.trim()) return text;
   const { supabase } = await import('@/integrations/supabase/client');
   const { data, error } = await supabase.functions.invoke('loshon-kodesh-ai', {
@@ -489,7 +611,10 @@ export async function applyLkAiFix(text: string): Promise<string> {
   const payload = data as { text?: string; error?: string } | null;
   if (!payload || payload.error) throw new Error(payload?.error || 'AI לא החזיר תוצאה');
   try { window.dispatchEvent(new CustomEvent('ai-usage-updated')); } catch { /* */ }
-  return payload.text || text;
+  const result = payload.text || text;
+  return options.normalizeFinalLetters === false
+    ? result
+    : normalizeHebrewFinalLettersDetailed(result).text;
 }
 
 export function subscribeLoshonKodeshRules(fn: () => void): () => void {

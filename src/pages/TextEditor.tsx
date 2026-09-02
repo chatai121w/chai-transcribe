@@ -91,6 +91,7 @@ import {
 } from "@/lib/transcriptFormatting";
 import { db, buildAudioFingerprint, clearLastAudioAlias, retainAudioBlob } from "@/lib/localDb";
 import { fingerprintFile } from "@/lib/recordingFingerprint";
+import { inferAsrSampleType } from "@/lib/asrSampleType";
 import { useCorrectionLearning } from "@/hooks/useCorrectionLearning";
 import { getServerUrl } from "@/lib/serverConfig";
 import {
@@ -1166,6 +1167,7 @@ const TextEditor = () => {
           audioFileName: audioFileName || current?.title || 'recording',
           initialTranscript: current?.text || originalTextRef.current,
           groundTruth: text.trim(),
+          sampleType: inferAsrSampleType(current?.tags, current?.title || audioFileName),
         },
       });
     } catch (error) {

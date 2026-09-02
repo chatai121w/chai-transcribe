@@ -135,18 +135,15 @@ function saveVerified(records: VerifiedRecord[]): void {
 }
 
 /**
- * Record that the user has verified a correction. This:
- *   1. Adds (or boosts) the entry in the standard correctionLearning store
- *      with max confidence (1.0) and engine='personal'.
- *   2. Tracks the verification separately so we can show a "verified" badge
- *      and protect it from confidence-based pruning.
+ * Record that the user has verified a correction. A correction is written to
+ * exactly one scope: the active speaker profile, or the global scope when no
+ * profile is active. Verification evidence follows the same scope.
  */
 export function verifyCorrection(original: string, corrected: string): void {
   const o = original.trim();
   const c = corrected.trim();
   if (!o || !c || o === c) return;
 
-  // 1) Push into the standard learning store at max confidence.
   const now = Date.now();
   const entry: CorrectionEntry = {
     original: o,
@@ -158,17 +155,15 @@ export function verifyCorrection(original: string, corrected: string): void {
     lastUsed: now,
     createdAt: now,
   };
-  learnFromCorrections([entry]);
-
-  // 1b) ALSO write to the active profile (if any) so per-speaker memories
-  //     accumulate alongside the global model.
   const activeId = getActiveProfileId();
   if (activeId) {
     addProfileCorrection(activeId, entry);
     addProfileVerified(activeId, o, c);
+    return;
   }
 
-  // 2) Track verification separately.
+  learnFromCorrections([entry]);
+
   const records = loadVerified();
   const existing = records.find((r) => r.original === o && r.corrected === c);
   if (existing) {

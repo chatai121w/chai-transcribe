@@ -86,6 +86,16 @@ export const PlayerTranscriptEditor = ({ originalText, editedText, onEditedTextC
     return () => window.removeEventListener("click", close);
   }, [spellMenu]);
 
+  const storeCorrectionsInActiveScope = (entries: CorrectionEntry[]): string => {
+    const activeId = getActiveProfileId();
+    if (!activeId) {
+      learnFromCorrections(entries);
+      return "במאגר הכללי";
+    }
+    for (const entry of entries) addProfileCorrection(activeId, entry);
+    return `בפרופיל "${getProfile(activeId)?.name || activeId}"`;
+  };
+
   const applyWordCorrection = (wordIndex: number, correctedWord: string) => {
     const next = replaceWordAt(editedText, wordIndex, correctedWord.trim());
     onEditedTextChange(next);
@@ -102,10 +112,10 @@ export const PlayerTranscriptEditor = ({ originalText, editedText, onEditedTextC
       createdAt: Date.now(),
       note: "תיקון ידני מתצוגת נגן (קליק ימני)",
     };
-    learnFromCorrections([correctionEntry]);
+    const scopeMessage = storeCorrectionsInActiveScope([correctionEntry]);
 
     setSpellMenu(null);
-    toast({ title: "תוקן", description: `${current} → ${correctedWord}` });
+    toast({ title: "תוקן", description: `${current} → ${correctedWord} · נשמר ${scopeMessage}` });
   };
 
   const handleLearnFromEdits = () => {
@@ -119,14 +129,8 @@ export const PlayerTranscriptEditor = ({ originalText, editedText, onEditedTextC
       ...d,
       note: learnNote.trim() || undefined,
     }));
-    learnFromCorrections(withNotes);
-    const activeId = getActiveProfileId();
-    let profileMsg = '';
-    if (activeId) {
-      for (const c of withNotes) addProfileCorrection(activeId, c);
-      profileMsg = ` גם לפרופיל "${getProfile(activeId)?.name || ''}"`;
-    }
-    toast({ title: "למידה נשמרה", description: `${withNotes.length} תיקונים נלמדו${profileMsg}` });
+    const scopeMessage = storeCorrectionsInActiveScope(withNotes);
+    toast({ title: "למידה נשמרה", description: `${withNotes.length} תיקונים נשמרו ${scopeMessage}` });
   };
 
   const handleAddManualLearning = () => {
@@ -152,11 +156,11 @@ export const PlayerTranscriptEditor = ({ originalText, editedText, onEditedTextC
       lastUsed: Date.now(),
       createdAt: Date.now(),
     };
-    learnFromCorrections([entry]);
+    const scopeMessage = storeCorrectionsInActiveScope([entry]);
     setManualOriginal("");
     setManualCorrected("");
     setManualNote("");
-    toast({ title: "נוסף ללמידה", description: "המונח נשמר במאגר הלמידה" });
+    toast({ title: "נוסף ללמידה", description: `המונח נשמר ${scopeMessage}` });
   };
 
   return (

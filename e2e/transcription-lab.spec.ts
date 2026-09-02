@@ -18,6 +18,15 @@ function silentWav(durationSeconds = 2, sampleRate = 16_000): Buffer {
   return buffer;
 }
 
+function transcriptionStream(payload: {
+  text: string;
+  language?: string;
+  model?: string;
+  word_timings?: Array<{ word: string; start: number; end: number }>;
+}): string {
+  return `data: ${JSON.stringify({ type: 'done', ...payload })}\n\n`;
+}
+
 test.describe('Unified transcription lab', () => {
   test.beforeEach(async ({ page }) => {
     await page.route('https://fonts.googleapis.com/**', route => route.fulfill({
@@ -54,7 +63,8 @@ test.describe('Unified transcription lab', () => {
       transcriptionCall += 1;
       await route.fulfill({
         status: 200,
-        json: {
+        contentType: 'text/event-stream',
+        body: transcriptionStream({
           text: transcriptionCall === 1 ? 'אמר רבי עקיבה' : 'אמר רבי עקיבא',
           language: 'he',
           model: 'ivrit-ai/whisper-large-v3-turbo-ct2',
@@ -63,10 +73,10 @@ test.describe('Unified transcription lab', () => {
             { word: 'רבי', start: 0.4, end: 0.8 },
             { word: transcriptionCall === 1 ? 'עקיבה' : 'עקיבא', start: 0.8, end: 1.8 },
           ],
-        },
+        }),
       });
     };
-    await page.route('**/whisper/transcribe', handleTranscription);
+    await page.route('**/transcribe-stream', handleTranscription);
     await page.route('**/training/dataset/approved-pair', route => {
       approvedAudioBodies.push(route.request().postDataBuffer()?.toString('latin1') || '');
       return route.fulfill({ status: 200, json: { rows: 1 } });
@@ -80,6 +90,9 @@ test.describe('Unified transcription lab', () => {
       buffer: silentWav(),
     });
     await page.locator('#ground-truth').fill('אמר רבי עקיבא');
+    await page.getByRole('combobox', { name: 'סוג חומר הבדיקה' }).click();
+    await page.getByRole('option', { name: 'קריאת מושגים' }).click();
+    await page.locator('#manual-hotwords').fill('רבי עקיבא');
     await page.getByRole('button', { name: 'הפעל ניסוי מלא' }).click();
 
     await expect(page.getByLabel('השוואה ושער איכות').getByText('נמצא שיפור', { exact: true })).toBeVisible({ timeout: 30_000 });
@@ -94,14 +107,24 @@ test.describe('Unified transcription lab', () => {
     await page.getByRole('button', { name: 'נקה' }).click();
 
     await page.getByTestId('asr-review-unit-2').click();
-    await expect(page.getByTestId('asr-review-decision-panel')).toBeVisible();
-    await page.getByTestId('asr-review-decision-panel').getByRole('button', { name: /מנוע B נכון/ }).click();
+    const decisionPanel = page.getByTestId('asr-review-decision-panel');
+    await expect(decisionPanel).toBeVisible();
+    const decisionBox = await decisionPanel.boundingBox();
+    expect(decisionBox?.y).toBeLessThanOrEqual(16);
+    await decisionPanel.getByRole('button', { name: /מנוע B נכון/ }).click();
     await page.getByRole('button', { name: 'שמור Human Review' }).click();
     await expect(page.getByText('הבדיקה האנושית נשמרה', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'אשר קטע ל-Gold' }).click();
     await expect(page.getByText('הקטע אושר ל-Gold', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'אשר את כל ההקלטה וטקסט האמת ל-Gold' }).click();
     await expect(page.getByText('כל קטעי ה-Gold נשמרו', { exact: true })).toBeVisible({ timeout: 15_000 });
+
+    await page.getByRole('button', { name: 'Close' }).click();
+    await page.getByRole('button', { name: 'שמור מיד מנוע A נכון בשורה 1' }).click();
+    await expect(page.getByText('ההכרעה המהירה נשמרה', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('asr-review-decision-panel')).toBeHidden();
+    await page.getByRole('button', { name: 'אשר שורה 1 ל-Gold' }).click();
+    await expect(page.getByText('השורה אושרה ל-Gold', { exact: true })).toBeVisible();
 
     const audit = await page.evaluate(() => {
       const id = localStorage.getItem('asr_pipeline_active_experiment_v1');
@@ -124,6 +147,15 @@ test.describe('Unified transcription lab', () => {
           && event.details.cloudSaved === true
           && typeof event.details.cloudTranscriptId === 'string'
           && typeof event.details.audioFilePath === 'string'),
+        sampleTypes: current.filter(event => event.eventType === 'source-ready').map(event => event.details.sampleType),
+        targetScopes: current.filter(event => event.eventType === 'configuration-resolved').map(event => ({
+          sampleType: event.details.sampleType,
+          targetTermsCount: event.details.targetTermsCount,
+          termMetricScope: event.details.termMetricScope,
+        })),
+        termRecallByVariant: Object.fromEntries(current
+          .filter(event => event.eventType === 'metrics-calculated')
+          .map(event => [String(event.details.variant), event.details.termRecall])),
       };
     });
 
@@ -138,7 +170,13 @@ test.describe('Unified transcription lab', () => {
     expect(audit.hasTimedGold).toBe(true);
     expect(audit.hasFullGold).toBe(true);
     expect(audit.cloudSaved).toBe(true);
-    expect(approvedAudioBodies).toHaveLength(2);
+    expect(audit.sampleTypes).toEqual(['term-reading', 'term-reading']);
+    expect(audit.targetScopes).toEqual([
+      { sampleType: 'term-reading', targetTermsCount: 1, termMetricScope: 'recording-targets' },
+      { sampleType: 'term-reading', targetTermsCount: 1, termMetricScope: 'recording-targets' },
+    ]);
+    expect(audit.termRecallByVariant).toEqual({ baseline: 0, candidate: 1 });
+    expect(approvedAudioBodies).toHaveLength(3);
     expect(approvedAudioBodies.every(body => /filename="[^"]+\.wav"/.test(body) && body.includes('RIFF'))).toBe(true);
     expect(cloudAudioUploads).toHaveLength(1);
     expect(cloudTranscriptCreates.filter(body => body.includes('asr-gold-source'))).toHaveLength(0);
@@ -158,6 +196,8 @@ test.describe('Unified transcription lab', () => {
     await expect(page).toHaveURL(/\/transcription-lab\?mode=lashon-kodesh/, { timeout: 120_000 });
     await expect(page.getByRole('heading', { name: 'מעבדת תמלול מתקדמת' })).toBeVisible({ timeout: 120_000 });
     await expect(page.getByLabel('הפעל מצב לשון הקודש בריצה B')).toBeChecked();
+    await expect(page.getByLabel('הפעל גם תיקון AI בריצה B')).toBeEnabled();
+    await expect(page.getByLabel('הפעל גם תיקון AI בריצה B')).not.toBeChecked();
     const layout = await page.evaluate(() => ({
       direction: getComputedStyle(document.querySelector('main')!).direction,
       viewportWidth: document.documentElement.clientWidth,
@@ -176,6 +216,90 @@ test.describe('Unified transcription lab', () => {
     await page.getByRole('combobox', { name: 'מנוע B - מועמד' }).click();
     await page.getByRole('option', { name: 'Gemini' }).click();
     await expect(page.getByRole('combobox', { name: 'מודל B' })).toContainText('Gemini 3.5 Transcribe');
+  });
+
+  test('isolates optional audio preprocessing and keeps one recording identity', async ({ page }) => {
+    const enhanceRequests: string[] = [];
+    const transcriptionBodies: string[] = [];
+    await page.route('**/enhance-audio', async route => {
+      enhanceRequests.push(route.request().postDataBuffer()?.toString('latin1') || '');
+      await route.fulfill({
+        status: 200,
+        body: silentWav(2),
+        contentType: 'audio/mpeg',
+        headers: { 'content-disposition': 'attachment; filename="processed-for-asr.mp3"' },
+      });
+    });
+    await page.route('**/transcribe-stream', async route => {
+      transcriptionBodies.push(route.request().postDataBuffer()?.toString('latin1') || '');
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: transcriptionStream({
+          text: 'אמר רבי עקיבא',
+          language: 'he',
+          model: 'ivrit-ai/whisper-large-v3-turbo-ct2',
+          word_timings: [
+            { word: 'אמר', start: 0, end: 0.4 },
+            { word: 'רבי', start: 0.4, end: 0.8 },
+            { word: 'עקיבא', start: 0.8, end: 1.8 },
+          ],
+        }),
+      });
+    });
+
+    await page.goto('/transcription-lab', { waitUntil: 'commit' });
+    await page.locator('#lab-audio').setInputFiles({
+      name: 'original-shiur.wav',
+      mimeType: 'audio/wav',
+      buffer: silentWav(2),
+    });
+    await page.locator('#ground-truth').fill('אמר רבי עקיבא');
+    await page.getByRole('combobox', { name: 'מודל B' }).click();
+    await page.getByRole('option', { name: 'Ivrit.ai Large V3', exact: true }).click();
+    await page.getByRole('button', { name: 'מקור מול משופר', exact: true }).click();
+    await expect(page.getByRole('combobox', { name: 'מנוע B - מועמד' })).toBeDisabled();
+    await expect(page.getByRole('combobox', { name: 'מודל B' })).toBeDisabled();
+    await expect(page.getByRole('combobox', { name: 'מודל B' })).toContainText('Ivrit.ai Turbo V3');
+    await page.getByRole('combobox', { name: 'תבנית עיבוד אודיו' }).click();
+    await page.getByRole('option', { name: 'ניקוי עדין' }).click();
+    await page.getByRole('button', { name: 'הפעל ניסוי מלא' }).click();
+    await expect(page.getByText('הניסוי הושלם', { exact: true })).toBeVisible({ timeout: 30_000 });
+
+    const audit = await page.evaluate(() => {
+      const experimentId = localStorage.getItem('asr_pipeline_active_experiment_v1');
+      const events = JSON.parse(localStorage.getItem('asr_pipeline_events_v1') || '[]') as Array<{
+        experimentId: string;
+        recordingFingerprint?: string;
+        eventType: string;
+        details: Record<string, unknown>;
+      }>;
+      const current = events.filter(event => event.experimentId === experimentId);
+      const sourceEvents = current.filter(event => event.eventType === 'source-ready');
+      return {
+        preprocessingEvents: current.filter(event => event.eventType.startsWith('audio-preprocessing-')).map(event => event.eventType).sort(),
+        fingerprints: [...new Set(sourceEvents.map(event => event.recordingFingerprint))],
+        inputs: Object.fromEntries(sourceEvents.map(event => {
+          const preprocessing = event.details.audioPreprocessing as { input?: string } | undefined;
+          return [String(event.details.variant), preprocessing?.input];
+        })),
+        models: Object.fromEntries(sourceEvents.map(event => [String(event.details.variant), event.details.model])),
+      };
+    });
+
+    expect(enhanceRequests).toHaveLength(1);
+    expect(enhanceRequests[0]).toContain('name="preset"');
+    expect(enhanceRequests[0]).toContain('clean');
+    expect(transcriptionBodies).toHaveLength(2);
+    expect(transcriptionBodies[0]).toContain('original-shiur.wav');
+    expect(transcriptionBodies[1]).toContain('processed-for-asr.mp3');
+    expect(audit.preprocessingEvents).toEqual(['audio-preprocessing-completed', 'audio-preprocessing-started']);
+    expect(audit.fingerprints).toHaveLength(1);
+    expect(audit.inputs).toEqual({ baseline: 'original', candidate: 'processed' });
+    expect(audit.models).toEqual({
+      baseline: 'ivrit-ai/whisper-large-v3-turbo-ct2',
+      candidate: 'ivrit-ai/whisper-large-v3-turbo-ct2',
+    });
   });
 
   test('selects an existing site recording from the shared folder tree without treating unverified text as Gold', async ({ page }) => {
@@ -198,24 +322,25 @@ test.describe('Unified transcription lab', () => {
     await expect(page.getByText('ההקלטה נטענה; הטקסט הקיים דורש אימות', { exact: true })).toBeVisible();
     await expect(page.locator('#initial-transcript')).toHaveValue('תמלול שני לבדיקת המערכת');
     await expect(page.locator('#ground-truth')).toHaveValue('');
-    await expect(page.getByText('תמלול בדיקה 2.webm · 0.0 MB', { exact: true })).toBeVisible();
+    await expect(page.getByText('תמלול בדיקה 2.webm · 0.0 MB · אחר / טרם סווג', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'הפעל ניסוי מלא' })).toBeEnabled();
     expect(storageUploads).toEqual([]);
   });
 
   test('applies a human-verified dictionary correction on a repeated run of the same recording', async ({ page }) => {
     let call = 0;
-    await page.route('**/whisper/transcribe', async route => {
+    await page.route('**/transcribe-stream', async route => {
       call += 1;
       const text = call % 2 === 1 ? 'ארומך אלוהי מלך' : 'ארומך אלוהי המלך';
       await route.fulfill({
         status: 200,
-        json: {
+        contentType: 'text/event-stream',
+        body: transcriptionStream({
           text,
           language: 'he',
           model: 'ivrit-ai/whisper-large-v3-turbo-ct2',
           word_timings: text.split(' ').map((word, index) => ({ word, start: index * 0.5, end: (index + 1) * 0.5 })),
-        },
+        }),
       });
     });
 
@@ -295,36 +420,35 @@ test.describe('Unified transcription lab', () => {
   });
 
   test('loads a saved Gold recording and its verified text for a repeated experiment', async ({ page }) => {
-    await page.route('**/rest/v1/transcripts*', async route => {
-      if (route.request().method() !== 'GET') return route.fallback();
-      const now = new Date().toISOString();
-      return route.fulfill({
-        status: 200,
-        json: [{
-          id: 'gold-source-1',
-          user_id: 'test-user-id',
-          text: 'ארוממך אלוהי המלך',
-          edited_text: 'ארוממך אלוהי המלך',
-          engine: 'Gold · Local CUDA',
-          title: 'Gold · fingerprint-1 · torah-sample.wav',
-          tags: ['asr-gold-source', 'human-approved'],
-          notes: '', folder: 'מעבדת תמלול', category: '', is_favorite: false,
-          audio_file_path: 'test-audio.webm',
-          word_timings: null,
-          created_at: now,
-          updated_at: now,
-        }],
-      });
+    const now = new Date().toISOString();
+    await page.unroute('**/pycryoyipkymaqorgpjy.supabase.co/rest/v1/**');
+    await mockSupabase(page, {
+      transcripts: [{
+        id: 'gold-source-1',
+        user_id: 'test-user-id',
+        text: 'ארוממך אלוהי המלך',
+        edited_text: 'ארוממך אלוהי המלך',
+        engine: 'Gold · Local CUDA',
+        title: 'Gold · fingerprint-1 · torah-sample.wav',
+        tags: ['asr-gold-source', 'human-approved'],
+        notes: '', folder: 'מעבדת תמלול', category: '', is_favorite: false,
+        audio_file_path: 'test-audio.webm',
+        word_timings: null,
+        created_at: now,
+        updated_at: now,
+        local_only: false,
+      }],
     });
 
     await page.goto('/transcription-lab', { waitUntil: 'commit' });
+    await expect(page.getByRole('heading', { name: 'מעבדת תמלול מתקדמת' })).toBeVisible({ timeout: 120_000 });
     const cloudSources = page.getByLabel('הקלטות Gold בענן');
     await expect(cloudSources).toBeVisible({ timeout: 30_000 });
     await cloudSources.getByRole('button', { name: 'טען לניסוי חוזר' }).click();
 
     await expect(page.locator('#ground-truth')).toHaveValue('ארוממך אלוהי המלך');
     await expect(page.getByText('הקלטה וטקסט אמת מאושר נטענו לניסוי חוזר', { exact: true })).toBeVisible();
-    await expect(page.getByText('torah-sample.wav · 0.0 MB', { exact: true })).toBeVisible();
+    await expect(page.getByText('torah-sample.wav · 0.0 MB · אחר / טרם סווג', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'הפעל ניסוי מלא' })).toBeEnabled();
   });
 
@@ -372,6 +496,7 @@ test.describe('Unified transcription lab', () => {
   });
 
   test('records a terminology sample and prepares the existing A/B pipeline automatically', async ({ page }) => {
+    const contextualScript = 'בשיעור נעסוק באביי, ונבחן את הקשר בין רבא לבין מסכת בבא קמא.';
     await page.addInitScript(() => {
       const fakeTrack = { stop: () => undefined };
       const fakeStream = { getTracks: () => [fakeTrack] };
@@ -402,18 +527,24 @@ test.describe('Unified transcription lab', () => {
 
     await page.goto('/transcription-lab', { waitUntil: 'commit' });
     const recorder = page.getByLabel('הקלטת בדיקת מושגים');
-    await recorder.getByLabel('מושגים לבדיקה').fill('אביי, רבא, מסכת בבא קמא');
-    await recorder.getByRole('button', { name: 'הכן טקסט' }).click();
-    await expect(recorder.getByLabel('טקסט מדויק להקראה')).toContainText('אביי, רבא, מסכת בבא קמא');
+    await recorder.getByLabel('מושגי יעד למדידה').fill('אביי, רבא, מסכת בבא קמא');
+    await expect(recorder.getByText('אביי', { exact: true })).toBeVisible();
+    await expect(recorder.getByText('רבא', { exact: true })).toBeVisible();
+    await expect(recorder.getByText('מסכת בבא קמא', { exact: true })).toBeVisible();
+    await recorder.getByLabel('טקסט אמת מלא להקלטה').fill('טקסט קודם שיוחלף ללא חלון אישור');
+    await recorder.getByRole('button', { name: 'צור טקסט הקשרי' }).click();
+    await expect(recorder.getByLabel('טקסט אמת מלא להקלטה')).toHaveValue(contextualScript);
+    await expect(recorder.getByLabel('טקסט אמת מלא להקלטה')).not.toHaveValue('אביי, רבא, מסכת בבא קמא');
 
     await recorder.getByRole('button', { name: 'התחל הקלטת בדיקת מושגים' }).click();
     await expect(recorder.getByText('00:00')).toBeVisible();
     await recorder.getByRole('button', { name: 'סיים והעלה לניסוי' }).click();
 
-    await expect(page.getByText('הקלטת המושגים מוכנה לניסוי', { exact: true })).toBeVisible();
+    await expect(page.getByText('קריאת מושגים מוכנה לניסוי', { exact: true })).toBeVisible();
     await expect(page.getByText(/torah-terms-.*\.webm/)).toBeVisible();
-    await expect(page.locator('#ground-truth')).toHaveValue('אני קורא כעת את המושגים הבאים: אביי, רבא, מסכת בבא קמא.');
+    await expect(page.locator('#ground-truth')).toHaveValue(contextualScript);
     await expect(page.locator('#manual-hotwords')).toHaveValue('אביי, רבא, מסכת בבא קמא');
+    await expect(page.getByRole('combobox', { name: 'סוג חומר הבדיקה' })).toContainText('קריאת מושגים');
     await expect(page.getByRole('button', { name: 'הפעל ניסוי מלא' })).toBeEnabled();
     await expect(recorder.getByText('הקלטה אחרונה')).toBeVisible();
   });

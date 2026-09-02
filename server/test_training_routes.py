@@ -16,6 +16,15 @@ from training_routes import (
 )
 
 
+def gold_metadata(group_id: str) -> dict:
+    return {
+        'groupId': group_id,
+        'sourceRecordingId': group_id,
+        'qualityTier': 'gold',
+        'labelSource': 'human-approved',
+    }
+
+
 class DatasetUploadTests(unittest.TestCase):
     def test_upload_requires_recording_identity_before_writing_files(self):
         with tempfile.TemporaryDirectory() as tmp, patch('training_routes.DATASETS_DIR', Path(tmp)), patch(
@@ -47,7 +56,7 @@ class DatasetUploadTests(unittest.TestCase):
             payload = lambda text: {
                 'dataset_id': 'approved-ground-truth',
                 'text': text,
-                'metadata': json.dumps({'groupId': 'recording-1'}),
+                'metadata': json.dumps(gold_metadata('recording-1')),
                 'audio': (BytesIO(b'same-audio'), 'clip.wav'),
             }
 
@@ -71,13 +80,13 @@ class DatasetUploadTests(unittest.TestCase):
             first = client.post('/training/dataset/approved-pair', data={
                 'dataset_id': 'approved-ground-truth',
                 'text': 'טקסט ראשון',
-                'metadata': json.dumps({'groupId': 'recording-1'}),
+                'metadata': json.dumps(gold_metadata('recording-1')),
                 'audio': (BytesIO(b'same-audio'), 'clip.wav'),
             })
             conflicting = client.post('/training/dataset/approved-pair', data={
                 'dataset_id': 'approved-ground-truth',
                 'text': 'טקסט אחר',
-                'metadata': json.dumps({'groupId': 'recording-1'}),
+                'metadata': json.dumps(gold_metadata('recording-1')),
                 'audio': (BytesIO(b'same-audio'), 'clip.wav'),
             })
 
@@ -114,10 +123,9 @@ class DatasetSplitTests(unittest.TestCase):
                 (root / folder).mkdir()
             (root / 'audio' / '00001.wav').write_bytes(b'audio')
             (root / 'texts' / '00001.txt').write_text('text', encoding='utf-8')
-            (root / 'metadata' / '00001.json').write_text(json.dumps({
-                'sourceRecordingId': 'content-fingerprint',
-                'groupId': 'legacy-name',
-            }), encoding='utf-8')
+            metadata = gold_metadata('legacy-name')
+            metadata['sourceRecordingId'] = 'content-fingerprint'
+            (root / 'metadata' / '00001.json').write_text(json.dumps(metadata), encoding='utf-8')
 
             _finalize_dataset(root)
             row = json.loads((root / 'manifest.jsonl').read_text(encoding='utf-8'))
@@ -135,9 +143,7 @@ class DatasetSplitTests(unittest.TestCase):
                 (root / 'audio' / f'{stem}.wav').write_bytes(b'audio')
                 (root / 'texts' / f'{stem}.txt').write_text(f'text {index}', encoding='utf-8')
                 group_id = 'recording-a' if index < 10 else 'recording-b'
-                (root / 'metadata' / f'{stem}.json').write_text(
-                    json.dumps({'groupId': group_id}), encoding='utf-8',
-                )
+                (root / 'metadata' / f'{stem}.json').write_text(json.dumps(gold_metadata(group_id)), encoding='utf-8')
 
             stats = _finalize_dataset(root)
             train = {
@@ -150,7 +156,7 @@ class DatasetSplitTests(unittest.TestCase):
             }
 
             self.assertEqual(stats['recording_groups'], 2)
-            self.assertTrue(stats['ready_for_training'])
+            self.assertFalse(stats['ready_for_training'])
             self.assertTrue(train)
             self.assertTrue(evaluation)
             self.assertTrue(train.isdisjoint(evaluation))
@@ -176,9 +182,7 @@ class DatasetSplitTests(unittest.TestCase):
                 (root / 'audio' / f'{stem}.wav').write_bytes(b'audio')
                 (root / 'texts' / f'{stem}.txt').write_text(f'text {index}', encoding='utf-8')
                 group_id = 'large-recording' if index < 22 else 'small-recording'
-                (root / 'metadata' / f'{stem}.json').write_text(
-                    json.dumps({'groupId': group_id}), encoding='utf-8',
-                )
+                (root / 'metadata' / f'{stem}.json').write_text(json.dumps(gold_metadata(group_id)), encoding='utf-8')
 
             stats = _finalize_dataset(root)
             self.assertEqual(stats['train_count'], 22)
@@ -194,7 +198,7 @@ class DatasetSplitTests(unittest.TestCase):
                 stem = f'{index:05d}'
                 (root / 'audio' / f'{stem}.wav').write_bytes(f'audio-{index}'.encode())
                 (root / 'texts' / f'{stem}.txt').write_text(f'text {index}', encoding='utf-8')
-                metadata = {'groupId': 'training-recording' if index < 22 else 'holdout-recording'}
+                metadata = gold_metadata('training-recording' if index < 22 else 'holdout-recording')
                 if index >= 22:
                     metadata['benchmarkRole'] = 'failure-holdout'
                 (root / 'metadata' / f'{stem}.json').write_text(json.dumps(metadata), encoding='utf-8')
@@ -209,6 +213,14 @@ class DatasetSplitTests(unittest.TestCase):
 
 
 class ModelQualityGateTests(unittest.TestCase):
+    @staticmethod
+    def passing_evidence() -> dict:
+        return {
+            'quality_counts': {'gold': 24, 'silver': 0, 'bronze': 0, 'unknown': 0},
+            'label_source_counts': {'human-approved': 24},
+            'recording_groups': 3,
+        }
+
     def test_requires_comparable_wer_and_cer(self):
         passed, reasons = _model_quality_gate({
             'wer_before': 30.0, 'wer_after': 20.0,
@@ -221,6 +233,7 @@ class ModelQualityGateTests(unittest.TestCase):
             'wer_before': 30.0, 'wer_after': 20.0,
             'cer_before': 10.0, 'cer_after': 11.0,
             'eval_sample_count': 12, 'eval_fingerprint': 'fixed-holdout',
+            **self.passing_evidence(),
         })
         self.assertFalse(passed)
         self.assertIn('holdout CER regressed', reasons)
@@ -230,6 +243,7 @@ class ModelQualityGateTests(unittest.TestCase):
             'wer_before': 30.0, 'wer_after': 25.0,
             'cer_before': 10.0, 'cer_after': 10.0,
             'eval_sample_count': 12, 'eval_fingerprint': 'fixed-holdout',
+            **self.passing_evidence(),
         })
         self.assertTrue(passed)
         self.assertEqual(reasons, [])
@@ -240,6 +254,7 @@ class ModelQualityGateTests(unittest.TestCase):
             'cer_before': 10.0, 'cer_after': 9.0,
             'eval_sample_count': 12, 'eval_fingerprint': 'fixed-holdout',
             'eval_term_count': 8, 'term_recall_before': 75.0, 'term_recall_after': 62.5,
+            **self.passing_evidence(),
         })
         self.assertFalse(passed)
         self.assertIn('holdout terminology recall regressed', reasons)
@@ -268,9 +283,23 @@ class ModelQualityGateTests(unittest.TestCase):
                 'wer_before': 30.0, 'wer_after': 20.0,
                 'cer_before': 12.0, 'cer_after': 10.0,
                 'eval_sample_count': 8, 'eval_fingerprint': 'fixed',
+                **self.passing_evidence(),
             }]), encoding='utf-8')
             with patch('training_routes.TRAINED_MODELS_FILE', registry):
                 self.assertEqual(resolve_trained_model('lora:passing'), str(ct2))
+
+    def test_rejects_unknown_training_labels(self):
+        passed, reasons = _model_quality_gate({
+            'wer_before': 30.0, 'wer_after': 25.0,
+            'cer_before': 10.0, 'cer_after': 9.0,
+            'eval_sample_count': 8, 'eval_fingerprint': 'fixed',
+            'quality_counts': {'gold': 20, 'silver': 0, 'bronze': 0, 'unknown': 1},
+            'label_source_counts': {'human-approved': 20, 'unknown': 1},
+            'recording_groups': 3,
+        })
+        self.assertFalse(passed)
+        self.assertIn('training contains non-Gold or unknown labels', reasons)
+        self.assertIn('training label provenance is missing', reasons)
 
 
 if __name__ == '__main__':

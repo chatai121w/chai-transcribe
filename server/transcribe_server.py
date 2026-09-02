@@ -26,7 +26,21 @@ import traceback as _tb_module
 from difflib import SequenceMatcher
 from pathlib import Path
 from collections import deque
+from contextlib import contextmanager
 from datetime import datetime, timezone
+
+try:
+    from hebrew_transcription_defaults import (
+        HEBREW_DEFAULT_HOTWORDS,
+        LOSHON_KODESH_HOTWORDS,
+        LOSHON_KODESH_PROMPT,
+    )
+except ModuleNotFoundError:
+    from server.hebrew_transcription_defaults import (
+        HEBREW_DEFAULT_HOTWORDS,
+        LOSHON_KODESH_HOTWORDS,
+        LOSHON_KODESH_PROMPT,
+    )
 
 # Suppress PyTorch CUDA compatibility warnings for newer GPUs
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "")
@@ -199,54 +213,6 @@ _request_history: deque = deque(maxlen=MAX_REQUEST_HISTORY)
 
 # Server start time
 _server_start_time = time.time()
-
-# ─── Loshon Kodesh (Ashkenazi torani Hebrew) ────────────────────────
-# When the client passes `loshon_kodesh=1`, we override the default
-# Hebrew prompt with a torani context and merge a curated hotwords list.
-LOSHON_KODESH_PROMPT = (
-    'שיעור תורה בלשון הקודש בהגייה אשכנזית. הקדוש ברוך הוא, רבי, גמרא, '
-    'משנה, תוספות, רש"י, רמב"ם, הלכה, סוגיא, פסוק, פרשה, מסכת, דף, תורה, '
-    'מצוה, ברכה, שבת, יום טוב, מקום, אבות, בני ישראל, תפילה, עבודה, '
-    'גמילות חסדים, יראת שמים, אמונה, חסידות, מוסר, ישיבה.'
-)
-LOSHON_KODESH_HOTWORDS = (
-    'הקדוש ברוך הוא, הקב"ה, השם יתברך, תורה, משנה, גמרא, תלמוד, בבלי, '
-    'ירושלמי, תוספות, רש"י, רמב"ם, רמב"ן, שולחן ערוך, מסכת, פרק, דף, '
-    'הלכה, אגדה, סוגיא, מצוה, ברכה, תפילה, יראת שמים, אמונה, חסידות, '
-    'מוסר, תשובה, גמילות חסדים, קדושה, טהרה, בית מדרש, ישיבה, כולל, '
-    'שבת קודש, יום טוב, ראש השנה, יום כיפור, סוכות, חנוכה, פורים, פסח, '
-    'שבועות, רבי, רבנו, הרב, אדמו"ר, הגאון, בעל שם טוב, משה רבנו, '
-    'אברהם אבינו, יצחק אבינו, יעקב אבינו, בני ישראל, ארץ ישראל, '
-    'ירושלים, בית המקדש, מקום, מקומות, ענין, פירוש, אפשר, אסור, מותר, '
-    'חייב, פטור, כשר, פסול, דאורייתא, דרבנן, לכתחילה, בדיעבד, '
-    'הלכה למעשה, אמר, תנא, שמע מינה, רבא, אביי'
-)
-
-# ─── Default Hebrew hotwords — common confusable pairs ─────────────────────────
-# Boosts probability of the correct word when a phonetically similar error-word
-# might otherwise score higher.  Whisper's hotwords work by adding a log-prob
-# bonus at decoding time, so listing the correct word makes the model prefer it.
-# Format: "correct_word" (the error variant is NOT listed — listing it would
-# boost the wrong word instead).
-HEBREW_DEFAULT_HOTWORDS = (
-    # ─ Construct state vs. base form ──────────────────────────────────────
-    'מגמת, ערכת, קבוצת, מדיניות, '
-    # ─ Prefix-bearing forms that models drop the prefix on ───────────────
-    'לניהול, באחריות, להתפתח, בפיתוח, לשיפור, '
-    # ─ ח/כ confusables ──────────────────────────────────────────────────
-    'עיבוד, חיפוש, צמיחה, ביטוח, השקעה, '
-    # ─ ע ayin-drop at start ──────────────────────────────────────────────
-    'ערכות, אבטחה, עיבוד, '
-    # ─ Plural vs. singular ───────────────────────────────────────────────
-    'תשתיות, מסמכים, קבוצות, '
-    # ─ Shin/samech, shin/ayin ────────────────────────────────────────────
-    'מפגש, אחריות, ניהול, '
-    # ─ tav-drop / lamed-drop ─────────────────────────────────────────────
-    'תהליך, '
-    # ─ adj vs. noun suffix ───────────────────────────────────────────────
-    'כלכלית'
-)
-
 
 def _resolve_prompt_and_hotwords(language, user_initial_prompt, user_hotwords, loshon_kodesh):
     """Decide which initial_prompt and hotwords to send to Whisper.
@@ -5393,14 +5359,7 @@ def main():
     print("    POST /merge-audio       — Merge audio clips in the requested order (server FFmpeg)")
     print("    POST /enhance-audio     — Enhance audio (AI/non-AI presets) to MP3/OPUS/AAC")
     print("    POST /harmonize         — Generate harmonies (basic/pro/studio)")
-    print("    GET  /lk/dictionary     — Lashon Kodesh personal dictionary (list)")
-    print("    POST /lk/dictionary     — Add / update word pair")
-    print("    DELETE /lk/dictionary/<id> — Remove word pair")
-    print("    GET  /lk/rules          — Grammar rules list")
-    print("    POST /lk/rules          — Add / update rule")
-    print("    PATCH /lk/rules/<id>    — Toggle rule enabled/disabled")
-    print("    DELETE /lk/rules/<id>   — Remove rule")
-    print("    POST /lk/transcribe     — Transcribe with LK mode + post-processing")
+    print(f"    /lk/* legacy API        — {'ENABLED FOR ROLLBACK' if LEGACY_LK_API_ENABLED else 'disabled (HTTP 410)'}")
     print("    GET  /harmonize/capabilities — Available harmony tiers")
     print("    POST /nikud             — Add nikud (diacritics) to Hebrew text")
     print("    POST /nikud/warmup      — Pre-load nikud model (no cold-start)")
@@ -5454,6 +5413,17 @@ import sqlite3 as _sqlite3
 import re as _re
 
 _LK_DB_PATH = Path(__file__).parent / "lk_data.db"
+LEGACY_LK_API_ENABLED = os.environ.get("ENABLE_LEGACY_LK_API", "0") == "1"
+
+
+@app.before_request
+def _block_legacy_lk_api():
+    if request.path.startswith("/lk/") and not LEGACY_LK_API_ENABLED:
+        return jsonify({
+            "error": "legacy_lk_api_disabled",
+            "message": "Use /transcribe-stream and the canonical client knowledge pipeline",
+            "rollback": "Set ENABLE_LEGACY_LK_API=1 only for controlled legacy recovery",
+        }), 410
 
 _LK_SCHEMA = """
 CREATE TABLE IF NOT EXISTS lk_dictionary (
@@ -5505,15 +5475,21 @@ _LK_UNSAFE_LEGACY_RULE_NAMES = (
     "תורה → תוירה",
     "שבת → שבס",
     "יום טוב → יום טויב",
+    "מִצְוָה → מִצְוָה (maintain)",
+    "מצוה → מצוה",
 )
 
 
+@contextmanager
 def _lk_db():
     """Open LK SQLite connection (thread-safe)."""
     _LK_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = _sqlite3.connect(str(_LK_DB_PATH), check_same_thread=False)
     conn.row_factory = _sqlite3.Row
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _lk_init():
@@ -5557,10 +5533,11 @@ def _lk_apply_postprocessing(text: str) -> tuple[str, int]:
             "WHERE enabled=1 ORDER BY priority DESC"
         ).fetchall()
         for row in rules:
-            new_result = _re.sub(row["pattern"], row["replacement"], result)
-            if new_result != result:
-                fixed += result.count(row["pattern"])  # rough estimate
-                result = new_result
+            matches = list(_re.finditer(row["pattern"], result))
+            if not matches:
+                continue
+            result = _re.sub(row["pattern"], row["replacement"], result)
+            fixed += len(matches)
 
         # 2. Dictionary substitutions (exact word match, case-insensitive)
         dictionary = conn.execute(
@@ -5570,16 +5547,17 @@ def _lk_apply_postprocessing(text: str) -> tuple[str, int]:
     for entry in dictionary:
         spoken = _re.escape(entry["spoken_form"])
         pattern = rf'\b{spoken}\b'
+        match_count = len(_re.findall(pattern, result, flags=_re.IGNORECASE))
         new_result = _re.sub(pattern, entry["correct_form"], result, flags=_re.IGNORECASE)
         if new_result != result:
-            fixed += len(_re.findall(pattern, result, flags=_re.IGNORECASE))
+            fixed += match_count
             result = new_result
-            # Increment count_applied asynchronously
+            # Track the number of actual substitutions, not only the number of requests.
             try:
                 with _lk_db() as conn:
                     conn.execute(
-                        "UPDATE lk_dictionary SET count_applied=count_applied+1 WHERE id=?",
-                        (entry["id"],)
+                        "UPDATE lk_dictionary SET count_applied=count_applied+? WHERE id=?",
+                        (match_count, entry["id"])
                     )
                     conn.commit()
             except Exception:
@@ -5798,8 +5776,8 @@ def lk_transcribe():
                     (session_id, audio_file.filename, raw_text, corrected_text, words_fixed)
                 )
                 conn.commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.warning("[LK] Failed to save transcription session: %s", exc)
 
         return jsonify({
             "text": corrected_text,
@@ -6454,7 +6432,10 @@ def lk_benchmark_run():
             "rtf": rtf,
             "total_words": total_words,
             "recognition_confidence_score": recognition_confidence_score,
-            "pronunciation_score": recognition_confidence_score,
+            # Kept as null for backward-compatible JSON shape. Whisper probability
+            # is recognition confidence, not a pronunciation-quality measurement.
+            "pronunciation_score": None,
+            "pronunciation_score_available": False,
             "avg_probability": round(avg_prob, 3),
             "grade": grade,
             "grade_color": grade_color,

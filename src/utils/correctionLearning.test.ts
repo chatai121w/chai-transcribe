@@ -75,7 +75,7 @@ describe('learnFromCorrections + applyLearnedCorrections', () => {
 
     const result = applyLearnedCorrections('כתוב במסכת בברא כך', { engine: 'Local CUDA' });
     expect(result.text).toBe('כתוב במסכת בבא כך');
-    expect(result.applied).toContainEqual({ original: 'בברא', corrected: 'בבא' });
+    expect(result.applied).toContainEqual({ original: 'בברא', corrected: 'בבא', count: 1 });
   });
 
   it('learns a one-to-many Talmudic phrase correction', () => {

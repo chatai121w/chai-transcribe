@@ -1,4 +1,5 @@
-import { replaceWholeTextOccurrences } from '@/lib/hebrewTextReplacement';
+import { replaceWholeTextOccurrences, type TextReplacementOccurrence } from '@/lib/hebrewTextReplacement';
+import { createTraceOperation, type TranscriptionTraceOperation } from '@/lib/transcriptionTrace';
 import { TORAH_LEXICON_SEED } from '@/data/torahLexiconSeed';
 
 /**
@@ -51,6 +52,12 @@ export interface VocabularyStats {
   totalTerms: number;
   byCategory: Record<string, number>;
   hotwordsString: string;
+}
+
+export interface AppliedVocabularyCorrection {
+  original: string;
+  corrected: string;
+  count: number;
 }
 
 const VOCAB_KEY = 'custom_vocabulary';
@@ -431,19 +438,52 @@ export function importVocabulary(json: string): number {
  * Apply vocabulary corrections to text.
  * Replaces known variants with the correct term.
  */
-export function applyVocabularyCorrections(text: string): { text: string; appliedCount: number } {
+export function applyVocabularyCorrections(text: string): {
+  text: string;
+  appliedCount: number;
+  applied: AppliedVocabularyCorrection[];
+  traceOperations: TranscriptionTraceOperation[];
+} {
   const vocab = loadVocabulary();
   let result = text;
   let applied = 0;
+  const appliedChanges: AppliedVocabularyCorrection[] = [];
+  const traceOperations: TranscriptionTraceOperation[] = [];
   
   for (const entry of vocab) {
     if (entry.approvalStatus !== 'verified' || entry.confidence < 0.85) continue;
     for (const variant of entry.variants) {
       if (variant) {
+        const beforeText = result;
         const replacement = replaceWholeTextOccurrences(result, variant, entry.term);
         if (replacement.count === 0) continue;
         result = replacement.text;
         applied += replacement.count;
+        appliedChanges.push({
+          original: variant,
+          corrected: entry.term,
+          count: replacement.count,
+        });
+        traceOperations.push(createTraceOperation({
+          sequence: traceOperations.length,
+          ruleId: `vocabulary:${entry.term}:${variant}`,
+          source: {
+            system: 'custom-vocabulary',
+            file: 'src/utils/customVocabulary.ts',
+            function: 'applyVocabularyCorrections',
+            store: 'localStorage:custom_vocabulary',
+          },
+          beforeText,
+          afterText: result,
+          occurrences: replacement.occurrences,
+          metadata: {
+            term: entry.term,
+            category: entry.category,
+            source: entry.source,
+            approvalStatus: entry.approvalStatus,
+            confidence: entry.confidence,
+          },
+        }));
         // Increment usage count
         entry.usageCount += replacement.count;
         entry.updatedAt = Date.now();
@@ -455,5 +495,5 @@ export function applyVocabularyCorrections(text: string): { text: string; applie
     saveVocabulary(vocab);
   }
   
-  return { text: result, appliedCount: applied };
+  return { text: result, appliedCount: applied, applied: appliedChanges, traceOperations };
 }
