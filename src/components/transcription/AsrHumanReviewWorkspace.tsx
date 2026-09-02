@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Check, Headphones, Pause, Play, RotateCcw, Save, ShieldCheck } from 'lucide-react';
+import { BookOpen, Check, CheckCheck, Headphones, Pause, Play, RotateCcw, Save, ShieldCheck, BadgeCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,7 +27,7 @@ interface AsrHumanReviewWorkspaceProps {
   candidate: PipelineRunResult;
   onSaveReview: (review: AsrHumanReviewRecord) => Promise<void>;
   onApproveGold: (review: AsrHumanReviewRecord) => Promise<void>;
-  onAddToLexicon: (wrong: string, correct: string) => Promise<void>;
+  onAddToLexicon: (wrong: string, correct: string, verified?: boolean) => Promise<void>;
 }
 
 const ERROR_TYPES: Array<{ value: AsrReviewErrorType; label: string }> = [
@@ -47,6 +47,8 @@ const choiceLabel: Record<AsrReviewChoice, string> = {
   candidate: 'מנוע B נכון',
   custom: 'שניהם שגויים',
 };
+
+const normalizedReviewText = (value: string) => value.replace(/\s+/g, ' ').trim();
 
 export function AsrHumanReviewWorkspace({
   experimentId,
@@ -73,6 +75,7 @@ export function AsrHumanReviewWorkspace({
   const [notes, setNotes] = useState('');
   const [savedReview, setSavedReview] = useState<AsrHumanReviewRecord | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savedUnitChoices, setSavedUnitChoices] = useState<Record<string, AsrReviewChoice>>({});
   const [playing, setPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const stopAtRef = useRef<number | null>(null);
@@ -91,6 +94,13 @@ export function AsrHumanReviewWorkspace({
   const correctedText = reviewChoiceText(choice, selection, customText);
   const hasTiming = Number.isFinite(selection.start) && Number.isFinite(selection.end)
     && (selection.end as number) > (selection.start as number);
+  const selectedIndexes = selectedIds
+    .map((id) => units.findIndex((unit) => unit.id === id))
+    .filter((index) => index >= 0)
+    .sort((left, right) => left - right);
+  const contiguousSelection = selectedIndexes.every((index, position) =>
+    position === 0 || index === selectedIndexes[position - 1] + 1,
+  );
 
   useEffect(() => {
     setSavedReview(null);
@@ -101,14 +111,30 @@ export function AsrHumanReviewWorkspace({
   const selectUnit = (index: number, extend: boolean) => {
     const unit = units[index];
     if (!unit) return;
-    if ((extend || selectedIds.length === 1) && anchorIndex !== null) {
+    if (extend && anchorIndex !== null) {
       const start = Math.min(anchorIndex, index);
       const end = Math.max(anchorIndex, index);
       setSelectedIds(units.slice(start, end + 1).map((item) => item.id));
       return;
     }
     setAnchorIndex(index);
-    setSelectedIds([unit.id]);
+    setSelectedIds((current) => current.includes(unit.id)
+      ? current.filter((id) => id !== unit.id)
+      : [...current, unit.id]);
+  };
+
+  const selectAll = () => {
+    setSelectedIds((current) => current.length === units.length ? [] : units.map((unit) => unit.id));
+    setAnchorIndex(units.length ? 0 : null);
+  };
+
+  const selectCandidateMatches = () => {
+    const matching = units.filter((unit) =>
+      unit.sourceText.replace(/\s+/g, ' ').trim()
+      && unit.sourceText.replace(/\s+/g, ' ').trim() === unit.candidateText.replace(/\s+/g, ' ').trim(),
+    );
+    setSelectedIds(matching.map((unit) => unit.id));
+    setAnchorIndex(matching[0]?.index ?? null);
   };
 
   const clearSelection = () => {
@@ -136,7 +162,7 @@ export function AsrHumanReviewWorkspace({
   };
 
   const saveReview = async () => {
-    if (!selectedIds.length || !correctedText.trim()) return;
+    if (!selectedIds.length || !correctedText.trim() || !contiguousSelection) return;
     setSaving(true);
     const evidence = classifyAsrEdit({
       original: selection.candidateText,
@@ -173,6 +199,60 @@ export function AsrHumanReviewWorkspace({
     }
   };
 
+  const saveBulkReviews = async (bulkChoice: 'source' | 'candidate') => {
+    if (!selectedIds.length) return;
+    const selectedUnits = units.filter((unit) => selectedIds.includes(unit.id));
+    const pendingUnits = selectedUnits.filter((unit) => savedUnitChoices[unit.id] !== bulkChoice);
+    if (!pendingUnits.length) {
+      toast({ title: 'הבחירה כבר נשמרה', description: 'לא נוצרו הכרעות כפולות.' });
+      return;
+    }
+    setSaving(true);
+    try {
+      for (const unit of pendingUnits) {
+        const unitSelection = mergeAsrReviewSelection(units, [unit.id]);
+        const unitCorrectedText = reviewChoiceText(bulkChoice, unitSelection, '').trim();
+        if (!unitCorrectedText) continue;
+        const evidence = classifyAsrEdit({
+          original: unitSelection.candidateText,
+          corrected: unitCorrectedText,
+          start: unitSelection.start,
+          end: unitSelection.end,
+        });
+        await onSaveReview({
+          schemaVersion: 1,
+          id: crypto.randomUUID(),
+          experimentId,
+          unitIds: [unit.id],
+          choice: bulkChoice,
+          correctedText: unitCorrectedText,
+          sourceText: unitSelection.sourceText,
+          baselineText: unitSelection.baselineText,
+          candidateText: unitSelection.candidateText,
+          errorType: 'asr-word',
+          notes: [`אישור מרוכז: ${choiceLabel[bulkChoice]}`, evidence.reason].filter(Boolean).join(' | '),
+          start: unitSelection.start,
+          end: unitSelection.end,
+          timingSource: unitSelection.timingSource,
+          baselineEngine: `${baseline.engineLabel}${baseline.model ? ` · ${baseline.model}` : ''}`,
+          candidateEngine: `${candidate.engineLabel}${candidate.model ? ` · ${candidate.model}` : ''}`,
+          approvedForGold: false,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      setSavedUnitChoices((current) => ({
+        ...current,
+        ...Object.fromEntries(pendingUnits.map((unit) => [unit.id, bulkChoice])),
+      }));
+      toast({
+        title: 'הבחירה המרובה נשמרה',
+        description: `${pendingUnits.length} הכרעות נשמרו בנפרד ללא חיבור קטעי אודיו לא סמוכים.`,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const approveGold = async () => {
     if (!savedReview || !hasTiming) return;
     setSaving(true);
@@ -185,10 +265,10 @@ export function AsrHumanReviewWorkspace({
     }
   };
 
-  const addSelectedCorrection = async () => {
+  const addSelectedCorrection = async (verified = false) => {
     const wrong = selection.candidateText.trim();
     if (!wrong || !correctedText.trim() || wrong === correctedText.trim()) return;
-    await onAddToLexicon(wrong, correctedText.trim());
+    await onAddToLexicon(wrong, correctedText.trim(), verified);
   };
 
   return (
@@ -215,6 +295,12 @@ export function AsrHumanReviewWorkspace({
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={selectedIds.length ? 'default' : 'secondary'}>{selectedIds.length} יחידות נבחרו</Badge>
+          <Button type="button" size="sm" variant="outline" onClick={selectAll}>
+            <CheckCheck className="me-1 h-4 w-4" />{selectedIds.length === units.length ? 'בטל בחירת הכל' : 'בחר הכל'}
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={selectCandidateMatches}>
+            בחר התאמות B
+          </Button>
           <Button type="button" size="sm" variant="ghost" onClick={clearSelection} disabled={!selectedIds.length}>
             <RotateCcw className="me-1 h-4 w-4" />נקה
           </Button>
@@ -240,10 +326,23 @@ export function AsrHumanReviewWorkspace({
               aria-pressed={selected}
               data-testid={`asr-review-unit-${index}`}
             >
-              <span className="text-xs tabular-nums text-muted-foreground">{index + 1}</span>
+              <span className="flex flex-col items-center gap-1 text-xs tabular-nums text-muted-foreground">
+                {index + 1}
+                {savedUnitChoices[unit.id] && (
+                  <span title={`נשמר: ${choiceLabel[savedUnitChoices[unit.id]]}`}>
+                    <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+                  </span>
+                )}
+              </span>
               <span className="min-w-0 whitespace-pre-wrap break-words">{unit.sourceText.trim() || '∅'}</span>
-              <span className="min-w-0 whitespace-pre-wrap break-words">{unit.baselineText.trim() || '∅'}</span>
-              <span className="min-w-0 whitespace-pre-wrap break-words">{unit.candidateText.trim() || '∅'}</span>
+              <span className={cn(
+                'min-w-0 whitespace-pre-wrap break-words',
+                normalizedReviewText(unit.baselineText) !== normalizedReviewText(unit.sourceText) && 'bg-red-100 px-1 text-red-900',
+              )}>{unit.baselineText.trim() || '∅'}</span>
+              <span className={cn(
+                'min-w-0 whitespace-pre-wrap break-words',
+                normalizedReviewText(unit.candidateText) !== normalizedReviewText(unit.sourceText) && 'bg-red-100 px-1 text-red-900',
+              )}>{unit.candidateText.trim() || '∅'}</span>
             </button>
           );
         })}
@@ -251,6 +350,15 @@ export function AsrHumanReviewWorkspace({
 
       {selectedIds.length > 0 && (
         <div className="space-y-4 border-y px-3 py-4" data-testid="asr-review-decision-panel">
+          <div className="flex flex-wrap items-center gap-2 border-b pb-4">
+            <Button type="button" onClick={() => void saveBulkReviews('candidate')} disabled={saving}>
+              <CheckCheck className="me-1 h-4 w-4" />שמור B כנכון למסומנים
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void saveBulkReviews('source')} disabled={saving}>
+              שמור טקסט אמת כנכון למסומנים
+            </Button>
+            <span className="text-sm text-muted-foreground">כל שורה נשמרת כהכרעה נפרדת. לחץ על שורה כדי להוסיף או להסיר אותה.</span>
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-sm">
               <Headphones className="h-4 w-4" />
@@ -306,17 +414,24 @@ export function AsrHumanReviewWorkspace({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" onClick={() => void saveReview()} disabled={saving || !correctedText.trim()}>
+            <Button type="button" onClick={() => void saveReview()} disabled={saving || !correctedText.trim() || !contiguousSelection}>
               <Save className="me-1 h-4 w-4" />שמור Human Review
             </Button>
-            <Button type="button" variant="outline" onClick={() => void addSelectedCorrection()} disabled={!correctedText.trim() || selection.candidateText.trim() === correctedText.trim()}>
+            <Button type="button" variant="outline" onClick={() => void addSelectedCorrection(false)} disabled={!correctedText.trim() || selection.candidateText.trim() === correctedText.trim()}>
               <BookOpen className="me-1 h-4 w-4" />הוסף כמועמד למילון
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void addSelectedCorrection(true)} disabled={!savedReview || !correctedText.trim() || selection.candidateText.trim() === correctedText.trim()}>
+              <BadgeCheck className="me-1 h-4 w-4" />אשר והפעל במילון
             </Button>
             <Button type="button" variant="secondary" onClick={() => void approveGold()} disabled={saving || !savedReview || !hasTiming || savedReview.approvedForGold}>
               {savedReview?.approvedForGold ? <Check className="me-1 h-4 w-4" /> : <ShieldCheck className="me-1 h-4 w-4" />}
               {savedReview?.approvedForGold ? 'אושר ל-Gold' : 'אשר קטע ל-Gold'}
             </Button>
           </div>
+          {!contiguousSelection && (
+            <p className="text-sm text-amber-700">לבחירה לא רציפה השתמש בשמירה המרובה למעלה. אישור קטע יחיד דורש מילים סמוכות.</p>
+          )}
+          <p className="text-xs text-muted-foreground">מועמד משמש כהטיה למנוע. תיקון מאומת מוחל גם לאחר התמלול ולכן יופיע באופן עקבי בניסוי הבא.</p>
         </div>
       )}
     </section>

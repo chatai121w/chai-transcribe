@@ -37,6 +37,54 @@ class DatasetUploadTests(unittest.TestCase):
             self.assertIn('groupId', response.get_json()['error'])
             self.assertEqual(list((dataset / 'audio').iterdir()), [])
 
+    def test_identical_audio_and_text_is_an_idempotent_success(self):
+        with tempfile.TemporaryDirectory() as tmp, patch('training_routes.DATASETS_DIR', Path(tmp)), patch(
+            'training_routes._audio_duration', return_value=1.0,
+        ):
+            app = Flask(__name__)
+            register_training_routes(app)
+            client = app.test_client()
+            payload = lambda text: {
+                'dataset_id': 'approved-ground-truth',
+                'text': text,
+                'metadata': json.dumps({'groupId': 'recording-1'}),
+                'audio': (BytesIO(b'same-audio'), 'clip.wav'),
+            }
+
+            first = client.post('/training/dataset/approved-pair', data=payload('טקסט אמת'))
+            second = client.post('/training/dataset/approved-pair', data=payload('טקסט אמת'))
+
+            self.assertEqual(first.status_code, 200)
+            self.assertEqual(second.status_code, 200)
+            self.assertTrue(second.get_json()['duplicate'])
+            audio_dir = Path(tmp) / 'approved-ground-truth' / 'audio'
+            self.assertEqual(len(list(audio_dir.iterdir())), 1)
+
+    def test_identical_audio_with_different_text_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp, patch('training_routes.DATASETS_DIR', Path(tmp)), patch(
+            'training_routes._audio_duration', return_value=1.0,
+        ):
+            app = Flask(__name__)
+            register_training_routes(app)
+            client = app.test_client()
+
+            first = client.post('/training/dataset/approved-pair', data={
+                'dataset_id': 'approved-ground-truth',
+                'text': 'טקסט ראשון',
+                'metadata': json.dumps({'groupId': 'recording-1'}),
+                'audio': (BytesIO(b'same-audio'), 'clip.wav'),
+            })
+            conflicting = client.post('/training/dataset/approved-pair', data={
+                'dataset_id': 'approved-ground-truth',
+                'text': 'טקסט אחר',
+                'metadata': json.dumps({'groupId': 'recording-1'}),
+                'audio': (BytesIO(b'same-audio'), 'clip.wav'),
+            })
+
+            self.assertEqual(first.status_code, 200)
+            self.assertEqual(conflicting.status_code, 409)
+            self.assertIn('different ground-truth', conflicting.get_json()['error'])
+
 
 
 class DatasetSplitTests(unittest.TestCase):

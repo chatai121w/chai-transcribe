@@ -44,4 +44,12 @@ describe('reference audio learning', () => {
     }).safe).toBe(false);
     expect(assessReferenceSegment({ id: 'normal', start: 0, end: 8, text: 'אחת שתים שלש ארבע חמש שש שבע' }).safe).toBe(true);
   });
+
+  it('allows fast verified speech only when the caller opts into the manual-review threshold', () => {
+    const fast = {
+      id: 'fast', start: 0, end: 10, text: Array.from({ length: 34 }, () => 'מילה').join(' '),
+    };
+    expect(assessReferenceSegment(fast).safe).toBe(false);
+    expect(assessReferenceSegment(fast, { maxWordsPerSecond: 4 }).safe).toBe(true);
+  });
 });

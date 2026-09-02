@@ -216,12 +216,10 @@ test.describe('עורך טקסט - תיקיות והשוואה', () => {
     await expect(targetWord).toBeVisible({ timeout: 15_000 });
     await targetWord.click({ button: 'right' });
 
-    await expect(page.getByRole('menuitem', { name: 'עריכת תווים ופיסוק' })).toBeVisible();
-    await page.getByRole('menuitem', { name: 'עריכת תווים ופיסוק' }).hover();
-    const editInput = page.locator('[role="menu"] input').last();
+    const editInput = page.getByRole('textbox', { name: 'תיקון מהיר' });
     await expect(editInput).toHaveValue('תמלול');
     await editInput.fill('התמלול');
-    await page.locator('[role="menu"]').last().getByRole('button', { name: 'שמור', exact: true }).click();
+    await page.getByRole('button', { name: 'אשר תיקון' }).click();
 
     await expect(page.getByText('המילה תוקנה ונשמרה', { exact: true })).toBeVisible();
     await expect(page.getByTestId('comparison-column-right')).toContainText('התמלול שני לבדיקת המערכת');

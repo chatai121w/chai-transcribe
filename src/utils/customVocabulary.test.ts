@@ -215,6 +215,13 @@ describe('applyVocabularyCorrections', () => {
     addTerm('תא שמע', 'aramaic', ['תה שמע'], { approvalStatus: 'candidate', confidence: 0.7 });
     expect(applyVocabularyCorrections('תה שמע').text).toBe('תה שמע');
   });
+
+  it('applies a human-verified correction on the next transcription', () => {
+    addTerm('ארוממך', 'other', ['ארומך'], { approvalStatus: 'verified', confidence: 1 });
+    const result = applyVocabularyCorrections('ארומך אלוהי המלך');
+    expect(result.text).toBe('ארוממך אלוהי המלך');
+    expect(result.appliedCount).toBe(1);
+  });
 });
 
 describe('Torah lexicon seed and canonical deduplication', () => {

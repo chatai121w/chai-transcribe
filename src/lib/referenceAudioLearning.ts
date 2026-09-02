@@ -14,6 +14,10 @@ export interface ReferenceSegmentQuality {
   reason?: string;
 }
 
+export interface ReferenceSegmentQualityOptions {
+  maxWordsPerSecond?: number;
+}
+
 export const cleanReferenceText = (text: string) => text
   .replace(/\([^)]*\)\s*\[([^\]]+)\]/g, '$1')
   .replace(/\{[פס]\}/g, ' ')
@@ -22,14 +26,18 @@ export const cleanReferenceText = (text: string) => text
   .replace(/\s+/g, ' ')
   .trim();
 
-export function assessReferenceSegment(segment: ReferenceSegment): ReferenceSegmentQuality {
+export function assessReferenceSegment(
+  segment: ReferenceSegment,
+  options: ReferenceSegmentQualityOptions = {},
+): ReferenceSegmentQuality {
   const duration = segment.end - segment.start;
   const wordCount = normalizeReferenceWords(segment.text).length;
   const wordsPerSecond = duration > 0 ? wordCount / duration : Number.POSITIVE_INFINITY;
+  const maxWordsPerSecond = options.maxWordsPerSecond ?? 2.8;
   if (duration < 2) return { safe: false, wordsPerSecond, reason: 'הקטע קצר מדי' };
   if (duration > 14.7) return { safe: false, wordsPerSecond, reason: 'הקטע ארוך מדי' };
   if (wordsPerSecond < 0.35) return { safe: false, wordsPerSecond, reason: 'מעט מדי מילים ביחס לאורך' };
-  if (wordsPerSecond > 2.8) return { safe: false, wordsPerSecond, reason: 'יותר מדי מילים ביחס לאורך' };
+  if (wordsPerSecond > maxWordsPerSecond) return { safe: false, wordsPerSecond, reason: 'יותר מדי מילים ביחס לאורך' };
   return { safe: true, wordsPerSecond };
 }
 

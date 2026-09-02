@@ -14,6 +14,7 @@ export async function extractAudioSegment(
   file: File,
   startSec: number,
   endSec: number,
+  options: { forceWav?: boolean } = {},
 ): Promise<File> {
   const audioBuffer = await decodeAudioFile(file);
   const duration = audioBuffer.duration;
@@ -22,7 +23,7 @@ export async function extractAudioSegment(
   const safeEnd = clampNumber(endSec, safeStart + MIN_SEGMENT_SEC, duration);
 
   // No-op: full range selected
-  if (safeStart <= 0.0001 && safeEnd >= duration - 0.0001) {
+  if (!options.forceWav && safeStart <= 0.0001 && safeEnd >= duration - 0.0001) {
     return file;
   }
 

@@ -537,7 +537,7 @@ export const useCloudTranscripts = () => {
 
   const updateTranscript = useCallback(async (
     id: string,
-    updates: Partial<Pick<CloudTranscript, 'text' | 'tags' | 'notes' | 'title' | 'folder' | 'folder_id' | 'category' | 'is_favorite' | 'edited_text' | 'word_timings'>>
+    updates: Partial<Pick<CloudTranscript, 'text' | 'tags' | 'notes' | 'title' | 'folder' | 'folder_id' | 'category' | 'is_favorite' | 'edited_text' | 'word_timings' | 'audio_file_path'>>
   ) => {
     try {
       const existing = state.transcripts.find((transcript) => transcript.id === id);
@@ -555,7 +555,7 @@ export const useCloudTranscripts = () => {
               : transcript,
           ),
         });
-        return;
+        return true;
       }
 
       await updateTranscriptLocally(id, updates);
@@ -576,8 +576,10 @@ export const useCloudTranscripts = () => {
         await db.transcripts.update(id, { _dirty: false });
       }
       if (error) throw error;
+      return true;
     } catch (error) {
       debugLog.error('Cloud', 'Error updating transcript (saved locally)', error instanceof Error ? error.message : String(error));
+      return false;
     }
   }, []);
 

@@ -8,10 +8,12 @@ import {
   ChevronLeft,
   CircleAlert,
   CloudDownload,
+  CloudUpload,
   Database,
   Download,
   FileAudio,
   FlaskConical,
+  FolderOpen,
   Loader2,
   Play,
   Save,
@@ -31,14 +33,17 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { TermRecordingPanel, type RecordedPracticeSource } from '@/components/transcription/TermRecordingPanel';
 import { AsrHumanReviewWorkspace } from '@/components/transcription/AsrHumanReviewWorkspace';
+import { GroundTruthDiffText } from '@/components/transcription/GroundTruthDiffText';
+import { ComparisonSourceDialog } from '@/components/ComparisonSourceDialog';
 import { toast } from '@/hooks/use-toast';
-import { useCloudTranscripts } from '@/hooks/useCloudTranscripts';
+import { useCloudTranscripts, type CloudTranscript } from '@/hooks/useCloudTranscripts';
 import { useCustomVocabulary } from '@/hooks/useCustomVocabulary';
 import { addApprovedLoraPair } from '@/hooks/useLoraTraining';
 import { extractCorrectionCandidates, wordDiff } from '@/lib/asrMetrics';
 import type { AsrHumanReviewRecord } from '@/lib/asrHumanReview';
 import { buildApprovedAsrMetadata } from '@/lib/asrDatasetMetadata';
 import { extractAudioSegment } from '@/lib/audioSegment';
+import { assessReferenceSegment, buildReferenceSegments } from '@/lib/referenceAudioLearning';
 import { importLegacyLkDictionary } from '@/lib/legacyLkMigration';
 import { debugLog } from '@/lib/debugLogger';
 import { listPipelineEvents, logPipelineEvent, type PipelineAuditEvent } from '@/lib/pipelineAudit';
@@ -127,7 +132,15 @@ function MetricRow({ label, baseline, candidate, lowerIsBetter = true }: { label
 export default function TranscriptionLab() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const { getAudioUrl } = useCloudTranscripts();
+  const {
+    transcripts,
+    isLoading: cloudTranscriptsLoading,
+    getAudioUrl,
+    saveTranscript,
+    updateTranscript,
+    uploadAudioFile,
+    isCloud,
+  } = useCloudTranscripts();
   const editorTransfer = location.state as VerifiedEditorTransferState | null;
   const initialLk = searchParams.get('mode') === 'lashon-kodesh';
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -159,6 +172,7 @@ export default function TranscriptionLab() {
   const [goldApproved, setGoldApproved] = useState(false);
   const [importingLegacy, setImportingLegacy] = useState(false);
   const [recordingSource, setRecordingSource] = useState<RecordedPracticeSource | null>(null);
+  const [sourceDialogOpen, setSourceDialogOpen] = useState(false);
   const vocabulary = useCustomVocabulary();
 
   useEffect(() => {
@@ -172,6 +186,13 @@ export default function TranscriptionLab() {
   const comparison = useMemo(
     () => baseline && candidate ? comparePipelineResults(baseline, candidate) : null,
     [baseline, candidate],
+  );
+  const cloudGoldSources = useMemo(
+    () => transcripts.filter((transcript) =>
+      Boolean(transcript.audio_file_path)
+      && (transcript.tags?.includes('asr-gold-source') || transcript.title?.startsWith('Gold · ')),
+    ),
+    [transcripts],
   );
   const handleFile = useCallback((next: File | null, preserveLinkedSource = false) => {
     setFile(next);
@@ -285,6 +306,45 @@ export default function TranscriptionLab() {
     setStatus('הקלטת המושגים מוכנה לניסוי');
   };
 
+  const loadStoredAudioSource = async (transcript: CloudTranscript) => {
+    if (!transcript.audio_file_path && !transcript.audio_blob) return;
+    try {
+      setStatus('טוען הקלטה שמורה');
+      let blob: Blob;
+      if (transcript.audio_blob) {
+        blob = transcript.audio_blob;
+      } else {
+        const signedUrl = await getAudioUrl(transcript.audio_file_path!);
+        if (!signedUrl) throw new Error('לא ניתן ליצור קישור מאובטח להקלטה');
+        const response = await fetch(signedUrl);
+        if (!response.ok) throw new Error(`טעינת ההקלטה נכשלה (${response.status})`);
+        blob = await response.blob();
+      }
+      const titleName = transcript.title?.split(' · ').at(-1) || 'recording';
+      const storedExtension = transcript.audio_file_path?.split('?')[0].split('.').at(-1) || blob.type?.split('/').at(-1) || 'wav';
+      const fallbackName = /\.[a-z0-9]{2,5}$/i.test(titleName) ? titleName : `${titleName}.${storedExtension}`;
+      const sourceFile = blob instanceof File
+        ? blob
+        : new File([blob], fallbackName, { type: blob.type || 'audio/wav' });
+      const verified = transcript.tags?.includes('human-approved') || transcript.tags?.includes('asr-gold-source');
+      const storedText = (transcript.edited_text || transcript.text || '').trim();
+      handleFile(sourceFile, true);
+      setLinkedTranscriptId(transcript.id);
+      setGroundTruth(verified ? storedText : '');
+      setInitialTranscript(storedText);
+      setStatus(verified ? 'הקלטה וטקסט אמת מאושר נטענו לניסוי חוזר' : 'ההקלטה נטענה; הטקסט הקיים דורש אימות');
+      toast({
+        title: 'ההקלטה נטענה מהתיקיות',
+        description: verified
+          ? 'טקסט האמת המאושר נטען ואפשר להריץ A/B.'
+          : 'התמלול הקיים נטען להשוואה בלבד. יש לבדוק אותו מול האודיו לפני אישור Gold.',
+      });
+    } catch (error) {
+      setStatus('טעינת ההקלטה השמורה נכשלה');
+      toast({ title: 'הטעינה נכשלה', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
+    }
+  };
+
   const appendEvent = (event: PipelineAuditEvent) => setEvents((current) => [event, ...current.filter((item) => item.id !== event.id)]);
 
   const runExperiment = async () => {
@@ -376,64 +436,161 @@ export default function TranscriptionLab() {
     }
   };
 
-  const addCorrectionToLexicon = async (wrong: string, correct: string) => {
+  const addCorrectionToLexicon = async (wrong: string, correct: string, verified = false) => {
     const normalizedCorrect = correct.trim();
     const normalizedWrong = wrong.trim();
     if (!normalizedCorrect || !normalizedWrong) return;
     const correctKey = normalizeVocabularyKey(normalizedCorrect);
     const wrongKey = normalizeVocabularyKey(normalizedWrong);
     const existing = vocabulary.entries.find((entry) => normalizeVocabularyKey(entry.term) === correctKey);
-    const saved = existing
-      ? vocabulary.update(existing.term, {
+    const syncResult = existing
+      ? await vocabulary.updateAndSync(existing.term, {
           variants: existing.variants.some((variant) => normalizeVocabularyKey(variant) === wrongKey)
             ? existing.variants
             : [...existing.variants, normalizedWrong],
-          approvalStatus: 'candidate',
+          approvalStatus: verified ? 'verified' : 'candidate',
+          confidence: verified ? 1 : Math.max(existing.confidence, 0.6),
         })
-      : vocabulary.add(normalizedCorrect, 'other', [normalizedWrong], {
+      : await vocabulary.addAndSync(normalizedCorrect, 'other', [normalizedWrong], {
           source: 'approved-correction',
-          approvalStatus: 'candidate',
-          confidence: 0.6,
+          approvalStatus: verified ? 'verified' : 'candidate',
+          confidence: verified ? 1 : 0.6,
           contextTags: ['ניסוי תמלול'],
         });
-    if (!saved) return;
+    if (!syncResult.ok) return;
+    const cloudSaved = syncResult.errors.length === 0;
     const event = await logPipelineEvent({
       experimentId,
       recordingFingerprint: candidate?.recordingFingerprint,
       stage: 'lexicon',
-      level: 'success',
-      eventType: 'candidate-added',
-      message: 'תיקון נוסף כמועמד למילון המרכזי',
-      details: { wrong: normalizedWrong, correct: normalizedCorrect },
+      level: cloudSaved ? 'success' : 'warning',
+      eventType: verified ? 'verified-correction-activated' : 'candidate-added',
+      message: verified ? 'תיקון אנושי אומת והופעל במילון המרכזי' : 'תיקון נוסף כמועמד למילון המרכזי',
+      details: { wrong: normalizedWrong, correct: normalizedCorrect, verified, cloudSaved, syncErrors: syncResult.errors },
     });
     appendEvent(event);
-    toast({ title: 'נוסף כמועמד למילון', description: `${normalizedWrong} ← ${normalizedCorrect}` });
+    toast({
+      title: cloudSaved
+        ? (verified ? 'התיקון אומת והופעל' : 'נוסף כמועמד למילון')
+        : 'התיקון נשמר מקומית, אך סנכרון הענן נכשל',
+      description: verified
+        ? `${normalizedWrong} ← ${normalizedCorrect} יוחל בתמלולים הבאים`
+        : `${normalizedWrong} ← ${normalizedCorrect}`,
+      variant: cloudSaved ? 'default' : 'destructive',
+    });
+  };
+
+  const persistGoldSource = async (): Promise<{ transcriptId: string | null; audioFilePath: string | null; reused: boolean }> => {
+    if (!file || !candidate || !isCloud) return { transcriptId: null, audioFilePath: null, reused: false };
+
+    const tags = ['asr-gold-source', 'human-approved', 'transcription-lab'];
+    const title = `Gold · ${candidate.recordingFingerprint} · ${file.name}`;
+    const linked = linkedTranscriptId ? transcripts.find((transcript) => transcript.id === linkedTranscriptId) : null;
+    const existing = linked || transcripts.find((transcript) => transcript.title === title);
+
+    if (existing) {
+      let audioPath = existing.audio_file_path;
+      if (!audioPath) {
+        audioPath = await uploadAudioFile(file);
+        if (!audioPath) throw new Error('העלאת קובץ המקור לענן נכשלה');
+      }
+      const updated = await updateTranscript(existing.id, {
+        edited_text: groundTruth.trim(),
+        word_timings: candidate.wordTimings,
+        tags: [...new Set([...(existing.tags || []), ...tags])],
+        audio_file_path: audioPath,
+      });
+      if (!updated) throw new Error('עדכון טקסט האמת ופרטי ה-Gold בענן נכשל');
+      return { transcriptId: existing.id, audioFilePath: audioPath, reused: true };
+    }
+
+    const saved = await saveTranscript(
+      groundTruth.trim(),
+      `Gold · ${candidate.engineLabel}`,
+      title,
+      file,
+      candidate.wordTimings,
+      'מעבדת תמלול',
+      { waitForAudioUpload: true },
+    );
+    if (!saved?.audio_file_path) throw new Error('מקור ה-Gold נשמר ללא קובץ אודיו בענן');
+    const updated = await updateTranscript(saved.id, { tags, edited_text: groundTruth.trim() });
+    if (!updated) throw new Error('קובץ המקור עלה, אך עדכון פרטי ה-Gold בענן נכשל');
+    return { transcriptId: saved.id, audioFilePath: saved.audio_file_path, reused: false };
   };
 
   const approveGold = async () => {
     if (!file || !groundTruth.trim() || !candidate) return;
     try {
-      const result = await addApprovedLoraPair(file, groundTruth.trim(), 'approved-ground-truth', buildApprovedAsrMetadata({
-        recordingFingerprint: candidate.recordingFingerprint,
-        sourceKind: 'transcription-lab',
-        sourceRef: file.name,
-        sourceLabel: file.name,
-        teacherEngines: [baseline?.engineLabel, candidate.engineLabel].filter(Boolean) as string[],
+      if (!candidate.wordTimings.length) {
+        throw new Error('לא ניתן לחלק את ההקלטה ל-Gold ללא תזמוני מילים. יש להשתמש במנוע שמחזיר תזמונים או לאשר קטעים ידנית.');
+      }
+      const builtSegments = buildReferenceSegments(groundTruth.trim(), candidate.wordTimings);
+      // Full Gold approval is an explicit human decision, so allow fast but still
+      // plausible speech while keeping the stricter threshold for automatic imports.
+      const assessedSegments = builtSegments.map((segment) => ({
+        segment,
+        quality: assessReferenceSegment(segment, { maxWordsPerSecond: 4 }),
       }));
+      const referenceSegments = assessedSegments
+        .filter(({ quality }) => quality.safe)
+        .map(({ segment }) => segment);
+      if (!referenceSegments.length) {
+        const reasons = [...new Set(assessedSegments.map(({ quality }) => quality.reason).filter(Boolean))];
+        throw new Error(`לא נמצאו קטעים המתאימים ל-Gold${reasons.length ? `: ${reasons.join(', ')}` : ''}. בחר קטע ארוך יותר ואשר אותו ידנית.`);
+      }
+
+      setStatus('שומר את מקור ה-Gold והאודיו בענן');
+      const cloudSource = await persistGoldSource();
+      let rows = 0;
+      let existingRows = 0;
+      for (const [index, segment] of referenceSegments.entries()) {
+        setStatus(`שומר קטע Gold ${index + 1} מתוך ${referenceSegments.length}`);
+        setProgress(Math.round((index / referenceSegments.length) * 100));
+        const clip = await extractAudioSegment(file, segment.start, segment.end, { forceWav: true });
+        const result = await addApprovedLoraPair(clip, segment.text, 'approved-ground-truth', buildApprovedAsrMetadata({
+          recordingFingerprint: candidate.recordingFingerprint,
+          sourceKind: 'transcription-lab',
+          sourceRef: `${file.name}#${segment.start.toFixed(3)}-${segment.end.toFixed(3)}`,
+          sourceLabel: file.name,
+          teacherEngines: [baseline?.engineLabel, candidate.engineLabel].filter(Boolean) as string[],
+          startSeconds: segment.start,
+          endSeconds: segment.end,
+        }));
+        rows += Number(result.rows || 0);
+        existingRows += Number(Boolean(result.duplicate));
+      }
       setGoldApproved(true);
+      setProgress(100);
+      setStatus('כל קטעי ה-Gold נשמרו');
       const event = await logPipelineEvent({
         experimentId,
         recordingFingerprint: candidate.recordingFingerprint,
         stage: 'training',
         level: 'success',
         eventType: 'gold-approved',
-        message: 'האודיו וטקסט האמת אושרו למאגר Gold',
-        details: { rows: result.rows, fileName: file.name },
+        message: 'ההקלטה וטקסט האמת חולקו לקטעים ואושרו למאגר Gold',
+        details: {
+          rows,
+          existingRows,
+          segments: referenceSegments.length,
+          fileName: file.name,
+          cloudSaved: Boolean(cloudSource.transcriptId && cloudSource.audioFilePath),
+          cloudTranscriptId: cloudSource.transcriptId,
+          audioFilePath: cloudSource.audioFilePath,
+          reusedCloudSource: cloudSource.reused,
+        },
       });
       appendEvent(event);
-      toast({ title: 'נוסף למאגר Gold', description: `${result.rows} קטעים מאושרים במאגר` });
+      toast({
+        title: 'הכול נשמר',
+        description: `${referenceSegments.length} קטעי Gold, טקסט האמת וקובץ המקור נשמרו${cloudSource.reused || existingRows ? ' בלי ליצור עותקים כפולים' : ' בענן'}.`,
+      });
     } catch (error) {
-      toast({ title: 'האישור נכשל', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
+      const message = error instanceof Error ? error.message : String(error);
+      debugLog.error('TranscriptionLab', 'Gold approval failed', message);
+      setStatus(`אישור Gold נכשל: ${message}`);
+      toast({ title: 'האישור נכשל', description: message, variant: 'destructive' });
     }
   };
 
@@ -455,7 +612,7 @@ export default function TranscriptionLab() {
     if (!file || !candidate || !Number.isFinite(review.start) || !Number.isFinite(review.end)) {
       throw new Error('לא ניתן לאשר Gold ללא קובץ מקור ותזמון תקין');
     }
-    const clip = await extractAudioSegment(file, review.start as number, review.end as number);
+    const clip = await extractAudioSegment(file, review.start as number, review.end as number, { forceWav: true });
     const result = await addApprovedLoraPair(clip, review.correctedText, 'approved-ground-truth', buildApprovedAsrMetadata({
       recordingFingerprint: candidate.recordingFingerprint,
       sourceKind: 'transcription-lab-human-review',
@@ -524,16 +681,41 @@ export default function TranscriptionLab() {
             {linkedTranscriptId && (
               <div className="flex flex-wrap items-center gap-2 border-y bg-emerald-50/70 px-3 py-2 text-sm text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
                 <CloudDownload className="h-4 w-4" />
-                <span className="font-medium">מקור מקושר מעורך הטקסט</span>
+                <span className="font-medium">מקור מקושר מהמערכת</span>
                 <Badge variant="outline" className="font-mono text-xs">{linkedTranscriptId.slice(0, 8)}</Badge>
                 <span>האודיו נטען מהרשומה הקיימת ולא הועלה שוב לענן.</span>
               </div>
             )}
+            {cloudGoldSources.length > 0 && (
+              <section className="space-y-2 border-y py-3" aria-label="הקלטות Gold בענן">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <CloudDownload className="h-4 w-4" />
+                  הקלטות Gold שמורות בענן
+                </div>
+                <div className="grid gap-2">
+                  {cloudGoldSources.slice(0, 6).map((transcript) => (
+                    <div key={transcript.id} className="flex flex-wrap items-center justify-between gap-2 px-2 py-2 text-sm hover:bg-muted/40">
+                      <span className="min-w-0 truncate" title={transcript.title}>{transcript.title}</span>
+                      <Button type="button" size="sm" variant="outline" onClick={() => void loadStoredAudioSource(transcript)}>
+                        <CloudUpload className="me-2 h-4 w-4" />טען לניסוי חוזר
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
             <div className="grid gap-4 md:grid-cols-[minmax(16rem,0.8fr)_minmax(20rem,1.2fr)]">
               <div className="space-y-2">
                 <Label htmlFor="lab-audio">קובץ האודיו המקורי</Label>
-                <div className="flex gap-2">
-                  <Input id="lab-audio" ref={fileInputRef} type="file" accept="audio/*,video/*" onChange={(event) => handleFile(event.target.files?.[0] || null)} />
+                <Input id="lab-audio" ref={fileInputRef} className="hidden" type="file" accept="audio/*,video/*" onChange={(event) => handleFile(event.target.files?.[0] || null)} />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                    <FileAudio className="me-2 h-4 w-4" />בחר מהמחשב
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setSourceDialogOpen(true)} disabled={cloudTranscriptsLoading}>
+                    {cloudTranscriptsLoading ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <FolderOpen className="me-2 h-4 w-4" />}
+                    בחר מהתיקיות
+                  </Button>
                 </div>
                 {file && <p className="text-xs text-muted-foreground">{file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB{recordingSource ? ` · ${recordingSource.durationSeconds} שניות · ${recordingSource.mode === 'terms' ? 'קריאת מושגים' : 'דיבור טבעי'}` : ''}</p>}
               </div>
@@ -591,8 +773,13 @@ export default function TranscriptionLab() {
                 <div><div className="font-semibold">{comparison?.regressed ? 'נמצאה רגרסיה' : comparison?.improved ? 'נמצא שיפור' : 'אין הכרעה מדידה'}</div><div className="text-sm">{comparison?.reason || 'יש להוסיף טקסט אמת כדי להפעיל את שער האיכות.'}</div></div>
               </div>
               <div className="grid gap-6 lg:grid-cols-2">
-                <section><h3 className="mb-2 font-semibold">A · בסיס · {baseline.engineLabel}</h3><Textarea readOnly value={baseline.text} rows={12} dir="rtl" /></section>
-                <section><h3 className="mb-2 font-semibold">B · מועמד · {candidate.engineLabel}</h3><Textarea readOnly value={candidate.text} rows={12} dir="rtl" /></section>
+                {groundTruth.trim() ? <>
+                  <GroundTruthDiffText groundTruth={groundTruth} hypothesis={baseline.text} label={`A · בסיס · ${baseline.engineLabel}`} testId="ground-truth-diff-a" />
+                  <GroundTruthDiffText groundTruth={groundTruth} hypothesis={candidate.text} label={`B · מועמד · ${candidate.engineLabel}`} testId="ground-truth-diff-b" />
+                </> : <>
+                  <section><h3 className="mb-2 font-semibold">A · בסיס · {baseline.engineLabel}</h3><Textarea readOnly value={baseline.text} rows={12} dir="rtl" /></section>
+                  <section><h3 className="mb-2 font-semibold">B · מועמד · {candidate.engineLabel}</h3><Textarea readOnly value={candidate.text} rows={12} dir="rtl" /></section>
+                </>}
               </div>
               <section className="border-y py-3">
                 <div className="grid grid-cols-[minmax(7rem,1fr)_minmax(5rem,7rem)_minmax(5rem,7rem)] gap-3 border-b pb-2 text-xs text-muted-foreground"><span>מדד</span><span className="text-center">A</span><span className="text-center">B</span></div>
@@ -658,6 +845,19 @@ export default function TranscriptionLab() {
           </AccordionContent>
         </AccordionItem>
       </Accordion>
+      <ComparisonSourceDialog
+        open={sourceDialogOpen}
+        side="new"
+        versions={[]}
+        transcripts={transcripts}
+        getVersionLabel={() => ''}
+        onOpenChange={setSourceDialogOpen}
+        onSelectVersion={() => undefined}
+        onSelectTranscript={(transcript) => void loadStoredAudioSource(transcript)}
+        purpose="audio"
+        dialogTitle="בחירת הקלטה למעבדת התמלול"
+        dialogDescription="בחר הקלטה עם אודיו מתוך עץ התיקיות. המקור הקיים ייטען ללא העלאה כפולה."
+      />
     </main>
   );
 }

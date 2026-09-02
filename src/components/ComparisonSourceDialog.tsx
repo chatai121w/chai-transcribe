@@ -23,6 +23,9 @@ interface ComparisonSourceDialogProps {
   onOpenChange: (open: boolean) => void;
   onSelectVersion: (versionId: string) => void;
   onSelectTranscript: (transcript: CloudTranscript) => void;
+  purpose?: "comparison" | "audio";
+  dialogTitle?: string;
+  dialogDescription?: string;
 }
 
 function transcriptText(transcript: CloudTranscript) {
@@ -180,6 +183,9 @@ export function ComparisonSourceDialog({
   onOpenChange,
   onSelectVersion,
   onSelectTranscript,
+  purpose = "comparison",
+  dialogTitle,
+  dialogDescription,
 }: ComparisonSourceDialogProps) {
   const { tree, createFolder, updateFolder, moveFolder } = useFolderTree();
   const { updateTranscript } = useCloudTranscripts();
@@ -205,12 +211,14 @@ export function ComparisonSourceDialog({
   }), [getVersionLabel, normalizedQuery, versions]);
 
   const usableTranscripts = useMemo(() => transcripts.filter((transcript) => {
-    if (!transcriptText(transcript)) return false;
+    if (purpose === "audio") {
+      if (!transcript.audio_file_path && !transcript.audio_blob) return false;
+    } else if (!transcriptText(transcript)) return false;
     if (!normalizedQuery) return true;
     return `${transcriptLabel(transcript)} ${transcript.engine || ""} ${transcript.folder || ""}`
       .toLocaleLowerCase("he")
       .includes(normalizedQuery);
-  }), [normalizedQuery, transcripts]);
+  }), [normalizedQuery, purpose, transcripts]);
 
   const byFolder = useMemo(() => {
     const map = new Map<string | null, CloudTranscript[]>();
@@ -383,6 +391,7 @@ export function ComparisonSourceDialog({
             <span className="block truncate text-sm font-medium">{label}</span>
             <span className="block truncate text-[11px] text-muted-foreground">
               {transcript.engine || "לא ידוע"} · {new Date(transcript.updated_at || transcript.created_at).toLocaleDateString("he-IL")}
+              {purpose === "audio" ? " · כולל אודיו" : ""}
             </span>
           </span>
         </button>
@@ -503,8 +512,8 @@ export function ComparisonSourceDialog({
     <Dialog modal={false} open={open} onOpenChange={onOpenChange}>
       <DialogContent hideOverlay dir="rtl" className="!left-auto !right-4 !top-20 !w-[min(42rem,calc(100vw-2rem))] !max-w-none !translate-x-0 !translate-y-0 max-h-[calc(100vh-6rem)] gap-0 overflow-hidden p-0 text-right shadow-2xl sm:rounded-lg" data-testid="comparison-source-dialog">
         <DialogHeader className="border-b px-5 py-4 text-right">
-          <DialogTitle>בחירת {side === "base" ? "גרסת בסיס" : "גרסה חדשה"}</DialogTitle>
-          <p className="text-xs text-muted-foreground">בחר גרסה קיימת או תמלול מסווג מתוך עץ התיקיות.</p>
+          <DialogTitle>{dialogTitle || `בחירת ${side === "base" ? "גרסת בסיס" : "גרסה חדשה"}`}</DialogTitle>
+          <p className="text-xs text-muted-foreground">{dialogDescription || "בחר גרסה קיימת או תמלול מסווג מתוך עץ התיקיות."}</p>
         </DialogHeader>
 
         <div className="border-b px-5 py-3">
@@ -520,7 +529,30 @@ export function ComparisonSourceDialog({
           </div>
         </div>
 
-        <Tabs defaultValue="folders" dir="rtl" className="min-h-0">
+        {purpose === "audio" ? (
+          <div className="min-h-0 px-5 pb-5 pt-3">
+            <div className="mb-2 flex justify-start">
+              <Button type="button" size="sm" variant="outline" className="gap-2" onClick={() => beginCreateFolder(null)}>
+                <FolderPlus className="h-4 w-4" /> תיקייה חדשה
+              </Button>
+            </div>
+            <ScrollArea className="h-[min(65vh,34rem)] rounded-md border p-2">
+              <DndContext sensors={sensors} onDragEnd={(event) => void handleFolderDragEnd(event)}>
+                <RootFolderDropZone>
+                  {creationRow(null)}
+                  {tree.map(renderFolder)}
+                  {uncategorized.length > 0 && (
+                    <div className="rounded-md border border-dashed p-2">
+                      <p className="mb-2 flex items-center gap-2 text-sm font-medium"><Folder className="h-4 w-4" /> ללא תיקייה</p>
+                      <div className="space-y-1">{uncategorized.map(renderTranscript)}</div>
+                    </div>
+                  )}
+                  {!usableTranscripts.length && <p className="p-8 text-center text-sm text-muted-foreground">לא נמצאו הקלטות עם אודיו.</p>}
+                </RootFolderDropZone>
+              </DndContext>
+            </ScrollArea>
+          </div>
+        ) : <Tabs defaultValue="folders" dir="rtl" className="min-h-0">
           <TabsList className="mx-5 mt-3 grid w-[calc(100%-2.5rem)] grid-cols-2">
             <TabsTrigger value="folders">תיקיות והקלטות</TabsTrigger>
             <TabsTrigger value="versions">גרסאות קיימות</TabsTrigger>
@@ -557,7 +589,7 @@ export function ComparisonSourceDialog({
               </div>
             </ScrollArea>
           </TabsContent>
-        </Tabs>
+        </Tabs>}
       </DialogContent>
     </Dialog>
   );

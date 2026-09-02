@@ -121,7 +121,10 @@ export async function mockSupabase(page: Page, options?: {
       if (method === 'GET') return route.fulfill({ status: 200, json: transcripts });
       if (method === 'POST') {
         const body = route.request().postDataJSON();
-        return route.fulfill({ status: 201, json: [{ ...body, id: 'tr-new-' + Date.now() }] });
+        const now = new Date().toISOString();
+        const inserted = { ...body, id: 'tr-new-' + Date.now(), created_at: now, updated_at: now };
+        const expectsSingle = route.request().headers()['accept']?.includes('application/vnd.pgrst.object+json');
+        return route.fulfill({ status: 201, json: expectsSingle ? inserted : [inserted] });
       }
       if (method === 'DELETE') return route.fulfill({ status: 200, json: [] });
       if (method === 'PATCH') return route.fulfill({ status: 200, json: [transcripts[0]] });

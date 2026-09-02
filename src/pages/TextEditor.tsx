@@ -1397,7 +1397,9 @@ const TextEditor = () => {
       timestamp: new Date(item.updated_at || item.created_at),
       source: 'original',
       customPrompt: joinVersionLabels(item.title, item.engine, item.folder || undefined),
-      engineLabel: item.engine || null,
+      engineLabel: item.title?.trim()
+        ? `${item.title.trim()}${item.engine ? ` · ${item.engine}` : ''}`
+        : item.engine || null,
       actionLabel: 'תמלול מהספרייה',
       wordCount: (item.edited_text?.trim() || item.text).split(/\s+/).filter(Boolean).length,
       storage: item.local_only ? 'local' : 'cloud',

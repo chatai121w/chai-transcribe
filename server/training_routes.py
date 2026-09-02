@@ -312,7 +312,21 @@ def register_training_routes(app):
         for existing in (ds_dir / "audio").glob("*"):
             if existing != audio_path and hashlib.sha256(existing.read_bytes()).hexdigest() == digest:
                 audio_path.unlink(missing_ok=True)
-                return jsonify({"error": "this audio clip is already in the dataset"}), 409
+                existing_text_path = ds_dir / "texts" / f"{existing.stem}.txt"
+                existing_text = existing_text_path.read_text(encoding="utf-8").strip() if existing_text_path.is_file() else ""
+                if existing_text == text:
+                    stats = _finalize_dataset(ds_dir)
+                    return jsonify({
+                        "index": int(existing.stem),
+                        "audio": str(existing),
+                        "text": str(existing_text_path),
+                        "duration": _audio_duration(existing),
+                        "duplicate": True,
+                        **stats,
+                    })
+                return jsonify({
+                    "error": "this audio clip already exists with different ground-truth text"
+                }), 409
         text_path.write_text(text, encoding="utf-8")
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
         metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")

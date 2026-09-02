@@ -65,6 +65,22 @@ export function useCustomVocabulary() {
     return ok;
   }, [refresh, syncCloud]);
 
+  const addAndSync = useCallback(async (term: string, category?: VocabularyEntry['category'], variants?: string[], metadata?: VocabularyMetadata) => {
+    const ok = addTerm(term, category, variants, metadata);
+    if (!ok) return { ok: false, errors: [] as string[] };
+    refresh();
+    const result = await syncCloud();
+    return { ok: true, errors: result.errors };
+  }, [refresh, syncCloud]);
+
+  const updateAndSync = useCallback(async (originalTerm: string, updates: Partial<Pick<VocabularyEntry, 'term' | 'category' | 'variants' | 'pronunciation' | 'contextTags' | 'approvalStatus' | 'confidence' | 'notes'>>) => {
+    const ok = updateTerm(originalTerm, updates);
+    if (!ok) return { ok: false, errors: [] as string[] };
+    refresh();
+    const result = await syncCloud();
+    return { ok: true, errors: result.errors };
+  }, [refresh, syncCloud]);
+
   const remove = useCallback((term: string) => {
     removeTerm(term);
     refresh();
@@ -90,7 +106,7 @@ export function useCustomVocabulary() {
   }, [refresh, syncCloud]);
 
   return {
-    entries, stats, add, addBulk, update, remove,
+    entries, stats, add, addAndSync, addBulk, update, updateAndSync, remove,
     clearAll, getHotwords, applyCorrections,
     exportData, importData, refresh, syncCloud, cloudState, cloudError,
   };
