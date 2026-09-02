@@ -255,10 +255,10 @@ export const WordContextMenu = ({
       {open && word && (
       <ContextMenuContent
         ref={panelRef}
-        dir="rtl"
         data-testid="floating-word-correction"
         className="z-[100] p-0 text-right pointer-events-auto"
         style={{
+          direction: 'rtl',
           width: expanded ? 'min(36rem, calc(100vw - 2rem))' : '20rem',
           height: expanded ? 'min(42rem, calc(100vh - 2rem))' : undefined,
           minWidth: minimized ? '16rem' : '18rem',
@@ -351,7 +351,7 @@ export const WordContextMenu = ({
             <Languages className="w-3.5 h-3.5 text-blue-500" />
             מילים דומות
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent dir="rtl" className="w-56 text-right">
+          <ContextMenuSubContent style={{ direction: "rtl" }} className="w-56 text-right">
             {similar.length === 0 ? (
               <ContextMenuItem disabled className="text-xs text-muted-foreground text-right">
                 אין הצעות
@@ -372,7 +372,7 @@ export const WordContextMenu = ({
               <ReplaceAll className="h-3.5 w-3.5 text-emerald-600" />
               תקן בכל הטקסט
             </ContextMenuSubTrigger>
-            <ContextMenuSubContent dir="rtl" className="w-72 p-2 text-right">
+            <ContextMenuSubContent style={{ direction: "rtl" }} className="w-72 p-2 text-right">
               <p className="mb-1.5 text-[10px] text-muted-foreground">
                 כל המופעים המדויקים של "{word}" יוחלפו בטקסט הנוכחי.
               </p>
@@ -416,7 +416,7 @@ export const WordContextMenu = ({
               <Wand2 className="w-3.5 h-3.5 text-primary" />
               הצעות תיקון ({uniqueSuggestions.length})
             </ContextMenuSubTrigger>
-            <ContextMenuSubContent dir="rtl" className="w-56 text-right">
+            <ContextMenuSubContent style={{ direction: "rtl" }} className="w-56 text-right">
               {uniqueSuggestions.map((s, i) => (
                 <ContextMenuItem
                   key={`${s}-${i}`}
@@ -444,7 +444,7 @@ export const WordContextMenu = ({
             <Brain className="w-3.5 h-3.5 text-purple-500" />
             הטמע ללמידת AI
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent dir="rtl" className="w-64 p-2 text-right">
+          <ContextMenuSubContent style={{ direction: "rtl" }} className="w-64 p-2 text-right">
             <p className="text-[10px] text-muted-foreground mb-1.5">
               הקלד את ההגייה/האיות הנכון. המערכת תזכור ש-"{word}" צריך להיכתב כך:
             </p>
@@ -515,7 +515,7 @@ export const WordContextMenu = ({
               />
             )}
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent dir="rtl" className="w-48 text-right">
+          <ContextMenuSubContent style={{ direction: "rtl" }} className="w-48 text-right">
             <div className="grid grid-cols-4 gap-1 p-1.5">
               {WORD_HIGHLIGHT_PALETTE.map((p) => (
                 <button

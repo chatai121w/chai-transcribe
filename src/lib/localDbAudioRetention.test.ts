@@ -20,14 +20,14 @@ describe('retainAudioBlob', () => {
       saved_at: 1,
     };
     const writes: Array<{ id: string; name: string }> = [];
-    vi.spyOn(db.audioBlobs, 'get').mockImplementation(async (id: string) => {
+    vi.spyOn(db.audioBlobs, 'get').mockImplementation((async (id: string) => {
       if (id === LAST_AUDIO_ALIAS) return previous;
       return undefined;
-    });
-    vi.spyOn(db.audioBlobs, 'put').mockImplementation(async (record) => {
+    }) as never);
+    vi.spyOn(db.audioBlobs, 'put').mockImplementation((async (record: { id: string; name: string }) => {
       writes.push({ id: record.id, name: record.name });
       return record.id;
-    });
+    }) as never);
     vi.spyOn(db, 'transaction').mockImplementation((async (_mode, _table, scope) => scope()) as typeof db.transaction);
 
     const result = await retainAudioBlob(new Blob(['new-audio']), 'new.wav', 'audio/wav');

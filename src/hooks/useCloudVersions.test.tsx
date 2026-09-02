@@ -75,7 +75,7 @@ describe('useCloudVersions', () => {
 
   it('continues saving to Supabase when the local version cache fails', async () => {
     const { result } = renderHook(() => useCloudVersions(null));
-    let saved: Awaited<ReturnType<typeof result.current.saveVersion>> = null;
+    let saved: { id?: string } | null = null;
 
     await act(async () => {
       saved = await result.current.saveVersion('טקסט מתוקן', 'manual', null, 'תיקון ידני', {
@@ -87,7 +87,7 @@ describe('useCloudVersions', () => {
       transcript_id: 'transcript-1',
       text: 'טקסט מתוקן',
     }));
-    expect(saved?.id).toBe('cloud-version-1');
+    expect((saved as { id?: string } | null)?.id).toBe('cloud-version-1');
     expect(mocks.warn).toHaveBeenCalledWith(
       'Versions',
       'Local version cache failed; continuing with cloud save',

@@ -196,6 +196,56 @@ export type Database = {
           },
         ]
       }
+      asr_pipeline_events: {
+        Row: {
+          comparison_run_id: string | null
+          created_at: string
+          details: Json
+          event_type: string
+          experiment_id: string
+          id: string
+          level: string
+          message: string
+          recording_fingerprint: string | null
+          stage: string
+          user_id: string
+        }
+        Insert: {
+          comparison_run_id?: string | null
+          created_at?: string
+          details?: Json
+          event_type: string
+          experiment_id: string
+          id?: string
+          level?: string
+          message: string
+          recording_fingerprint?: string | null
+          stage: string
+          user_id: string
+        }
+        Update: {
+          comparison_run_id?: string | null
+          created_at?: string
+          details?: Json
+          event_type?: string
+          experiment_id?: string
+          id?: string
+          level?: string
+          message?: string
+          recording_fingerprint?: string | null
+          stage?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asr_pipeline_events_comparison_run_id_fkey"
+            columns: ["comparison_run_id"]
+            isOneToOne: false
+            referencedRelation: "comparison_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       asr_training_runs: {
         Row: {
           audio_duration_ms: number | null
