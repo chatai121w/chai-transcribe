@@ -11,6 +11,7 @@ from typing import Any, Iterable
 REQUIRED_FIELDS = {
     "id", "audio_path", "text", "split", "sha256",
     "speaker_id", "source_id", "gold_source",
+    "previously_used_for_training", "holdout_eligible",
 }
 ALLOWED_SPLITS = {"train", "test"}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -94,6 +95,12 @@ def validate_samples(samples: list[dict[str, Any]], verify_audio: bool = True) -
             raise ValueError(f"sample {row['id']}: split must be train or test")
         if row["gold_source"] != "human_verified":
             raise ValueError(f"sample {row['id']}: Phase A accepts only human_verified Gold")
+        if not isinstance(row["previously_used_for_training"], bool) or not isinstance(row["holdout_eligible"], bool):
+            raise ValueError(f"sample {row['id']}: training-history fields must be explicit booleans")
+        if row["split"] == "test" and row["previously_used_for_training"]:
+            raise ValueError(f"sample {row['id']}: previously trained audio cannot enter the holdout")
+        if row["split"] == "test" and not row["holdout_eligible"]:
+            raise ValueError(f"sample {row['id']}: test audio must be explicitly holdout_eligible")
         if row["id"] in ids:
             raise ValueError(f"duplicate sample id: {row['id']}")
         if not SHA256_RE.fullmatch(str(row["sha256"])):

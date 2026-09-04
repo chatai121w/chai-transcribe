@@ -11,10 +11,13 @@ The single Phase A question is whether a base Whisper/Ivrit model can learn from
 - A sample belongs to exactly one of `train` or `test`; duplicate audio hashes across splits fail preparation.
 - Baseline and candidate use the same audio, Gold, decoding settings, and metric normalization.
 - Raw model output is evaluated as-is: no production post-processing, hotwords, dictionary, teachers, or UI.
+- Lab modules must never import the production `server`, application `src`, or production tooling. Production code must never import or invoke `asr_learning_lab`.
 - Change one experimental variable at a time.
 - A candidate is rejected when the frozen-test regression gate fails.
 
 The full source-of-truth plan is in [PROOF_OF_LEARNING_PLAN.md](PROOF_OF_LEARNING_PLAN.md).
+
+The current local-data audit is in [reports/EXISTING_DATA_READINESS_2026-09-04.md](reports/EXISTING_DATA_READINESS_2026-09-04.md). Existing production datasets are never imported automatically.
 
 ## Manifest
 
@@ -31,6 +34,12 @@ python -m asr_learning_lab.src.compare --baseline asr_learning_lab/artifacts/run
 ```
 
 Heavy audio, model caches, datasets, checkpoints, and generated reports stay under ignored `artifacts/` or local storage. Only manifests, hashes, configs, code, tests, and intentionally selected reports belong in Git.
+
+To audit legacy data without copying or relabeling it:
+
+```powershell
+python -m asr_learning_lab.src.audit_legacy_dataset <dataset-dir> --known-trained-audio <audio-used-before.wav> --output asr_learning_lab/artifacts/legacy-audit.json
+```
 
 ## Verification
 
