@@ -1,0 +1,20 @@
+experiment:
+  name: proof-of-learning-run-001
+  seed: 17
+model:
+  id: openai/whisper-small
+  language: he
+  task: transcribe
+  device: auto
+  dtype: auto
+decoding:
+  batch_size: 1
+  num_beams: 1
+  temperature: 0.0
+  condition_on_prev_tokens: false
+evaluation:
+  splits: [train, test]
+  normalization: unicode_nfkc_whitespace
+outputs:
+  save_raw_transcripts: true
+  record_audio_sha256: true

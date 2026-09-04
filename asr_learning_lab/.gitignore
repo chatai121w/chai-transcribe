@@ -1,0 +1,9 @@
+artifacts/
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.safetensors
+*.bin
+__pycache__/
+.pytest_cache/

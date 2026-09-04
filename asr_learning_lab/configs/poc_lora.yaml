@@ -1,0 +1,33 @@
+experiment:
+  name: proof-of-learning-run-001-lora
+  seed: 17
+  changed_variable: lora_training
+model:
+  id: openai/whisper-small
+  language: he
+  task: transcribe
+lora:
+  rank: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules: [q_proj, v_proj]
+training:
+  train_split: train
+  forbidden_splits: [test]
+  max_steps: 50
+  learning_rate: 0.0001
+  warmup_steps: 5
+  per_device_batch_size: 1
+  gradient_accumulation_steps: 4
+  fp16: true
+  save_steps: 25
+  log_steps: 5
+checkpoint:
+  require_save: true
+  require_reload_test: true
+regression_gate:
+  metric: wer
+  holdout_split: test
+  max_relative_regression: 0.0
+  require_train_improvement: true
+  require_holdout_non_regression: true
