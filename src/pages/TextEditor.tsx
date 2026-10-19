@@ -1130,7 +1130,8 @@ const TextEditor = () => {
       const id = transcriptIdRef.current || transcriptId || await ensureCloudTranscript();
       if (!id) throw new Error('לא ניתן ליצור רשומת מקור עבור התמלול');
 
-      let current = transcripts.find((item) => item.id === id);
+      let current: { audio_file_path: string | null; folder_id?: string | null } | undefined =
+        transcripts.find((item) => item.id === id);
       if (!current) {
         const { data, error } = await supabase
           .from('transcripts')

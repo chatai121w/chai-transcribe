@@ -13,4 +13,11 @@ describe('isExpectedNavigationAbort', () => {
     expect(isExpectedNavigationAbort(new Error('net::ERR_ABORTED'))).toBe(false);
     expect(isExpectedNavigationAbort(new Error('permission denied'))).toBe(false);
   });
+
+  it('recognizes navigation cancellation in an error cause', () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    const error = Object.assign(new Error('request interrupted'), { cause: 'net::ERR_ABORTED' });
+    expect(isExpectedNavigationAbort(error)).toBe(true);
+    expect(isExpectedNavigationAbort(new Error('permission denied'))).toBe(false);
+  });
 });
