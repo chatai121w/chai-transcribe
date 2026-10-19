@@ -1130,7 +1130,14 @@ const TextEditor = () => {
       const id = transcriptIdRef.current || transcriptId || await ensureCloudTranscript();
       if (!id) throw new Error('לא ניתן ליצור רשומת מקור עבור התמלול');
 
-      let current = transcripts.find((item) => item.id === id);
+      let current: {
+        audio_file_path: string | null;
+        folder_id?: string | null;
+        title: string | null;
+        text: string;
+        tags: string[] | null;
+      } | undefined =
+        transcripts.find((item) => item.id === id);
       if (!current) {
         const { data, error } = await supabase
           .from('transcripts')
@@ -1177,7 +1184,7 @@ const TextEditor = () => {
           audioFileName: audioFileName || current?.title || 'recording',
           initialTranscript: current.text || originalTextRef.current,
           groundTruth: text.trim(),
-          sampleType: inferAsrSampleType(current?.tags, current?.title || audioFileName),
+          sampleType: inferAsrSampleType(current.tags ?? [], current.title || audioFileName),
         },
       });
     } catch (error) {

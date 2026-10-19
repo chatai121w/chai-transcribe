@@ -12,6 +12,9 @@ const result = (wer: number, cer: number, termRecall: number): PipelineRunResult
   wordTimings: [],
   elapsedMs: 1,
   appliedKnowledge: 0,
+  knowledgeTrace: [],
+  traceValidationErrors: [],
+  traceOverlaps: [],
   metrics: { wer, cer, orthographicWer: wer, orthographicCer: cer, termRecall, lenRatio: 1 },
 });
 
