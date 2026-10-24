@@ -44,6 +44,12 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import numpy as np  # noqa: E402
 
+sys.path.insert(0, os.path.join(HERE, "scripts"))
+try:
+    import machine_state as ms
+except ImportError:
+    ms = None
+
 BENCH_DIR = os.path.join(HERE, "benchmark_private", "approved")
 AUDIO_DIR = os.path.join(HERE, "benchmark_private", "audio")
 RESULTS_DIR = os.path.join(HERE, "benchmark_private", "regression")
@@ -117,6 +123,58 @@ def wilson(c, n, z=1.96):
 
 
 # ------------------------------------------------------------------ המדידות
+
+#: קובץ רשימת החבילות המלאה, לנקודת חזרה.
+#:
+#: למה זה נחוץ: התקנת חבילה אחת משדרגת תלויות **בשקט**. בניסיון
+#: אחד התקנה של מנוע הגרפים שדרגה את numpy מ-2.4.4 ל-2.5, מה
+#: ששבר את numba, ששבר את librosa, ששבר את שכפול הקול.
+#:
+#: החזרה לא הייתה שלמה: הוחזר מה שהותקן ביודעין, אבל לא מה
+#: שהשתנה כנזק צדדי. בלי רשימה מלאה אי אפשר לדעת מה זז.
+FREEZE_DIR = os.path.join(RESULTS_DIR, "freeze")
+
+
+def freeze_packages(label):
+    """שומר את רשימת החבילות המלאה."""
+    import subprocess
+    os.makedirs(FREEZE_DIR, exist_ok=True)
+    path = os.path.join(FREEZE_DIR, f"{label}.txt")
+    try:
+        r = subprocess.run([sys.executable, "-m", "pip", "freeze"],
+                           capture_output=True, text=True, timeout=120)
+        if r.returncode == 0:
+            io.open(path, "w", encoding="utf-8").write(r.stdout)
+            return path
+    except Exception:
+        pass
+    return None
+
+
+def compare_packages(label_a, label_b):
+    """מה השתנה בין שתי רשימות חבילות."""
+    pa = os.path.join(FREEZE_DIR, f"{label_a}.txt")
+    pb = os.path.join(FREEZE_DIR, f"{label_b}.txt")
+    if not (os.path.exists(pa) and os.path.exists(pb)):
+        return None
+
+    def read(p):
+        out = {}
+        for line in io.open(p, encoding="utf-8"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "==" in line:
+                n, v = line.split("==", 1)
+                out[n.lower()] = v
+        return out
+
+    a, b = read(pa), read(pb)
+    changed = [(n, a[n], b[n]) for n in a if n in b and a[n] != b[n]]
+    added = [n for n in b if n not in a]
+    removed = [n for n in a if n not in b]
+    return {"changed": changed, "added": added, "removed": removed}
+
 
 def measure_environment():
     import importlib.metadata as md
@@ -291,6 +349,31 @@ def run_all(args):
     print("בדיקת רגרסיה")
     print("=" * 74)
 
+    # הניטור עוטף את כל המדידה. בלי זה אי אפשר לדעת אם מספר מהירות
+    # מתאר את המערכת או את מה שרץ במקביל — ואותה עבודה בדיוק כבר
+    # נמדדה פי שלושה עשר לאט יותר רק בגלל עומס.
+    monitor = ms.Monitor() if ms else None
+    if monitor:
+        monitor.__enter__()
+        before = monitor.before
+        c = before.get("cpu") or {}
+        m = before.get("memory") or {}
+        g = before.get("gpu") or {}
+        print(f"\nמצב המחשב בהתחלה:")
+        if c:
+            print(f"  מעבד {c['percent']}% · {c['cores']} ליבות")
+        if m:
+            print(f"  זיכרון {m['free_gb']} ג׳יגה פנוי מתוך {m['total_gb']}")
+        if g and g.get("mem_total"):
+            print(f"  כרטיס: {g['mem_used']:.0f} מתוך {g['mem_total']:.0f} מגה "
+                  f"· חום {g['temp']:.0f} · תדר {g['clock']:.0f}")
+        heavy = [n for n in before.get("neighbours", []) if n["cpu_pct"] >= 10]
+        if heavy:
+            print("  תוכנות כבדות שרצות במקביל:")
+            for n in heavy[:5]:
+                print(f"     {n['name']:26} מעבד {n['cpu_pct']}% · "
+                      f"זיכרון {n['mem_mb']} מגה")
+
     result = {"environment": measure_environment()}
     env = result["environment"]
     print("\nסביבה:")
@@ -350,12 +433,47 @@ def run_all(args):
         if w != "error":
             print(f"  {w:12} {ipa}")
 
+    # סוגרים את הניטור ומסכמים את מצב המחשב לאורך המדידה.
+    if monitor:
+        monitor.__exit__(None, None, None)
+        mstate = monitor.summary()
+        result["machine"] = mstate
+        v, problems = ms.verdict(mstate)
+        result["machine_verdict"] = v
+        result["machine_problems"] = problems
+
+        print("\n" + "-" * 74)
+        print("מצב המחשב לאורך המדידה")
+        print("-" * 74)
+        for label, key in (("מעבד", "cpu"), ("זיכרון פנוי", "free_gb"),
+                           ("ניצול הכרטיס", "gpu_util"),
+                           ("זיכרון הכרטיס", "gpu_mem"),
+                           ("חום הכרטיס", "gpu_temp"),
+                           ("תדר הכרטיס", "gpu_clock")):
+            st = (mstate or {}).get(key)
+            if st:
+                print(f"  {label:16} ממוצע {st['avg']:8} · "
+                      f"מ-{st['min']} עד {st['max']}")
+        if (mstate or {}).get("cpu_busy_pct_of_time") is not None:
+            print(f"  {'מעבד מעל 60%':16} {mstate['cpu_busy_pct_of_time']}% מהזמן")
+
+        print(f"\n  מצב המדידה: {v}")
+        for pr in problems:
+            print("     - " + pr)
+        if v == "תחת עומס":
+            print()
+            print("  !! מספרי המהירות במדידה הזאת אינם ניתנים להשוואה.")
+            print("     הדיוק עדיין תקף — הוא אינו מושפע מעומס.")
+
     if args.save:
         os.makedirs(RESULTS_DIR, exist_ok=True)
         path = os.path.join(RESULTS_DIR, f"{args.save}.json")
         json.dump(result, io.open(path, "w", encoding="utf-8"),
                   ensure_ascii=False, indent=2)
         append_journal(args.save, result)
+        fp = freeze_packages(args.save)
+        if fp:
+            print(f"רשימת החבילות נשמרה: {fp}")
         print(f"\nנשמר: {path}")
         print(f"נרשם ביומן המדידות: {JOURNAL}")
 
@@ -485,6 +603,14 @@ def append_journal(label, result):
         "realtime_factor": t.get("realtime_factor"),
         "tts_factor": (result.get("tts") or {}).get("realtime_factor"),
         "tts_providers": (result.get("tts") or {}).get("providers"),
+        # בלי המצב הזה אי אפשר לדעת אם מספר מהירות מתאר את המערכת
+        # או את מה שרץ במקביל.
+        "machine_verdict": result.get("machine_verdict"),
+        "machine_problems": result.get("machine_problems", []),
+        "cpu_avg": ((result.get("machine") or {}).get("cpu") or {}).get("avg"),
+        "cpu_busy_pct": (result.get("machine") or {}).get("cpu_busy_pct_of_time"),
+        "free_gb_min": ((result.get("machine") or {}).get("free_gb") or {}).get("min"),
+        "gpu_mem_max": ((result.get("machine") or {}).get("gpu_mem") or {}).get("max"),
         "onnx_providers": (result.get("environment") or {}).get("onnx_providers"),
         "versions": {k: v for k, v in (result.get("environment") or {}).items()
                      if k in ("torch", "ctranslate2", "onnxruntime",
@@ -962,10 +1088,57 @@ def compare(args):
                 print("\nאיך חוזרים:")
                 print_rollback_help(best_g)
 
+    # --- תנאי המדידה.
+    #
+    # זאת ההגנה החשובה ביותר על מספרי המהירות. מדידה שנלקחה כשהמעבד
+    # היה עמוס אינה ניתנת להשוואה לאחת שנלקחה על מחשב פנוי — אותה
+    # עבודה בדיוק נמדדה פי שלושה עשר לאט יותר רק בגלל עומס.
+    #
+    # הדיוק אינו מושפע מעומס: מנוע עמוס עונה את אותה תשובה, רק
+    # לאט יותר. לכן ההסתייגות חלה על המהירות בלבד.
+    cur_v = current.get("machine_verdict")
+    speed_comparable = True
+    if cur_v:
+        print("\n" + "-" * 78)
+        print("תנאי המדידה")
+        print("-" * 78)
+        mach = current.get("machine") or {}
+        cpu = mach.get("cpu") or {}
+        if cpu:
+            print(f"  מעבד: ממוצע {cpu['avg']}% · שיא {cpu['max']}%")
+        if mach.get("cpu_busy_pct_of_time") is not None:
+            print(f"  המעבד היה מעל 60% במשך "
+                  f"{mach['cpu_busy_pct_of_time']}% מהזמן")
+        print(f"  מצב: {cur_v}")
+        for pr in current.get("machine_problems", []):
+            print("     - " + pr)
+
+        if cur_v == "תחת עומס":
+            speed_comparable = False
+            notes.append(
+                "המדידה נלקחה תחת עומס. מספרי המהירות שלה אינם ניתנים "
+                "להשוואה — הדיוק כן תקף.")
+
+        if best:
+            bv = best.get("machine_verdict")
+            if bv and bv != cur_v:
+                speed_comparable = False
+                notes.append(
+                    f"תנאי המדידה שונים מהשיא: אז {bv!r}, עכשיו {cur_v!r}. "
+                    "אי אפשר להשוות מהירות בין תנאים שונים.")
+            elif not bv:
+                speed_comparable = False
+                notes.append(
+                    "לשיא ההיסטורי אין נתוני מצב מחשב, ולכן אי אפשר לדעת "
+                    "אם המהירות שלו נמדדה בתנאים דומים.")
+
     # --- מהירות. איטיות אינה רגרסיה בדיוק, אבל כדאי לדעת.
     prev_rows = [r for r in rows if r.get("label") != name and r.get("tts_factor")]
     cur_tts = (current.get("tts") or {}).get("realtime_factor")
-    if cur_tts and prev_rows:
+    if cur_tts and prev_rows and not speed_comparable:
+        print("\nהקראה: המספר הוא " + str(cur_tts) +
+              ", אבל אי אפשר להשוות אותו — תנאי המדידה שונים.")
+    elif cur_tts and prev_rows:
         fastest = min(prev_rows, key=lambda r: r["tts_factor"])
         print(f"\nהקראה:")
         print(f"  עכשיו:      יחס {cur_tts}")
@@ -975,6 +1148,29 @@ def compare(args):
                          f"{cur_tts / fastest['tts_factor']:.1f} מהטוב ביותר.")
         elif cur_tts < fastest["tts_factor"]:
             print(f"  מהיר פי {fastest['tts_factor'] / cur_tts:.1f} — שיא חדש.")
+
+    # --- מה השתנה בחבילות, כולל מה שהשתנה בלי שביקשנו.
+    #
+    # זה המקום שתופס את הנזק הצדדי. התקנה אחת יכולה לשדרג תלות
+    # רחוקה ולשבור משהו שלא נגעו בו בכלל.
+    if best and best.get("label"):
+        pkg = compare_packages(best["label"], name)
+        if pkg and (pkg["changed"] or pkg["added"] or pkg["removed"]):
+            print("\n" + "-" * 78)
+            print("שינויים בחבילות מול השיא")
+            print("-" * 78)
+            for n, va, vb in pkg["changed"]:
+                print(f"  {n}: {va} -> {vb}")
+            for n in pkg["added"]:
+                print(f"  נוסף: {n}")
+            for n in pkg["removed"]:
+                print(f"  הוסר: {n}")
+            notes.append(
+                f"{len(pkg['changed'])} חבילות שינו גרסה, {len(pkg['added'])} "
+                f"נוספו ו-{len(pkg['removed'])} הוסרו. חלקן אולי השתנו בלי "
+                f"שביקשנו — התקנה משדרגת תלויות בשקט.")
+        elif pkg:
+            print("\n  החבילות זהות בדיוק לשיא.")
 
     # --- ממיר הצלילים. אינו תלוי בספריות חיצוניות, וחייב להיות זהה.
     for other in sorted(glob.glob(os.path.join(RESULTS_DIR, "*.json"))):
