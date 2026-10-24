@@ -26,7 +26,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GuidedTabs, TabGuideButton } from "@/components/guide/GuidedTabs";
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CustomProvidersDialog } from '@/components/CustomProvidersDialog';
@@ -524,11 +525,14 @@ export default function Translation() {
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Card className="space-y-4 rounded-md p-4">
-          <Tabs defaultValue="library" dir="rtl">
+          <GuidedTabs guidePrefix="translation" defaultValue="library" dir="rtl">
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="library"><FolderOpen className="ml-2 h-4 w-4" /> מהתיקיות</TabsTrigger>
               <TabsTrigger value="file"><Upload className="ml-2 h-4 w-4" /> מהמחשב</TabsTrigger>
               <TabsTrigger value="paste"><FileText className="ml-2 h-4 w-4" /> הדבקת טקסט</TabsTrigger>
+              {/* דוחף את כפתור ההסבר לקצה השני של הרצועה. */}
+              <div className="flex-1" />
+              <TabGuideButton />
             </TabsList>
             <TabsContent value="library" className="space-y-3 pt-2">
               <div className="grid gap-2 sm:grid-cols-2">
@@ -560,7 +564,7 @@ export default function Translation() {
             <TabsContent value="paste" className="pt-3">
               <Input value={sourceTitle} onChange={event => setSourceTitle(event.target.value)} placeholder="שם התרגום" />
             </TabsContent>
-          </Tabs>
+          </GuidedTabs>
 
           <Textarea dir="auto" value={sourceText} onChange={event => { setSourceText(event.target.value); setSourceTranscriptId(null); }} placeholder="הטקסט לתרגום יופיע כאן" className="min-h-[320px] resize-y text-base leading-7" />
           <div className="flex flex-wrap items-center justify-between gap-2">

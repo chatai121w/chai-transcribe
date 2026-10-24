@@ -7,7 +7,8 @@ import { FileUploader } from "@/components/FileUploader";
 import { AudioRecorder } from "@/components/AudioRecorder";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GuidedTabs, TabGuideButton } from "@/components/guide/GuidedTabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -2146,7 +2147,7 @@ const Index = () => {
         </div>
 
         {/* Navigation Tabs */}
-        <Tabs defaultValue="transcribe" className="w-full" dir="rtl">
+        <GuidedTabs guidePrefix="index" defaultValue="transcribe" className="w-full" dir="rtl">
           <TabsList className="grid w-full grid-cols-3 mb-6">
             <TabsTrigger value="transcribe">תמלול</TabsTrigger>
             <TabsTrigger 
@@ -2160,8 +2161,11 @@ const Index = () => {
               <Youtube className="w-4 h-4 ml-1 text-red-500" />
               YouTube
             </TabsTrigger>
+            {/* דוחף את כפתור ההסבר לקצה השני של הרצועה. */}
+            <div className="flex-1" />
+            <TabGuideButton />
           </TabsList>
-        </Tabs>
+        </GuidedTabs>
 
         {/* Incoming file banner — shows immediately when a file is received from another page */}
         {incomingFileBanner && (

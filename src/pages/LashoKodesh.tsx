@@ -2,7 +2,8 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { WaveformPlayer, type WaveformPlayerHandle } from "@/components/WaveformPlayer";
 import { TranscriptEditor } from "@/components/TranscriptEditor";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GuidedTabs, TabGuideButton } from "@/components/guide/GuidedTabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -2008,7 +2009,7 @@ export default function LashoKodesh() {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={(tab) => setSearchParams({ tab })} dir="rtl">
+      <GuidedTabs guidePrefix="lashon-kodesh" value={activeTab} onValueChange={(tab) => setSearchParams({ tab })} dir="rtl">
         <TabsList className="grid h-auto w-full grid-cols-2 md:grid-cols-4">
           <TabsTrigger value="transcribe" className="gap-2">
             <Mic className="w-4 h-4" />
@@ -2026,6 +2027,9 @@ export default function LashoKodesh() {
             <BarChart3 className="w-4 h-4" />
             בנצ׳מארק
           </TabsTrigger>
+          {/* דוחף את כפתור ההסבר לקצה השני של הרצועה. */}
+          <div className="flex-1" />
+          <TabGuideButton />
         </TabsList>
 
         <TabsContent value="transcribe" className="mt-6">
@@ -2040,7 +2044,7 @@ export default function LashoKodesh() {
         <TabsContent value="benchmark" className="mt-6">
           <TabBenchmark />
         </TabsContent>
-      </Tabs>
+      </GuidedTabs>
     </div>
   );
 }

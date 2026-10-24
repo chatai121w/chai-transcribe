@@ -9,7 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { GuidedTabs, TabGuideButton } from "@/components/guide/GuidedTabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Youtube, Loader2, Download, FileText, Music, Video as VideoIcon,
@@ -346,13 +347,16 @@ export default function YouTubePage() {
         </Button>
       </div>
 
-      <Tabs defaultValue="new">
+      <GuidedTabs guidePrefix="youtube" defaultValue="new">
         <TabsList className="mb-4">
           <TabsTrigger value="new"><Youtube className="w-4 h-4 ml-2" />משימה חדשה</TabsTrigger>
           <TabsTrigger value="manager">
             <History className="w-4 h-4 ml-2" />מנהל הורדות
             {jobs.length > 0 && <Badge variant="secondary" className="mr-2">{jobs.length}</Badge>}
           </TabsTrigger>
+          {/* דוחף את כפתור ההסבר לקצה השני של הרצועה. */}
+          <div className="flex-1" />
+          <TabGuideButton />
         </TabsList>
 
         <TabsContent value="new" className="space-y-4">
@@ -773,7 +777,7 @@ export default function YouTubePage() {
             )}
           </Card>
         </TabsContent>
-      </Tabs>
+      </GuidedTabs>
     </div>
   );
 }

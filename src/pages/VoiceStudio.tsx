@@ -4,7 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GuidedTabs, TabGuideButton } from "@/components/guide/GuidedTabs";
 import {
   clearEnhanceQueueCompleted,
   getEnhanceQueueJobs,
@@ -201,13 +202,16 @@ export default function VoiceStudio() {
         </div>
       </div>
 
-      <Tabs defaultValue="enhance" className="space-y-4" dir="rtl">
+      <GuidedTabs guidePrefix="voice-studio" defaultValue="enhance" className="space-y-4" dir="rtl">
         <TabsList className="h-auto p-1.5 rounded-xl bg-muted/60 border flex flex-wrap justify-start gap-1">
           <TabsTrigger value="enhance" className="rounded-lg data-[state=active]:shadow-sm">שיפור וטעינה</TabsTrigger>
           <TabsTrigger value="compare" className="rounded-lg data-[state=active]:shadow-sm gap-1"><Zap className="w-3.5 h-3.5" />השוואת מנועים</TabsTrigger>
           <TabsTrigger value="batch" className="rounded-lg data-[state=active]:shadow-sm">קבצים ותיקיות</TabsTrigger>
           <TabsTrigger value="read" className="rounded-lg data-[state=active]:shadow-sm gap-1"><Volume2 className="w-3.5 h-3.5" />הקראה והקלטה</TabsTrigger>
           <TabsTrigger value="flows" className="rounded-lg data-[state=active]:shadow-sm">זרימות עבודה</TabsTrigger>
+          {/* דוחף את כפתור ההסבר לקצה השני של הרצועה. */}
+          <div className="flex-1" />
+          <TabGuideButton />
         </TabsList>
 
         <TabsContent value="enhance" className="mt-0 space-y-5">
@@ -384,7 +388,7 @@ export default function VoiceStudio() {
             </CardContent>
           </Card>
         </TabsContent>
-      </Tabs>
+      </GuidedTabs>
 
       {/* Enhancement Queue */}
       <Card>

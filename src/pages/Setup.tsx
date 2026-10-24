@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GuidedTabs, TabGuideButton } from "@/components/guide/GuidedTabs";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
@@ -302,7 +303,7 @@ const BrowserSetup = () => {
         </Card>
 
         {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)} dir="rtl" className="space-y-4">
+        <GuidedTabs guidePrefix="setup" value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)} dir="rtl" className="space-y-4">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="scan" className="gap-1.5 text-xs sm:text-sm">
               {statusIcon(tabStatus.scan)}
@@ -324,6 +325,9 @@ const BrowserSetup = () => {
               <PlayCircle className="h-4 w-4 hidden sm:inline" />
               אימות
             </TabsTrigger>
+            {/* דוחף את כפתור ההסבר לקצה השני של הרצועה. */}
+            <div className="flex-1" />
+            <TabGuideButton />
           </TabsList>
 
           {/* ===== Tab 1: System Scan ===== */}
@@ -731,7 +735,7 @@ const BrowserSetup = () => {
               </CardContent>
             </Card>
           </TabsContent>
-        </Tabs>
+        </GuidedTabs>
       </div>
     </div>
   );

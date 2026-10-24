@@ -86,8 +86,26 @@ export default {
             height: "0",
           },
         },
+        // מסך ההדרכה. המשכים לקוחים מכללי התנועה של המערכת:
+        // הופעה 167 אלפיות. ארוך מזה מרגיש איטי, קצר מזה נראה כקפיצה.
+        "guide-backdrop": {
+          from: { opacity: "0" },
+          to: { opacity: "1" },
+        },
+        "guide-panel": {
+          // ההגדלה מ-0.985 ולא מ-0.9: שינוי גדול נראה כקפיצה.
+          from: { opacity: "0", transform: "scale(0.985) translateY(8px)" },
+          to: { opacity: "1", transform: "scale(1) translateY(0)" },
+        },
+        "guide-card": {
+          from: { opacity: "0", transform: "translateY(10px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
+        "guide-backdrop": "guide-backdrop 167ms ease-out both",
+        "guide-panel": "guide-panel 167ms cubic-bezier(0.16, 1, 0.3, 1) both",
+        "guide-card": "guide-card 167ms cubic-bezier(0.16, 1, 0.3, 1) both",
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "shimmer": "shimmer 1.5s infinite",

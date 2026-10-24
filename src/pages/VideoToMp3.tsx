@@ -92,7 +92,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GuidedTabs, TabGuideButton } from "@/components/guide/GuidedTabs";
 import AudioEnhanceDialog from "@/components/AudioEnhanceDialog";
 
 // Lazy-loaded advanced cut panel
@@ -866,7 +867,8 @@ export default function VideoToMp3() {
       </div>
 
 
-      <Tabs
+      <GuidedTabs
+        guidePrefix="video-to-mp3"
         value={activeTab}
         onValueChange={(value) => {
           const next = value as "convert" | "extract" | "cut";
@@ -889,6 +891,9 @@ export default function VideoToMp3() {
             <Scissors className="w-4 h-4" />
             חיתוך קבצים
           </TabsTrigger>
+          {/* דוחף את כפתור ההסבר לקצה השני של הרצועה. */}
+          <div className="flex-1" />
+          <TabGuideButton />
         </TabsList>
 
 
@@ -1646,7 +1651,7 @@ export default function VideoToMp3() {
             />
           </Suspense>
         </TabsContent>
-      </Tabs>
+      </GuidedTabs>
 
       {/* Aggregated completed-files panel (cut + convert results) */}
       <CompletedFilesPanel

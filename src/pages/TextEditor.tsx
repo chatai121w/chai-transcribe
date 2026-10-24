@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } fro
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GuidedTabs, TabGuideButton } from "@/components/guide/GuidedTabs";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
 import { SyncMirrorLayout } from "@/components/SyncMirrorLayout";
@@ -2526,7 +2527,7 @@ const TextEditor = () => {
 
 
         {/* Main Content */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" dir="rtl">
+        <GuidedTabs guidePrefix="text-editor" value={activeTab} onValueChange={setActiveTab} className="w-full" dir="rtl">
           {/* Primary tabs — core workflow */}
           {(() => {
             const orderedPrimary = tabOrder
@@ -2546,6 +2547,9 @@ const TextEditor = () => {
                         {tab.label}
                       </TabsTrigger>
                     ))}
+                    {/* דוחף את כפתור ההסבר לקצה השני של הרצועה. */}
+                    <div className="flex-1" />
+                    <TabGuideButton />
                   </TabsList>
                 )}
                 {orderedSecondary.length > 0 && (
@@ -3075,7 +3079,7 @@ const TextEditor = () => {
               /></LazyErrorBoundary>
             </CollapsibleWidget>
           </TabsContent>
-        </Tabs>
+        </GuidedTabs>
 
         <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
         <TranscriptFolderDialog

@@ -1,7 +1,8 @@
 import { lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { BookOpen, BrainCircuit, ScrollText, ShieldCheck, Users } from 'lucide-react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GuidedTabs, TabGuideButton } from "@/components/guide/GuidedTabs";
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -29,13 +30,16 @@ export default function PersonalLearning() {
         <p className="text-sm text-muted-foreground mt-1">מקום אחד לניהול המידע שמשפיע על זיהוי ותיקון התמלול.</p>
       </header>
 
-      <Tabs value={activeTab} onValueChange={(tab) => setSearchParams({ tab })}>
+      <GuidedTabs guidePrefix="personal-learning" value={activeTab} onValueChange={(tab) => setSearchParams({ tab })}>
         <TabsList className="grid h-auto w-full grid-cols-2 md:grid-cols-5">
           <TabsTrigger value="vocabulary"><BookOpen className="h-4 w-4 ml-1" />אוצר מילים</TabsTrigger>
           <TabsTrigger value="corrections"><BrainCircuit className="h-4 w-4 ml-1" />תיקונים נלמדים</TabsTrigger>
           <TabsTrigger value="definitive"><ShieldCheck className="h-4 w-4 ml-1" />תיקונים חד־משמעיים</TabsTrigger>
           <TabsTrigger value="profiles"><Users className="h-4 w-4 ml-1" />פרופילי הגייה</TabsTrigger>
           <TabsTrigger value="loshon-kodesh"><ScrollText className="h-4 w-4 ml-1" />לשון הקודש</TabsTrigger>
+          {/* דוחף את כפתור ההסבר לקצה השני של הרצועה. */}
+          <div className="flex-1" />
+          <TabGuideButton />
         </TabsList>
 
         <Suspense fallback={<LoadingPanel />}>
@@ -50,7 +54,7 @@ export default function PersonalLearning() {
           </TabsContent>
           <TabsContent value="loshon-kodesh" className="mt-4"><LoshonKodeshRules embedded /></TabsContent>
         </Suspense>
-      </Tabs>
+      </GuidedTabs>
     </main>
   );
 }
