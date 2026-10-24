@@ -14,6 +14,7 @@ import { debugLog } from "@/lib/debugLogger";
 import { AlignmentStatusBanner } from "@/components/AlignmentStatusBanner";
 import type { TextVersion } from "@/components/TextEditHistory";
 import type { WordTiming, SyncAudioPlayerRef } from "@/components/SyncAudioPlayer";
+import { SubtitleDropZone } from "@/components/SubtitleDropZone";
 import { TextStyleControl } from "@/components/TextStyleControl";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -361,6 +362,31 @@ const TextEditor = () => {
     return () => { cancelled = true; };
   }, [audioBlob]);
   const [wordTimings, setWordTimings] = useState<WordTiming[]>([]);
+  // אורך האודיו, לבדיקה שקובץ הכתוביות שמייבאים באמת שייך להקלטה הזו.
+  // נמדד מאלמנט זמני ולא מהנגן, כי הנגן נטען בעצלתיים ועלול עדיין לא להיות
+  // מוכן ברגע שהמשתמש גורר קובץ.
+  const [audioDurationSeconds, setAudioDurationSeconds] = useState<number | null>(null);
+  useEffect(() => {
+    if (!audioUrl) {
+      setAudioDurationSeconds(null);
+      return;
+    }
+    let cancelled = false;
+    const probe = new Audio();
+    probe.preload = "metadata";
+    const onMeta = () => {
+      if (!cancelled && Number.isFinite(probe.duration) && probe.duration > 0) {
+        setAudioDurationSeconds(probe.duration);
+      }
+    };
+    probe.addEventListener("loadedmetadata", onMeta);
+    probe.src = audioUrl;
+    return () => {
+      cancelled = true;
+      probe.removeEventListener("loadedmetadata", onMeta);
+      probe.src = "";
+    };
+  }, [audioUrl]);
   const wordTimingsRef = useRef<WordTiming[]>([]);
   const wordTimingsRevisionRef = useRef(0);
   const [audioLearningCandidates, setAudioLearningCandidates] = useState<AudioLearningCandidate[]>([]);
@@ -2656,6 +2682,21 @@ const TextEditor = () => {
               </Suspense>
             ) : (
               <Suspense fallback={null}>
+              {/* ייבוא כתוביות — מופיע רק כשיש אודיו ואין עדיין תזמונים, כדי
+                  שלא יתפוס מקום אחרי שהטקסט כבר מסונכרן. */}
+              {audioUrl && wordTimings.length === 0 && (
+                <div className="mb-3">
+                  <SubtitleDropZone
+                    audioDuration={audioDurationSeconds}
+                    onImported={(timings, importedText) => {
+                      setWordTimings(timings);
+                      if (!text.trim()) setText(importedText);
+                      setSyncEnabled(true);
+                      toast.success(`נטענו ${timings.length} מילים מקובץ הכתוביות`);
+                    }}
+                  />
+                </div>
+              )}
               <div className="relative rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden">
                 {/* Quick access to floating mode, right on the player itself */}
                 <Button

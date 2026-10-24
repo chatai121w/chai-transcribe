@@ -214,6 +214,12 @@ _request_history: deque = deque(maxlen=MAX_REQUEST_HISTORY)
 # Server start time
 _server_start_time = time.time()
 
+# Measured ceiling for faster-whisper's prompt-spliced "hotwords" on Hebrew audio.
+# 8 terms beat 0 terms; 25 and 115 were both far worse than sending nothing.
+# Raising this without re-running the measurement will silently degrade accuracy.
+MAX_EFFECTIVE_HOTWORDS = 12
+
+
 def _resolve_prompt_and_hotwords(language, user_initial_prompt, user_hotwords, loshon_kodesh):
     """Decide which initial_prompt and hotwords to send to Whisper.
 
@@ -233,14 +239,42 @@ def _resolve_prompt_and_hotwords(language, user_initial_prompt, user_hotwords, l
     else:
         prompt = None
 
-    # Build hotword list: user words always first, then language defaults
+    # Build the hotword list, highest priority first — the token budget below keeps
+    # a PREFIX, so whatever is appended last is what gets thrown away.
+    #
+    # MEASURED on real audio, 2026-10-23, clip 00013 of approved-ground-truth
+    # (3 identical repeat runs, word error rate against human ground truth):
+    #
+    #     no terms ................ 55.6%
+    #     8 terms, relevant ....... 33.3%   <-- best
+    #     25 terms, mixed ......... 77.8%
+    #     115 terms (full list) ... 100.0%
+    #
+    # faster-whisper does NOT do decoder biasing: it splices the hotword string
+    # into the prompt context as text, so Whisper will happily transcribe the
+    # terms themselves. Observed leakage with the long list: the word "הטמיו"
+    # from the term list appeared in the output, and segments began repeating.
+    #
+    # Therefore MORE terms is actively worse. A short list of terms that really
+    # occur in THIS recording helps a lot; the full generic list hurts badly.
+    # The cap below is the operative guard — do not raise it without re-measuring.
+    # Follow-up measurement, same clips, with the cap already in place:
+    #
+    #     clip     no terms   generic LK list   8 terms for THIS clip
+    #     00013      55.6%        122.2%              33.3%
+    #     00011     144.4%        155.6%             111.1%
+    #     00018      70.0%         70.0%              70.0%
+    #
+    # The generic list loses to sending NOTHING at every size we tried — capping it
+    # at 12 did not rescue it, because the first terms of a fixed list ("הקדוש ברוך
+    # הוא", "השם יתברך", …) have nothing to do with the recording at hand. Relevance
+    # is what matters, not quantity. So a Loshon Kodesh run no longer injects the
+    # stock list at all; it only forwards terms the caller chose for this audio.
     sources = []
     if user_hotwords and user_hotwords.strip():
-        sources.append(user_hotwords)
-    if language == "he":
-        sources.append(HEBREW_DEFAULT_HOTWORDS)  # always boost common confusables
-    if loshon_kodesh:
-        sources.append(LOSHON_KODESH_HOTWORDS)
+        sources.append(user_hotwords)          # terms chosen for THIS recording
+    elif language == "he" and not loshon_kodesh:
+        sources.append(HEBREW_DEFAULT_HOTWORDS)  # general Hebrew runs only
 
     if sources:
         seen = set()
@@ -254,6 +288,18 @@ def _resolve_prompt_and_hotwords(language, user_initial_prompt, user_hotwords, l
                 if key and key not in seen:
                     seen.add(key)
                     merged.append(w)
+
+        # Hard cap — see the measurement table above. Past roughly a dozen terms
+        # the prompt-splice starts leaking term text into the transcript and
+        # triggering repetition, and accuracy falls off a cliff. User-supplied
+        # terms come first in `merged`, so a caller who sends terms chosen for
+        # this recording keeps them; the generic list only fills what is left.
+        if len(merged) > MAX_EFFECTIVE_HOTWORDS:
+            _log.info(
+                "Hotwords capped at %d of %d terms (measured: longer lists reduce accuracy).",
+                MAX_EFFECTIVE_HOTWORDS, len(merged))
+            merged = merged[:MAX_EFFECTIVE_HOTWORDS]
+
         hotwords = ', '.join(merged) if merged else None
     else:
         hotwords = None
@@ -288,6 +334,21 @@ def _fit_whisper_prompt_budget(model, initial_prompt, hotwords):
         safe_prompt = trim(initial_prompt, prompt_budget)
         prompt_tokens = len(tokenizer.encode(" " + safe_prompt).ids) if safe_prompt else 0
         safe_hotwords = trim(hotwords, shared_budget - prompt_tokens)
+
+        # Report what the decoder will actually receive. Silent truncation here is
+        # how 115 torani terms went missing without a trace for months.
+        if hotwords:
+            asked = len([w for w in hotwords.split(',') if w.strip()])
+            kept = len([w for w in (safe_hotwords or '').split(',') if w.strip()])
+            if kept < asked:
+                _log.warning(
+                    "Hotword budget: %d of %d terms sent to the decoder, %d dropped "
+                    "(prompt used %d/%d tokens). Shorten the prompt or send fewer terms.",
+                    kept, asked, asked - kept, prompt_tokens, shared_budget)
+        if initial_prompt and safe_prompt and len(safe_prompt) < len(initial_prompt):
+            _log.warning("Initial prompt truncated: %d of %d characters kept.",
+                         len(safe_prompt), len(initial_prompt))
+
         return safe_prompt, safe_hotwords
     except Exception as exc:
         # Conservative fallback for unexpected model wrappers/tokenizers.
@@ -769,20 +830,41 @@ MODEL_REGISTRY = {
     "distil-large-v3": "deepdml/faster-whisper-large-v3-turbo-ct2",
     "distil-medium.en": "Systran/faster-distil-whisper-medium.en",
     "distil-small.en": "Systran/faster-distil-whisper-small.en",
-    # Ivrit.ai Hebrew-optimized models (pre-converted CT2 format on HuggingFace)
-    "ivrit-ai/faster-whisper-v2-d4": "ivrit-ai/faster-whisper-v2-d4",
+    # ── Hebrew. Keep this list in step with server/config.py.
+    #    Measured 24.10.2026 on 112 words of verified external Hebrew, and across
+    #    three difficulty tiers. Correct words, higher is better:
+    #
+    #      whisper-large-v3-ct2 ......... 102/112 plain · 19/28 lecture · 6/35 LK
+    #      whisper-large-v3-turbo-ct2 ....  99/112 plain · 16/28 lecture · 4/35 LK
+    #      faster-whisper-v2-d4 .......... removed — 90/112, worst and oldest
+    #      kabbalah fine-tune ............ removed — 92/112, lost on LK as well
     "ivrit-ai/whisper-large-v3-turbo-ct2": "ivrit-ai/whisper-large-v3-turbo-ct2",
     "ivrit-ai/whisper-large-v3-ct2": "ivrit-ai/whisper-large-v3-ct2",
-    # ivrit-ai/whisper-large-v3-turbo — requires local HF→CT2 conversion (see MODELS_NEEDING_CONVERSION)
-    # Yiddish-optimized (ivrit-ai fine-tune) — pre-converted CT2, ready for faster-whisper.
-    # Closest available model for Yiddish / לשון-הקודש-style mixed speech.
-    "ivrit-ai/yi-whisper-large-v3-turbo-ct2": "ivrit-ai/yi-whisper-large-v3-turbo-ct2",  # Yiddish turbo (fast)
-    "ivrit-ai/yi-whisper-large-v3-ct2": "ivrit-ai/yi-whisper-large-v3-ct2",              # Yiddish full (accurate)
+    # ── yeshivish-ct2 removed 24.10.2026 after measurement. It was a local
+    #    conversion of a Torah-lecture fine-tune, and the hypothesis was that
+    #    lecture-domain tuning would beat the general model on lecture audio.
+    #    Measured on the same 336-word benchmark: 251/336 against the
+    #    baseline's 273/336 — a significant regression, not noise.
+    #    The weights were 1.5 GB and are deleted. Do not restore without a
+    #    fresh measurement.
+    # ── Yiddish models removed 24.10.2026 after measurement. The hypothesis was
+    #    that they would help Ashkenazi-pronunciation Hebrew, since Yiddish is
+    #    phonetically close and keeps Hebrew-origin words in traditional spelling.
+    #    Measured, correct words against human ground truth:
+    #
+    #      clip      Hebrew full   Yiddish/he    Yiddish/yi
+    #      00019     6/35 (17%)    1/35 ( 3%)    3/35 ( 9%)
+    #      00013     5/9  (56%)    1/9  (11%)    1/9  (11%)
+    #
+    #    The model substitutes Yiddish words for Hebrew ones and falls into
+    #    repetition loops. Three to five times worse than the baseline in both
+    #    language settings. Do not restore without a fresh measurement.
 }
 
-# Default to ivrit-ai for best Hebrew quality (per Interspeech 2025: Marmor et al.).
-# Override with --model on CLI for non-Hebrew use cases.
-DEFAULT_MODEL = "ivrit-ai/whisper-large-v3-turbo-ct2"
+# The full model measures best on every tier (see the table above). It needs
+# ~5.9 GB against ~2.1 GB for turbo, which fits this machine's 7.93 GB when
+# nothing else holds GPU memory. Override with --model on the command line.
+DEFAULT_MODEL = "ivrit-ai/whisper-large-v3-ct2"
 DEFAULT_PYANNOTE_MODEL = "pyannote/speaker-diarization-community-1"
 
 
@@ -1343,7 +1425,22 @@ def transcribe():
     audio_file = request.files["file"]
     language = request.form.get("language", "he")
     model_id = request.form.get("model", _current_model_id or _default_model_for(language))
-    beam_size = int(request.form.get("beam_size", 3))
+
+    # Honour the quality preset here too. Fixed 2026-10-23: this route read
+    # beam_size straight from the form and ignored "preset" entirely, so the
+    # fast / balanced / accurate choice had NO effect on anything transcribed
+    # through it — three runs at different presets produced byte-identical
+    # output. An explicit beam_size still wins, as before.
+    _preset_name = request.form.get("preset", "").strip()
+    _preset = TRANSCRIPTION_PRESETS.get(_preset_name) if _preset_name else None
+    _beam_raw = request.form.get("beam_size")
+    if _beam_raw and _beam_raw.isdigit():
+        beam_size = int(_beam_raw)
+    elif _preset:
+        beam_size = int(_preset["beam_size"])
+    else:
+        beam_size = 3
+    _condition_on_prev = bool(_preset["condition_on_previous_text"]) if _preset else False
     # Preserve clean source audio by default. Normalization is opt-in because
     # even non-denoising filters can alter Hebrew phonemes in an already clean
     # recording and measurably increase WER.
@@ -1390,7 +1487,11 @@ def transcribe():
         ).hexdigest()[:16]
         cache_key = (
             f"{file_hash}:{resolved}:{language}:{beam_size}:norm={int(normalize)}:"
-            f"denoise={int(ai_denoise)}:lk={int(loshon_kodesh)}:hints={hints_hash}"
+            f"denoise={int(ai_denoise)}:lk={int(loshon_kodesh)}:hints={hints_hash}:"
+            # Added 2026-10-23 — without this, two runs that differ only in
+            # whether previous-segment context is carried forward collide and
+            # the second silently returns the first one's text.
+            f"cprev={int(_condition_on_prev)}"
         )
         cached = _cache_get(cache_key)
         if cached:
@@ -1424,7 +1525,11 @@ def transcribe():
                 vad_filter=True,
                 initial_prompt=safe_prompt,
                 hotwords=safe_hotwords,
-                condition_on_previous_text=True,
+                # Fixed 2026-10-23: this was hardcoded True, so disabling it in
+                # the presets had no effect on this route. Carrying the previous
+                # segment forward lets one bad segment poison every segment after
+                # it and sends Whisper into a repetition loop.
+                condition_on_previous_text=_condition_on_prev,
                 temperature=0.0,
             )
 
@@ -6451,6 +6556,410 @@ def lk_benchmark_run():
         except Exception:
             pass
 
+
+
+# ============================================================================
+#  הקראה — המרת טקסט עברי לקול
+#
+#  שתי שכבות נפרדות בכוונה:
+#     /tts/phonemize   עברית מנוקדת -> צלילים. מהיר, בלי מנוע.
+#     /tts/speak       צלילים -> קול. דורש את המנוע המותקן.
+#
+#  ההפרדה חשובה כי אפשר לראות ולתקן את הצלילים לפני שמשלמים על
+#  ההקראה, וכי המרת הצלילים עובדת גם כשהמנוע אינו מותקן.
+# ============================================================================
+
+def _tts_modules():
+    """טוען את שלושת המודולים של ההקראה.
+
+    הם נטענים כאן ולא בראש הקובץ, כדי ששרת התמלול יעלה גם אם מנוע
+    ההקראה אינו מותקן. אין סיבה שהעדר הקראה ימנע תמלול.
+    """
+    import importlib
+    import sys as _sys
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in _sys.path:
+        _sys.path.insert(0, here)
+    return (
+        importlib.import_module("hebrew_phonemes"),
+        importlib.import_module("bluetts_engine"),
+        importlib.import_module("hebrew_nikud"),
+    )
+
+
+def _cloning_module():
+    """טוען את מודול שכפול הקול בנפרד.
+
+    הוא דורש חבילת עיבוד שמע כבדה, ואין סיבה לשלם עליה כשרק מקריאים.
+    """
+    import importlib
+    import sys as _sys
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in _sys.path:
+        _sys.path.insert(0, here)
+    return importlib.import_module("voice_cloning")
+
+
+@app.route("/tts/status", methods=["GET"])
+def tts_status():
+    """מה מותקן, אילו קולות יש, ועל מה הוא ירוץ."""
+    try:
+        hp, be, hn = _tts_modules()
+    except Exception as exc:
+        return jsonify({
+            "installed": False,
+            "error": f"לא ניתן לטעון את מודולי ההקראה: {exc}",
+            "accents": [],
+            "levels": [],
+            "voices": [],
+        })
+
+    engine = be.get_engine()
+    installed = engine.available()
+    voices = []
+    if installed:
+        for name in engine.list_voices():
+            try:
+                info = engine.voice_info(name)
+            except Exception:
+                info = {"name": name, "source": "", "ref_frames": None}
+            src = str(info.get("source") or "")
+            voices.append({
+                "id": name,
+                # הקול העברי הוא היחיד שמתאים לעברית, ולכן חייב להיות מסומן.
+                "hebrew": "hebrew" in src.lower(),
+                # קול משוכפל מסומן, כדי שאפשר יהיה למחוק אותו ולא
+                # לנסות למחוק קול שבא עם המנוע.
+                "cloned": bool(info.get("cloned")),
+                "note": str(info.get("note") or ""),
+                "source": src,
+                "refFrames": info.get("ref_frames"),
+            })
+
+    nikud = hn.get_nikud()
+    try:
+        cloner = _cloning_module().get_cloner()
+        cloning_ok = cloner.available()
+        cloning_missing = cloner.missing_files()
+    except Exception as exc:
+        cloning_ok, cloning_missing = False, [str(exc)[:120]]
+    vocab = hp.engine_vocab()
+    return jsonify({
+        "installed": installed,
+        "missingFiles": engine.missing_files(),
+        "modelDir": engine.model_dir,
+        "accents": hp.accent_options(),
+        "levels": hp.level_options(),
+        "nikudAvailable": nikud.available(),
+        "nikudSizeMb": round(nikud.size_mb()),
+        "cloningAvailable": cloning_ok,
+        "cloningMissing": cloning_missing,
+        "cloneMinSeconds": 2,
+        "cloneMaxSeconds": 20,
+        "voices": voices,
+        "symbolCount": len(vocab),
+        "sampleRate": be.SAMPLE_RATE,
+        "defaultSteps": be.DEFAULT_STEPS,
+        "defaultCfg": be.DEFAULT_CFG,
+        "providers": engine.providers(),
+    })
+
+
+@app.route("/tts/phonemize", methods=["POST"])
+def tts_phonemize():
+    """עברית מנוקדת -> צלילים, עם אזהרות."""
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    accent = data.get("accent") or "ashkenazi"
+    level = data.get("level") or "prayer"
+    stress = bool(data.get("stress", True))
+    auto_nikud = bool(data.get("autoNikud", True))
+
+    if not text:
+        return jsonify({"error": "לא נשלח טקסט."}), 400
+
+    try:
+        hp, _be, hn = _tts_modules()
+    except Exception as exc:
+        return jsonify({"error": f"מודול הצלילים אינו זמין: {exc}"}), 500
+
+    nikud_added = False
+    nikud_error = ""
+    vocalized = text
+    if auto_nikud:
+        nikud = hn.get_nikud()
+        if nikud.available():
+            try:
+                vocalized, nikud_added = nikud.add_nikud_if_missing(text)
+            except Exception as exc:
+                # כשל בניקוד אינו עוצר את ההמרה. הטקסט המקורי עובר
+                # כמו שהוא, וממיר הצלילים יזהיר שאינו מנוקד.
+                nikud_error = str(exc)
+                _log.warning(f"[tts] nikud failed: {exc}")
+
+    try:
+        result = hp.phonemize(vocalized, accent=accent, level=level, stress=stress)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        _log.exception("[tts] phonemize failed")
+        return jsonify({"error": f"המרת הצלילים נכשלה: {exc}"}), 500
+
+    payload = result.as_dict()
+    payload["vocalized"] = hn.strip_helpers(vocalized)
+    payload["nikudAdded"] = nikud_added
+    if nikud_added:
+        payload["warnings"] = [
+            "הטקסט נוקד אוטומטית. הניקוד נכון ברוב המקרים אבל לא בכולם — "
+            "כדאי לעבור עליו, במיוחד בשמות ובמילים נדירות."
+        ] + payload["warnings"]
+    if nikud_error:
+        payload["warnings"].append(f"הניקוד האוטומטי נכשל: {nikud_error}")
+    return jsonify(payload)
+
+
+@app.route("/tts/nikud", methods=["POST"])
+def tts_nikud():
+    """מנקד טקסט עברי.
+
+    נפרד מההמרה לצלילים, כדי שאפשר יהיה לראות ולתקן את הניקוד לפני
+    שממשיכים. ניקוד שגוי מייצר הגייה שגויה, ואין דרך לזהות את זה
+    מהצלילים לבד.
+    """
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    keep_helpers = bool(data.get("keepHelpers", False))
+    if not text:
+        return jsonify({"error": "לא נשלח טקסט."}), 400
+
+    try:
+        _hp, _be, hn = _tts_modules()
+    except Exception as exc:
+        return jsonify({"error": f"מודול הניקוד אינו זמין: {exc}"}), 500
+
+    nikud = hn.get_nikud()
+    if not nikud.available():
+        return jsonify({"error": "המנקד אינו מותקן."}), 503
+
+    before = hn.coverage(text)
+    started = time.time()
+    try:
+        out = nikud.add_nikud(text, keep_helpers=keep_helpers)
+    except hn.NikudError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        _log.exception("[tts] nikud failed")
+        return jsonify({"error": f"הניקוד נכשל: {exc}"}), 500
+
+    after = hn.coverage(out)
+    return jsonify({
+        "text": out,
+        "coverageBefore": before[2],
+        "coverageAfter": after[2],
+        "words": after[1],
+        "elapsed": round(time.time() - started, 2),
+        "warnings": [
+            "הניקוד אוטומטי. הוא נכון ברוב המקרים אבל לא בכולם — "
+            "כדאי לעבור עליו, במיוחד בשמות ובמילים נדירות."
+        ],
+    })
+
+
+@app.route("/tts/clone", methods=["POST"])
+def tts_clone():
+    """יוצר קול חדש מהקלטה.
+
+    מה שנשמר הוא **זהות הקול בלבד, לא ההגייה**. הקול החדש לא ידבר
+    אשכנזית מעצמו — ההגייה נקבעת על ידי הצלילים שנשלחים, וזה חלק
+    אחר של המערכת. זאת נקודה שקל לטעות בה.
+    """
+    if "audio" not in request.files:
+        return jsonify({"error": "לא נשלח קובץ שמע."}), 400
+    name = (request.form.get("name") or "").strip()
+    note = (request.form.get("note") or "").strip()
+    overwrite = (request.form.get("overwrite") or "").lower() in ("1", "true", "yes")
+    # מאיזו שנייה בקובץ לקחת. ריק פירושו שהמערכת תבחר לבד את הקטע
+    # הרצוף ביותר של דיבור — נחוץ בהקלטת שיעור ארוכה, שבה ההתחלה
+    # היא בדרך כלל שקט או פתיח.
+    raw_start = (request.form.get("startSeconds") or "").strip()
+    try:
+        start_seconds = float(raw_start) if raw_start else None
+    except ValueError:
+        return jsonify({"error": "נקודת ההתחלה אינה מספר תקין."}), 400
+    if start_seconds is not None and start_seconds < 0:
+        return jsonify({"error": "נקודת ההתחלה אינה יכולה להיות שלילית."}), 400
+    if not name:
+        return jsonify({"error": "צריך לתת לקול שם."}), 400
+
+    audio = request.files["audio"]
+    raw = audio.read()
+    if not raw:
+        return jsonify({"error": "קובץ השמע ריק."}), 400
+    if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+        return jsonify({"error": f"הקובץ גדול מדי (עד {MAX_UPLOAD_SIZE_MB} מגה)."}), 413
+
+    try:
+        vc = _cloning_module()
+        _hp, be, _hn = _tts_modules()
+    except Exception as exc:
+        return jsonify({"error": f"שכפול הקול אינו זמין: {exc}"}), 500
+
+    cloner = vc.get_cloner()
+    if not cloner.available():
+        return jsonify({
+            "error": "שכפול הקול אינו מותקן.",
+            "missingFiles": cloner.missing_files(),
+        }), 503
+
+    suffix = os.path.splitext(audio.filename or "")[1] or ".wav"
+    fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(raw)
+        try:
+            report = cloner.clone(tmp_path, name, note=note, overwrite=overwrite,
+                                  start_seconds=start_seconds)
+        except vc.CloningError as exc:
+            return jsonify({"error": str(exc)}), 422
+        except Exception as exc:
+            _log.exception("[tts] cloning failed")
+            return jsonify({"error": f"שכפול הקול נכשל: {exc}"}), 500
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    # הקול הישן נשאר בזיכרון אחרת, וההקראה תמשיך להשתמש בו.
+    be.get_engine().forget_voice(report.name)
+    _log.info(f"[tts] cloned voice {report.name!r} from {report.seconds:.1f}s")
+    return jsonify(report.as_dict())
+
+
+@app.route("/tts/voices/<path:name>", methods=["DELETE"])
+def tts_delete_voice(name):
+    """מוחק קול משוכפל. קול שבא עם המנוע אינו נמחק."""
+    try:
+        vc = _cloning_module()
+        _hp, be, _hn = _tts_modules()
+    except Exception as exc:
+        return jsonify({"error": f"שכפול הקול אינו זמין: {exc}"}), 500
+    try:
+        removed = vc.get_cloner().delete_voice(name)
+    except vc.CloningError as exc:
+        return jsonify({"error": str(exc)}), 403
+    if not removed:
+        return jsonify({"error": f"לא נמצא קול בשם {name!r}."}), 404
+    be.get_engine().forget_voice(name)
+    return jsonify({"deleted": name})
+
+
+@app.route("/tts/speak", methods=["POST"])
+def tts_speak():
+    """מקריא טקסט עברי או צלילים, ומחזיר קובץ קול.
+
+    אפשר לשלוח ``text`` (עברית מנוקדת) או ``ipa`` (צלילים ישירות).
+    שליחת צלילים ישירות היא הדרך לעקוף את ההמרה כשרוצים לתקן הגייה
+    של מילה אחת ביד.
+    """
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    ipa = (data.get("ipa") or "").strip()
+    accent = data.get("accent") or "ashkenazi"
+    level = data.get("level") or "prayer"
+    voice = data.get("voice") or "female"
+    auto_nikud = bool(data.get("autoNikud", True))
+
+    try:
+        steps = max(4, min(64, int(data.get("steps") or 16)))
+        cfg = max(1.0, min(8.0, float(data.get("cfg") or 3.0)))
+        speed = max(0.5, min(2.0, float(data.get("speed") or 1.0)))
+    except (TypeError, ValueError):
+        return jsonify({"error": "אחד המספרים שנשלחו אינו תקין."}), 400
+    seed = data.get("seed")
+    seed = int(seed) if isinstance(seed, (int, float)) else None
+
+    if not text and not ipa:
+        return jsonify({"error": "לא נשלח טקסט ולא צלילים."}), 400
+
+    try:
+        hp, be, hn = _tts_modules()
+    except Exception as exc:
+        return jsonify({"error": f"מנוע ההקראה אינו זמין: {exc}"}), 500
+
+    engine = be.get_engine()
+    if not engine.available():
+        return jsonify({
+            "error": "מנוע ההקראה אינו מותקן.",
+            "missingFiles": engine.missing_files(),
+        }), 503
+
+    warnings_out, per_word = [], []
+    if not ipa:
+        if auto_nikud:
+            nikud = hn.get_nikud()
+            if nikud.available():
+                try:
+                    text, _added = nikud.add_nikud_if_missing(text)
+                except Exception as exc:
+                    _log.warning(f"[tts] nikud failed: {exc}")
+        try:
+            pr = hp.phonemize(text, accent=accent, level=level, stress=True)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        ipa = pr.ipa
+        warnings_out = pr.warnings
+        per_word = [{"word": w, "ipa": p} for w, p in pr.per_word]
+        if pr.unsupported:
+            # המנוע זורק סימנים כאלה בשקט. עצירה כאן היא הדרך היחידה
+            # שהמשתמש ידע שההקראה הייתה יוצאת חסרה.
+            return jsonify({
+                "error": "בצלילים יש סימנים שהמנוע אינו מכיר, והוא היה "
+                         "זורק אותם בשקט. ההקראה נעצרה כדי שלא תקבל "
+                         "תוצאה חסרה בלי לדעת.",
+                "unsupported": pr.unsupported,
+                "ipa": ipa,
+            }), 422
+
+    if not ipa:
+        return jsonify({"error": "לא נותרו צלילים להקראה."}), 400
+
+    started = time.time()
+    try:
+        wav, sr = engine.synthesize(
+            ipa, voice=voice, steps=steps, cfg=cfg, speed=speed, seed=seed)
+    except be.BlueTtsError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        _log.exception("[tts] synthesis failed")
+        return jsonify({"error": f"ההקראה נכשלה: {exc}"}), 500
+
+    import io as _io
+    import wave as _wave
+    import numpy as _np
+
+    pcm = (_np.clip(wav, -1.0, 1.0) * 32767.0).astype("<i2")
+    buf = _io.BytesIO()
+    with _wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(pcm.tobytes())
+    raw = buf.getvalue()
+
+    took = time.time() - started
+    seconds = len(wav) / float(sr) if sr else 0.0
+    _log.info(f"[tts] {seconds:.1f}s קול ב-{took:.1f}s  קול={voice} מבטא={accent}")
+
+    return Response(raw, mimetype="audio/wav", headers={
+        "Content-Disposition": 'inline; filename="speech.wav"',
+        "X-Tts-Seconds": f"{seconds:.3f}",
+        "X-Tts-Elapsed": f"{took:.3f}",
+        "X-Tts-Ipa-Length": str(len(ipa)),
+        "X-Tts-Warnings": str(len(warnings_out)),
+        "Access-Control-Expose-Headers":
+            "X-Tts-Seconds,X-Tts-Elapsed,X-Tts-Ipa-Length,X-Tts-Warnings",
+    })
 
 if __name__ == "__main__":
     main()

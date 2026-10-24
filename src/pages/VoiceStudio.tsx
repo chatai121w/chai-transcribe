@@ -29,6 +29,7 @@ import {
   TestTube2,
   Trash2,
   UploadCloud,
+  Volume2,
   WandSparkles,
   X,
   Zap,
@@ -37,6 +38,7 @@ import { LazyErrorBoundary } from "@/components/LazyErrorBoundary";
 import EnhanceCompare from "@/components/EnhanceCompare";
 
 const SyncAudioPlayer = lazy(() => import("@/components/SyncAudioPlayer").then(m => ({ default: m.SyncAudioPlayer })));
+const ReadAloudStudio = lazy(() => import("@/components/voice/ReadAloudStudio"));
 
 function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return "0 B";
@@ -204,6 +206,7 @@ export default function VoiceStudio() {
           <TabsTrigger value="enhance" className="rounded-lg data-[state=active]:shadow-sm">שיפור וטעינה</TabsTrigger>
           <TabsTrigger value="compare" className="rounded-lg data-[state=active]:shadow-sm gap-1"><Zap className="w-3.5 h-3.5" />השוואת מנועים</TabsTrigger>
           <TabsTrigger value="batch" className="rounded-lg data-[state=active]:shadow-sm">קבצים ותיקיות</TabsTrigger>
+          <TabsTrigger value="read" className="rounded-lg data-[state=active]:shadow-sm gap-1"><Volume2 className="w-3.5 h-3.5" />הקראה והקלטה</TabsTrigger>
           <TabsTrigger value="flows" className="rounded-lg data-[state=active]:shadow-sm">זרימות עבודה</TabsTrigger>
         </TabsList>
 
@@ -354,6 +357,14 @@ export default function VoiceStudio() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="read" className="mt-0">
+          <LazyErrorBoundary label="אולפן ההקראה">
+            <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">טוען את אולפן ההקראה…</div>}>
+              <ReadAloudStudio />
+            </Suspense>
+          </LazyErrorBoundary>
         </TabsContent>
 
         <TabsContent value="flows" className="mt-0">
