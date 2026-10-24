@@ -69,7 +69,8 @@ def gpu_now():
              "temperature.gpu,clocks.sm,clocks.max.sm,power.draw,"
              "clocks_throttle_reasons.active",
              "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=6)
+            capture_output=True, text=True, timeout=6,
+            encoding="utf-8", errors="replace")
         if r.returncode != 0:
             return None
         p = [x.strip() for x in r.stdout.strip().split(",")]
@@ -95,7 +96,8 @@ def gpu_processes():
         r = subprocess.run(
             ["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory",
              "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=6)
+            capture_output=True, text=True, timeout=6,
+            encoding="utf-8", errors="replace")
         out = []
         for line in r.stdout.strip().split("\n"):
             if not line.strip():

@@ -142,7 +142,8 @@ def freeze_packages(label):
     path = os.path.join(FREEZE_DIR, f"{label}.txt")
     try:
         r = subprocess.run([sys.executable, "-m", "pip", "freeze"],
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, timeout=120,
+                           encoding="utf-8", errors="replace")
         if r.returncode == 0:
             io.open(path, "w", encoding="utf-8").write(r.stdout)
             return path
@@ -344,7 +345,85 @@ def measure_phonemes():
 
 # ------------------------------------------------------------------- הרצה
 
+def require_project_python():
+    """עוצר אם הכלי רץ עם תקן פייתון שאינו של הפרויקט.
+
+    למה זה קריטי: לפרויקט יש סביבה נפרדת, ושם מותקנות החבילות
+    האמיתיות. רשימת החבילות שהכלי שומר היא של התקן שמריץ אותו —
+    ולכן מדידה שנלקחה עם התקן הכללי של המחשב נשמרת כאילו היא
+    מתארת את הפרויקט.
+
+    מה זה עשה בפועל: השוואה אחת דיווחה 45 חבילות שנעלמו, 112
+    שנוספו ו-20 ששינו גרסה — כולל שינוי בספריית החישוב הראשית
+    ובמנוע הניקוד. נראה כמו הרס מוחלט. בפועל לא נגעו בכלום:
+    פשוט נמדדו שתי סביבות שונות.
+
+    זאת התקלה הגרועה שיכולה להיות בכלי מדידה — לא כשל, אלא דיווח
+    מדויק על הדבר הלא נכון. לכן הכלי עוצר, ואינו מסתפק באזהרה.
+    """
+    candidates = [
+        os.path.join(HERE, ".venv", "Scripts", "python.exe"),
+        os.path.join(HERE, ".venv", "bin", "python"),
+    ]
+    venv = next((c for c in candidates if os.path.exists(c)), None)
+    if venv is None:
+        return  # אין סביבה נפרדת, ואז אין מה לבדוק
+
+    def same(a, b):
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+    if same(sys.executable, venv):
+        return
+    print("הכלי רץ עם תקן פייתון שאינו של הפרויקט.")
+    print("  רץ עכשיו:  " + sys.executable)
+    print("  נדרש:      " + venv)
+    print("")
+    print("רשימת החבילות שתישמר תתאר סביבה אחרת, וההשוואה תדווח על")
+    print("עשרות שינויים שלא קרו. להריץ כך:")
+    print("")
+    print('  "' + venv + '" scripts/regression_check.py ...')
+    sys.exit(2)
+
+
+def add_gpu_dll_dirs():
+    """מוסיף את נתיבי ספריות החישוב של כרטיס המסך.
+
+    למה זה כאן: הספריות האלה מגיעות כחבילות נפרדות, והן אינן
+    בנתיב החיפוש של חלונות. בלעדיהן העבודה על כרטיס המסך נכשלת
+    בהודעה "cublas64_12.dll לא נמצאה" — למרות שהקובץ קיים.
+
+    זה עבד עד כה במקרה: ייבוא של ספריית החישוב הראשית מוסיף את
+    הנתיבים כתופעת לוואי, ולכן הכל תלוי בסדר הייבוא. סדר ייבוא
+    אינו דבר שכלי מדידה יכול להישען עליו — מדידה שנכשלת בגלל
+    נתיב אינה מדידה, והיא עלולה להיראות כמו רגרסיה אמיתית.
+
+    השרת עושה את אותו דבר. כאן זה משוכפל בכוונה: הכלי חייב לעבוד
+    גם בלי שהשרת רץ.
+    """
+    if sys.platform != "win32":
+        return []
+    added = []
+    # שני סידורים שונים ושניהם קיימים כאן: בסביבה אחת
+    # הספריות הן חבילות נפרדות, ובשנייה הן בתוך חבילת
+    # החישוב הראשית. מכסים את שתיהן ולא מניחים כלום.
+    for pkg in ("torch", "nvidia.cublas", "nvidia.cudnn",
+                "nvidia.cusparse", "nvidia.cusparselt"):
+        try:
+            mod = __import__(pkg, fromlist=[""])
+            sub = "lib" if pkg == "torch" else "bin"
+            d = os.path.join(mod.__path__[0], sub)
+            if os.path.isdir(d):
+                os.add_dll_directory(d)
+                os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+                added.append(d)
+        except Exception:
+            pass
+    return added
+
+
 def run_all(args):
+    require_project_python()
+    add_gpu_dll_dirs()
     print("=" * 74)
     print("בדיקת רגרסיה")
     print("=" * 74)
@@ -520,9 +599,19 @@ def git(*args):
     """מריץ פקודת גיט ומחזיר את הפלט, או None אם נכשל."""
     import subprocess
     try:
+        # קידוד מפורש: בחלונות בעברית ברירת המחדל היא קידוד
+        # שאינו יודע לקרוא שמות קבצים בעברית, והקריאה נשברת —
+        # כלומר מצב הגיט שנרשם במדידה יוצא שגוי בשקט.
         r = subprocess.run(["git"] + list(args), capture_output=True,
-                           text=True, cwd=HERE, timeout=20)
-        return r.stdout.strip() if r.returncode == 0 else None
+                           text=True, cwd=HERE, timeout=20,
+                           encoding="utf-8", errors="replace")
+        if r.returncode != 0:
+            return None
+        # חיתוך מימין בלבד. חיתוך משני הצדדים היה מוריד את
+        # הרווח שבתחילת הפלט — ובפלט של status הרווח הזה הוא
+        # חלק מסימון המצב, כך שהקובץ הראשון ברשימה היה מאבד
+        # את האות הראשונה בשמו, והמסננים היו מפספסים אותו.
+        return r.stdout.rstrip()
     except Exception:
         return None
 
@@ -533,7 +622,16 @@ def git_state():
     if not commit:
         return {"available": False}
     status = git("status", "--porcelain") or ""
-    dirty_files = [l[3:] for l in status.split("\n") if l.strip()]
+    # שתי אותיות מצב, רווח, ואז הנתיב. קובץ ששמו שונה מדווח
+    # כ"ישן -> חדש", ואז מה שמעניין הוא החדש.
+    dirty_files = []
+    for line in status.split("\n"):
+        if not line.strip():
+            continue
+        path = line[3:] if len(line) > 3 else line.strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        dirty_files.append(path.strip('"'))
     # קבצים שאינם משפיעים על התוצאה אינם הופכים מדידה ללא ניתנת
     # לשחזור. תוצאות מדידה, יומנים וקבצים זמניים הם כאלה.
     relevant = [f for f in dirty_files
@@ -1231,6 +1329,8 @@ def main():
     ap.add_argument("--change", default="", help="מה בדיוק שונה")
     ap.add_argument("--outcome", default="", help="מה קרה בפועל")
     ap.add_argument("--learned", default="", help="מה למדנו, ומה לא לנסות שוב")
+    ap.add_argument("--lesson", metavar="שם",
+                    help="לרשום לקח בלי להריץ מדידה (לתקלות תשתית)")
     ap.add_argument("--verdict", choices=["אומץ", "נפסל", "לא הוכרע"],
                     help="האם השינוי נשאר או בוטל")
     args = ap.parse_args()
@@ -1242,6 +1342,29 @@ def main():
         return show_history(args)
     if args.compare:
         return compare(args)
+    if args.lesson:
+        # לקח בלי מדידה. תקלות תשתית — כלי שבור, בדיקה שאינה
+        # בודקת — אינן משנות שום מספר, ובכל זאת הן הלקחים
+        # היקרים ביותר. בלי המסלול הזה היה צריך להריץ מדידה
+        # מלאה רק כדי לרשום משפט, וזה בדיוק מה שגורם לא לרשום.
+        fields = {"hypothesis": args.hypothesis, "change": args.change,
+                  "outcome": args.outcome, "lesson": args.learned}
+        if not any((fields[k] or "").strip() for k in fields):
+            print("לרישום לקח נדרש לפחות אחד מהשדות: "
+                  "--hypothesis, --change, --outcome, --learned")
+            return 1
+        entry = add_lesson(args.lesson, fields, None)
+        if args.verdict:
+            rows = read_lessons()
+            if rows:
+                rows[-1]["verdict"] = args.verdict
+                with io.open(lessons_path(), "w", encoding="utf-8") as fh:
+                    for r in rows:
+                        fh.write(json.dumps(r, ensure_ascii=False) + chr(10))
+        print(f"נרשם ביומן הלקחים: {lessons_path()}")
+        print(f"  שם: {entry['label']}")
+        print("  בלי מדידה — זה לקח תשתית.")
+        return 0
     return run_all(args)
 
 
