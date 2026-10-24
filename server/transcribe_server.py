@@ -2848,23 +2848,57 @@ def media_mux_subtitles():
             _write_subtitle_srt(subtitle_path, track["segments"])
             subtitle_paths.append((subtitle_path, language, label))
 
-        command = ["ffmpeg", "-y", "-i", str(video_path)]
-        for subtitle_path, _, _ in subtitle_paths:
-            command.extend(["-i", str(subtitle_path)])
-        command.extend(["-map", "0:v:0", "-map", "0:a?"])
-        for input_index in range(1, len(subtitle_paths) + 1):
-            command.extend(["-map", f"{input_index}:0"])
-        command.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text"])
-        for stream_index, (_, language, label) in enumerate(subtitle_paths):
-            metadata_language = _SUBTITLE_LANGUAGE_METADATA.get(language, language[:3] or "und")
-            command.extend([
-                f"-metadata:s:s:{stream_index}", f"language={metadata_language}",
-                f"-metadata:s:s:{stream_index}", f"title={label}",
-            ])
-            if stream_index == 0:
-                command.extend([f"-disposition:s:{stream_index}", "default"])
-        command.extend(["-movflags", "+faststart", str(output_path)])
-        result = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+        # איך הכתוביות נכנסות. ההבחנה אינה טכנית אלא מעשית: קובץ עם
+        # מסלול כתוביות אינו מציג אותן מעצמו, והמשתמש פותח אותו, לא
+        # רואה כלום, וחושב שהחיבור נכשל.
+        #
+        #   track          מסלול נפרד, כבוי. צריך להדליק בנגן.
+        #   default-track  מסלול מסומן כברירת מחדל. נגנים שתומכים
+        #                  בסימון ידליקו לבד.
+        #   burned         הכתוביות נכנסות לתמונה. תמיד נראות, בשום
+        #                  נגן אי אפשר לכבות, ושפה אחת בלבד.
+        mode = (request.form.get("mode") or "default-track").strip()
+        if mode not in ("track", "default-track", "burned"):
+            mode = "default-track"
+
+        if mode == "burned":
+            # מסנן הכתוביות קורא את הנתיב כמחרוזת, ולכן תווים מיוחדים
+            # בנתיב שוברים אותו. הרצה מתוך תיקיית העבודה עם שם קובץ
+            # פשוט פותרת את זה בלי לנסות לברוח מכל תו.
+            shutil.copyfile(subtitle_paths[0][0], work_dir / "burn.srt")
+            command = [
+                "ffmpeg", "-y", "-i", str(video_path),
+                "-vf", "subtitles=burn.srt:force_style="
+                       "'FontSize=22,BorderStyle=3,Outline=1,Alignment=2,MarginV=25'",
+                # הצריבה מחייבת דחיסה מחדש של התמונה. השמע מועתק כמות
+                # שהוא, כי אין סיבה לפגוע גם בו.
+                "-c:v", "libx264", "-crf", "23", "-preset", "medium",
+                "-c:a", "copy",
+                "-movflags", "+faststart", str(output_path),
+            ]
+            result = subprocess.run(command, capture_output=True, text=True,
+                                    timeout=3600, cwd=str(work_dir))
+        else:
+            command = ["ffmpeg", "-y", "-i", str(video_path)]
+            for subtitle_path, _, _ in subtitle_paths:
+                command.extend(["-i", str(subtitle_path)])
+            command.extend(["-map", "0:v:0", "-map", "0:a?"])
+            for input_index in range(1, len(subtitle_paths) + 1):
+                command.extend(["-map", f"{input_index}:0"])
+            command.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text"])
+            for stream_index, (_, language, label) in enumerate(subtitle_paths):
+                metadata_language = _SUBTITLE_LANGUAGE_METADATA.get(
+                    language, language[:3] or "und")
+                command.extend([
+                    f"-metadata:s:s:{stream_index}", f"language={metadata_language}",
+                    f"-metadata:s:s:{stream_index}", f"title={label}",
+                ])
+                if stream_index == 0 and mode == "default-track":
+                    command.extend([f"-disposition:s:{stream_index}", "default"])
+            command.extend(["-movflags", "+faststart", str(output_path)])
+            result = subprocess.run(command, capture_output=True, text=True,
+                                    timeout=1800)
+
         if result.returncode != 0 or not output_path.is_file():
             raise RuntimeError((result.stderr or "FFmpeg subtitle mux failed")[-1200:])
 

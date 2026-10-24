@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } fro
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GuidedTabs, TabGuideButton } from "@/components/guide/GuidedTabs";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
@@ -16,6 +16,7 @@ import { AlignmentStatusBanner } from "@/components/AlignmentStatusBanner";
 import type { TextVersion } from "@/components/TextEditHistory";
 import type { WordTiming, SyncAudioPlayerRef } from "@/components/SyncAudioPlayer";
 import { SubtitleDropZone } from "@/components/SubtitleDropZone";
+import { SubtitleDropTarget } from "@/components/SubtitleDropTarget";
 import { TextStyleControl } from "@/components/TextStyleControl";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -2696,11 +2697,26 @@ const TextEditor = () => {
                       setWordTimings(timings);
                       if (!text.trim()) setText(importedText);
                       setSyncEnabled(true);
-                      toast.success(`נטענו ${timings.length} מילים מקובץ הכתוביות`);
+                      toast({ title: `נטענו ${timings.length} מילים מקובץ הכתוביות` });
                     }}
                   />
                 </div>
               )}
+              {/* גרירת קובץ כתוביות ישירות על הנגן. זאת הדרך המהירה
+                  ביותר לחבר תמלול קיים למדיה שכבר פתוחה. */}
+              <SubtitleDropTarget
+                enabled={!!audioUrl}
+                mediaDuration={audioDurationSeconds}
+                onError={(message) => toast({ title: message, variant: "destructive" })}
+                onImported={(timings, importedText, info) => {
+                  setWordTimings(timings);
+                  if (!text.trim()) setText(importedText);
+                  setSyncEnabled(true);
+                  toast({
+                    title: `נטענו ${info.words} מילים מ-${info.cues} קטעי כתוביות`,
+                  });
+                }}
+              >
               <div className="relative rounded-2xl border border-border/50 bg-card shadow-sm overflow-hidden">
                 {/* Quick access to floating mode, right on the player itself */}
                 <Button
@@ -2746,6 +2762,7 @@ const TextEditor = () => {
                   )}
                 />
               </div>
+              </SubtitleDropTarget>
               </Suspense>
             )}
 

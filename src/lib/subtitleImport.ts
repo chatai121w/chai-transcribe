@@ -53,7 +53,9 @@ function isPromoLine(text: string): boolean {
 /** קורא קובץ כתוביות בתסדיר SRT או WebVTT. */
 export function parseSubtitleFile(raw: string): { cues: SubtitleCue[]; warnings: string[] } {
   const warnings: string[] = [];
-  const text = raw.replace(/^﻿/, '').replace(/\r\n?/g, '\n').trim();
+  // מסירים את סימון הקידוד שבתחילת הקובץ (U+FEFF). הוא נכתב
+  // כסימון ולא כתו ממשי, כי תו ממשי בלתי נראה בעורך.
+  const text = raw.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim();
   if (!text) return { cues: [], warnings: ['הקובץ ריק'] };
 
   const body = text.startsWith('WEBVTT') ? text.replace(/^WEBVTT[^\n]*\n/, '') : text;
