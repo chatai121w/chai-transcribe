@@ -223,6 +223,16 @@ export function AttachTranscriptToVideoDialog({
     setSubsError("");
   };
 
+  // מעבר לצריבה מצמצם את השפות לאחת.
+  //
+  // בלי זה נוצר מצב שקרי: האזהרה "שפה אחת בלבד" מוצגת, שתי שפות
+  // נשארות מסומנות, והיצירה מותרת — והשרת צורב את הראשונה ומתעלם
+  // מהשנייה בלי לומר כלום. אזהרה שאינה נאכפת גרועה מאזהרה שאין.
+  useEffect(() => {
+    if (modeInfo.multiLanguage) return;
+    setLanguages((current) => (current.length > 1 ? current.slice(0, 1) : current));
+  }, [modeInfo.multiLanguage]);
+
   const toggleLanguage = (language: string, checked: boolean) => {
     setLanguages((current) => {
       const next = checked
