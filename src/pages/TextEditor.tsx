@@ -3121,6 +3121,7 @@ const TextEditor = () => {
           onOpenChange={setAttachVideoDialogOpen}
           wordTimings={wordTimings}
           transcriptTitle={transcripts.find((item) => item.id === (transcriptIdRef.current || transcriptId))?.title}
+          libraryTranscripts={transcripts}
         />
         <DriveFolderPicker
           open={drivePickerOpen}

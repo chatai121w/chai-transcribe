@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from "react";
-import { AlertTriangle, Captions, Check, Download, FileText, FileVideo, Loader2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Captions, Check, Download, FileText, FileVideo, Library, Loader2, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -16,16 +16,117 @@ import {
 import { fetchLocalServer, getServerUrl } from "@/lib/serverConfig";
 import { toast } from "@/hooks/use-toast";
 
+/** תמלול שמור באתר, כפי שהוא מגיע מספריית התמלולים. */
+export interface LibraryTranscriptOption {
+  id: string;
+  title: string;
+  created_at: string;
+  word_timings?: Array<{ word: string; start: number; end: number }> | null;
+}
+
+/**
+ * מאיפה מגיע הטקסט שייהפך לכתוביות.
+ *
+ *   open     התמלול שפתוח עכשיו בעורך — מה שהרגע תומלל.
+ *   library  תמלול שמור באתר, מהספרייה.
+ *   file     קובץ כתוביות מהמחשב.
+ *
+ * למה בחירה מפורשת ולא ניחוש: קודם לכן הקובץ שהועלה פשוט גבר על
+ * התמלול הפתוח. זה עבד, אבל המשתמש לא ראה מה נבחר בפועל — ולא
+ * הייתה שום דרך להגיע לתמלול שמור באתר בלי לפתוח אותו קודם בעורך.
+ */
+type SourceKind = "open" | "library" | "file";
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   wordTimings: WordTiming[];
   transcriptTitle?: string;
+  /** התמלולים השמורים באתר. מגיעים מבחוץ כדי לא לטעון אותם פעמיים. */
+  libraryTranscripts?: LibraryTranscriptOption[];
 }
 
 const LANGUAGES = TRANSLATION_LANGUAGES.filter((language) => ["he", "en", "de", "fr", "es", "yi"].includes(language.code));
 
-export function AttachTranscriptToVideoDialog({ open, onOpenChange, wordTimings, transcriptTitle }: Props) {
+/**
+ * כותרת שלב ממוספרת.
+ *
+ * למה מספר ולא רק כותרת: בחלון הזה שלוש החלטות נפרדות — אילו
+ * קבצים, באיזו צורה, ובאילו שפות. בלי מספור הן נראות כרשימה
+ * אחת ארוכה, ולא ברור מה חובה ומה כבר נבחר.
+ */
+/** תאריך קצר וקריא, בלי שעה — ברשימה ארוכה השעה רק מרעישה. */
+function formatDate(value: string): string {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleDateString("he-IL", { day: "numeric", month: "short", year: "numeric" });
+}
+
+/**
+ * אפשרות אחת לבחירת מקור הטקסט.
+ *
+ * אפשרות שאינה זמינה מוצגת ולא מוסתרת: המשתמש צריך לדעת שהיא
+ * קיימת ולמה אי אפשר לבחור בה עכשיו. הסיבה כתובה בשורת ההסבר.
+ */
+function SourceOption({
+  active, disabled, onClick, icon, title, note,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  title: string;
+  note: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        "flex w-full items-center gap-2 rounded-lg border p-3 text-right transition-colors duration-[83ms]",
+        disabled ? "cursor-not-allowed opacity-50" : "",
+        active && !disabled
+          ? "border-primary bg-primary/[0.06]"
+          : "border-border/60 hover:border-primary/40 hover:bg-muted/40",
+      ].join(" ")}
+    >
+      <span
+        className={[
+          "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
+          active && !disabled ? "border-primary" : "border-muted-foreground/40",
+        ].join(" ")}
+        aria-hidden
+      >
+        {active && !disabled && <span className="h-2 w-2 rounded-full bg-primary" />}
+      </span>
+      <span className={active && !disabled ? "shrink-0 text-primary" : "shrink-0 text-muted-foreground"}>
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{title}</span>
+        <span className="block truncate text-xs text-muted-foreground">{note}</span>
+      </span>
+    </button>
+  );
+}
+
+function Step({ number, title, note }: { number: number; title: string; note?: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
+        {number}
+      </span>
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {note && <span className="text-xs font-normal text-muted-foreground">— {note}</span>}
+    </div>
+  );
+}
+
+export function AttachTranscriptToVideoDialog({
+  open, onOpenChange, wordTimings, transcriptTitle, libraryTranscripts = [],
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const subsRef = useRef<HTMLInputElement>(null);
   const [video, setVideo] = useState<File | null>(null);
@@ -55,12 +156,38 @@ export function AttachTranscriptToVideoDialog({ open, onOpenChange, wordTimings,
   const fileTimings = useMemo(
     () => (subsTimings ? wordTimingsToSubtitleSegments(subsTimings) : []), [subsTimings]);
 
-  // הקובץ שהועלה גובר על התמלול הפתוח: אם המשתמש טרח להעלות
-  // קובץ, זה מה שהוא רוצה לחבר.
-  const segments = fileTimings.length ? fileTimings : openTimings;
-  const source = fileTimings.length ? "file" : "open";
+  // רק תמלולים שיש להם תזמונים. בלי תזמונים אין ממה לבנות כתוביות,
+  // והצגתם ברשימה הייתה מבטיחה משהו שייכשל אחרי הבחירה.
+  const libraryOptions = useMemo(
+    () => libraryTranscripts.filter((t) => (t.word_timings?.length ?? 0) > 0),
+    [libraryTranscripts]);
+
+  const [sourceKind, setSourceKind] = useState<SourceKind>("open");
+  const [libraryId, setLibraryId] = useState<string>("");
+
+  // בכל פתיחה מתחילים מהמקור הזמין ביותר: מה שפתוח עכשיו, ואם אין
+  // תזמונים — הספרייה, ואם גם היא ריקה — קובץ.
+  useEffect(() => {
+    if (!open) return;
+    setSourceKind(openTimings.length ? "open" : libraryOptions.length ? "library" : "file");
+  }, [open, openTimings.length, libraryOptions.length]);
+
+  const librarySelected = useMemo(
+    () => libraryOptions.find((t) => t.id === libraryId) || null,
+    [libraryOptions, libraryId]);
+  const libraryTimings = useMemo(
+    () => (librarySelected?.word_timings?.length
+      ? wordTimingsToSubtitleSegments(librarySelected.word_timings as WordTiming[])
+      : []),
+    [librarySelected]);
+
+  const segments = sourceKind === "file"
+    ? fileTimings
+    : sourceKind === "library" ? libraryTimings : openTimings;
+  const source = sourceKind;
 
   const loadSubtitles = async (file: File) => {
+    setSourceKind("file");
     setSubsError("");
     setSubsInfo("");
     setSubsTimings(null);
@@ -89,6 +216,7 @@ export function AttachTranscriptToVideoDialog({ open, onOpenChange, wordTimings,
   };
 
   const clearSubtitles = () => {
+    setSourceKind(openTimings.length ? "open" : libraryOptions.length ? "library" : "file");
     setSubsFile(null);
     setSubsTimings(null);
     setSubsInfo("");
@@ -140,94 +268,182 @@ export function AttachTranscriptToVideoDialog({ open, onOpenChange, wordTimings,
 
   return (
     <Dialog open={open} onOpenChange={(value) => !working && onOpenChange(value)}>
-      <DialogContent dir="rtl" className="max-w-xl text-right" data-testid="attach-transcript-video-dialog">
-        <DialogHeader className="text-right">
-          <DialogTitle className="flex items-center gap-2 text-right"><Captions className="h-5 w-5" /> חיבור התמלול לווידאו</DialogTitle>
+      <DialogContent
+        dir="rtl"
+        className="flex max-h-[88vh] max-w-2xl flex-col gap-0 overflow-hidden p-0 text-right"
+        data-testid="attach-transcript-video-dialog"
+      >
+        {/*
+          הראש והכפתורים קבועים, והאמצע נגלל.
+
+          למה: לחלון אין גובה מרבי מלידה, והתוכן כאן ארוך. במסך
+          נמוך הכותרת וכפתור היצירה נדחקו מחוץ למסך, והמשתמש ראה
+          חלון חתוך בלי דרך להגיע לכפתור.
+        */}
+        <DialogHeader className="shrink-0 border-b px-6 pb-4 pt-6 text-right">
+          <DialogTitle className="flex items-center gap-2 text-right">
+            <Captions className="h-5 w-5" /> חיבור התמלול לווידאו
+          </DialogTitle>
           <p className="text-sm text-muted-foreground">
             {source === "file"
-              ? "הכתוביות יוטמעו לפי קובץ הכתוביות שהעלית."
-              : "הכתוביות יוטמעו כמסלולים מתחלפים לפי התזמונים של התמלול הפתוח. אפשר גם להעלות קובץ כתוביות משלך."}
+              ? "הכתוביות ייבנו מקובץ הכתוביות שהעלית."
+              : source === "library"
+                ? "הכתוביות ייבנו מתמלול שמור באתר."
+                : "הכתוביות ייבנו מהתמלול שפתוח עכשיו. אפשר גם לבחור תמלול שמור או קובץ."}
           </p>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <input ref={inputRef} type="file" accept="video/*,.mp4,.mkv,.mov,.webm" className="hidden" onChange={(event) => setVideo(event.target.files?.[0] || null)} />
-          <Button type="button" variant="outline" className="h-auto w-full justify-start gap-3 py-3" onClick={() => inputRef.current?.click()} disabled={working}>
-            <FileVideo className="h-5 w-5 shrink-0" />
-            <span className="min-w-0 text-right"><span className="block truncate font-medium">{video?.name || "בחר קובץ וידאו"}</span><span className="block text-xs text-muted-foreground">MP4, MKV, MOV או WebM</span></span>
-          </Button>
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
 
-          {/* קובץ כתוביות, כשהתמלול אינו פתוח בעורך */}
-          <input
-            ref={subsRef}
-            type="file"
-            accept=".srt,.vtt,.webvtt,text/vtt"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void loadSubtitles(file);
-              event.target.value = "";
-            }}
-          />
-          <div
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const file = e.dataTransfer.files?.[0];
-              if (file) void loadSubtitles(file);
-            }}
-          >
+          <section className="space-y-3">
+            <Step number={1} title="קובץ הווידאו" />
+
+            <input ref={inputRef} type="file" accept="video/*,.mp4,.mkv,.mov,.webm" className="hidden" onChange={(event) => setVideo(event.target.files?.[0] || null)} />
+            <input
+              ref={subsRef}
+              type="file"
+              accept=".srt,.vtt,.webvtt,text/vtt"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void loadSubtitles(file);
+                event.target.value = "";
+              }}
+            />
+
             <Button
               type="button"
               variant="outline"
-              className="h-auto w-full justify-start gap-3 py-3"
-              onClick={() => subsRef.current?.click()}
+              className={[
+                "h-auto w-full justify-start gap-3 py-3",
+                video ? "border-primary/50 bg-primary/[0.04]" : "",
+              ].join(" ")}
+              onClick={() => inputRef.current?.click()}
               disabled={working}
             >
-              <FileText className="h-5 w-5 shrink-0" />
+              <FileVideo className={["h-5 w-5 shrink-0", video ? "text-primary" : ""].join(" ")} />
               <span className="min-w-0 text-right">
-                <span className="block truncate font-medium">
-                  {subsFile?.name || "קובץ כתוביות (לא חובה)"}
-                </span>
-                <span className="block text-xs text-muted-foreground">
-                  {subsFile
-                    ? "הקובץ הזה יחליף את התמלול הפתוח"
-                    : "גרור לכאן או לחץ · srt או vtt · בלעדיו ישמש התמלול הפתוח"}
+                <span className="block truncate font-medium">{video?.name || "בחר קובץ וידאו"}</span>
+                <span className="block text-xs font-normal text-muted-foreground">
+                  {video ? "לחץ כדי להחליף" : "חובה · MP4, MKV, MOV או WebM"}
                 </span>
               </span>
             </Button>
-          </div>
+          </section>
 
-          {subsError && (
-            <div className="flex items-start gap-2 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-              <span className="min-w-0">{subsError}</span>
-            </div>
-          )}
+          <section className="space-y-3">
+            <Step number={2} title="מאיפה הטקסט" />
 
-          {subsInfo && !subsError && (
-            <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/60 p-3 text-sm">
-              <span className="flex min-w-0 items-center gap-2">
-                <Check className="h-4 w-4 shrink-0 text-green-600" aria-hidden />
-                <span className="truncate">{subsInfo}</span>
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={clearSubtitles}
-                disabled={working}
-                className="h-7 shrink-0 gap-1"
+            <div className="space-y-1.5">
+              <SourceOption
+                active={sourceKind === "open"}
+                disabled={working || !openTimings.length}
+                onClick={() => setSourceKind("open")}
+                icon={<Pencil className="h-4 w-4" />}
+                title="התמלול שפתוח עכשיו"
+                note={openTimings.length
+                  ? `${transcriptTitle || "ללא שם"} · ${openTimings.length} קטעים`
+                  : "אין תזמונים לתמלול הפתוח"}
+              />
+
+              <SourceOption
+                active={sourceKind === "library"}
+                disabled={working || !libraryOptions.length}
+                onClick={() => setSourceKind("library")}
+                icon={<Library className="h-4 w-4" />}
+                title="תמלול שמור באתר"
+                note={libraryOptions.length
+                  ? `${libraryOptions.length} תמלולים עם תזמונים`
+                  : "אין באתר תמלול עם תזמונים"}
+              />
+
+              {sourceKind === "library" && libraryOptions.length > 0 && (
+                <div className="pr-7">
+                  <Select value={libraryId} onValueChange={setLibraryId} disabled={working}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="בחר תמלול מהספרייה" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {libraryOptions.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {/*
+                            שתי שורות ולא אחת: השמות נוצרים אוטומטית
+                            מתחילת הטקסט, ולכן הרבה מהם פותחים באותן
+                            מילים. התאריך ומספר הקטעים הם מה שמבדיל
+                            ביניהם בפועל.
+                          */}
+                          <span className="flex flex-col items-start gap-0.5 text-right">
+                            <span className="line-clamp-1 max-w-[20rem]">{t.title || "ללא שם"}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {formatDate(t.created_at)} · {t.word_timings?.length || 0} מילים
+                            </span>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) void loadSubtitles(file);
+                }}
               >
-                <X className="h-3.5 w-3.5" />
-                בטל
-              </Button>
-            </div>
-          )}
+                <SourceOption
+                  active={sourceKind === "file"}
+                  disabled={working}
+                  onClick={() => {
+                    setSourceKind("file");
+                    if (!subsFile) subsRef.current?.click();
+                  }}
+                  icon={<FileText className="h-4 w-4" />}
+                  title="קובץ כתוביות מהמחשב"
+                  note={subsFile?.name || "גרור לכאן או לחץ · srt או vtt"}
+                />
+              </div>
 
-          {/* איך הכתוביות ייכנסו */}
-          <div className="space-y-2">
-            <Label className="block">איך הכתוביות ייכנסו</Label>
+              {sourceKind === "file" && subsFile && (
+                <div className="pr-7">
+                  <Button type="button" variant="ghost" size="sm" onClick={clearSubtitles} disabled={working} className="h-7 gap-1 text-xs text-muted-foreground">
+                    <X className="h-3.5 w-3.5" />
+                    הסר את הקובץ
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {subsError && (
+              <div className="flex items-start gap-2 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                <span className="min-w-0">{subsError}</span>
+              </div>
+            )}
+
+            {subsInfo && !subsError && sourceKind === "file" && (
+              <div className="flex items-center gap-2 rounded-lg bg-muted/60 p-3 text-sm">
+                <Check className="h-4 w-4 shrink-0 text-green-600" aria-hidden />
+                <span className="min-w-0 truncate">{subsInfo}</span>
+              </div>
+            )}
+
+            {!segments.length && (
+              <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
+                {sourceKind === "library"
+                  ? "בחר תמלול מהרשימה."
+                  : sourceKind === "file"
+                    ? "העלה קובץ כתוביות."
+                    : "לתמלול הפתוח אין תזמונים. אפשר לבצע לו יישור מדויק מול האודיו, או לבחור מקור אחר."}
+              </p>
+            )}
+          </section>
+
+          <section className="space-y-3">
+            <Step number={3} title="איך הכתוביות ייכנסו" />
+
             <div className="space-y-1.5">
               {SUBTITLE_MODES.map((m) => {
                 const active = mode === m.id;
@@ -244,7 +460,7 @@ export function AttachTranscriptToVideoDialog({ open, onOpenChange, wordTimings,
                         : "border-border/60 hover:border-primary/40 hover:bg-muted/40",
                     ].join(" ")}
                   >
-                    <span className="flex items-center gap-2">
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span
                         className={[
                           "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
@@ -266,11 +482,11 @@ export function AttachTranscriptToVideoDialog({ open, onOpenChange, wordTimings,
                         </span>
                       )}
                     </span>
-                    <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                    <span className="mt-1 block pr-6 text-xs leading-relaxed text-muted-foreground">
                       {m.body}
                     </span>
                     {active && (
-                      <span className="mt-1.5 block border-r-2 border-primary/30 pr-2 text-xs text-muted-foreground">
+                      <span className="mr-6 mt-2 block border-r-2 border-primary/30 pr-2 text-xs text-muted-foreground">
                         {m.when}
                       </span>
                     )}
@@ -299,55 +515,88 @@ export function AttachTranscriptToVideoDialog({ open, onOpenChange, wordTimings,
                 קבע את הבחירה הזאת כברירת מחדל
               </Button>
             )}
-          </div>
+          </section>
 
-          <div>
-            <Label className="mb-2 block">
-              שפות כתוביות
-              {!modeInfo.multiLanguage && (
-                <span className="mr-2 text-xs font-normal text-muted-foreground">
-                  — בצריבה אפשר שפה אחת בלבד
-                </span>
-              )}
-            </Label>
+          <section className="space-y-3">
+            <Step
+              number={4}
+              title="שפות"
+              note={modeInfo.multiLanguage ? undefined : "בצריבה אפשר שפה אחת בלבד"}
+            />
+
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {LANGUAGES.map((language) => (
-                <label key={language.code} className="flex cursor-pointer items-center gap-2 rounded border px-3 py-2 text-sm">
-                  <Checkbox checked={languages.includes(language.code)} onCheckedChange={(checked) => toggleLanguage(language.code, checked === true)} disabled={working} />
-                  {language.label}
-                </label>
-              ))}
+              {LANGUAGES.map((language) => {
+                const checked = languages.includes(language.code);
+                return (
+                  <label
+                    key={language.code}
+                    className={[
+                      "flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors duration-[83ms]",
+                      checked ? "border-primary/50 bg-primary/[0.04]" : "border-border/60 hover:bg-muted/40",
+                    ].join(" ")}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={(value) => toggleLanguage(language.code, value === true)}
+                      disabled={working}
+                    />
+                    {language.label}
+                  </label>
+                );
+              })}
             </div>
-          </div>
 
-          {languages.some((language) => language !== "he") && (
-            <div>
-              <Label className="mb-2 block">מנוע תרגום</Label>
-              <Select value={model} onValueChange={setModel} disabled={working}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="google/gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
-                  <SelectItem value="google/gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
-                  <SelectItem value="openai/gpt-5-mini">GPT-5 Mini</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {!segments.length && (
-            <p className="rounded border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800">
-              אין תזמונים לעבוד איתם. אפשר להעלות קובץ כתוביות למעלה, או לבצע
-              "יישור מדויק" לתמלול הפתוח מול האודיו.
-            </p>
-          )}
-          {working && <div className="space-y-1"><div className="h-2 overflow-hidden rounded bg-muted"><div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} /></div><p className="text-xs text-muted-foreground">{progress < 88 ? "מתרגם ומכין כתוביות..." : "מחבר את הכתוביות לווידאו..."}</p></div>}
+            {languages.some((language) => language !== "he") && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">מנוע התרגום</Label>
+                <Select value={model} onValueChange={setModel} disabled={working}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="google/gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+                    <SelectItem value="google/gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+                    <SelectItem value="openai/gpt-5-mini">GPT-5 Mini</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </section>
         </div>
 
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={working}>סגור</Button>
-          <Button type="button" onClick={() => void createVideo()} disabled={working || !video || !segments.length || !languages.length}>
-            {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} צור והורד וידאו
-          </Button>
+        <DialogFooter className="shrink-0 flex-col gap-3 border-t px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+          {working ? (
+            <div className="w-full space-y-1 sm:order-1 sm:flex-1">
+              <div className="h-2 overflow-hidden rounded bg-muted">
+                <div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {progress < 88 ? "מתרגם ומכין כתוביות..." : "מחבר את הכתוביות לווידאו..."}
+              </p>
+            </div>
+          ) : (
+            <p className="w-full text-xs text-muted-foreground sm:order-1 sm:flex-1">
+              {!video
+                ? "בחר קובץ וידאו כדי להמשיך"
+                : !segments.length
+                  ? "אין תזמונים — העלה קובץ כתוביות"
+                  : !languages.length
+                    ? "בחר לפחות שפה אחת"
+                    : `${modeInfo.label} · ${languages.length === 1 ? "שפה אחת" : languages.length + " שפות"}`}
+            </p>
+          )}
+          <div className="flex w-full gap-2 sm:order-2 sm:w-auto">
+            <Button type="button" variant="outline" className="flex-1 sm:flex-none" onClick={() => onOpenChange(false)} disabled={working}>
+              סגור
+            </Button>
+            <Button
+              type="button"
+              className="flex-1 gap-2 sm:flex-none"
+              onClick={() => void createVideo()}
+              disabled={working || !video || !segments.length || !languages.length}
+            >
+              {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              צור והורד וידאו
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
