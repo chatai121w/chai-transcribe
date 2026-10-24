@@ -355,7 +355,28 @@ def run_all(args):
         path = os.path.join(RESULTS_DIR, f"{args.save}.json")
         json.dump(result, io.open(path, "w", encoding="utf-8"),
                   ensure_ascii=False, indent=2)
+        append_journal(args.save, result)
         print(f"\nנשמר: {path}")
+        print(f"נרשם ביומן המדידות: {JOURNAL}")
+
+        # הלקח — מה ניסינו ולמה. בלעדיו המדידה היא מספר בלי הקשר,
+        # ונחזור על אותו ניסיון כעבור חודשיים.
+        fields = {"hypothesis": args.hypothesis, "change": args.change,
+                  "outcome": args.outcome, "lesson": args.learned}
+        if any(fields.values()) or args.verdict:
+            add_lesson(args.save, fields, result)
+            if args.verdict:
+                rows = read_lessons()
+                rows[-1]["verdict"] = args.verdict
+                with io.open(lessons_path(), "w", encoding="utf-8") as fh:
+                    for r in rows:
+                        fh.write(json.dumps(r, ensure_ascii=False) + "\\n")
+            print(f"נרשם ביומן הלקחים: {lessons_path()}")
+        else:
+            print()
+            print("  !! לא נרשם לקח למדידה הזאת.")
+            print("     מספר בלי הסבר מה ניסינו ולמה אינו שווה הרבה —")
+            print("     כעבור חודשיים לא נזכור מה עשינו כאן.")
     return 0
 
 
@@ -518,6 +539,231 @@ def significant(c1, n1, c2, n2, z=1.96):
     noise = z * se * 100
     diff = (p2 - p1) * 100
     return abs(diff) > noise, diff, noise
+
+
+
+# ===================================================================
+#  יומן הלקחים — מה ניסינו, למה, ומה למדנו
+# ===================================================================
+#
+# למה זה חייב להיות כאן ולא רק מספרים:
+#
+#     מספר אומר **שמשהו קרה**. הוא אינו אומר **מה ניסינו ולמה**.
+#     בלי זה, כעבור חודשיים נחזור על ניסיון שכבר נכשל, כי אף אחד
+#     לא יזכור שהוא נוסה.
+#
+#     "ניסינו להוסיף מנוע יידיש כי הוא קרוב פונטית לאשכנזית. יצא
+#     פי שלושה עד חמישה גרוע יותר — הוא מחליף מילים עבריות במילים
+#     ביידיש ונכנס ללולאות. לא להחזיר בלי מדידה חדשה."
+#
+#     זה שווה יותר מהמספר עצמו, כי הוא מונע את הניסיון הבא.
+#
+# ארבעה שדות, וכל אחד עונה על שאלה אחרת:
+#
+#     השערה   מה ציפינו שיקרה, ולמה חשבנו כך
+#     שינוי   מה בדיוק שונה
+#     תוצאה   מה קרה בפועל
+#     לקח     מה למדנו — ובעיקר, מה לא לנסות שוב
+
+LESSON_FIELDS = ("hypothesis", "change", "outcome", "lesson")
+
+LESSON_LABELS = {
+    "hypothesis": "השערה",
+    "change": "שינוי",
+    "outcome": "תוצאה",
+    "lesson": "לקח",
+}
+
+
+def lessons_path():
+    return os.path.join(RESULTS_DIR, "lessons.jsonl")
+
+
+def add_lesson(label, fields, result=None):
+    """רושם מה ניסינו, למה, ומה למדנו."""
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    t = (result or {}).get("transcription", {})
+    entry = {
+        "label": label,
+        "stamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "git": git_state(),
+        "correct": t.get("correct"),
+        "words": t.get("words"),
+        "percent": t.get("percent"),
+    }
+    entry.update({k: (fields.get(k) or "").strip() for k in LESSON_FIELDS})
+    with io.open(lessons_path(), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return entry
+
+
+def read_lessons():
+    p = lessons_path()
+    if not os.path.exists(p):
+        return []
+    rows = []
+    for line in io.open(p, encoding="utf-8"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def show_lessons(args):
+    """כל מה שניסינו, לפי סדר, עם המסקנה.
+
+    זה המסמך שקוראים **לפני** שמתחילים ניסיון חדש, כדי לא לחזור
+    על משהו שכבר נפל.
+    """
+    rows = read_lessons()
+    if not rows:
+        print("יומן הלקחים ריק.")
+        print()
+        print("לרשום לקח:")
+        print('  python scripts/regression_check.py --lesson "שם"'
+              ' --hypothesis "..." --change "..." --outcome "..." --learned "..."')
+        return 0
+
+    only = (args.filter or "").strip()
+    print("=" * 78)
+    print(f"יומן הלקחים — {len(rows)} ניסיונות")
+    print("=" * 78)
+
+    for r in rows:
+        if only and only not in json.dumps(r, ensure_ascii=False):
+            continue
+        score = (f"{r['correct']}/{r['words']} ({r['percent']}%)"
+                 if r.get("correct") is not None else "לא נמדד")
+        g = r.get("git") or {}
+        print()
+        print("-" * 78)
+        print(f"  {r['stamp']}   {r['label']}")
+        print(f"  תוצאה במספרים: {score}"
+              + (f"   ·   נקודת שמירה {g['commit']}" if g.get("commit") else ""))
+        print("-" * 78)
+        for k in LESSON_FIELDS:
+            v = r.get(k)
+            if not v:
+                continue
+            lines = _wrap(v, 68)
+            print(f"  {LESSON_LABELS[k]}:")
+            for ln in lines:
+                print(f"     {ln}")
+    print()
+    print("=" * 78)
+    print("לפני ניסיון חדש — לקרוא את זה, כדי לא לחזור על מה שכבר נפל.")
+    return 0
+
+
+def _wrap(text, width):
+    """שבירת שורות שעובדת גם בעברית."""
+    out, line = [], ""
+    for word in str(text).split():
+        if len(line) + len(word) + 1 > width:
+            out.append(line)
+            line = word
+        else:
+            line = f"{line} {word}".strip()
+    if line:
+        out.append(line)
+    return out or [""]
+
+
+# ===================================================================
+#  השומר — עוצר לפני שחוזרים על ניסיון שנפל
+# ===================================================================
+#
+# יומן הלקחים לבדו אינו מספיק: הוא עוזר רק למי שזוכר לקרוא אותו.
+# השומר הזה עושה את ההפך — הוא בודק **לפני** הניסיון, ומזהיר אם
+# משהו דומה כבר נוסה ונפל.
+#
+# ההתאמה היא לפי מילים משותפות. היא אינה מושלמת, אבל היא תופסת
+# את המקרה שבאמת קורה: "בוא ננסה מנוע יידיש" כעבור חודשיים.
+
+#: מילים שחוזרות בכל משפט ואינן מעידות על נושא.
+STOPWORDS = {
+    "של", "את", "על", "עם", "לא", "זה", "הוא", "היא", "אם", "כי", "גם",
+    "או", "אבל", "רק", "יותר", "כמו", "אחרי", "לפני", "בין", "כל", "יש",
+    "אין", "היה", "הייתה", "להיות", "אפשר", "צריך", "ניסיון", "ניסינו",
+    "לנסות", "בדיקה", "לבדוק", "מה", "איך", "למה", "כדי", "שזה", "הזה",
+}
+
+
+def _keywords(text):
+    words = re.findall(r"[\u05D0-\u05EAa-zA-Z0-9][\u05D0-\u05EAa-zA-Z0-9\-]{2,}",
+                       str(text or "").lower())
+    return {w for w in words if w not in STOPWORDS}
+
+
+def find_similar_attempts(description, threshold=0.22):
+    """מחפש ניסיונות קודמים שדומים למה שעומדים לעשות."""
+    want = _keywords(description)
+    if not want:
+        return []
+    hits = []
+    for r in read_lessons():
+        text = " ".join(str(r.get(k) or "") for k in
+                        ("label", "hypothesis", "change", "outcome", "lesson"))
+        have = _keywords(text)
+        if not have:
+            continue
+        shared = want & have
+        # יחס מול הקצר מביניהם: תיאור קצר מול לקח ארוך עדיין אמור להתאים.
+        score = len(shared) / min(len(want), len(have))
+        if score >= threshold:
+            hits.append((score, sorted(shared), r))
+    hits.sort(key=lambda x: -x[0])
+    return hits
+
+
+def check_before(args):
+    """לקרוא לפני שמתחילים. עוצר אם משהו דומה כבר נפל."""
+    desc = args.check_before
+    hits = find_similar_attempts(desc)
+
+    print("=" * 78)
+    print("בדיקה לפני ניסיון")
+    print("=" * 78)
+    print(f"  מה שעומדים לנסות: {desc}")
+    print()
+
+    if not hits:
+        print("  לא נמצא ניסיון דומה ביומן. אפשר להמשיך.")
+        print()
+        print("  כדאי לרשום את ההשערה **לפני** הניסיון, ולא אחריו —")
+        print("  אחרי שרואים את התוצאה קל לשכנע את עצמך שזה מה שציפית.")
+        return 0
+
+    rejected = [h for h in hits if (h[2].get("verdict") or "") == "נפסל"]
+    print(f"  נמצאו {len(hits)} ניסיונות דומים"
+          + (f", מתוכם {len(rejected)} נפסלו" if rejected else "") + ":")
+
+    for score, shared, r in hits[:5]:
+        v = r.get("verdict") or "לא הוכרע"
+        mark = "!! נפסל" if v == "נפסל" else ("אומץ" if v == "אומץ" else "לא הוכרע")
+        print()
+        print("  " + "-" * 74)
+        print(f"  {mark}   {r['label']}   ({r['stamp']})")
+        print(f"  התאמה {score:.0%} · מילים משותפות: {', '.join(shared[:8])}")
+        if r.get("correct") is not None:
+            print(f"  נמדד: {r['correct']}/{r['words']} ({r['percent']}%)")
+        for k in ("hypothesis", "outcome", "lesson"):
+            if r.get(k):
+                print(f"  {LESSON_LABELS[k]}: {r[k][:200]}")
+
+    print()
+    print("=" * 78)
+    if rejected:
+        print("עצור. משהו דומה כבר נוסה ונפסל.")
+        print("אם בכל זאת ממשיכים — צריך לומר מה שונה הפעם, אחרת זה אותו")
+        print("ניסיון עם אותה תוצאה.")
+        return 1
+    print("היו ניסיונות דומים, אבל אף אחד לא נפסל. אפשר להמשיך בזהירות.")
+    return 0
 
 
 def show_history(args):
@@ -777,7 +1023,25 @@ def main():
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--compute-type", default="float16")
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--environment-change", action="store_true",
+                    help="השינוי היה בסביבה בלבד — אז כל שינוי בפלט הוא סימן")
+    # יומן הלקחים
+    ap.add_argument("--lessons", action="store_true",
+                    help="להציג את כל מה שניסינו ומה למדנו")
+    ap.add_argument("--filter", help="לסנן את יומן הלקחים לפי מילה")
+    ap.add_argument("--check-before", metavar="תיאור",
+                    help="לבדוק לפני ניסיון אם משהו דומה כבר נפל")
+    ap.add_argument("--hypothesis", default="", help="מה ציפינו שיקרה ולמה")
+    ap.add_argument("--change", default="", help="מה בדיוק שונה")
+    ap.add_argument("--outcome", default="", help="מה קרה בפועל")
+    ap.add_argument("--learned", default="", help="מה למדנו, ומה לא לנסות שוב")
+    ap.add_argument("--verdict", choices=["אומץ", "נפסל", "לא הוכרע"],
+                    help="האם השינוי נשאר או בוטל")
     args = ap.parse_args()
+    if args.lessons:
+        return show_lessons(args)
+    if args.check_before:
+        return check_before(args)
     if args.history:
         return show_history(args)
     if args.compare:
