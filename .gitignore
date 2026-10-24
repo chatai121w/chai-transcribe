@@ -74,3 +74,24 @@ flash_attention_state.json
 
 # Local runtime logs (watchdog + whisper server)
 logs/
+
+# משקולות מנועים — נשארות על המחשב ואינן נשמרות במאגר
+#
+# התיקייה הזאת שוקלת מעל 2.6 ג׳יגה, ויש בה קבצים בודדים מעל ג׳יגה.
+# גיטהאב חוסם קובץ מעל 100 מגה, ושמירה כזאת נכשלת ומלכלכת את
+# ההיסטוריה בצורה שקשה לתקן.
+#
+# ההורדה מחדש נעשית בשתי פקודות:
+#   python scripts/download_bluetts.py       מנוע ההקראה
+#   python scripts/download_tts_extras.py    שכפול קול ומנקד
+server/models/
+*.onnx
+*.safetensors
+*.ct2
+model.bin
+
+# חומר בדיקה והקלטות — פרטי, ואין טעם לשמור אותו במאגר
+benchmark_private/
+scripts/_roundtrip/
+research_notes/
+*.wav

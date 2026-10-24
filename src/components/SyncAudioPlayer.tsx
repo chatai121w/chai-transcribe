@@ -423,7 +423,28 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   studioLayoutJson,
   onStudioLayoutChange,
 }, ref) => {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // HTMLMediaElement ולא HTMLAudioElement: כשהמקור הוא קובץ וידאו מוצג כאן
+  // אלמנט וידאו במקום אודיו. שני הסוגים יורשים את אותו ממשק — נגינה, עצירה,
+  // זמן נוכחי, אירועים — ולכן כל 51 השימושים בהפניה הזו עובדים בלי שינוי.
+  const audioRef = useRef<HTMLMediaElement | null>(null);
+
+  // זיהוי לפי הכתובת. בקישור זמני שנוצר מקובץ מקומי אין סיומת, ולכן נבדק גם
+  // הסוג שהדפדפן רשם לו. אם לא ניתן להכריע — אודיו, שזה המצב הנפוץ.
+  const [isVideoSource, setIsVideoSource] = useState(false);
+  useEffect(() => {
+    if (!audioUrl) { setIsVideoSource(false); return; }
+    if (/\.(mp4|webm|mov|mkv|avi|m4v|ogv)(\?|#|$)/i.test(audioUrl)) {
+      setIsVideoSource(true);
+      return;
+    }
+    if (!audioUrl.startsWith("blob:")) { setIsVideoSource(false); return; }
+    let cancelled = false;
+    fetch(audioUrl)
+      .then((r) => r.blob())
+      .then((b) => { if (!cancelled) setIsVideoSource(b.type.startsWith("video/")); })
+      .catch(() => { if (!cancelled) setIsVideoSource(false); });
+    return () => { cancelled = true; };
+  }, [audioUrl]);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number>(0);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -2845,20 +2866,39 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   return (
     <TooltipProvider delayDuration={300}>
       <Wrapper className={wrapperClass} dir="rtl">
-        {/* Hidden audio element */}
-        <audio
-          ref={audioRef}
-          src={audioUrl}
-          onTimeUpdate={handleTimeUpdate}
-          onLoadedMetadata={handleLoadedMetadata}
-          onDurationChange={handleDurationChange}
-          onEnded={handleEnded}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          preload="auto"
-          playsInline
-          crossOrigin="anonymous"
-        />
+        {/* כשהמקור הוא וידאו מוצג נגן וידאו גלוי; אחרת אלמנט אודיו מוסתר.
+            שני הסוגים חולקים את אותו ממשק, ולכן כל שאר הנגן — הגלים, הזמנים,
+            הסנכרון עם הטקסט — עובד בלי שינוי. */}
+        {isVideoSource ? (
+          <video
+            ref={audioRef as React.RefObject<HTMLVideoElement>}
+            src={audioUrl ?? undefined}
+            onTimeUpdate={handleTimeUpdate}
+            onLoadedMetadata={handleLoadedMetadata}
+            onDurationChange={handleDurationChange}
+            onEnded={handleEnded}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            preload="auto"
+            playsInline
+            crossOrigin="anonymous"
+            className="w-full max-h-[340px] rounded-lg bg-black object-contain mb-2"
+          />
+        ) : (
+          <audio
+            ref={audioRef as React.RefObject<HTMLAudioElement>}
+            src={audioUrl ?? undefined}
+            onTimeUpdate={handleTimeUpdate}
+            onLoadedMetadata={handleLoadedMetadata}
+            onDurationChange={handleDurationChange}
+            onEnded={handleEnded}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            preload="auto"
+            playsInline
+            crossOrigin="anonymous"
+          />
+        )}
 
         {/* ─── Layout / Features toolbar ─────────────────── */}
         {!compact && (

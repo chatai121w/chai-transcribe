@@ -32,7 +32,9 @@ interface ModelInfo {
   category: 'tiny' | 'small' | 'medium' | 'large' | 'hebrew';
   hebrewOptimized?: boolean;
   speed: 'fast' | 'medium' | 'slow';
-  accuracy: 'basic' | 'good' | 'great' | 'excellent';
+  // 'unknown' נוסף 24.10.2026: מודל שלא נמדד על החומר של המשתמש לא יקבל דירוג.
+  // דגמי היידיש היו מסומנים "מצוין" ומתוארים כמתאימים ללשון הקודש בלי שנמדדו.
+  accuracy: 'basic' | 'good' | 'great' | 'excellent' | 'unknown';
   runtime: 'browser' | 'server';
 }
 
@@ -141,42 +143,6 @@ const SERVER_MODELS: ModelInfo[] = [
     category: 'hebrew',
     hebrewOptimized: true,
     speed: 'fast',
-    accuracy: 'excellent',
-    runtime: 'server',
-  },
-  {
-    id: "ivrit-ai/faster-whisper-v2-d4",
-    name: "Ivrit.ai Whisper V2 🇮🇱",
-    size: "~1.5GB",
-    description: "מודל ישראלי! אומן על מאות שעות שמע בעברית. רץ על GPU עם CUDA.",
-    downloaded: false,
-    category: 'hebrew',
-    hebrewOptimized: true,
-    speed: 'medium',
-    accuracy: 'excellent',
-    runtime: 'server',
-  },
-  {
-    id: "ivrit-ai/yi-whisper-large-v3-turbo-ct2",
-    name: "Ivrit.ai יידיש Turbo CT2 🕍⚡",
-    size: "~800MB",
-    description: "מודל יידיש של ivrit-ai מוכן CT2 — מהיר. מתאים גם לדיבור בלשון-הקודש (עברית-ארמית-יידיש מעורב).",
-    downloaded: false,
-    category: 'hebrew',
-    hebrewOptimized: true,
-    speed: 'fast',
-    accuracy: 'excellent',
-    runtime: 'server',
-  },
-  {
-    id: "ivrit-ai/yi-whisper-large-v3-ct2",
-    name: "Ivrit.ai יידיש מלא CT2 🕍",
-    size: "~3GB",
-    description: "גרסת היידיש המלאה (לא turbo) — דיוק גבוה יותר לדיבור יידיש/לשון-הקודש. דורש יותר זיכרון.",
-    downloaded: false,
-    category: 'hebrew',
-    hebrewOptimized: true,
-    speed: 'medium',
     accuracy: 'excellent',
     runtime: 'server',
   },
@@ -556,7 +522,14 @@ export const LocalModelManager = () => {
   });
 
   const speedLabel = (s: string) => s === 'fast' ? '⚡ מהיר' : s === 'medium' ? '🔄 בינוני' : '🐢 איטי';
-  const accuracyLabel = (a: string) => a === 'basic' ? 'בסיסי' : a === 'good' ? 'טוב' : a === 'great' ? 'מצוין' : 'מעולה';
+  // 'unknown' חייב להופיע כאן במפורש: בשרשרת הקודמת כל ערך לא מוכר נפל ל"מעולה",
+  // כך שמודל שלא נמדד היה מוצג כטוב ביותר.
+  const accuracyLabel = (a: string) =>
+    a === 'basic' ? 'בסיסי'
+    : a === 'good' ? 'טוב'
+    : a === 'great' ? 'מצוין'
+    : a === 'excellent' ? 'מעולה'
+    : 'לא נמדד';
   const runtimeLabel = (r: string) => r === 'server' ? '🖥️ GPU/CUDA' : '🌐 דפדפן';
 
   return (
