@@ -95,3 +95,9 @@ benchmark_private/
 scripts/_roundtrip/
 research_notes/
 *.wav
+
+# קובץ זמני של שומר בדיקת הטיפוסים (נמחק מיד; כאן למקרה שהריצה נקטעה)
+src/__typecheck_probe.ts
+
+# עותקי מדיה להדגמות מקומיות — כבדים ואינם חלק מהתוכנה
+public/demo/

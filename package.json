@@ -11,6 +11,8 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck:verify": "node scripts/verify-typecheck.mjs",
     "preview": "vite preview",
     "test": "node scripts/run-playwright.mjs smoke",
     "test:all": "node scripts/run-playwright.mjs full",
@@ -28,7 +30,7 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "desktop:validate": "npx tsc --noEmit && cargo test --manifest-path src-tauri/Cargo.toml && npm run build",
+    "desktop:validate": "npm run typecheck && cargo test --manifest-path src-tauri/Cargo.toml && npm run build",
     "desktop:build": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-tauri-installer.ps1",
     "dev:win": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/start-vite.ps1"
   },
