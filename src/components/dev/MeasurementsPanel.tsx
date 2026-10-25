@@ -124,7 +124,9 @@ function GroupChart({ group }: { group: Group }) {
         <Badge variant="outline">
           כלל נרמול: {group.normalisation ?? "לא נרשם"}
         </Badge>
-        <span className="text-muted-foreground">{data.length} מדידות</span>
+        <span className="text-muted-foreground">
+          {data.length === 1 ? "מדידה אחת" : `${data.length} מדידות`}
+        </span>
       </div>
 
       <div className="h-44 w-full" dir="ltr">
