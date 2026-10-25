@@ -764,6 +764,42 @@ def print_rollback_help(entry):
     print(f"        git switch -c חזרה-{g['commit'][:7]} {g['commit']}")
 
 
+def record_simple(label, topic, correct, total, benchmark=None, extra=None):
+    """רושם ביומן מדידה שנעשתה בכלי אחר.
+
+    למה זה קיים: זיהוי הדוברים והקובץ הארוך נמדדים בכלים נפרדים,
+    ועד כה התוצאות שלהם נשארו על המסך ונעלמו. מספר שלא נרשם אינו
+    מדידה — אי אפשר לדעת כעבור חודש אם השתפרנו או נסוגנו.
+
+    correct ו-total אינם חייבים להיות מילים. בזיהוי דוברים אלה
+    דוברים, ובקובץ ארוך אלה קטעים שעברו בלי דילוג ובלי לולאה.
+    מה שחשוב הוא שהיחידה תהיה קבועה בתוך הנושא, אחרת ההשוואה
+    חסרת משמעות.
+
+    benchmark הוא טביעת אצבע של החומר שנמדד. שתי מדידות על קבצים
+    שונים אינן בנות השוואה, בדיוק כמו בתמלול.
+    """
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    pct = round(100.0 * correct / total, 2) if total else None
+    entry = {
+        "label": label,
+        "stamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "git": git_state(),
+        "topic": topic,
+        "benchmark": benchmark,
+        "correct": correct,
+        "words": total,
+        "percent": pct,
+    }
+    if extra:
+        entry.update(extra)
+    with io.open(JOURNAL, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False) + chr(10))
+    print("נרשם ביומן: %s · %s · %s מתוך %s = %s מתוך 100"
+          % (label, TOPICS.get(topic, topic), correct, total, round(pct or 0)))
+    return entry
+
+
 def append_journal(label, result, topic=DEFAULT_TOPIC):
     """מוסיף מדידה ליומן. שורה אחת לכל מדידה, לפי הסדר."""
     os.makedirs(RESULTS_DIR, exist_ok=True)

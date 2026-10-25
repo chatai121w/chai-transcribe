@@ -268,6 +268,37 @@ def main(folder):
     print("  אינו כותב באיזו שנייה כל אחד דיבר, ולכן זה דורש הצמדה של")
     print("  התמלול לפרוטוקול מילה במילה.")
 
+    # ---------------------------------------------- רישום ביומן
+    #
+    # מספר שנשאר על המסך אינו מדידה. בלי רישום לא נדע כעבור חודש
+    # אם השתפרנו או נסוגנו.
+    #
+    # מה נספר כ"נכון": כמה קרובה ספירת הדוברים לאמת. סטייה לכל
+    # כיוון היא שגיאה — מערכת שמצאה 15 דוברים כשהיו 10 שגויה בדיוק
+    # כמו אחת שמצאה 7. לכן הציון הוא מספר הדוברים האמיתי פחות
+    # גודל הסטייה.
+    expected_n = len(expected_speakers)
+    found_n = len(found_labels)
+    score = max(0, expected_n - abs(found_n - expected_n))
+    try:
+        rc.record_simple(
+            label="דוברים-%s" % os.path.basename(folder.rstrip("/\\")),
+            topic="speaker-id",
+            correct=score, total=expected_n,
+            # טביעת אצבע של החומר. שתי מדידות על ישיבות שונות
+            # אינן בנות השוואה.
+            benchmark=str(meta.get("session_id") or os.path.basename(folder)),
+            extra={
+                "found_speakers": found_n,
+                "expected_switches": switches,
+                "found_switches": found_switches,
+                "audio_seconds": audio_secs,
+                "analysis_seconds": round(elapsed, 1),
+            },
+        )
+    except Exception as exc:
+        print("לא נרשם ביומן: %s" % exc)
+
     out = os.path.join(folder, "speakers.json")
     io.open(out, "w", encoding="utf-8").write(json.dumps({
         "expected_speakers": expected_speakers,

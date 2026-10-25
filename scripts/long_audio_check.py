@@ -203,6 +203,33 @@ def analyse(folder):
         print("  מטעה לשני הכיוונים.")
     print()
 
+    # ---------------------------------------------- רישום ביומן
+    #
+    # אין כאן ציון דיוק בכוונה — הפרוטוקול ערוך והמודל אומן על
+    # ועדות הכנסת. מה שכן נמדד ושווה מעקב הוא היציבות: קטע שנתקע
+    # בלולאה הוא כשל אמיתי, והוא שקט לגמרי בתמלול.
+    #
+    # לכן היחידה היא קטעים: כמה מהם יצאו בלי לולאה. בהרצה נקייה
+    # זה מלא, וירידה פירושה שהמנוע התחיל להיתקע.
+    looped = sum(n for _start, n, _t in runs)
+    clean = max(0, len(segs) - looped)
+    try:
+        rc.record_simple(
+            label="ארוך-%s" % os.path.basename(folder.rstrip("/\\")),
+            topic="long-form",
+            correct=clean, total=len(segs),
+            benchmark=str(meta.get("session_id") or os.path.basename(folder)),
+            extra={
+                "gaps": len(gaps),
+                "covered_pct": round(100.0 * covered / dur, 1) if dur else None,
+                "audio_seconds": round(dur, 1),
+                "realtime_factor": round(elapsed / dur, 3) if dur else None,
+                "words": len(words),
+            },
+        )
+    except Exception as exc:
+        print("לא נרשם ביומן: %s" % exc)
+
     out = os.path.join(folder, "transcript.txt")
     io.open(out, "w", encoding="utf-8").write(text)
     print("התמלול המלא נשמר ב-%s" % out)
