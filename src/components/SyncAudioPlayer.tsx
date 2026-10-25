@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo, forwardRef, useImperativeHandle } from "react";
+import { createVttUrl } from "@/lib/subtitleVtt";
+import { wordTimingsToSubtitleSegments } from "@/lib/subtitleTracks";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Card } from "@/components/ui/card";
@@ -431,6 +433,34 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
   // זיהוי לפי הכתובת. בקישור זמני שנוצר מקובץ מקומי אין סיומת, ולכן נבדק גם
   // הסוג שהדפדפן רשם לו. אם לא ניתן להכריע — אודיו, שזה המצב הנפוץ.
   const [isVideoSource, setIsVideoSource] = useState(false);
+
+  /**
+   * כתוביות על הווידאו עצמו.
+   *
+   * עד כה הנגן הציג את התמלול לצד הווידאו בלבד. זה טוב לעריכה,
+   * אבל כשרוצים פשוט לצפות — רוצים את הטקסט על התמונה.
+   *
+   * הקובץ נבנה בזיכרון מהתזמונים שכבר קיימים. הוא חייב להיות
+   * בפורמט WebVTT: זה הפורמט היחיד שהדפדפן קורא בתגית הזאת, והוא
+   * אינו מתלונן על אחר אלא פשוט אינו מציג כלום.
+   */
+  const [subtitlesOn, setSubtitlesOn] = useState(false);
+  const [vttUrl, setVttUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isVideoSource || !wordTimings.length) { setVttUrl(null); return; }
+    const url = createVttUrl(wordTimingsToSubtitleSegments(wordTimings));
+    setVttUrl(url);
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [isVideoSource, wordTimings]);
+
+  // הדלקה וכיבוי נעשים על המסלול עצמו ולא בהסרת התגית: הסרה
+  // מאלצת את הדפדפן לטעון מחדש, והווידאו מהבהב.
+  useEffect(() => {
+    const el = audioRef.current as HTMLVideoElement | null;
+    const track = el?.textTracks?.[0];
+    if (track) track.mode = subtitlesOn ? "showing" : "hidden";
+  }, [subtitlesOn, vttUrl]);
   useEffect(() => {
     if (!audioUrl) { setIsVideoSource(false); return; }
     if (/\.(mp4|webm|mov|mkv|avi|m4v|ogv)(\?|#|$)/i.test(audioUrl)) {
@@ -2869,6 +2899,32 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         {/* כשהמקור הוא וידאו מוצג נגן וידאו גלוי; אחרת אלמנט אודיו מוסתר.
             שני הסוגים חולקים את אותו ממשק, ולכן כל שאר הנגן — הגלים, הזמנים,
             הסנכרון עם הטקסט — עובד בלי שינוי. */}
+        {isVideoSource && vttUrl && (
+          <div className="mb-1.5 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setSubtitlesOn((on) => !on)}
+              aria-pressed={subtitlesOn}
+              title={subtitlesOn ? "כיבוי הכתוביות על הווידאו" : "הצגת כתוביות על הווידאו"}
+              className={[
+                "flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors duration-[83ms]",
+                subtitlesOn
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border/60 text-muted-foreground hover:bg-muted/50",
+              ].join(" ")}
+            >
+              <span
+                className={[
+                  "inline-block h-2 w-3 rounded-[2px] border",
+                  subtitlesOn ? "border-primary bg-primary/30" : "border-current",
+                ].join(" ")}
+                aria-hidden
+              />
+              כתוביות
+            </button>
+          </div>
+        )}
+
         {isVideoSource ? (
           <video
             ref={audioRef as React.RefObject<HTMLVideoElement>}
@@ -2883,7 +2939,11 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
             playsInline
             crossOrigin="anonymous"
             className="w-full max-h-[340px] rounded-lg bg-black object-contain mb-2"
-          />
+          >
+            {vttUrl && (
+              <track kind="subtitles" srcLang="he" label="עברית" src={vttUrl} />
+            )}
+          </video>
         ) : (
           <audio
             ref={audioRef as React.RefObject<HTMLAudioElement>}

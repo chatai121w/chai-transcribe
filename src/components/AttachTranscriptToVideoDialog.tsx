@@ -10,8 +10,8 @@ import { TRANSLATION_LANGUAGES } from "@/lib/translation";
 import { buildSubtitleTracks, wordTimingsToSubtitleSegments } from "@/lib/subtitleTracks";
 import { importSubtitles, isSubtitleFilename } from "@/lib/subtitleImport";
 import {
-  SUBTITLE_MODES, getDefaultSubtitleMode, setDefaultSubtitleMode,
-  subtitleModeInfo, type SubtitleMode,
+  SUBTITLE_CONTAINERS, SUBTITLE_MODES, getDefaultSubtitleMode, setDefaultSubtitleMode,
+  subtitleContainerInfo, subtitleModeInfo, type SubtitleContainer, type SubtitleMode,
 } from "@/lib/subtitleMode";
 import { fetchLocalServer, getServerUrl } from "@/lib/serverConfig";
 import { toast } from "@/hooks/use-toast";
@@ -147,6 +147,9 @@ export function AttachTranscriptToVideoDialog({
   // איך הכתוביות ייכנסו. נטען מברירת המחדל השמורה, וניתן לשנות
   // בכל פעם בלי לשנות את ברירת המחדל עצמה.
   const [mode, setMode] = useState<SubtitleMode>(() => getDefaultSubtitleMode());
+  // ברירת המחדל היא mkv: במסלול, זאת המכולה היחידה שבה הכתוביות
+  // באמת נראות בנגן של חלונות. נבדק בפועל.
+  const [container, setContainer] = useState<SubtitleContainer>("mkv");
   const [savedDefault, setSavedDefault] = useState<SubtitleMode>(
     () => getDefaultSubtitleMode());
   const modeInfo = subtitleModeInfo(mode);
@@ -254,6 +257,7 @@ export function AttachTranscriptToVideoDialog({
       form.append("video", video);
       form.append("tracks", JSON.stringify(tracks));
       form.append("mode", mode);
+      form.append("container", container);
       const response = await fetchLocalServer(`${getServerUrl()}/media/subtitles`, { method: "POST", body: form });
       if (!response.ok) {
         const error = await response.json().catch(() => null) as { error?: string } | null;
@@ -263,7 +267,7 @@ export function AttachTranscriptToVideoDialog({
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${(transcriptTitle || video.name.replace(/\.[^.]+$/, "") || "video").replace(/[\\/:*?"<>|]+/g, "-")}-with-subtitles.mp4`;
+      link.download = `${(transcriptTitle || video.name.replace(/\.[^.]+$/, "") || "video").replace(/[\\/:*?"<>|]+/g, "-")}-with-subtitles.${mode === "burned" ? "mp4" : container}`;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 30_000);
       setProgress(100);
@@ -504,6 +508,54 @@ export function AttachTranscriptToVideoDialog({
                 );
               })}
             </div>
+
+            {mode !== "burned" && (
+              <div className="space-y-1.5 rounded-lg border border-border/60 bg-muted/30 p-3">
+                <div className="text-xs font-medium">סוג הקובץ</div>
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  {SUBTITLE_CONTAINERS.map((c) => {
+                    const active = container === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setContainer(c.id)}
+                        disabled={working}
+                        className={[
+                          "rounded-lg border p-2.5 text-right transition-colors duration-[83ms]",
+                          active
+                            ? "border-primary bg-primary/[0.06]"
+                            : "border-border/60 bg-background hover:border-primary/40",
+                        ].join(" ")}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={[
+                              "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border",
+                              active ? "border-primary" : "border-muted-foreground/40",
+                            ].join(" ")}
+                            aria-hidden
+                          >
+                            {active && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                          </span>
+                          <span className="text-sm font-medium">{c.label}</span>
+                        </span>
+                        <span className="mt-1 block pr-5 text-xs leading-relaxed text-muted-foreground">
+                          {c.body}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {container === "mp4" && (
+                  <p className="flex items-start gap-1.5 pt-0.5 text-xs text-amber-700 dark:text-amber-400">
+                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
+                    נבדק בפועל: בנגן של חלונות מסלול הכתוביות בקובץ mp4 אינו
+                    מופיע בכלל בתפריט. אם זה הנגן שלך — בחר mkv או צריבה.
+                  </p>
+                )}
+              </div>
+            )}
 
             {mode !== savedDefault && (
               <Button

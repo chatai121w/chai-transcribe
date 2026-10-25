@@ -63,6 +63,51 @@ export const SUBTITLE_MODES: SubtitleModeInfo[] = [
   },
 ];
 
+// ------------------------------------------------- המכולה של הקובץ
+
+/**
+ * באיזה סוג קובץ יוצא הווידאו.
+ *
+ * זה נראה כמו פרט טכני, והתברר שהוא מכריע. נבדק בפועל בנגן של
+ * חלונות:
+ *
+ *   קובץ mp4 עם מסלול כתוביות — המסלול **אינו מופיע בכלל** בתפריט
+ *   הכתוביות של הנגן. באותו תפריט הנגן כן מציג את מסלול הקול,
+ *   כלומר הוא קורא את רשימת המסלולים שבקובץ ומדלג דווקא על זה.
+ *
+ *   אותו תמלול בדיוק בקובץ mkv — מופיע בתפריט, נבחר, ומוצג על
+ *   המסך. בלי שום דחיסה מחדש ובלי פגיעה באיכות.
+ *
+ * הסיבה: mp4 מכיר רק פורמט כתוביות אחד, והנגן של חלונות אינו
+ * קורא אותו. ב-mkv אפשר להשתמש בפורמט הרגיל.
+ */
+export type SubtitleContainer = "mkv" | "mp4";
+
+export interface SubtitleContainerInfo {
+  id: SubtitleContainer;
+  label: string;
+  body: string;
+}
+
+export const SUBTITLE_CONTAINERS: SubtitleContainerInfo[] = [
+  {
+    id: "mkv",
+    label: "קובץ mkv",
+    body: "הכתוביות נראות בנגן של חלונות. זאת האפשרות היחידה שבה " +
+          "מסלול כתוביות באמת עובד שם.",
+  },
+  {
+    id: "mp4",
+    label: "קובץ mp4",
+    body: "מתאים לשיתוף בכל מקום — טלפונים, רשתות חברתיות. אבל הנגן " +
+          "של חלונות לא יציג את הכתוביות.",
+  },
+];
+
+export function subtitleContainerInfo(id: SubtitleContainer): SubtitleContainerInfo {
+  return SUBTITLE_CONTAINERS.find((c) => c.id === id) ?? SUBTITLE_CONTAINERS[0];
+}
+
 export function subtitleModeInfo(mode: SubtitleMode): SubtitleModeInfo {
   return SUBTITLE_MODES.find((m) => m.id === mode) ?? SUBTITLE_MODES[0];
 }

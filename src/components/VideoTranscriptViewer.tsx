@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Download, Captions, Loader2 } from "lucide-react";
+import { createVttUrl } from "@/lib/subtitleVtt";
 
 export interface TranscriptSegment {
   start: number;
@@ -38,6 +39,23 @@ export function VideoTranscriptViewer({ videoUrl, transcriptJsonUrl, srtUrl, srt
   const [loading, setLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [follow, setFollow] = useState(true);
+
+  /**
+   * כתובת זמנית לקובץ כתוביות בפורמט שהדפדפן מבין.
+   *
+   * קודם לכן הוזן כאן ישירות קובץ srt. דפדפנים אינם קוראים את
+   * הפורמט הזה בתגית הכתוביות — הם לא מתלוננים, לא זורקים שגיאה,
+   * ופשוט לא מציגים כלום. כלומר הוצג כפתור כתוביות שלא עשה דבר.
+   *
+   * הקטעים כבר נמצאים ביד, ולכן בונים מהם את הקובץ בזיכרון.
+   */
+  const [vttUrl, setVttUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const url = createVttUrl(segments);
+    setVttUrl(url);
+    // הכתובת תופסת זיכרון עד שמשחררים אותה.
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [segments]);
 
   useEffect(() => {
     if (!transcriptJsonUrl) return;
@@ -98,7 +116,7 @@ export function VideoTranscriptViewer({ videoUrl, transcriptJsonUrl, srtUrl, srt
         className="w-full rounded-lg bg-black max-h-[45vh]"
         onTimeUpdate={(e) => setCurrentTime((e.target as HTMLVideoElement).currentTime)}
       >
-        {srtUrl && <track kind="subtitles" srcLang="he" label="עברית" src={srtUrl} default />}
+        {vttUrl && <track kind="subtitles" srcLang="he" label="עברית" src={vttUrl} default />}
       </video>
 
       {loading && (

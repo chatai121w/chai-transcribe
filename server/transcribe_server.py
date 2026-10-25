@@ -2835,7 +2835,7 @@ def media_mux_subtitles():
 
     work_dir = Path(tempfile.mkdtemp(prefix="subtitle_mux_"))
     video_path = work_dir / f"input{suffix}"
-    output_path = work_dir / "video-with-subtitles.mp4"
+    output_path = work_dir / "video-with-subtitles.mp4"  # נקבע מחדש לפי המכולה
     try:
         upload.save(video_path)
         subtitle_paths = []
@@ -2861,6 +2861,24 @@ def media_mux_subtitles():
         if mode not in ("track", "default-track", "burned"):
             mode = "default-track"
 
+        # באיזו מכולה יוצא הקובץ. זה נראה כמו פרט טכני, והתברר
+        # שהוא מכריע: נבדק בפועל בנגן של חלונות, ושם קובץ mp4 עם
+        # מסלול כתוביות מסוג mov_text פשוט אינו מופיע בתפריט
+        # הכתוביות — הנגן כן מציג את מסלול הקול, כלומר הוא קורא את
+        # רשימת המסלולים ומדלג על זה. אותו תמלול בדיוק, במכולה mkv
+        # ובפורמט srt, מופיע בתפריט ומוצג על המסך.
+        #
+        # לכן ברירת המחדל למסלול היא mkv: אין טעם במסלול שאי אפשר
+        # לראות. מי שצריך תאימות רחבה לשיתוף יבחר mp4 במפורש.
+        container = (request.form.get("container") or "").strip().lower()
+        if container not in ("mp4", "mkv"):
+            container = "mp4" if mode == "burned" else "mkv"
+        if mode == "burned":
+            # בצריבה הכתוביות בתמונה, והמכולה אינה משנה דבר. mp4
+            # מתאים יותר לשיתוף, ולכן הצריבה תמיד יוצאת כך.
+            container = "mp4"
+        output_path = work_dir / f"video-with-subtitles.{container}"
+
         if mode == "burned":
             # מסנן הכתוביות קורא את הנתיב כמחרוזת, ולכן תווים מיוחדים
             # בנתיב שוברים אותו. הרצה מתוך תיקיית העבודה עם שם קובץ
@@ -2885,7 +2903,10 @@ def media_mux_subtitles():
             command.extend(["-map", "0:v:0", "-map", "0:a?"])
             for input_index in range(1, len(subtitle_paths) + 1):
                 command.extend(["-map", f"{input_index}:0"])
-            command.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text"])
+            # mov_text הוא פורמט הכתוביות היחיד ש-mp4 מכיר, ודווקא
+            # אותו הנגן של חלונות אינו קורא. ב-mkv אפשר srt רגיל.
+            subtitle_codec = "mov_text" if container == "mp4" else "srt"
+            command.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", subtitle_codec])
             for stream_index, (_, language, label) in enumerate(subtitle_paths):
                 metadata_language = _SUBTITLE_LANGUAGE_METADATA.get(
                     language, language[:3] or "und")
@@ -2895,7 +2916,10 @@ def media_mux_subtitles():
                 ])
                 if stream_index == 0 and mode == "default-track":
                     command.extend([f"-disposition:s:{stream_index}", "default"])
-            command.extend(["-movflags", "+faststart", str(output_path)])
+            # faststart הוא דגל של mp4 בלבד.
+            if container == "mp4":
+                command.extend(["-movflags", "+faststart"])
+            command.append(str(output_path))
             result = subprocess.run(command, capture_output=True, text=True,
                                     timeout=1800)
 
@@ -2909,9 +2933,9 @@ def media_mux_subtitles():
 
         return send_file(
             output_path,
-            mimetype="video/mp4",
+            mimetype="video/x-matroska" if container == "mkv" else "video/mp4",
             as_attachment=True,
-            download_name="video-with-subtitles.mp4",
+            download_name=f"video-with-subtitles.{container}",
         )
     except ValueError as exc:
         shutil.rmtree(work_dir, ignore_errors=True)
