@@ -108,7 +108,7 @@ const Index = () => {
   const { isAuthenticated } = useAuth();
 
   // Cloud-synced preferences
-  const { preferences, updatePreference, isLoaded: prefsLoaded } = useCloudPreferences();
+  const { preferences, updatePreference, patchTabSettings, isLoaded: prefsLoaded } = useCloudPreferences();
   const engine = preferences.engine as Engine;
   const sourceLanguage = normalizeSourceLanguage(preferences.source_language);
   const fontSize = preferences.font_size;
@@ -129,6 +129,38 @@ const Index = () => {
   };
   const [personalModelOn, setPersonalModelOn] = useState<boolean>(() => isPersonalPronunciationEnabled());
   const [customVocabularyOn, setCustomVocabularyOn] = useState<boolean>(() => isCustomVocabularyEnabled());
+
+  /**
+   * סנכרון אוצר המילים בין מחשבים.
+   *
+   * עד כה המתג הזה נשמר בזיכרון הדפדפן בלבד, בעוד ששני המתגים
+   * לידו נשמרים בענן. התוצאה: מי שכיבה אותו במחשב אחד מצא אותו
+   * דלוק באחר, בלי שום סימן שמשהו לא נשמר.
+   *
+   * הערך נשמר בתוך שדה ההגדרות הכללי ולא בעמודה משלו, כי שם כבר
+   * נשמרות הגדרות אחרות מאותו סוג — ובלי לשנות את מבנה המסד.
+   *
+   * כשאין ערך בענן נשמר מה שיש מקומית, כדי שבחירה קיימת לא תימחק
+   * בכניסה הראשונה אחרי השינוי.
+   */
+  useEffect(() => {
+    if (!prefsLoaded) return;
+    let cloud: unknown;
+    try {
+      const parsed = JSON.parse(preferences.tab_settings_json || '{}');
+      if (parsed && typeof parsed === 'object') {
+        cloud = (parsed as Record<string, unknown>).custom_vocabulary_enabled;
+      }
+    } catch { /* הגדרות פגומות — נופלים למקומי */ }
+
+    if (typeof cloud === 'boolean') {
+      setCustomVocabularyEnabled(cloud);
+      setCustomVocabularyOn(cloud);
+    } else {
+      // אין עדיין ערך בענן. מעלים לשם את מה שנבחר כאן.
+      patchTabSettings({ custom_vocabulary_enabled: isCustomVocabularyEnabled() });
+    }
+  }, [prefsLoaded, preferences.tab_settings_json, patchTabSettings]);
 
   useEffect(() => {
     setPersonalModelOn(preferences.personal_pronunciation_enabled);
@@ -2270,6 +2302,7 @@ const Index = () => {
                   onChange={(e) => {
                     setCustomVocabularyEnabled(e.target.checked);
                     setCustomVocabularyOn(e.target.checked);
+                    patchTabSettings({ custom_vocabulary_enabled: e.target.checked });
                   }}
                   className="rounded"
                 />
