@@ -11,17 +11,24 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { LayoutGrid, LayoutPanelLeft, Rows3, Square, Columns3 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LayoutSwitch } from "@/components/ui/LayoutSwitch";
 
 export type PronunciationLayoutMode = "rich" | "compact" | "tabs" | "grid" | "row";
 
 const STORAGE_KEY = "pronunciation_layout_mode";
 
-const MODES: Array<{ id: PronunciationLayoutMode; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { id: "rich",    label: "מורחב",   icon: Rows3 },
-  { id: "compact", label: "קומפקטי", icon: Square },
-  { id: "grid",    label: "רשת",     icon: LayoutGrid },
-  { id: "row",     label: "אופקי",   icon: Columns3 },
-  { id: "tabs",    label: "טאבים",   icon: LayoutPanelLeft },
+const MODES: Array<{
+  id: PronunciationLayoutMode;
+  label: string;
+  /** מה משתנה בפועל — מוצג בריחוף וליד הבורר, כמו בבורר השני. */
+  hint: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { id: "rich",    label: "מורחב",   hint: "שני מתגים זה לצד זה",        icon: Rows3 },
+  { id: "compact", label: "קומפקטי", hint: "שורות צרות, טקסט קטן",       icon: Square },
+  { id: "grid",    label: "רשת",     hint: "שתי עמודות שוות",            icon: LayoutGrid },
+  { id: "row",     label: "אופקי",   hint: "שלושתם בשורה, בלי הסברים",   icon: Columns3 },
+  { id: "tabs",    label: "טאבים",   hint: "אחד בכל פעם, לשוניות בצד",   icon: LayoutPanelLeft },
 ];
 
 const TAB_DEFS: Array<{ id: "lk" | "personal" | "profile"; label: string }> = [
@@ -77,39 +84,24 @@ export function PronunciationStack({
       aria-label="הגדרות הגייה עברית"
       className="rounded-xl border border-yellow-500/30 bg-yellow-500/[0.03] p-2.5 space-y-2"
     >
-      {/* Header + layout switcher */}
-      <header className="flex items-center justify-between gap-2 px-1">
-        <h3 className="text-xs font-semibold text-foreground/80 flex items-center gap-1.5">
+      {/*
+        הכותרת ובורר הפריסה.
+
+        הבורר הוא אותו רכיב ששאר הבוררים בעמוד משתמשים בו. קודם
+        לכן הוא היה עותק נפרד בצבע אחר, וכל אחד מהם היה סביר בפני
+        עצמו — אבל יחד הם נראו כמו שתי מערכות שונות.
+      */}
+      <header className="flex flex-wrap items-center justify-between gap-2 px-1">
+        <h3 className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-foreground/80">
           <span aria-hidden>🕮</span>
           הגייה ולשון
         </h3>
-        <div
-          role="tablist"
-          aria-label="פריסת תצוגה"
-          className="inline-flex items-center gap-0.5 rounded-md border border-border bg-muted/40 p-0.5"
-        >
-          {MODES.map(({ id, label, icon: Icon }) => {
-            const active = mode === id;
-            return (
-              <button
-                key={id}
-                role="tab"
-                aria-selected={active}
-                title={label}
-                onClick={() => setMode(id)}
-                className={cn(
-                  "flex items-center gap-1 px-2 h-6 rounded text-[11px] font-medium transition-colors",
-                  active
-                    ? "bg-yellow-500/90 text-black shadow-sm"
-                    : "text-muted-foreground hover:text-foreground hover:bg-background/60"
-                )}
-              >
-                <Icon className="w-3 h-3" />
-                <span className="hidden sm:inline">{label}</span>
-              </button>
-            );
-          })}
-        </div>
+        <LayoutSwitch
+          label="פריסת ההגייה והלשון"
+          value={mode}
+          onChange={setMode}
+          options={MODES}
+        />
       </header>
 
       {/* Body */}

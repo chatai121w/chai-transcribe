@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, memo, useRef } from "react";
+import { LayoutSwitch } from "@/components/ui/LayoutSwitch";
+import { Columns3, LayoutGrid, Rows3 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -67,6 +69,11 @@ const hasCustomServerUrl = () => {
   if (url === '' || url.startsWith('/')) return false;
   return !url.includes('localhost') && !url.includes('127.0.0.1');
 };
+
+/** חיבור בין שם הפריסה לציור שלה. */
+const LAYOUT_ICONS = {
+  wide: Rows3, snug: Square, row: Columns3, mini: LayoutGrid,
+} as const;
 
 export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, onSourceLanguageChange, groqKeysText = "", completedEngine = null }: TranscriptionEngineProps) => {
   const navigate = useNavigate();
@@ -603,36 +610,20 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
       {selected === 'local-server' && (
         <div className="mt-3 border-t pt-3" dir="rtl">
 
-        {/* בורר הפריסה — אותה רוח כמו בפאנל ההגייה, כדי שלא יהיו
-            שתי דרכים שונות לאותו דבר באותה מערכת. */}
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="text-[11px] text-muted-foreground">
-            {ENGINE_PANEL_LAYOUTS.find((l) => l.id === panelLayout)?.hint}
-          </span>
-          <div
-            role="tablist"
-            aria-label="פריסת הגדרות המנוע"
-            className="inline-flex items-center gap-0.5 rounded-md border bg-muted/40 p-0.5"
-          >
-            {ENGINE_PANEL_LAYOUTS.map((l) => (
-              <button
-                key={l.id}
-                role="tab"
-                type="button"
-                aria-selected={panelLayout === l.id}
-                title={l.hint}
-                onClick={(e) => { e.preventDefault(); chooseLayout(l.id); }}
-                className={`h-6 rounded px-2 text-[11px] font-medium transition-colors ${
-                  panelLayout === l.id
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'
-                }`}
-              >
-                {l.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* בורר הפריסה. הרכיב משותף עם שאר הבוררים בעמוד, כדי
+            שכולם יישארו זהים בלי שאף אחד יצטרך לזכור. */}
+        <LayoutSwitch
+          className="mb-2"
+          label="פריסת הגדרות המנוע"
+          value={panelLayout}
+          onChange={chooseLayout}
+          options={ENGINE_PANEL_LAYOUTS.map((l) => ({
+            id: l.id,
+            label: l.label,
+            hint: l.hint,
+            icon: LAYOUT_ICONS[l.id],
+          }))}
+        />
 
         <div className={L.wrap}>
 

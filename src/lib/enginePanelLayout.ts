@@ -26,6 +26,19 @@ export interface EnginePanelLayoutInfo {
   hint: string;
 }
 
+/**
+ * הסמלים יושבים בנפרד מהרשימה.
+ *
+ * הקובץ הזה מתאר מה כל פריסה עושה, ואין סיבה שהוא יידע מאיזו
+ * ספרייה מגיעים הציורים. מי שמציג את הבורר מחבר ביניהם.
+ */
+export const ENGINE_PANEL_LAYOUT_ICONS: Record<EnginePanelLayout, string> = {
+  wide: "Rows3",
+  snug: "Square",
+  row: "Columns3",
+  mini: "LayoutGrid",
+};
+
 export const ENGINE_PANEL_LAYOUTS: EnginePanelLayoutInfo[] = [
   { id: "wide", label: "רחב",     hint: "כל אפשרות תופסת שורה שלמה" },
   { id: "snug", label: "צמוד",    hint: "כפתורים ברוחב הטקסט, מקובצים" },
