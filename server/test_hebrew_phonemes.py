@@ -534,3 +534,45 @@ class TestNikudHelpers:
         without = ashk("הַבֵּן")
         assert with_mark != without, "הקו חייב להשפיע על ההטעמה"
         assert with_mark.index("ˈ") > 0
+
+
+class TestMatresLectionis:
+    """אותיות שנכתבות ואינן נשמעות.
+
+    המנקד האוטומטי מנקד טקסט בכתיב מלא: הוי"ו כבר קיימת בטקסט
+    המקורי, והוא רק מוסיף סימן תנועה על האות שלפניה. כך נוצרות
+    צורות שנראות מוזרות אך תקינות — ושבהן הוי"ו היא אם קריאה
+    ולא עיצור.
+
+    בלי הכללים האלה נוסף עיצור v שלא נאמר כלל.
+    """
+
+    def test_vav_after_holam_is_silent(self):
+        assert ashk("מַחְלֹוקֶת") == ashk("מַחְלֹקֶת")
+
+    def test_vav_after_kubutz_is_silent(self):
+        """הבאג שנתפס בבדיקה מקצה לקצה.
+
+        המנקד הוציא "לכולם" כ-לְכֻולָּם, והתוצאה הייתה ləχʊvlɔm
+        עם v באמצע. הכלל לחולם היה קיים, לקובוץ לא.
+        """
+        assert ashk("לְכֻולָּם") == ashk("לְכֻלָּם")
+
+    def test_no_stray_v_in_either_spelling(self):
+        for word in ("לְכֻולָּם", "לְכֻלָּם", "מַחְלֹוקֶת", "שָׁלוֹם"):
+            assert "v" not in ashk(word), word
+
+    def test_vav_at_the_start_is_still_a_consonant(self):
+        """אסור שהתיקון ישתיק וי"ו שכן נשמעת."""
+        assert ashk("וְאָהַבְתָּ").startswith("v")
+
+    def test_vav_between_vowels_is_still_a_consonant(self):
+        # מִצְוָה — הוי"ו נושאת תנועה משלה ולכן היא עיצור.
+        assert "v" in ashk("מִצְוָה")
+
+    def test_shuruk_is_not_affected(self):
+        assert ashk("הוּא") == "hʊ"
+
+    def test_yod_rule_still_holds(self):
+        # הכלל המקביל ליו"ד, שהיה קיים לפני כן.
+        assert ashk("בַּיִת") != ashk("בֵּית")

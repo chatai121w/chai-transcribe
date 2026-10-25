@@ -535,13 +535,22 @@ def word_to_pieces(word: str, accent: Accent) -> Tuple[List[Piece], List[str]]:
                                  in_prefix=in_prefix))
                 idx += 1
                 continue
-            # ו' בלי ניקוד אחרי חולם היא חולם מלא ולא עיצור.
+            # ו' בלי ניקוד אחרי חולם או קובוץ היא אם קריאה ולא עיצור.
             #
-            # המנקד האוטומטי כותב "מחלוקת" כ-מַחְלֹוקֶת, כלומר חולם על
-            # ל' ואחריו ו' ריקה. בלי הכלל הזה נוסף v והמילה יוצאת
-            # maχlɔvkəs במקום maχlɔjkəs.
+            # המנקד האוטומטי מנקד טקסט בכתיב מלא, כלומר הוי"ו כבר
+            # קיימת בטקסט המקורי והוא רק מוסיף סימן על האות שלפניה.
+            # כך נוצרות שתי צורות שנראות מוזרות ושתיהן תקינות:
+            #
+            #   "מחלוקת"  ->  מַחְלֹוקֶת   חולם על ל' ואחריו ו' ריקה
+            #   "לכולם"   ->  לְכֻולָּם    קובוץ על כ' ואחריו ו' ריקה
+            #
+            # בלי הכלל הזה נוסף v: maχlɔvkəs במקום maχlɔjkəs,
+            # ləχʊvlɔm במקום ləχʊlɔm.
+            #
+            # הקובוץ נוסף אחרי שהמקרה הראשון כבר תוקן — אותו באג
+            # בדיוק, רק עם תנועה אחרת, ולכן הוא לא נתפס אז.
             prev_vowel = units[idx - 1].vowel if idx > 0 else None
-            if vowel_mark is None and prev_vowel in (HOLAM, HOLAM_HASER):
+            if vowel_mark is None and prev_vowel in (HOLAM, HOLAM_HASER, KUBUTZ):
                 idx += 1
                 continue
             cons = accent.consonants[VAV]
