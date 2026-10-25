@@ -14,6 +14,10 @@ import { Globe, Cpu, Zap, Chrome, Mic, Waves, Server, Power, PowerOff, Loader2, 
 import { useLocalServer } from "@/hooks/useLocalServer";
 import { startLocalTranscriptionServer } from "@/lib/localServerLauncher";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
+import {
+  DEFAULT_ENGINE_PANEL_LAYOUT, ENGINE_PANEL_LAYOUTS, ENGINE_PANEL_LAYOUT_KEY,
+  enginePanelClasses, isEnginePanelLayout, type EnginePanelLayout,
+} from "@/lib/enginePanelLayout";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
 import { getApiKey } from "@/lib/keyCrypto";
@@ -77,6 +81,27 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
   const [beamSize, setBeamSize] = useState(() => parseInt(localStorage.getItem('cuda_beam_size') || '0'));
   const [noConditionPrev, setNoConditionPrev] = useState(() => localStorage.getItem('cuda_no_condition_prev') === '1');
   const [vadAggressive, setVadAggressive] = useState(() => localStorage.getItem('cuda_vad_aggressive') === '1');
+
+  /**
+   * פריסת הפאנל. נשמרת בענן בתוך שדה ההגדרות הכללי, ולכן עוברת
+   * גם למחשב אחר — בניגוד להעדפות שנשמרו בדפדפן בלבד.
+   */
+  const [panelLayout, setPanelLayout] = useState<EnginePanelLayout>(DEFAULT_ENGINE_PANEL_LAYOUT);
+  useEffect(() => {
+    if (!cloudLoaded) return;
+    try {
+      const parsed = JSON.parse(cloudPrefs.tab_settings_json || '{}');
+      const v = parsed?.[ENGINE_PANEL_LAYOUT_KEY];
+      if (isEnginePanelLayout(v)) setPanelLayout(v);
+    } catch { /* הגדרות פגומות — נשארים בברירת המחדל */ }
+  }, [cloudLoaded, cloudPrefs.tab_settings_json]);
+
+  const chooseLayout = (next: EnginePanelLayout) => {
+    setPanelLayout(next);
+    patchTabSettings({ [ENGINE_PANEL_LAYOUT_KEY]: next });
+  };
+
+  const L = enginePanelClasses(panelLayout);
   const [preset, setPreset] = useState<'fast' | 'balanced' | 'accurate'>(() => (localStorage.getItem('cuda_preset') as 'fast' | 'balanced' | 'accurate') || 'balanced');
   const [cudaModel, setCudaModel] = useState(() => localStorage.getItem('preferred_local_model') || 'ivrit-ai/whisper-large-v3-turbo-ct2');
 
@@ -576,12 +601,45 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
         ומתחילה הבאה.
       */}
       {selected === 'local-server' && (
-        <div className="mt-3 grid gap-3 border-t pt-3 lg:grid-cols-2" dir="rtl">
+        <div className="mt-3 border-t pt-3" dir="rtl">
 
-        <div className="rounded-lg border bg-muted/20 p-3">
-          <Label className="mb-1.5 block text-right text-sm font-semibold">מודל התמלול</Label>
+        {/* בורר הפריסה — אותה רוח כמו בפאנל ההגייה, כדי שלא יהיו
+            שתי דרכים שונות לאותו דבר באותה מערכת. */}
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="text-[11px] text-muted-foreground">
+            {ENGINE_PANEL_LAYOUTS.find((l) => l.id === panelLayout)?.hint}
+          </span>
+          <div
+            role="tablist"
+            aria-label="פריסת הגדרות המנוע"
+            className="inline-flex items-center gap-0.5 rounded-md border bg-muted/40 p-0.5"
+          >
+            {ENGINE_PANEL_LAYOUTS.map((l) => (
+              <button
+                key={l.id}
+                role="tab"
+                type="button"
+                aria-selected={panelLayout === l.id}
+                title={l.hint}
+                onClick={(e) => { e.preventDefault(); chooseLayout(l.id); }}
+                className={`h-6 rounded px-2 text-[11px] font-medium transition-colors ${
+                  panelLayout === l.id
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'
+                }`}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={L.wrap}>
+
+        <div className={L.card}>
+          <Label className={L.label}>מודל התמלול</Label>
           <Select value={cudaModel} onValueChange={handleCudaModelChange}>
-            <SelectTrigger className="h-10 w-full text-right" dir="rtl" aria-label="בחירת מודל CUDA לתמלול">
+            <SelectTrigger className={`w-full text-right ${panelLayout === "mini" ? "h-8 text-xs" : "h-10"}`} dir="rtl" aria-label="בחירת מודל CUDA לתמלול">
               <SelectValue placeholder="בחר מודל תמלול" />
             </SelectTrigger>
             <SelectContent dir="rtl" align="end">
@@ -590,17 +648,17 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
               ))}
             </SelectContent>
           </Select>
-          <p className="mt-1 text-right text-[11px] text-muted-foreground">ישמש בתמלול הבא, ונשמר גם בענן.</p>
+          <p className={L.hint}>ישמש בתמלול הבא, ונשמר גם בענן.</p>
         </div>
 
         {isConnected && (
-        <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
-          <Label className="text-xs font-medium text-right block">מתי המודל נטען</Label>
-          <div className="grid grid-cols-2 gap-2">
+        <div className={L.card}>
+          <Label className={L.label}>מתי המודל נטען</Label>
+          <div className={L.group}>
             <Button
               variant={preloadMode === 'preload' ? 'default' : 'outline'}
               size="sm"
-              className={`gap-1.5 text-xs h-8 ${preloadMode === 'preload' ? 'bg-blue-500 hover:bg-blue-600 text-white' : ''}`}
+              className={`${L.button} ${preloadMode === 'preload' ? 'bg-blue-500 hover:bg-blue-600 text-white' : ''}`}
               onClick={(e) => {
                 e.preventDefault();
                 setPreloadMode('preload');
@@ -614,7 +672,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
             <Button
               variant={preloadMode === 'direct' ? 'default' : 'outline'}
               size="sm"
-              className={`gap-1.5 text-xs h-8 ${preloadMode === 'direct' ? 'bg-blue-500 hover:bg-blue-600 text-white' : ''}`}
+              className={`${L.button} ${preloadMode === 'direct' ? 'bg-blue-500 hover:bg-blue-600 text-white' : ''}`}
               onClick={(e) => {
                 e.preventDefault();
                 setPreloadMode('direct');
@@ -626,7 +684,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
               תמלל ישיר
             </Button>
           </div>
-          <p className="text-[10px] text-muted-foreground text-right">
+          <p className={L.hint}>
             {preloadMode === 'preload' ? 'המודל נטען ברקע מיד כשהשרת מוכן — תמלול ראשון מהיר' : 'חוסך VRAM — המודל נטען רק כשמתחילים לתמלל'}
           </p>
 
@@ -684,13 +742,13 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
         )}
 
         {/* ערכת התמלול — תופסת את כל הרוחב, כי יש בה שלוש אפשרויות */}
-        <div className="rounded-lg border bg-muted/20 p-3 lg:col-span-2">
-          <Label className="text-xs font-medium text-right block mb-2">איזון בין מהירות לדיוק</Label>
-          <div className="flex gap-1.5" dir="rtl">
+        <div className={`${L.card} ${panelLayout === "wide" || panelLayout === "snug" ? "lg:col-span-2" : ""}`}>
+          <Label className={L.label}>איזון בין מהירות לדיוק</Label>
+          <div className={L.group} dir="rtl">
             <Button
               variant={preset === 'fast' ? 'default' : 'outline'}
               size="sm"
-              className={`gap-1 text-xs h-8 flex-1 ${preset === 'fast' ? 'bg-amber-500 hover:bg-amber-600 text-white' : ''}`}
+              className={`${L.button} ${preset === 'fast' ? 'bg-amber-500 hover:bg-amber-600 text-white' : ''}`}
               onClick={(e) => { e.preventDefault(); applyPreset('fast'); }}
             >
               <Rabbit className="w-3.5 h-3.5" />
@@ -699,7 +757,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
             <Button
               variant={preset === 'balanced' ? 'default' : 'outline'}
               size="sm"
-              className={`gap-1 text-xs h-8 flex-1 ${preset === 'balanced' ? 'bg-blue-500 hover:bg-blue-600 text-white' : ''}`}
+              className={`${L.button} ${preset === 'balanced' ? 'bg-blue-500 hover:bg-blue-600 text-white' : ''}`}
               onClick={(e) => { e.preventDefault(); applyPreset('balanced'); }}
             >
               <Zap className="w-3.5 h-3.5" />
@@ -708,20 +766,21 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
             <Button
               variant={preset === 'accurate' ? 'default' : 'outline'}
               size="sm"
-              className={`gap-1 text-xs h-8 flex-1 ${preset === 'accurate' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''}`}
+              className={`${L.button} ${preset === 'accurate' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''}`}
               onClick={(e) => { e.preventDefault(); applyPreset('accurate'); }}
             >
               <Turtle className="w-3.5 h-3.5" />
               <Target className="w-3 h-3 text-[#0f1e43]" /> מדויק
             </Button>
           </div>
-          <p className="text-[10px] text-muted-foreground text-right mt-1">
+          <p className={L.hint}>
             {preset === 'fast' && 'עיבוד מקבילי, beam=1, דילוג שקט אגרסיבי — מהיר פי 3-5'}
             {preset === 'balanced' && 'איזון טוב בין מהירות לדיוק — ברירת מחדל מומלצת'}
             {preset === 'accurate' && 'עיבוד סדרתי, beam=5, הקשר מלא — דיוק מקסימלי'}
           </p>
         </div>
 
+        </div>
         </div>
       )}
 
@@ -932,6 +991,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
         <TranscriptionLanguageControl
           value={sourceLanguage}
           onChange={onSourceLanguageChange}
+          layout={panelLayout}
         />
       </div>
     </Card>

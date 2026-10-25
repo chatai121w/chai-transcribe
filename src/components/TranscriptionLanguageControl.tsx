@@ -3,6 +3,7 @@ import { Languages, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { enginePanelClasses, type EnginePanelLayout } from "@/lib/enginePanelLayout";
 import {
   TRANSCRIPTION_LANGUAGES,
   type ManualTranscriptionLanguage,
@@ -13,6 +14,14 @@ interface TranscriptionLanguageControlProps {
   value: SourceLanguage;
   onChange: (language: SourceLanguage) => void;
   compact?: boolean;
+  /**
+   * הפריסה שנבחרה בפאנל המנוע.
+   *
+   * הרכיב הזה יושב בתוך אותו פאנל, ולכן הוא חייב להיראות כמוהו.
+   * בלי זה נוצר מצב מביך: ההגדרות מעליו צמודות וקטנות, ודווקא
+   * בחירת השפה נשארת עם שני כפתורי ענק.
+   */
+  layout?: EnginePanelLayout;
 }
 
 const LAST_MANUAL_LANGUAGE_KEY = "transcript_last_manual_language";
@@ -27,7 +36,10 @@ function getLastManualLanguage(): ManualTranscriptionLanguage {
   return "he";
 }
 
-export function TranscriptionLanguageControl({ value, onChange, compact = false }: TranscriptionLanguageControlProps) {
+export function TranscriptionLanguageControl({
+  value, onChange, compact = false, layout = "wide",
+}: TranscriptionLanguageControlProps) {
+  const L = enginePanelClasses(layout);
   const isAuto = value === "auto";
   const manualValue = useMemo(() => value === "auto" ? getLastManualLanguage() : value, [value]);
 
@@ -39,14 +51,14 @@ export function TranscriptionLanguageControl({ value, onChange, compact = false 
   return (
     <div className={compact ? "space-y-2" : "space-y-3"} dir="rtl">
       {!compact && <Label className="block text-right text-sm font-semibold">שפת הדיבור באודיו</Label>}
-      <div className="grid grid-cols-2 gap-2" role="group" aria-label="אופן בחירת שפת התמלול">
+      <div className={L.group} role="group" aria-label="אופן בחירת שפת התמלול">
         <Button
           type="button"
           size="sm"
           variant={isAuto ? "default" : "outline"}
           aria-pressed={isAuto}
           onClick={() => onChange("auto")}
-          className="gap-2"
+          className={L.button}
         >
           <Sparkles className="h-4 w-4" />
           זיהוי אוטומטי
@@ -57,7 +69,7 @@ export function TranscriptionLanguageControl({ value, onChange, compact = false 
           variant={!isAuto ? "default" : "outline"}
           aria-pressed={!isAuto}
           onClick={() => selectManual(manualValue)}
-          className="gap-2"
+          className={L.button}
         >
           <Languages className="h-4 w-4" />
           בחירה ידנית
@@ -66,7 +78,7 @@ export function TranscriptionLanguageControl({ value, onChange, compact = false 
 
       {!isAuto && (
         <Select value={value} onValueChange={(language) => selectManual(language as ManualTranscriptionLanguage)}>
-          <SelectTrigger className="w-full text-right" dir="rtl" aria-label="שפה ידנית מחייבת">
+          <SelectTrigger className={`w-full text-right ${layout === "mini" ? "h-8 text-xs" : ""}`} dir="rtl" aria-label="שפה ידנית מחייבת">
             <SelectValue placeholder="בחר שפה" />
           </SelectTrigger>
           <SelectContent dir="rtl">
