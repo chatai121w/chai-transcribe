@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -162,6 +163,7 @@ class BlueTts:
             except ImportError as exc:
                 raise BlueTtsError("חסרה חבילת ההרצה של המנוע.") from exc
 
+            self._add_gpu_dll_dirs()
             providers = self._providers or self._pick_providers(ort)
             opts = ort.SessionOptions()
             opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
@@ -199,6 +201,37 @@ class BlueTts:
             self._u_ref = np.asarray(unc["u_ref"], dtype=np.float32)
 
             self._loaded = True
+
+    @staticmethod
+    def _add_gpu_dll_dirs() -> List[str]:
+        """מוסיף את נתיבי ספריות החישוב של כרטיס המסך.
+
+        בלי זה מנוע ההרצה טוען את ספק כרטיס המסך, נכשל על
+        cublasLt64_12.dll שאינה בנתיב החיפוש של חלונות, **וחוזר
+        בשקט למעבד**. אין שגיאה, אין אזהרה — רק עבודה איטית פי
+        כמה בלי שאף אחד יודע למה.
+
+        הספריות אינן חסרות: הן יושבות בתוך חבילת החישוב הראשית.
+        חלונות פשוט אינו מחפש שם.
+
+        זאת בדיוק אותה תקלה שנתפסה בכלי המדידה, ומאותה סיבה: שם
+        היא נראתה ככישלון גלוי, וכאן כנסיגה שקטה — וזה גרוע יותר.
+        """
+        if sys.platform != "win32":
+            return []
+        added: List[str] = []
+        for pkg, sub in (("torch", "lib"), ("nvidia.cublas", "bin"),
+                         ("nvidia.cudnn", "bin"), ("nvidia.cufft", "bin")):
+            try:
+                mod = __import__(pkg, fromlist=[""])
+                d = os.path.join(mod.__path__[0], sub)
+                if os.path.isdir(d):
+                    os.add_dll_directory(d)
+                    os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+                    added.append(d)
+            except Exception:
+                pass
+        return added
 
     @staticmethod
     def _pick_providers(ort) -> List[str]:
