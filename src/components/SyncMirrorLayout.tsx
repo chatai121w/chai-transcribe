@@ -2105,9 +2105,12 @@ export const SyncMirrorLayout = ({
       {/* Shared marking toolbar — lifted ABOVE both columns so each side starts at the same height */}
       {enableRichEdit && (
         <div className="px-3 pt-2 pb-1 border-b border-border/30 bg-background/40" dir="rtl">
+          {/* הסימון עובר דרך הנעילה ולא ישירות: קודם לכן הסרגל
+              קיבל את הפונקציה הגולמית, ולכן הוא שינה את הטקסט גם
+              כשהצד היה נעול — בלי הודעה ובלי שום סימן. */}
           <TextMarkingOverlay
             text={text}
-            onTextChange={onTextChange}
+            onTextChange={(v) => handleTextChangeFromPane('left', v)}
             fontSize={localFontSize}
             fontFamily={localFontFamily}
             lineHeight={localLineHeight}
@@ -2269,7 +2272,10 @@ export const SyncMirrorLayout = ({
           {effectiveRichEdit && !paddedAlignment ? (
             <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
               {/* Marking toolbar has been lifted above both columns (see top of layout). */}
-              {/* RichTextEditor — full editing surface */}
+              {/* RichTextEditor — משטח העריכה המלא.
+                  השמירה עוברת באותה עטיפה כמו הכפתור שבסרגל.
+                  בלעדיה שמירה מכאן הייתה שקטה: בלי אישור ובלי
+                  הודעת שגיאה אם היא נכשלה. */}
               {!isMarkingActive && (
                 <div
                   style={{ ...textStyle, ...(localTextColor ? { color: localTextColor } : {}) }}
@@ -2277,7 +2283,7 @@ export const SyncMirrorLayout = ({
                   <RichTextEditor
                     text={text}
                     onChange={(v) => handleTextChangeFromPane('left', v)}
-                    onSaveReplaceOriginal={onSaveReplace}
+                    onSaveReplaceOriginal={onSaveReplace ? handleSaveLocalAndCloud : undefined}
                     onDuplicateSave={onDuplicateSave ? () => onDuplicateSave('') : undefined}
                     onWordCorrected={onWordCorrected}
                     textAlign={sharedTextAlign}
