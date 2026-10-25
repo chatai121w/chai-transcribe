@@ -35,6 +35,9 @@ import sys
 sys.path.insert(0, "scripts")
 import regression_check as rc  # noqa: E402
 
+sys.path.insert(0, 'server')
+from hebrew_spelling import same_word  # noqa: E402
+
 rc.require_project_python()
 rc.add_gpu_dll_dirs()
 
@@ -60,10 +63,18 @@ def is_latin(w):
 
 
 def one_letter_apart(a, b):
-    """האם שתי המילים נבדלות באות אחת בלבד.
+    """נשאר כאן רק כדי להראות למה הוא נפסל.
 
-    זה הסימן המובהק לכתיב מלא מול חסר, לתחילית שנוספה, ולאם קריאה
-    שהושמטה — כלומר למקרים שבהם נאמרה אותה מילה בדיוק.
+    זה היה הכלל הראשון: "נבדלות באות אחת". הוא נראה סביר וספר 29
+    מילים כהבדלי כתיב — אבל הוא כלל גם שגיאות אמיתיות:
+
+        והיא / והוא      היא מול הוא
+        קצת / קצר        מילים שונות
+        יותר / ביותר     תחילית שמשנה משמעות
+
+    כלומר הוא היה מעלה את אחוז ההצלחה בלי ששום דבר ישתפר, על ידי
+    הסתרת שגיאות. הכלל שבשימוש נמצא ב-hebrew_spelling.same_word,
+    והוא צר בהרבה: רק אותיות שנוספות ונשמטות בכתיב מלא וחסר.
     """
     if abs(len(a) - len(b)) > 1:
         return False
@@ -111,7 +122,7 @@ def classify(kind, r, h):
         return "לועזי" if is_latin(h) else "נוספה"
     if is_latin(r) or is_latin(h):
         return "לועזי"
-    return "כתיב" if one_letter_apart(r, h) else "אחרת"
+    return "כתיב" if same_word(r, h) else "אחרת"
 
 
 def main(show):
