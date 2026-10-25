@@ -840,3 +840,84 @@ export function resetAllGuides(): void {
 export function countSeenGuides(): number {
   return ALL.filter((g) => wasGuideSeen(g.id)).length;
 }
+
+// ===================================================================
+//  קיבוץ לפי דף — למסך ההגדרות
+// ===================================================================
+
+/**
+ * שם הדף בעברית, לפי החלק שלפני הלוכסן במזהה.
+ *
+ * למה מפה ולא גזירה מהמזהה: המזהה הוא מפתח הזיכרון ואסור לשנות
+ * אותו, ולכן הוא נשאר באותיות לטיניות. המשתמש אינו קורא אנגלית,
+ * ולכן השם שמוצג לו חייב להיות נפרד מהמזהה.
+ */
+const PAGE_LABELS: Record<string, string> = {
+  'index': 'מסך התמלול',
+  'text-editor': 'עורך הטקסט',
+  'voice-studio': 'אולפן הקול',
+  'personal-learning': 'למידה אישית',
+  'setup': 'התקנת שרת',
+  'lashon-kodesh': 'לשון הקודש',
+  'video-to-mp3': 'המרת וידאו לאודיו',
+  'translation': 'תרגום',
+  'youtube': 'תמלול מיוטיוב',
+};
+
+export interface GuidePageGroup {
+  pageId: string;
+  label: string;
+  guides: TabGuide[];
+  /** כמה מהן כבר נראו. */
+  seen: number;
+}
+
+/** דף שאין לו שם מוגדר מקבל את המזהה שלו, כדי שלא ייעלם מהרשימה. */
+function pageLabel(pageId: string): string {
+  return PAGE_LABELS[pageId] || pageId;
+}
+
+/**
+ * כל ההדרכות מקובצות לפי דף, לפי סדר ההופעה בקובץ.
+ *
+ * הסדר אינו אלפביתי בכוונה: הוא הסדר שבו הדפים נכתבו, שהוא גם
+ * סדר השימוש הטבעי במערכת.
+ */
+export function guidesByPage(): GuidePageGroup[] {
+  const order: string[] = [];
+  const groups = new Map<string, TabGuide[]>();
+  for (const guide of ALL) {
+    const pageId = guide.id.split('/')[0];
+    if (!groups.has(pageId)) {
+      groups.set(pageId, []);
+      order.push(pageId);
+    }
+    groups.get(pageId)!.push(guide);
+  }
+  return order.map((pageId) => {
+    const guides = groups.get(pageId)!;
+    return {
+      pageId,
+      label: pageLabel(pageId),
+      guides,
+      seen: guides.filter((g) => wasGuideSeen(g.id)).length,
+    };
+  });
+}
+
+/** מאפס את ההדרכות של דף אחד בלבד. */
+export function resetPageGuides(pageId: string): void {
+  for (const guide of ALL) {
+    if (guide.id.split('/')[0] === pageId) writeFlag(SEEN_PREFIX + guide.id, false);
+  }
+}
+
+/** מסמן הדרכה כלא-נראתה, כדי שתוצג שוב. */
+export function unmarkGuideSeen(id: string): void {
+  writeFlag(SEEN_PREFIX + id, false);
+}
+
+/** סך כל ההדרכות במערכת. */
+export function countAllGuides(): number {
+  return ALL.length;
+}

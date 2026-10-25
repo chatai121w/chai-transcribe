@@ -6,8 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GuideSettings } from "@/components/settings/GuideSettings";
 import { toast } from "sonner";
-import { Settings as SettingsIcon, ArrowRight, LogOut, Eye, EyeOff, Wrench, Cpu, Palette, Key, Pencil, Trash2 } from "lucide-react";
+import { Settings as SettingsIcon, ArrowRight, LogOut, Eye, EyeOff, Wrench, Cpu, Palette, Key, Pencil, Trash2, BookOpen } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCloudApiKeys } from "@/hooks/useCloudApiKeys";
 import DevToolsPanel from "@/components/DevToolsPanel";
@@ -434,7 +435,7 @@ const Settings = () => {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} dir="rtl" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="api-keys" className="gap-2">
               <Key className="h-4 w-4" />
               מפתחות API
@@ -447,7 +448,28 @@ const Settings = () => {
               <Palette className="h-4 w-4" />
               ערכות נושא
             </TabsTrigger>
+            <TabsTrigger value="guides" className="gap-2">
+              <BookOpen className="h-4 w-4" />
+              מסכי הדרכה
+            </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="guides">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <BookOpen className="w-6 h-6 text-primary" />
+                  <CardTitle className="text-2xl">מסכי הדרכה</CardTitle>
+                </div>
+                <CardDescription>
+                  שליטה במסכי ההסבר שנפתחים בכניסה ללשונית חדשה
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <GuideSettings />
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           <TabsContent value="ai-pricing">
             <AIPricingSettings />
