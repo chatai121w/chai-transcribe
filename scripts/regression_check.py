@@ -30,6 +30,7 @@
 """
 import argparse
 import glob
+import hashlib
 import io
 import json
 import os
@@ -206,6 +207,34 @@ def measure_environment():
     return out
 
 
+def benchmark_fingerprint(clips):
+    """טביעת אצבע של נתוני המבחן עצמם.
+
+    למה זה הכרחי: ההשוואה בין מדידות נעשתה עד כה לפי מספר המילים
+    בלבד. זה הספיק כל עוד נתוני המבחן קבועים — אבל ברגע שמתקנים
+    טקסט הפניה שגוי, מספר המילים עשוי להישאר זהה והציון יעלה,
+    ואז תיקון בנתונים נראה בדיוק כמו שיפור במנוע.
+
+    זה קרה בפועל: בהפניה היה כתוב "ארה ב" — שתי מילים שבורות,
+    שריד של ארה"ב שהגרשיים שלו נמחקו. המנוע כתב "ארצות הברית",
+    שזה מה שנאמר בשמע, וקיבל שתי שגיאות על תמלול נכון. תיקון
+    ההפניה מעלה את הציון בארבע מילים בלי שהמנוע השתנה במאום.
+
+    לכן כל מדידה נושאת טביעת אצבע של הטקסטים שהיא נמדדה מולם,
+    ומדידות עם טביעות שונות אינן מושוות זו לזו. עדיף להתחיל
+    סדרה חדשה מאשר לרשום שיפור שלא היה.
+    """
+    h = hashlib.sha256()
+    for path in clips:
+        try:
+            meta = json.load(io.open(path, encoding="utf-8"))
+        except Exception:
+            continue
+        h.update(("%s%s" % (meta.get("audio", ""),
+                                     meta.get("text", ""))).encode("utf-8"))
+    return h.hexdigest()[:12]
+
+
 def measure_transcription(model_name, device, compute_type, limit=None):
     """תמלול עברית רגילה מול תמלול מאומת."""
     from faster_whisper import WhisperModel
@@ -246,6 +275,7 @@ def measure_transcription(model_name, device, compute_type, limit=None):
     pct, lo, hi = wilson(correct, total)
     return {
         "model": model_name, "device": device, "compute_type": compute_type,
+        "benchmark": benchmark_fingerprint(clips),
         "clips": len(per_clip), "correct": correct, "words": total,
         "percent": round(pct, 2), "ci_low": round(lo, 2), "ci_high": round(hi, 2),
         "load_seconds": round(load_s, 1),
@@ -691,6 +721,8 @@ def append_journal(label, result):
         "stamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         # בלי זה המספר חסר משמעות: אי אפשר לדעת מה השתנה ואיך לחזור.
         "git": git_state(),
+        # בלי זה תיקון בנתוני המבחן נראה כמו שיפור במנוע.
+        "benchmark": t.get("benchmark"),
         "correct": t.get("correct"),
         "words": t.get("words"),
         "percent": t.get("percent"),
@@ -734,18 +766,31 @@ def read_journal():
     return rows
 
 
-def comparable(rows, words):
-    """רק מדידות על אותו מספר מילים ניתנות להשוואה.
+def comparable(rows, words, benchmark=None):
+    """רק מדידות על אותם נתונים ממש ניתנות להשוואה.
 
-    השוואה בין מדידה על 340 מילים למדידה על 100 היא חסרת משמעות:
-    אפשר לקבל אחוז גבוה יותר פשוט בגלל קטעים קלים יותר. מדידה
-    חלקית נרשמת ביומן אבל אינה נכנסת לחישוב השיא.
+    שני תנאים, ושניהם נדרשים:
+
+      אותו מספר מילים   השוואה בין מדידה על 349 מילים למדידה על
+                        100 חסרת משמעות: אפשר לקבל אחוז גבוה
+                        יותר פשוט בגלל קטעים קלים יותר.
+
+      אותה טביעת אצבע   אותם טקסטי הפניה בדיוק. אם תוקן טקסט
+                        שגוי, הציון עולה בלי שהמנוע השתנה, וזה
+                        היה נרשם כשיפור.
+
+    מדידה שאינה עומדת בשניהם נרשמת ביומן אך אינה נכנסת לחישוב
+    השיא. רישומים ישנים שנשמרו לפני שהטביעה הוכנסה נחשבים
+    להשוואה רק מול רישומים ישנים אחרים.
     """
-    return [r for r in rows if r.get("words") == words and r.get("correct") is not None]
+    return [r for r in rows
+            if r.get("words") == words
+            and r.get("correct") is not None
+            and r.get("benchmark") == benchmark]
 
 
-def best_ever(rows, words):
-    pool = comparable(rows, words)
+def best_ever(rows, words, benchmark=None):
+    pool = comparable(rows, words, benchmark)
     return max(pool, key=lambda r: r["correct"]) if pool else None
 
 
@@ -1052,12 +1097,23 @@ def compare(args):
         print("  אין נתוני תמלול במדידה הזאת.")
     else:
         c, w = cur_t["correct"], cur_t["words"]
-        pool = [r for r in comparable(rows, w) if r.get("label") != name]
+        bm = cur_t.get("benchmark")
+        pool = [r for r in comparable(rows, w, bm) if r.get("label") != name]
+        # מדידות על נתוני מבחן אחרים אינן בנות השוואה, וחשוב
+        # שזה ייאמר במפורש ולא יישאר כשתיקה.
+        other_bm = [r for r in rows
+                    if r.get("correct") is not None
+                    and r.get("label") != name
+                    and r.get("benchmark") != bm]
         best = max(pool, key=lambda r: r["correct"]) if pool else None
         prev = pool[-1] if pool else None
 
         print(f"\nתמלול עברית רגילה — {w} מילים")
         print(f"  עכשיו:         {c}/{w} = {cur_t['percent']}%")
+        if other_bm and not pool:
+            print("  אין מדידה בת-השוואה: נתוני המבחן השתנו.")
+            print("  %d מדידות קודמות נעשו על טקסטי הפניה אחרים," % len(other_bm))
+            print("  ולכן אינן מושוות. זאת נקודת בסיס חדשה.")
         if prev:
             print(f"  המדידה הקודמת: {prev['correct']}/{w} = {prev['percent']}%"
                   f"   ({prev['label']}, {prev['stamp']})")
@@ -1157,7 +1213,8 @@ def compare(args):
     # זה מה שהופך את היומן משימושי למועיל: לא רק "היינו טוב יותר",
     # אלא "היינו טוב יותר בנקודה הזאת, ואלה הקבצים שהשתנו מאז".
     if cur_t.get("correct") is not None:
-        pool_g = [r for r in comparable(rows, cur_t["words"])
+        pool_g = [r for r in comparable(rows, cur_t["words"],
+                                        cur_t.get("benchmark"))
                   if r.get("label") != name]
         best_g = max(pool_g, key=lambda r: r["correct"]) if pool_g else None
         if best_g and (best_g.get("git") or {}).get("commit"):
