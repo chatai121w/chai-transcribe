@@ -1245,6 +1245,126 @@ def health():
     })
 
 
+# ----------------------------------------------------------------- מדידות
+#
+# יומן המדידות יושב על הדיסק ונכתב בידי scripts/regression_check.py.
+# עד כה הוא היה נגיש רק משורת הפקודה, והממשק לא ידע עליו דבר.
+#
+# הפעולה הזאת רק קוראת. היא אינה מודדת ואינה כותבת — מדידה נעשית
+# בכלי שלה, שמנטר את מצב המחשב ושומר רשימת חבילות.
+
+_MEASURE_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "benchmark_private", "regression")
+
+# אותם שמות בדיוק כמו ב-benchmarks/README.md וב-regression_check.py.
+# רשימה שלישית הייתה יוצרת מערכת מדידה מקבילה שאי אפשר להצליב.
+_TOPIC_LABELS = {
+    "modern-hebrew": "עברית מודרנית",
+    "torah-lesson": "שיעור תורה",
+    "gemara-aramaic": "גמרא וארמית",
+    "ashkenazi-pronunciation": "הגייה אשכנזית",
+    "noisy-audio": "שמע רועש",
+    "long-form": "הקלטה ארוכה",
+    "speaker-id": "זיהוי מי מדבר",
+    "tts": "הקראת טקסט בקול",
+}
+_DEFAULT_TOPIC = "modern-hebrew"
+
+
+def _read_jsonl(name):
+    path = os.path.join(_MEASURE_DIR, name)
+    if not os.path.exists(path):
+        return []
+    rows = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                continue  # שורה פגומה אינה סיבה לאבד את כל היומן
+    return rows
+
+
+def _comparable_groups(rows):
+    """מחלק מדידות לקבוצות שבתוכן מותר להשוות.
+
+    שתי מדידות ניתנות להשוואה רק אם נמדדו על אותו מספר מילים, על
+    אותם טקסטי הפניה, ובאותו כלל נרמול. בלי החלוקה הזאת מדידה על
+    114 מילים נראית ליד מדידה על 349, תיקון בנתוני המבחן נראה
+    כשיפור, ושינוי בכלל הנרמול — שמזיז את הציון יותר מכל שיפור
+    אמיתי שנעשה אי פעם במנוע — נראה כהישג.
+
+    לכל קבוצה מסומן השיא ההיסטורי — לא המדידה הקודמת. אם היינו
+    ב-60, ירדנו ל-50 והגענו ל-55, ההשוואה לקודמת מראה שיפור בעוד
+    שבפועל זאת נסיגה.
+    """
+    groups = {}
+    for r in rows:
+        if r.get("correct") is None:
+            continue
+        key = (r.get("words"), r.get("benchmark") or "",
+               r.get("normalisation") or "")
+        groups.setdefault(key, []).append(r)
+
+    out = []
+    for (words, bench, norm), items in groups.items():
+        items.sort(key=lambda x: x.get("stamp") or "")
+        best = max(items, key=lambda x: x.get("correct") or 0)
+        out.append({
+            "words": words,
+            "benchmark": bench or None,
+            "benchmarkKnown": bool(bench),
+            # שינוי בכלל הנרמול מזיז את הציון יותר מכל שיפור אמיתי,
+            # ולכן גם הוא שובר את הרציפות.
+            "normalisation": norm or None,
+            "best": {"label": best.get("label"), "stamp": best.get("stamp"),
+                     "correct": best.get("correct"), "percent": best.get("percent")},
+            "rows": items,
+        })
+    # הקבוצה הגדולה ביותר ראשונה — היא המייצגת
+    out.sort(key=lambda g: (-(g["words"] or 0), g["rows"][-1].get("stamp") or ""))
+    return out
+
+
+@app.route("/measurements", methods=["GET"])
+def measurements_endpoint():
+    """יומן המדידות והלקחים, מופרד לפי נושא."""
+    journal = _read_jsonl("journal.jsonl")
+    lessons = _read_jsonl("lessons.jsonl")
+
+    by_topic = {}
+    for r in journal:
+        by_topic.setdefault(r.get("topic") or _DEFAULT_TOPIC, []).append(r)
+
+    topics = []
+    for key, rows in by_topic.items():
+        rows.sort(key=lambda x: x.get("stamp") or "")
+        topics.append({
+            "key": key,
+            "label": _TOPIC_LABELS.get(key, key),
+            "count": len(rows),
+            "latest": rows[-1] if rows else None,
+            "groups": _comparable_groups(rows),
+        })
+    topics.sort(key=lambda t: -t["count"])
+
+    # נושאים שעדיין לא נמדדו — חשוב שייראו, אחרת נדמה שהכול מכוסה
+    missing = [{"key": k, "label": v} for k, v in _TOPIC_LABELS.items()
+               if k not in by_topic]
+
+    return jsonify({
+        "topics": topics,
+        "notMeasured": missing,
+        "lessons": sorted(lessons, key=lambda x: x.get("stamp") or "", reverse=True),
+        "journalPath": os.path.join(_MEASURE_DIR, "journal.jsonl"),
+        "howToMeasure": "python scripts/regression_check.py --save <שם> --topic <נושא>",
+    })
+
+
 @app.route("/metrics", methods=["GET"])
 def metrics_endpoint():
     """Per-model performance metrics with latency percentiles."""

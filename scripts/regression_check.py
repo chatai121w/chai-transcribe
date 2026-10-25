@@ -65,6 +65,31 @@ RESULTS_DIR = os.path.join(HERE, "benchmark_private", "regression")
 #: לכן ההשוואה כאן היא תמיד **מול השיא ההיסטורי**, ולא מול הקודם.
 JOURNAL = os.path.join(RESULTS_DIR, "journal.jsonl")
 
+#: הנושאים הנמדדים.
+#:
+#: השמות אינם חדשים: ששת הראשונים הם החיתוכים שכבר מוגדרים
+#: ב-benchmarks/README.md ומשמשים את מערך המבחן הקפוא. שני
+#: האחרונים הם יכולות אחרות שאינן תמלול.
+#:
+#: למה לא להמציא שמות משלנו: שתי רשימות נושאים לאותו דבר פירושן
+#: שתי מערכות מדידה מקבילות, ואי אפשר להצליב ביניהן. מדידה
+#: שנרשמה תחת שם אחד לא תימצא לעולם תחת השני.
+#:
+#: ולמה בכלל להפריד: מדידה של הגייה אשכנזית ומדידה של עברית
+#: מודרנית נראות ביומן זהות לחלוטין — שתיהן "כך מילים נכונות
+#: מתוך כך" — והן נמדדות על חומר אחר ומול רף אחר לגמרי.
+TOPICS = {
+    "modern-hebrew": "עברית מודרנית",
+    "torah-lesson": "שיעור תורה",
+    "gemara-aramaic": "גמרא וארמית",
+    "ashkenazi-pronunciation": "הגייה אשכנזית",
+    "noisy-audio": "שמע רועש",
+    "long-form": "הקלטה ארוכה",
+    "speaker-id": "זיהוי מי מדבר",
+    "tts": "הקראת טקסט בקול",
+}
+DEFAULT_TOPIC = "modern-hebrew"
+
 NIKUD = re.compile(r"[֑-ׇ]")
 FINALS = {"ך": "כ", "ם": "מ", "ן": "נ",
           "ף": "פ", "ץ": "צ"}
@@ -207,6 +232,32 @@ def measure_environment():
     return out
 
 
+def normalisation_fingerprint():
+    """טביעת אצבע של כלל הנרמול עצמו.
+
+    זאת המלכודת המסוכנת ביותר במדידת תמלול, והיא מתועדת במחקר:
+    שינוי בכלל הנרמול לבדו הזיז את שיעור השגיאה ב-10 עד 34 נקודות
+    בשפות עם ניקוד — בלי ששום דבר במנוע השתנה. הסיבה: נרמול
+    שמפרק מילים מנפח את מספר מילות ההתייחסות, והמכנה גדל.
+
+    בעברית זה חמור במיוחד: ניקוד, כתיב מלא וחסר, גרשיים בקיצורים
+    ואותיות סופיות — כל אחד מהם יכול לשנות את הציון יותר מכל
+    שיפור אמיתי שנעשה אי פעם במנוע.
+
+    לכן כלל הנרמול נחתם, והחתימה נשמרת לצד כל מדידה. שינוי בכלל
+    שובר את רציפות הסדרה בדיוק כמו שינוי בנתוני המבחן.
+    """
+    import inspect
+    src = inspect.getsource(normalise)
+    try:
+        import hebrew_spelling
+        src += inspect.getsource(hebrew_spelling.same_word)
+        src += hebrew_spelling.MATRES + str(hebrew_spelling.MIN_SKELETON)
+    except Exception:
+        pass
+    return hashlib.sha256(src.encode("utf-8")).hexdigest()[:12]
+
+
 def benchmark_fingerprint(clips):
     """טביעת אצבע של נתוני המבחן עצמם.
 
@@ -276,6 +327,7 @@ def measure_transcription(model_name, device, compute_type, limit=None):
     return {
         "model": model_name, "device": device, "compute_type": compute_type,
         "benchmark": benchmark_fingerprint(clips),
+        "normalisation": normalisation_fingerprint(),
         "clips": len(per_clip), "correct": correct, "words": total,
         "percent": round(pct, 2), "ci_low": round(lo, 2), "ci_high": round(hi, 2),
         "load_seconds": round(load_s, 1),
@@ -579,7 +631,7 @@ def run_all(args):
         path = os.path.join(RESULTS_DIR, f"{args.save}.json")
         json.dump(result, io.open(path, "w", encoding="utf-8"),
                   ensure_ascii=False, indent=2)
-        append_journal(args.save, result)
+        append_journal(args.save, result, getattr(args, "topic", DEFAULT_TOPIC))
         fp = freeze_packages(args.save)
         if fp:
             print(f"רשימת החבילות נשמרה: {fp}")
@@ -712,7 +764,7 @@ def print_rollback_help(entry):
     print(f"        git switch -c חזרה-{g['commit'][:7]} {g['commit']}")
 
 
-def append_journal(label, result):
+def append_journal(label, result, topic=DEFAULT_TOPIC):
     """מוסיף מדידה ליומן. שורה אחת לכל מדידה, לפי הסדר."""
     os.makedirs(RESULTS_DIR, exist_ok=True)
     t = result.get("transcription", {})
@@ -721,8 +773,13 @@ def append_journal(label, result):
         "stamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         # בלי זה המספר חסר משמעות: אי אפשר לדעת מה השתנה ואיך לחזור.
         "git": git_state(),
+        # בלי זה מדידות מנושאים שונים מתערבבות לסדרה אחת.
+        "topic": topic,
         # בלי זה תיקון בנתוני המבחן נראה כמו שיפור במנוע.
         "benchmark": t.get("benchmark"),
+        # ובלי זה שינוי בכלל הנרמול נראה כך — והוא מזיז את הציון
+        # יותר מכל שיפור אמיתי שנעשה אי פעם.
+        "normalisation": t.get("normalisation"),
         "correct": t.get("correct"),
         "words": t.get("words"),
         "percent": t.get("percent"),
@@ -766,7 +823,7 @@ def read_journal():
     return rows
 
 
-def comparable(rows, words, benchmark=None):
+def comparable(rows, words, benchmark=None, topic=None, normalisation=None):
     """רק מדידות על אותם נתונים ממש ניתנות להשוואה.
 
     שני תנאים, ושניהם נדרשים:
@@ -779,6 +836,9 @@ def comparable(rows, words, benchmark=None):
                         שגוי, הציון עולה בלי שהמנוע השתנה, וזה
                         היה נרשם כשיפור.
 
+      אותו נושא         עברית רגילה ולשון קודש נראות ביומן זהות
+                        לגמרי, ונמדדות מול רפים שונים לחלוטין.
+
     מדידה שאינה עומדת בשניהם נרשמת ביומן אך אינה נכנסת לחישוב
     השיא. רישומים ישנים שנשמרו לפני שהטביעה הוכנסה נחשבים
     להשוואה רק מול רישומים ישנים אחרים.
@@ -786,11 +846,13 @@ def comparable(rows, words, benchmark=None):
     return [r for r in rows
             if r.get("words") == words
             and r.get("correct") is not None
-            and r.get("benchmark") == benchmark]
+            and r.get("benchmark") == benchmark
+            and (r.get("topic") or DEFAULT_TOPIC) == (topic or DEFAULT_TOPIC)
+            and r.get("normalisation") == normalisation]
 
 
-def best_ever(rows, words, benchmark=None):
-    pool = comparable(rows, words, benchmark)
+def best_ever(rows, words, benchmark=None, topic=None, normalisation=None):
+    pool = comparable(rows, words, benchmark, topic, normalisation)
     return max(pool, key=lambda r: r["correct"]) if pool else None
 
 
@@ -1098,13 +1160,19 @@ def compare(args):
     else:
         c, w = cur_t["correct"], cur_t["words"]
         bm = cur_t.get("benchmark")
-        pool = [r for r in comparable(rows, w, bm) if r.get("label") != name]
+        # הנושא נרשם ביומן ולא בקובץ התוצאה, ולכן נקרא משם.
+        mine = [r for r in rows if r.get("label") == name]
+        tp = (mine[-1].get("topic") if mine else None) or DEFAULT_TOPIC
+        nz = cur_t.get("normalisation")
+        pool = [r for r in comparable(rows, w, bm, tp, nz) if r.get("label") != name]
         # מדידות על נתוני מבחן אחרים אינן בנות השוואה, וחשוב
         # שזה ייאמר במפורש ולא יישאר כשתיקה.
         other_bm = [r for r in rows
                     if r.get("correct") is not None
                     and r.get("label") != name
-                    and r.get("benchmark") != bm]
+                    and (r.get("benchmark") != bm
+                         or (r.get("topic") or DEFAULT_TOPIC) != tp
+                         or r.get("normalisation") != nz)]
         best = max(pool, key=lambda r: r["correct"]) if pool else None
         prev = pool[-1] if pool else None
 
@@ -1214,7 +1282,8 @@ def compare(args):
     # אלא "היינו טוב יותר בנקודה הזאת, ואלה הקבצים שהשתנו מאז".
     if cur_t.get("correct") is not None:
         pool_g = [r for r in comparable(rows, cur_t["words"],
-                                        cur_t.get("benchmark"))
+                                        cur_t.get("benchmark"),
+                                        tp, cur_t.get("normalisation"))
                   if r.get("label") != name]
         best_g = max(pool_g, key=lambda r: r["correct"]) if pool_g else None
         if best_g and (best_g.get("git") or {}).get("commit"):
@@ -1374,6 +1443,8 @@ def main():
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--compute-type", default="float16")
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--topic", default=DEFAULT_TOPIC, choices=list(TOPICS),
+                    help="מה נמדד. מדידות מנושאים שונים אינן מושוות")
     ap.add_argument("--environment-change", action="store_true",
                     help="השינוי היה בסביבה בלבד — אז כל שינוי בפלט הוא סימן")
     # יומן הלקחים
