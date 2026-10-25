@@ -113,11 +113,20 @@ export function PronunciationStack({
       </header>
 
       {/* Body */}
+      {/*
+        המצב המורחב סידר את שלושת החלקים זה מתחת לזה ברוחב מלא.
+        הטקסט בכל שורה תופס פחות מחצי מהרוחב, ולכן נוצר שטח ריק
+        גדול, והפאנל יצא גבוה בלי שום צורך.
+
+        עכשיו שני המתגים יושבים זה לצד זה במסך רחב, ובורר הפרופיל
+        — שהוא רשימה ולא מתג — תופס שורה משלו מתחת. במסך צר הכל
+        חוזר לעמודה אחת מאליו.
+      */}
       {mode === "rich" && (
-        <div className="flex flex-col gap-2">
-          {loshonKodeshSlot}
-          {personalModelSlot}
-          {profileSelectorSlot}
+        <div className="grid gap-2 md:grid-cols-2 [&>*]:min-w-0">
+          <div className="min-w-0">{loshonKodeshSlot}</div>
+          <div className="min-w-0">{personalModelSlot}</div>
+          <div className="min-w-0 md:col-span-2">{profileSelectorSlot}</div>
         </div>
       )}
 

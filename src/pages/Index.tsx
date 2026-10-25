@@ -2277,25 +2277,27 @@ const Index = () => {
               className="flex items-center justify-between gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-3 py-2 text-sm"
               dir="rtl"
             >
-              <label className="flex items-center gap-2 cursor-pointer flex-1">
+              <label className="flex flex-1 cursor-pointer items-start gap-2">
                 <input
                   type="checkbox"
                   checked={loshonKodeshOn}
                   onChange={(e) => {
                     setLoshonKodeshOn(e.target.checked);
                   }}
-                  className="rounded border-yellow-400"
+                  className="mt-0.5 rounded border-yellow-400"
                 />
-                <span className="font-medium">לשון הקודש (הגייה אשכנזית)</span>
-                <span className="text-xs text-muted-foreground">
-                  — מטה את התמלול למינוח תורני וכתיב מסורתי (תורה / גמרא / רמב"ם וכו').
+                <span className="min-w-0">
+                  <span className="block font-medium">לשון הקודש (הגייה אשכנזית)</span>
+                  <span className="block text-xs leading-relaxed text-muted-foreground">
+                    מטה את התמלול למינוח תורני וכתיב מסורתי (תורה / גמרא / רמב"ם וכו').
+                  </span>
                 </span>
               </label>
             </div>
           }
           personalModelSlot={
             <div className="grid gap-2" dir="rtl">
-              <label className="flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2 text-sm">
+              <label className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm">
                 <input
                   type="checkbox"
                   checked={customVocabularyOn}
@@ -2304,12 +2306,16 @@ const Index = () => {
                     setCustomVocabularyOn(e.target.checked);
                     patchTabSettings({ custom_vocabulary_enabled: e.target.checked });
                   }}
-                  className="rounded"
+                  className="mt-0.5 rounded"
                 />
-                <span className="font-medium">השתמש באוצר המילים</span>
-                <span className="text-xs text-muted-foreground">— מטה את המנוע למונחים ולווריאנטים שהוספת.</span>
+                <span className="min-w-0">
+                  <span className="block font-medium">השתמש באוצר המילים</span>
+                  <span className="block text-xs leading-relaxed text-muted-foreground">
+                    מטה את המנוע למונחים ולכתיב השגוי שהוספת.
+                  </span>
+                </span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-sm">
+              <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-sm">
                 <input
                   type="checkbox"
                   checked={personalModelOn}
@@ -2319,12 +2325,26 @@ const Index = () => {
                     updatePreference('personal_pronunciation_enabled', e.target.checked);
                     debugLog.info('Index', 'Learned corrections toggle changed', { enabled: e.target.checked, isAuthenticated });
                   }}
-                  className="rounded border-purple-400"
+                  className="mt-0.5 rounded border-purple-400"
                 />
-                <span className="font-medium flex items-center gap-1"><BrainCircuit className="w-4 h-4 text-[#0f1e43]" /> החל תיקונים נלמדים</span>
-                <span className="text-xs text-muted-foreground">— מבצע החלפות שגוי → נכון לאחר התמלול.</span>
+                <span className="min-w-0">
+                  <span className="flex items-center gap-1 font-medium">
+                    <BrainCircuit className="h-4 w-4 shrink-0 text-[#0f1e43]" /> החל תיקונים נלמדים
+                  </span>
+                  <span className="block text-xs leading-relaxed text-muted-foreground">
+                    מבצע החלפות שגוי ← נכון אחרי התמלול.
+                  </span>
+                </span>
               </label>
-              <Button type="button" variant="outline" size="sm" onClick={() => navigate('/personal-learning')}>
+              {/* לא ברוחב מלא: זאת פעולה משנית, ורוחב מלא נותן לה
+                  משקל של פעולה ראשית. */}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-fit"
+                onClick={() => navigate('/personal-learning')}
+              >
                 נהל מילון ולמידה
               </Button>
             </div>

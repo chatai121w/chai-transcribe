@@ -568,10 +568,18 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
         </div>
       )}
 
-      {/* Model preload mode + manual preload */}
+      {/*
+        שלושת החלקים האלה היו זה מתחת לזה ברוחב מלא, וכל אחד תפס
+        שורה שלמה. במסך רחב זה יצר עמודה ארוכה עם שטח ריק גדול
+        מימין לכל בלוק. הרשת מציבה אותם זה לצד זה, וכל אחד מהם
+        הופך לכרטיס עם מסגרת משלו — כך ברור איפה נגמרת החלטה אחת
+        ומתחילה הבאה.
+      */}
       {selected === 'local-server' && (
-        <div className="mt-3 border-t pt-3" dir="rtl">
-          <Label className="mb-1.5 block text-right text-sm font-semibold">מודל CUDA לתמלול</Label>
+        <div className="mt-3 grid gap-3 border-t pt-3 lg:grid-cols-2" dir="rtl">
+
+        <div className="rounded-lg border bg-muted/20 p-3">
+          <Label className="mb-1.5 block text-right text-sm font-semibold">מודל התמלול</Label>
           <Select value={cudaModel} onValueChange={handleCudaModelChange}>
             <SelectTrigger className="h-10 w-full text-right" dir="rtl" aria-label="בחירת מודל CUDA לתמלול">
               <SelectValue placeholder="בחר מודל תמלול" />
@@ -582,13 +590,12 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
               ))}
             </SelectContent>
           </Select>
-          <p className="mt-1 text-right text-[11px] text-muted-foreground">המודל הנבחר ישמש בתמלול הבא ויישמר מקומית ובענן.</p>
+          <p className="mt-1 text-right text-[11px] text-muted-foreground">ישמש בתמלול הבא, ונשמר גם בענן.</p>
         </div>
-      )}
 
-      {selected === 'local-server' && isConnected && (
-        <div className="border-t pt-3 mt-3 space-y-2">
-          <Label className="text-xs font-medium text-right block">מצב טעינת מודל</Label>
+        {isConnected && (
+        <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+          <Label className="text-xs font-medium text-right block">מתי המודל נטען</Label>
           <div className="grid grid-cols-2 gap-2">
             <Button
               variant={preloadMode === 'preload' ? 'default' : 'outline'}
@@ -674,12 +681,11 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
             </div>
           )}
         </div>
-      )}
+        )}
 
-      {/* Fast mode toggle — only for CUDA engine */}
-      {selected === 'local-server' && (
-        <div className="border-t pt-3 mt-3">
-          <Label className="text-xs font-medium text-right block mb-2">ערכת תמלול</Label>
+        {/* ערכת התמלול — תופסת את כל הרוחב, כי יש בה שלוש אפשרויות */}
+        <div className="rounded-lg border bg-muted/20 p-3 lg:col-span-2">
+          <Label className="text-xs font-medium text-right block mb-2">איזון בין מהירות לדיוק</Label>
           <div className="flex gap-1.5" dir="rtl">
             <Button
               variant={preset === 'fast' ? 'default' : 'outline'}
@@ -714,6 +720,8 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
             {preset === 'balanced' && 'איזון טוב בין מהירות לדיוק — ברירת מחדל מומלצת'}
             {preset === 'accurate' && 'עיבוד סדרתי, beam=5, הקשר מלא — דיוק מקסימלי'}
           </p>
+        </div>
+
         </div>
       )}
 
