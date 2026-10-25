@@ -7,8 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GuideSettings } from "@/components/settings/GuideSettings";
+import { DisplaySettings } from "@/components/settings/DisplaySettings";
 import { toast } from "sonner";
-import { Settings as SettingsIcon, ArrowRight, LogOut, Eye, EyeOff, Wrench, Cpu, Palette, Key, Pencil, Trash2, BookOpen } from "lucide-react";
+import { Settings as SettingsIcon, ArrowRight, LogOut, Eye, EyeOff, Wrench, Cpu, Palette, Key, Pencil, Trash2, BookOpen , Monitor } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCloudApiKeys } from "@/hooks/useCloudApiKeys";
 import DevToolsPanel from "@/components/DevToolsPanel";
@@ -435,7 +436,7 @@ const Settings = () => {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} dir="rtl" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="api-keys" className="gap-2">
               <Key className="h-4 w-4" />
               מפתחות API
@@ -452,7 +453,28 @@ const Settings = () => {
               <BookOpen className="h-4 w-4" />
               מסכי הדרכה
             </TabsTrigger>
+            <TabsTrigger value="display" className="gap-2">
+              <Monitor className="h-4 w-4" />
+              תצוגה
+            </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="display">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Monitor className="w-6 h-6 text-primary" />
+                  <CardTitle className="text-2xl">תצוגה</CardTitle>
+                </div>
+                <CardDescription>
+                  מה מוצג על המסך בכל העמודים
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <DisplaySettings />
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           <TabsContent value="guides">
             <Card>

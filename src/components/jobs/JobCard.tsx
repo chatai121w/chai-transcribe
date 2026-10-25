@@ -44,20 +44,25 @@ export function JobCard({ job }: { job: JobRecord }) {
   };
 
   return (
-    <Card className="p-3 space-y-3" dir="rtl">
-      <div className="flex items-start gap-3">
+    /*
+      min-w-0 ו-overflow-hidden הם מה שמונע מהכרטיס להימתח.
+      בלעדיהם שם קובץ ארוך דוחף את הכרטיס מעבר לרוחב הפאנל, והכל
+      בפנים נחתך בצד.
+    */
+    <Card className="min-w-0 space-y-2.5 overflow-hidden p-2.5" dir="rtl">
+      <div className="flex min-w-0 items-start gap-2.5">
         {job.thumbnail_url ? (
-          <img src={job.thumbnail_url} alt="" className="w-16 h-12 object-cover rounded shrink-0" />
+          <img src={job.thumbnail_url} alt="" className="h-10 w-14 shrink-0 rounded object-cover" />
         ) : (
-          <div className="w-16 h-12 rounded bg-muted shrink-0 flex items-center justify-center text-xs text-muted-foreground">
+          <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded bg-muted text-[10px] text-muted-foreground">
             {KIND_LABEL[job.job_kind] ?? "Job"}
           </div>
         )}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-[10px]">{KIND_LABEL[job.job_kind] ?? job.job_kind}</Badge>
-            <Badge variant={status.tone} className="text-[10px]">{status.text}</Badge>
-            <span className="text-xs text-muted-foreground tabular-nums mr-auto">{job.overall_percent}%</span>
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <Badge variant="outline" className="shrink-0 text-[10px]">{KIND_LABEL[job.job_kind] ?? job.job_kind}</Badge>
+            <Badge variant={status.tone} className="shrink-0 text-[10px]">{status.text}</Badge>
+            <span className="mr-auto shrink-0 text-xs tabular-nums text-muted-foreground">{job.overall_percent}%</span>
           </div>
           <div className="text-sm font-medium truncate mt-1" title={job.title ?? job.video_title ?? job.url}>
             {job.title ?? job.video_title ?? job.url}
@@ -75,7 +80,7 @@ export function JobCard({ job }: { job: JobRecord }) {
       )}
 
       {job.output_files && job.output_files.length > 0 && (
-        <div className="flex gap-1 flex-wrap">
+        <div className="flex min-w-0 flex-wrap gap-1">
           {job.output_files.map((f, i) => (
             <Button key={i} variant="outline" size="sm" className="h-7 text-xs" asChild>
               <a href={`${f.url}${f.url.includes('?') ? '&' : '?'}download=1`} target="_blank" rel="noreferrer" download={f.filename}>
@@ -87,7 +92,7 @@ export function JobCard({ job }: { job: JobRecord }) {
         </div>
       )}
 
-      <div className="flex gap-2 justify-end">
+      <div className="flex flex-wrap justify-end gap-1.5">
         {isFailed && (
           <Button variant="default" size="sm" className="h-7 text-xs" onClick={onResume}>
             <Play className="w-3 h-3 ml-1" /> המשך מהשלב שנפל

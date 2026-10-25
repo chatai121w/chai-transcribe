@@ -39,24 +39,24 @@ export function JobStagesProgress({ stages }: { stages: JobStage[] }) {
         const isTranscribing = serverStatus === "transcribing";
 
         return (
-          <div key={s.key} className="space-y-1">
-            <div className="flex items-center gap-2 text-xs flex-wrap">
+          <div key={s.key} className="min-w-0 space-y-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
               <Icon className={cn("w-3.5 h-3.5 shrink-0", tone, s.status === "running" && "animate-spin")} />
-              <span className={cn("font-medium", tone)}>
+              <span className={cn("min-w-0 truncate font-medium", tone)} title={s.label}>
                 {s.label}
                 {isDownloading && isTranscribing && (
                   <span className="mr-1 text-muted-foreground font-normal"> — מתמלל…</span>
                 )}
               </span>
               {isDownloading && dlMb > 0 && !isTranscribing && (
-                <span className="font-mono text-muted-foreground">
+                <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
                   ⬇ {dlMb.toFixed(1)}{totalMb > 0 ? ` / ${totalMb.toFixed(1)}` : ""} MB
                   {speedMb > 0 && (
                     <span className="text-blue-500 mr-1"> @ {speedMb.toFixed(2)} MB/s</span>
                   )}
                 </span>
               )}
-              <span className="text-muted-foreground/70 mr-auto tabular-nums">{pct}%</span>
+              <span className="mr-auto shrink-0 tabular-nums text-muted-foreground/70">{pct}%</span>
             </div>
             <Progress value={pct} className={cn("h-1", s.status === "failed" && "[&>div]:bg-destructive")} />
             {s.error && <div className="text-[10px] text-destructive truncate" title={s.error}>{s.error}</div>}
