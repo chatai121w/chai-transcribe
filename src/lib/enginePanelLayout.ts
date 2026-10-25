@@ -47,6 +47,17 @@ interface Classes {
   wrap: string;
   /** כרטיס של החלטה אחת. */
   card: string;
+  /**
+   * הגוף שבתוך הכרטיס.
+   *
+   * זה מה שתוקן: הכותרת ישבה בשורה אחת, הכפתורים בשורה שמתחתיה,
+   * ושניהם נצמדו לצד אחד. כך נוצר שטח ריק שתופס את רוב רוחב
+   * הכרטיס ומכפיל את גובהו בלי להוסיף שום דבר.
+   *
+   * בפריסות הצפופות הגוף הוא שורה אחת: הכותרת בצד אחד והפקדים
+   * בצד השני, והרווח ביניהם הוא מה שממלא את הכרטיס.
+   */
+  body: string;
   /** שורת הכפתורים בתוך כרטיס. */
   group: string;
   /** כפתור בודד. */
@@ -69,6 +80,9 @@ export function enginePanelClasses(layout: EnginePanelLayout): Classes {
       return {
         wrap: "grid gap-3 lg:grid-cols-2",
         card: "rounded-lg border bg-muted/20 p-3",
+        // הפריסה הרחבה נשארת מוערמת בכוונה — זאת האפשרות
+        // ה"מרווחת", ומי שבוחר בה רוצה מטרות גדולות.
+        body: "block",
         group: "flex gap-1.5",
         button: "h-8 flex-1 gap-1 text-xs",
         hint: "mt-1 text-right text-[10px] text-muted-foreground",
@@ -80,6 +94,8 @@ export function enginePanelClasses(layout: EnginePanelLayout): Classes {
       return {
         wrap: "grid gap-2 md:grid-cols-3",
         card: "rounded-lg border bg-muted/20 p-2.5",
+        // שלוש עמודות צרות — הכותרת והפקדים לא נכנסים לשורה אחת.
+        body: "block",
         group: "flex flex-wrap gap-1",
         button: "h-7 gap-1 px-2 text-[11px]",
         hint: "mt-1 text-right text-[10px] leading-snug text-muted-foreground",
@@ -90,11 +106,12 @@ export function enginePanelClasses(layout: EnginePanelLayout): Classes {
       return {
         wrap: "grid gap-1.5 md:grid-cols-2 xl:grid-cols-3",
         card: "rounded-md border bg-muted/20 p-2",
+        body: "flex flex-wrap items-center justify-between gap-2",
         group: "flex flex-wrap gap-1",
         button: "h-6 gap-1 px-2 text-[11px]",
         // ההסברים מוסתרים לגמרי — זאת כל המטרה של המצב הזה.
         hint: "hidden",
-        label: "mb-1 block text-right text-[11px] font-medium",
+        label: "shrink-0 text-right text-[11px] font-medium",
       };
 
     case "snug":
@@ -104,10 +121,13 @@ export function enginePanelClasses(layout: EnginePanelLayout): Classes {
       return {
         wrap: "grid gap-3 lg:grid-cols-2",
         card: "rounded-lg border bg-muted/20 p-3",
+        // הכותרת בצד אחד והפקדים בצד השני, באותה שורה. זה מה
+        // שממלא את רוחב הכרטיס במקום להשאיר אותו ריק.
+        body: "flex flex-wrap items-center justify-between gap-x-4 gap-y-2",
         group: "inline-flex flex-wrap gap-1 rounded-lg border bg-background/60 p-1",
         button: "h-7 gap-1 px-3 text-xs",
         hint: "mt-1.5 text-right text-[10px] text-muted-foreground",
-        label: "mb-1.5 block text-right text-xs font-medium",
+        label: "shrink-0 text-right text-xs font-medium",
       };
   }
 }

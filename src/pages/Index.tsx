@@ -2125,7 +2125,7 @@ const Index = () => {
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>}>
     <div className="mobile-optimized-page transcription-page min-h-screen bg-background p-4 md:p-8" dir="rtl">
-      <div className="max-w-6xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6 pb-24">
         {/* Header with Tabs */}
         <div className="flex items-center justify-between mb-6">
           <div className="text-right flex-1">
@@ -2229,11 +2229,13 @@ const Index = () => {
           <div className="flex flex-col gap-2" dir="rtl">
             {/* Cloud save mode selector */}
             <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 px-3 py-2" dir="rtl">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs text-muted-foreground">מה לעשות אחרי התמלול?</span>
-                <span className="text-sm font-medium">💾 מצב שמירה</span>
-              </div>
-              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+              {/* הכותרת והכפתורים באותה שורה.
+                  קודם לכן הכותרת והשאלה נדחפו לשני קצוות השורה, כל
+                  הרוחב ביניהן נשאר ריק, והכפתורים ירדו לשורה נוספת
+                  מתחת — שלוש שורות למשהו שנכנס באחת. */}
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                <span className="shrink-0 text-sm font-medium">💾 מצב שמירה</span>
+                <div className="flex flex-wrap items-center gap-1.5">
                 {([
                   { value: 'immediate', icon: '☁️', label: 'שמור לענן', desc: 'טקסט + אודיו → Supabase' },
                   { value: 'text-only', icon: '📝', label: 'טקסט בלבד', desc: 'רק הטקסט → Supabase' },
@@ -2256,6 +2258,7 @@ const Index = () => {
                     </button>
                   );
                 })}
+                </div>
               </div>
               <p className="text-[11px] text-muted-foreground mt-1.5">
                 {(preferences.cuda_cloud_save || 'immediate') === 'immediate' && '☁️ טקסט + קובץ אודיו יועלו ל-Supabase אחרי כל תמלול'}

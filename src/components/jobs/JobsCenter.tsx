@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { DOCK_SLOTS } from "@/lib/floatingDock";
 import { Activity, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +25,7 @@ export function JobsCenter() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="fixed bottom-4 left-4 z-[60] h-12 w-12 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:scale-105 transition"
+        className={`fixed ${DOCK_SLOTS.jobs} left-4 z-[60] h-12 w-12 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:scale-105 transition`}
         title="מרכז המשימות"
         aria-label="מרכז המשימות"
       >

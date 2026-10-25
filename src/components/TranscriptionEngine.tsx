@@ -653,6 +653,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
 
         {isConnected && (
         <div className={L.card}>
+          <div className={L.body}>
           <Label className={L.label}>מתי המודל נטען</Label>
           <div className={L.group}>
             <Button
@@ -683,6 +684,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
               <Zap className="w-3.5 h-3.5" />
               תמלל ישיר
             </Button>
+          </div>
           </div>
           <p className={L.hint}>
             {preloadMode === 'preload' ? 'המודל נטען ברקע מיד כשהשרת מוכן — תמלול ראשון מהיר' : 'חוסך VRAM — המודל נטען רק כשמתחילים לתמלל'}
@@ -743,6 +745,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
 
         {/* ערכת התמלול — תופסת את כל הרוחב, כי יש בה שלוש אפשרויות */}
         <div className={`${L.card} ${panelLayout === "wide" || panelLayout === "snug" ? "lg:col-span-2" : ""}`}>
+          <div className={L.body}>
           <Label className={L.label}>איזון בין מהירות לדיוק</Label>
           <div className={L.group} dir="rtl">
             <Button
@@ -772,6 +775,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
               <Turtle className="w-3.5 h-3.5" />
               <Target className="w-3 h-3 text-[#0f1e43]" /> מדויק
             </Button>
+          </div>
           </div>
           <p className={L.hint}>
             {preset === 'fast' && 'עיבוד מקבילי, beam=1, דילוג שקט אגרסיבי — מהיר פי 3-5'}

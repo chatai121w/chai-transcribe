@@ -50,7 +50,16 @@ export function TranscriptionLanguageControl({
 
   return (
     <div className={compact ? "space-y-2" : "space-y-3"} dir="rtl">
-      {!compact && <Label className="block text-right text-sm font-semibold">שפת הדיבור באודיו</Label>}
+      {/* הכותרת והכפתורים באותה שורה: קודם לכן הכותרת תפסה שורה
+          שלמה, הכפתורים שורה נוספת, ורוב רוחב השורה נשאר ריק. */}
+      <div className={layout === "wide" ? "block" : "flex flex-wrap items-center justify-between gap-x-4 gap-y-2"}>
+      {!compact && (
+        <Label className={layout === "wide"
+          ? "mb-2 block text-right text-sm font-semibold"
+          : "shrink-0 text-right text-sm font-semibold"}>
+          שפת הדיבור באודיו
+        </Label>
+      )}
       <div className={L.group} role="group" aria-label="אופן בחירת שפת התמלול">
         <Button
           type="button"
@@ -74,6 +83,7 @@ export function TranscriptionLanguageControl({
           <Languages className="h-4 w-4" />
           בחירה ידנית
         </Button>
+      </div>
       </div>
 
       {!isAuto && (

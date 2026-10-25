@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { DOCK_SLOTS } from "@/lib/floatingDock";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -600,7 +601,7 @@ export function SmartConsole() {
     <Sheet open={open} onOpenChange={setOpen} modal={false}>
       <SheetTrigger asChild>
         <button
-          className={`fixed bottom-16 left-4 z-50 w-11 h-11 rounded-full bg-background border border-border shadow-lg flex items-center justify-center hover:bg-accent transition-all group ${
+          className={`fixed ${DOCK_SLOTS.console} left-4 z-50 w-11 h-11 rounded-full bg-background border border-border shadow-lg flex items-center justify-center hover:bg-accent transition-all group ${
             hasCritical ? 'animate-pulse border-red-500/50' : ''
           }`}
           title="קונסול חכם"
