@@ -4,8 +4,6 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GuidedTabs, TabGuideButton } from "@/components/guide/GuidedTabs";
-import { RichTextEditor } from "@/components/RichTextEditor";
-import { PlayerTranscriptEditor } from "@/components/PlayerTranscriptEditor";
 import { SyncMirrorLayout } from "@/components/SyncMirrorLayout";
 import { TranscriptFolderDialog } from "@/components/TranscriptFolderDialog";
 import { RetranscribeDialog } from "@/components/RetranscribeDialog";
@@ -34,8 +32,6 @@ const TextEditHistory = lazy(() => import("@/components/TextEditHistory").then(m
 const PromptLibrary = lazy(() => import("@/components/PromptLibrary").then(m => ({ default: m.PromptLibrary })));
 const EditPipeline = lazy(() => import("@/components/EditPipeline").then(m => ({ default: m.EditPipeline })));
 const OllamaManager = lazy(() => import("@/components/OllamaManager").then(m => ({ default: m.OllamaManager })));
-const SyncEditableView = lazy(() => import("@/components/SyncEditableView").then(m => ({ default: m.SyncEditableView })));
-const SyncTranscriptView = lazy(() => import("@/components/SyncTranscriptView").then(m => ({ default: m.SyncTranscriptView })));
 const VerifiedTranscriptLabTransfer = lazy(() => import("@/components/VerifiedTranscriptLabTransfer").then(m => ({ default: m.VerifiedTranscriptLabTransfer })));
 const AudioLearningQueue = lazy(() => import("@/components/AudioLearningQueue").then(m => ({ default: m.AudioLearningQueue })));
 const DictionaryValidator = lazy(() => import("@/components/DictionaryValidator").then(m => ({ default: m.DictionaryValidator })));
