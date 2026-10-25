@@ -34,7 +34,7 @@ import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, GitCompareArrows, FolderInput, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor, MoreHorizontal, LocateFixed, Columns2, Square } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
@@ -1815,36 +1815,95 @@ export const SyncMirrorLayout = ({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 text-right text-xs" style={{ direction: "rtl" }}>
-                <DropdownMenuItem onClick={restoreToBaseline} disabled={!isModifiedFromBaseline}>
-                  <History className="me-2 h-3.5 w-3.5" /> החזר לגרסת בסיס
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={compareMode ? toggleCompareMode : compareToBaseline} disabled={!hasBaseline}>
-                  <GitCompare className="me-2 h-3.5 w-3.5" /> {compareMode ? 'סיים השוואה' : 'השווה לגרסת בסיס'}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={setNewBaseline}>
+                {/* התפריט מחולק לשלוש קבוצות. קודם היו שמונה
+                    פריטים ברצף אחד, ובהם שלושה נושאים שאינם
+                    קשורים זה לזה. "שכפל ושמור" ו"יישור 1:1" אינם
+                    מאותו עולם. */}
+                <DropdownMenuLabel className="text-[10px] font-normal text-muted-foreground">
+                  גרסת בסיס
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={setNewBaseline}
+                  title="שומר את הטקסט הנוכחי כנקודת ייחוס, כדי שאפשר יהיה להשוות אליה ולחזור אליה"
+                >
                   <Bookmark className="me-2 h-3.5 w-3.5" /> קבע כגרסת בסיס
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={compareMode ? toggleCompareMode : compareToBaseline}
+                  disabled={!hasBaseline}
+                  title={hasBaseline
+                    ? 'מראה מה השתנה מאז גרסת הבסיס'
+                    : 'אין עדיין גרסת בסיס. קבע אחת כדי להשוות אליה.'}
+                >
+                  <GitCompare className="me-2 h-3.5 w-3.5" /> {compareMode ? 'סיים השוואה' : 'השווה לגרסת בסיס'}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={restoreToBaseline}
+                  disabled={!isModifiedFromBaseline}
+                  title={isModifiedFromBaseline
+                    ? 'מחזיר את הטקסט לגרסת הבסיס. השינויים שאחריה יאבדו.'
+                    : 'הטקסט זהה לגרסת הבסיס — אין מה להחזיר.'}
+                >
+                  <History className="me-2 h-3.5 w-3.5" /> החזר לגרסת בסיס
+                </DropdownMenuItem>
+
+                {(onDuplicateSave || onSaveLearning) && <DropdownMenuSeparator />}
+                {(onDuplicateSave || onSaveLearning) && (
+                  <DropdownMenuLabel className="text-[10px] font-normal text-muted-foreground">
+                    שמירה
+                  </DropdownMenuLabel>
+                )}
                 {onDuplicateSave && (
-                  <DropdownMenuItem onClick={() => { setDupName(""); setDupDialogOpen(true); }}>
+                  <DropdownMenuItem
+                    onClick={() => { setDupName(""); setDupDialogOpen(true); }}
+                    title="שומר עותק נוסף בשם אחר, בלי לדרוס את הקיים"
+                  >
                     <Copy className="me-2 h-3.5 w-3.5" /> שכפל ושמור
                   </DropdownMenuItem>
                 )}
                 {onSaveLearning && (
-                  <>
-                    <DropdownMenuItem onClick={() => openLearningPicker('quick')} disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}>
-                      <Brain className="me-2 h-3.5 w-3.5" /> שמור ללמידה
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => openLearningPicker('advanced')} disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}>
-                      <Brain className="me-2 h-3.5 w-3.5" /> למידה עם הערה
-                    </DropdownMenuItem>
-                  </>
+                  /* קודם היו כאן שני פריטים, "שמור ללמידה" ו"למידה
+                     עם הערה". ההבדל היחיד ביניהם היה אם מופיע שדה
+                     הערה — אותו קוד, אותה פעולה, אותה תוצאה. שדה
+                     ההערה הוא בחירה בתוך החלון, לא פעולה נפרדת. */
+                  <DropdownMenuItem
+                    onClick={() => openLearningPicker('advanced')}
+                    disabled={!learningEnabled || !learningProfiles.length || !editedTextForLearning}
+                    title={
+                      !learningEnabled ? 'הלמידה כבויה בהגדרות.'
+                        : !learningProfiles.length ? 'אין אף פרופיל הגייה. צור פרופיל כדי ללמד אותו מהתיקונים שלך.'
+                        : !editedTextForLearning ? 'אין טקסט לשמור.'
+                        : 'שומר את התיקונים שלך לפרופיל הגייה, כדי שילמד מהם. אפשר להוסיף הערה.'
+                    }
+                  >
+                    <Brain className="me-2 h-3.5 w-3.5" /> שמור ללמידה
+                  </DropdownMenuItem>
                 )}
+
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[10px] font-normal text-muted-foreground">
+                  תצוגה
+                </DropdownMenuLabel>
                 {enableRichEdit && (
-                  <DropdownMenuItem onClick={togglePreciseAlign}>
+                  <DropdownMenuItem
+                    onClick={togglePreciseAlign}
+                    title={preciseAlign
+                      ? 'חוזר לעריכה חופשית. הטקסט לא יהיה נעול לשורות.'
+                      : 'נועל את העריכה לשורות, כדי ששני הצדדים יישארו מיושרים. העריכה החופשית תיכבה.'}
+                  >
                     <Rows3 className="me-2 h-3.5 w-3.5" /> {preciseAlign ? 'עבור לעריכה חופשית' : 'הפעל יישור מדויק'}
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={toggleAlignmentMode}>
+                {/* היישור הזה אינו עושה דבר בלי צד נעול — שתי נקודות
+                    בקוד יוצאות מיד כשאין אחד. קודם הפריט נראה פעיל,
+                    והלחיצה עליו פשוט לא עשתה כלום. */}
+                <DropdownMenuItem
+                  onClick={toggleAlignmentMode}
+                  disabled={!lockedPane}
+                  title={!lockedPane
+                    ? 'צריך לנעול צד אחד כדי שהיישור יעבוד. בלי נעילה אין מול מה ליישר.'
+                    : 'מרפד את השורות כך ששני הצדדים יתחילו באותו גובה'}
+                >
                   <AlignJustify className="me-2 h-3.5 w-3.5" /> {alignmentMode === 'mirrored-padded' ? 'כבה יישור 1:1' : 'הפעל יישור 1:1'}
                 </DropdownMenuItem>
               </DropdownMenuContent>
