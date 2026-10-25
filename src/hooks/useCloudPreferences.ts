@@ -589,6 +589,37 @@ const useCloudPreferencesImpl = () => {
     'tab_settings_json',
   ];
 
+  /**
+   * שמירה לענן אינה נעשית בתוך פונקציית עדכון המצב.
+   *
+   * הבעיה: פונקציית עדכון מצב חייבת להיות נקייה — להחזיר ערך
+   * חדש ולא לעשות שום דבר נוסף. ריאקט רשאי להריץ אותה יותר
+   * מפעם אחת על אותו עדכון, וגם באמצע רינדור של רכיב אחר.
+   *
+   * מה זה גרם בפועל:
+   *
+   *   1. שמירה כפולה לענן על שינוי אחד, כי הפונקציה רצה פעמיים.
+   *   2. אזהרה אמיתית בדפדפן — "אי אפשר לעדכן רכיב בזמן רינדור
+   *      של רכיב אחר" — כי השמירה כותבת ליומן, והיומן מעדכן את
+   *      חלון הפקודות שמאזין לו.
+   *
+   * הפתרון: הפונקציה רק מחזירה ערך, ומניחה את מה שצריך להישמר
+   * בתור. הריקון קורה אחרי שהרינדור הסתיים. ריצה כפולה של
+   * הפונקציה משאירה את אותו ערך בתור, ולכן נשמר פעם אחת.
+   */
+  const pendingSaveRef = useRef<{ prefs: UserPreferences; immediate: boolean } | null>(null);
+
+  useEffect(() => {
+    const pending = pendingSaveRef.current;
+    if (!pending) return;
+    pendingSaveRef.current = null;
+    saveToCloud(pending.prefs, { immediate: pending.immediate });
+  });
+
+  const queueSave = useCallback((prefs: UserPreferences, immediate: boolean) => {
+    pendingSaveRef.current = { prefs, immediate };
+  }, []);
+
   const updatePreference = useCallback(<K extends keyof UserPreferences>(
     key: K,
     value: UserPreferences[K]
@@ -598,10 +629,10 @@ const useCloudPreferencesImpl = () => {
         return prev;
       }
       const updated = { ...prev, [key]: value };
-      saveToCloud(updated, { immediate: IMMEDIATE_KEYS.includes(key) });
+      queueSave(updated, IMMEDIATE_KEYS.includes(key));
       return updated;
     });
-  }, [saveToCloud]);
+  }, [queueSave]);
 
   const updatePreferences = useCallback((partial: Partial<UserPreferences>) => {
     setPreferences(prev => {
@@ -615,10 +646,10 @@ const useCloudPreferencesImpl = () => {
 
       const updated = { ...prev, ...partial };
       const hasImmediate = Object.keys(partial).some(k => IMMEDIATE_KEYS.includes(k as keyof UserPreferences));
-      saveToCloud(updated, { immediate: hasImmediate });
+      queueSave(updated, hasImmediate);
       return updated;
     });
-  }, [saveToCloud]);
+  }, [queueSave]);
 
   const patchTabSettings = useCallback((patch: Record<string, unknown>) => {
     setPreferences(prev => {
@@ -631,10 +662,10 @@ const useCloudPreferencesImpl = () => {
       const nextJson = JSON.stringify({ ...current, ...patch });
       if (nextJson === prev.tab_settings_json) return prev;
       const updated = { ...prev, tab_settings_json: nextJson };
-      saveToCloud(updated, { immediate: true });
+      queueSave(updated, true);
       return updated;
     });
-  }, [saveToCloud]);
+  }, [queueSave]);
 
   return {
     preferences,
