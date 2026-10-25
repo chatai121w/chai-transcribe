@@ -32,6 +32,13 @@ import { TranscriptionLanguageControl } from "@/components/TranscriptionLanguage
 import { resolveCudaModel, type SourceLanguage } from "@/lib/transcriptionLanguages";
 
 
+import { EngineVisibilityMenu } from "@/components/transcription/EngineVisibilityMenu";
+import {
+  type EngineId, type EnginePrefs,
+  isEngineVisible, orderedEngines,
+  readLocalEnginePrefs, writeLocalEnginePrefs,
+} from "@/lib/enginePrefs";
+
 type Engine = 'openai' | 'groq' | 'google' | 'local' | 'local-server' | 'assemblyai' | 'deepgram' | 'gemini';
 
 interface TranscriptionEngineProps {
@@ -260,22 +267,49 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
     }
   }, [startPolling]);
 
+  // אילו מנועים להציג ובאיזה סדר. נקרא מקומית כדי שהמסך לא
+  // יהבהב לפני שההעדפות נטענות.
+  const [enginePrefs, setEnginePrefs] = useState<EnginePrefs>(readLocalEnginePrefs);
+  const updateEnginePrefs = useCallback((next: EnginePrefs) => {
+    setEnginePrefs(next);
+    writeLocalEnginePrefs(next);
+  }, []);
+  const shows = useCallback(
+    (id: EngineId) => isEngineVisible(id, enginePrefs, selected),
+    [enginePrefs, selected],
+  );
+
   return (
     <Card className="p-5 shadow-sm border-border/60" dir="rtl">
-      <h2 className="text-base font-semibold mb-3 text-right text-foreground">בחר מנוע תמלול</h2>
+      <div className="mb-3 flex items-center justify-between">
+        <EngineVisibilityMenu
+          prefs={enginePrefs}
+          onChange={updateEnginePrefs}
+          selected={selected}
+        />
+        <h2 className="text-base font-semibold text-right text-foreground">בחר מנוע תמלול</h2>
+      </div>
       
       <div className="mb-3">
         <h3 className="text-xs font-medium mb-2 text-right text-muted-foreground tracking-wide flex items-center justify-end gap-1"><Cloud className="w-3 h-3 text-[#0f1e43]" /> מנועים אונליין</h3>
         <RadioGroup value={selected} onValueChange={(value) => onChange(value as Engine)}>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-            {([
-              { id: 'groq' as Engine, icon: Zap, label: 'Groq', sub: 'whisper-large-v3-turbo' },
-              { id: 'openai' as Engine, icon: Globe, label: 'OpenAI', sub: 'whisper-1' },
-              { id: 'google' as Engine, icon: Chrome, label: 'Google', sub: 'Speech-to-Text' },
-              { id: 'assemblyai' as Engine, icon: Mic, label: 'AssemblyAI', sub: 'Universal' },
-              { id: 'deepgram' as Engine, icon: Waves, label: 'Deepgram', sub: 'nova-2' },
-              { id: 'gemini' as Engine, icon: Sparkles, label: 'Gemini', sub: 'Google AI · Audio' },
-            ] as const).map(({ id, icon: Icon, label, sub }) => (
+            {/* הסדר מגיע מההעדפות, והמוסתרים מסוננים. הסינון כאן
+                ולא בתוך המפה, כדי שלא יישארו חורים בפריסה. */}
+            {(() => {
+              const cards = [
+                { id: 'groq' as Engine, icon: Zap, label: 'Groq', sub: 'whisper-large-v3-turbo' },
+                { id: 'openai' as Engine, icon: Globe, label: 'OpenAI', sub: 'whisper-1' },
+                { id: 'google' as Engine, icon: Chrome, label: 'Google', sub: 'Speech-to-Text' },
+                { id: 'assemblyai' as Engine, icon: Mic, label: 'AssemblyAI', sub: 'Universal' },
+                { id: 'deepgram' as Engine, icon: Waves, label: 'Deepgram', sub: 'nova-2' },
+                { id: 'gemini' as Engine, icon: Sparkles, label: 'Gemini', sub: 'Google AI · Audio' },
+              ];
+              const rank = orderedEngines(enginePrefs);
+              return cards
+                .filter((c) => shows(c.id as EngineId))
+                .sort((a, b) => rank.indexOf(a.id as EngineId) - rank.indexOf(b.id as EngineId));
+            })().map(({ id, icon: Icon, label, sub }) => (
               <Label
                 key={id}
                 htmlFor={id}
@@ -381,7 +415,11 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
       <div>
         <h3 className="text-xs font-medium mb-2 text-right text-muted-foreground tracking-wide flex items-center justify-end gap-1"><Monitor className="w-3 h-3 text-[#0f1e43]" /> מנועים מקומיים</h3>
         <RadioGroup value={selected} onValueChange={(value) => onChange(value as Engine)}>
-          <div className="grid grid-cols-2 gap-2">
+          {/* אותה פריסה בדיוק כמו המנועים האונליין. קודם היו כאן
+              שתי עמודות בלבד, ולכן כל כרטיס היה רחב פי שלושה
+              מהאחרים — אותו תוכן, גודל אחר. */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            {shows('local-server') && (
             <Label 
               htmlFor="local-server" 
               className={`flex flex-col items-center justify-center p-2.5 border rounded-xl cursor-pointer transition-all duration-150 hover:border-primary/60 hover:shadow-sm relative ${
@@ -407,7 +445,9 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                 מומלץ לעברית 🇮🇱
               </Badge>
             </Label>
+            )}
 
+            {shows('local') && (
             <Label 
               htmlFor="local" 
               className={`flex flex-col items-center justify-center p-2.5 border rounded-xl cursor-pointer transition-all duration-150 hover:border-primary/60 hover:shadow-sm ${
@@ -424,6 +464,7 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                 מודל: {getLocalModelLabel()}
               </Badge>
             </Label>
+            )}
           </div>
         </RadioGroup>
       </div>

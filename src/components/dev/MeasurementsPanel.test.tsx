@@ -95,9 +95,29 @@ const PAYLOAD = {
   ],
 };
 
+const MEMORY = {
+  gpu: { used: 5200, total: 8151 },
+  transcriptionModels: ['ivrit-ai/whisper-large-v3-ct2'],
+  transcriptionTtlMinutes: 30,
+  ttsLoaded: true,
+  ttsIdleSeconds: 900,
+  ttsTtlMinutes: 60,
+};
+
+/** המסך פונה לשתי כתובות שונות, ולכל אחת מבנה תשובה אחר. */
+function route(mem: unknown = MEMORY, data: unknown = PAYLOAD) {
+  fetchLocalServer.mockImplementation((url: string) =>
+    Promise.resolve(
+      String(url).includes('/memory')
+        ? { ok: true, json: async () => mem }
+        : { ok: true, json: async () => data },
+    ),
+  );
+}
+
 beforeEach(() => {
   fetchLocalServer.mockReset();
-  fetchLocalServer.mockResolvedValue({ ok: true, json: async () => PAYLOAD });
+  route();
 });
 afterEach(cleanup);
 
@@ -134,7 +154,7 @@ describe('קבוצות שאסור להשוות ביניהן', () => {
       ...PAYLOAD,
       topics: [{ ...PAYLOAD.topics[0], groups: [PAYLOAD.topics[0].groups[0]] }],
     };
-    fetchLocalServer.mockResolvedValue({ ok: true, json: async () => one });
+    route(MEMORY, one);
     const view = render(<MeasurementsPanel />);
     await waitFor(() => expect(view.container.textContent).toContain('עברית מודרנית'));
     expect(view.container.textContent).not.toContain('אסור להשוות');
@@ -190,5 +210,45 @@ describe('כשהשרת אינו פועל', () => {
     fetchLocalServer.mockRejectedValue(new Error('Failed to fetch'));
     const view = render(<MeasurementsPanel />);
     await waitFor(() => expect(view.container.textContent).toContain('שרת התמלול אינו פועל'));
+  });
+});
+
+
+describe('מצב הזיכרון', () => {
+  it('מציג מה טעון וכמה תפוס', async () => {
+    const view = render(<MeasurementsPanel />);
+    await waitFor(() => expect(view.container.textContent).toContain('מה טעון בזיכרון'));
+    expect(view.container.textContent).toContain('5.1 מתוך 8 ג׳יגה');
+    expect(view.container.textContent).toContain('15 דקות ללא שימוש');
+  });
+
+  it('כפתור השחרור פעיל כשיש מה לשחרר', async () => {
+    render(<MeasurementsPanel />);
+    const btn = await screen.findByRole('button', { name: 'שחרר עכשיו' });
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('הכפתור כבוי כששום דבר אינו טעון', async () => {
+    // כפתור שנראה פעיל ואינו עושה דבר הוא גרוע מכפתור כבוי.
+    route({ ...MEMORY, transcriptionModels: [], ttsLoaded: false, ttsIdleSeconds: null });
+    const view = render(<MeasurementsPanel />);
+    await waitFor(() => expect(view.container.textContent).toContain('אין מה לשחרר'));
+    const btn = screen.getByRole('button', { name: 'שחרר עכשיו' });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('נאמר שהשחרור עולה בטעינה מחדש', async () => {
+    // בלי זה אפשר לחשוב שהשחרור חינם.
+    const view = render(<MeasurementsPanel />);
+    await waitFor(() => expect(view.container.textContent).toContain('ישלם על הטעינה מחדש'));
+  });
+
+  it('תשובה לא מוכרת אינה מפילה את המסך', async () => {
+    // זאת התקלה שהבדיקות תפסו: שרת ישן מחזיר מבנה אחר, והרכיב
+    // קרס ולקח איתו גם את המדידות, שאין להן שום קשר.
+    route({ something: 'else' });
+    const view = render(<MeasurementsPanel />);
+    await waitFor(() => expect(view.container.textContent).toContain('עברית מודרנית'));
+    expect(view.container.textContent).not.toContain('מה טעון בזיכרון');
   });
 });

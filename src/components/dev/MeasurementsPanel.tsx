@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getServerUrl, fetchLocalServer } from "@/lib/serverConfig";
-import { AlertTriangle, RefreshCw, TrendingUp } from "lucide-react";
+import { AlertTriangle, HardDrive, RefreshCw, TrendingUp } from "lucide-react";
 
 /**
  * מסך המדידות — מה נמדד, מתי, ומה היה הטוב ביותר.
@@ -192,6 +192,141 @@ function GroupChart({ group }: { group: Group }) {
   );
 }
 
+type Memory = {
+  gpu: { used: number; total: number } | null;
+  transcriptionModels: string[];
+  transcriptionTtlMinutes: number;
+  ttsLoaded: boolean;
+  ttsIdleSeconds: number | null;
+  ttsTtlMinutes: number;
+};
+
+const minutes = (s: number | null) =>
+  s == null ? "" : s < 60 ? "פחות מדקה" : `${Math.round(s / 60)} דקות`;
+
+/**
+ * מה טעון עכשיו, וכפתור לשחרר.
+ *
+ * נבנה אחרי שביום אחד נתקלנו שלוש פעמים בכרטיס מסך מלא בלי לדעת
+ * מי מחזיק אותו: מדידה שקרסה מחוסר זיכרון, תהליך שהחזיק שלושה
+ * ג'יגה אחרי שמת, ומודל שפה חיצוני שתפס חמישה וחצי.
+ *
+ * השחרור קורה גם לבד — מודלי תמלול אחרי חצי שעה, מנוע ההקראה
+ * אחרי שעה. הכפתור כאן נועד לרגע שבו צריך את הזיכרון *עכשיו*,
+ * ואין כוונה לחכות.
+ */
+function MemoryPanel() {
+  const [mem, setMem] = useState<Memory | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  const read = useCallback(async () => {
+    try {
+      const r = await fetchLocalServer(`${getServerUrl()}/memory`);
+      if (!r.ok) return setMem(null);
+      const j = await r.json();
+      // שרת ישן אינו מכיר את הפעולה הזאת ויחזיר משהו אחר לגמרי.
+      // בלי הבדיקה הזאת הרכיב קורס ולוקח איתו את כל הטאב — ואז
+      // גם המדידות, שאין להן שום קשר, נעלמות מהמסך.
+      if (!j || !Array.isArray(j.transcriptionModels)) return setMem(null);
+      setMem(j as Memory);
+    } catch {
+      setMem(null);
+    }
+  }, []);
+
+  useEffect(() => { void read(); }, [read]);
+
+  const release = useCallback(async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await fetchLocalServer(`${getServerUrl()}/unload-models`, { method: "POST" });
+      const j = await r.json();
+      // המספרים שחוזרים הם מה שבאמת שוחרר, לא מה שביקשנו לשחרר.
+      const parts = [`${j.unloaded ?? 0} מודלי תמלול`];
+      if (j.ttsReleased) parts.push("מנוע ההקראה");
+      setNote(`שוחררו: ${parts.join(" ו")}`);
+      await read();
+    } catch {
+      setNote("השחרור נכשל — שרת התמלול אינו פועל");
+    } finally {
+      setBusy(false);
+    }
+  }, [read]);
+
+  if (!mem) return null;
+  const nothing = mem.transcriptionModels.length === 0 && !mem.ttsLoaded;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <HardDrive className="h-4 w-4" />
+          מה טעון בזיכרון
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {mem.gpu && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span>כרטיס המסך</span>
+              <span className="tabular-nums text-muted-foreground">
+                {Math.round(mem.gpu.used / 1024 * 10) / 10} מתוך{" "}
+                {Math.round(mem.gpu.total / 1024 * 10) / 10} ג׳יגה
+              </span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded bg-muted">
+              <div
+                className={`h-full ${mem.gpu.used > mem.gpu.total * 0.85 ? "bg-destructive" : "bg-primary"}`}
+                style={{ width: `${Math.min(100, (mem.gpu.used / mem.gpu.total) * 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-1 text-xs">
+          <div className="flex items-center justify-between gap-2">
+            <span>מודלי תמלול</span>
+            <span className="text-muted-foreground">
+              {mem.transcriptionModels.length === 0
+                ? "אין"
+                : `${mem.transcriptionModels.length} · משתחרר אחרי ${mem.transcriptionTtlMinutes} דקות`}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span>מנוע ההקראה</span>
+            <span className="text-muted-foreground">
+              {!mem.ttsLoaded
+                ? "אינו טעון"
+                : `טעון · ${minutes(mem.ttsIdleSeconds)} ללא שימוש · משתחרר אחרי ${mem.ttsTtlMinutes} דקות`}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => void release()}
+                  disabled={busy || nothing}>
+            {busy ? "משחרר..." : "שחרר עכשיו"}
+          </Button>
+          {nothing && (
+            <span className="text-[11px] text-muted-foreground">
+              אין מה לשחרר — שום מודל אינו טעון.
+            </span>
+          )}
+          {note && <span className="text-[11px] text-muted-foreground">{note}</span>}
+        </div>
+
+        {/* בלי המשפט הזה אפשר לחשוב שהשחרור חינם. הוא לא. */}
+        <p className="text-[11px] text-muted-foreground">
+          שחרור מפנה זיכרון מיד, אבל השימוש הבא ישלם על הטעינה מחדש —
+          שניות בודדות למודל תמלול, וכ-70 שניות למנוע ההקראה.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function MeasurementsPanel() {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -241,6 +376,11 @@ export function MeasurementsPanel() {
       {data && (
         <ScrollArea className="h-[62vh] pr-2">
           <div className="space-y-4">
+            {/* מצב הזיכרון ראשון: כשכרטיס המסך מלא, זאת הסיבה
+                שהמדידה הבאה תיכשל — ועדיף לראות את זה לפני
+                שמסתכלים על המספרים. */}
+            <MemoryPanel />
+
             {data.topics.map((t) => (
               <Card key={t.key}>
                 <CardHeader className="pb-2">

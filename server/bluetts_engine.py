@@ -34,6 +34,7 @@ import json
 import os
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -492,11 +493,47 @@ class BlueTts:
 
 _engine: Optional[BlueTts] = None
 _engine_lock = threading.Lock()
+_engine_last_used: float = 0.0
 
 
 def get_engine() -> BlueTts:
-    global _engine
+    global _engine, _engine_last_used
     with _engine_lock:
         if _engine is None:
             _engine = BlueTts()
+        _engine_last_used = time.time()
         return _engine
+
+
+def idle_seconds() -> Optional[float]:
+    """כמה זמן המנוע טעון ולא שימש. None אם אינו טעון."""
+    with _engine_lock:
+        if _engine is None:
+            return None
+        return time.time() - _engine_last_used
+
+
+def release_engine(min_idle_seconds: float = 0.0) -> bool:
+    """משחרר את המנוע מהזיכרון אם הוא בטל מספיק זמן.
+
+    למה זה נחוץ: המנוע נטען פעם אחת ונשאר לנצח. הוא תופס כשני
+    ג'יגה בזיכרון כרטיס המסך, ובכרטיס של שמונה זה רבע מהכול —
+    גם כשאיש לא הקריא דבר כבר שעות.
+
+    למה ההמתנה ארוכה יותר מזו של מודלי התמלול: הטעינה כאן עולה
+    כשבעים שניות. שחרור אחרי המתנה קצרה היה הופך כל הקראה שנייה
+    להמתנה ארוכה, וזה גרוע מלהחזיק את הזיכרון.
+
+    מחזיר אמת אם שוחרר בפועל.
+    """
+    global _engine, _engine_last_used
+    with _engine_lock:
+        if _engine is None:
+            return False
+        if min_idle_seconds and (time.time() - _engine_last_used) < min_idle_seconds:
+            return False
+        _engine = None
+        _engine_last_used = 0.0
+    import gc
+    gc.collect()
+    return True

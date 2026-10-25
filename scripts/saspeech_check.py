@@ -80,20 +80,38 @@ def drop_fillers(tokens):
     return [t for t in tokens if t not in FILLERS]
 
 
-def load_rows(limit=None):
+def iter_rows(limit=None):
+    """קורא את המדגם במנות קטנות ומחזיר אמירה אחת בכל פעם.
+
+    הגרסה הראשונה קראה קובץ שלם לזיכרון וקרסה. קובץ אחד הוא 366
+    מגה של שמע דחוס, ופריסתו לאובייקטים בפייתון תופסת כמה ג'יגה —
+    המחשב נגמר לו הזיכרון והתהליך מת.
+
+    כאן הקריאה היא במנות של 16 אמירות, ואין רגע שבו יותר מהן
+    נמצאות בזיכרון. זה גם מאפשר להריץ את כל 2,986 האמירות בלי
+    לדאוג לגודל.
+    """
     import pyarrow.parquet as pq
     files = sorted(f for f in os.listdir(DATA_DIR) if f.endswith(".parquet"))
     if not files:
         raise SystemExit("אין קובצי מדגם ב-%s" % DATA_DIR)
-    rows = []
+    seen = 0
     for name in files:
-        table = pq.read_table(os.path.join(DATA_DIR, name))
-        data = table.to_pylist()
-        for r in data:
-            rows.append(r)
-            if limit and len(rows) >= limit:
-                return rows
-    return rows
+        pf = pq.ParquetFile(os.path.join(DATA_DIR, name))
+        for batch in pf.iter_batches(batch_size=16):
+            for row in batch.to_pylist():
+                yield row
+                seen += 1
+                if limit and seen >= limit:
+                    return
+
+
+def count_rows():
+    import pyarrow.parquet as pq
+    total = 0
+    for name in sorted(f for f in os.listdir(DATA_DIR) if f.endswith(".parquet")):
+        total += pq.ParquetFile(os.path.join(DATA_DIR, name)).metadata.num_rows
+    return total
 
 
 def main():
@@ -103,9 +121,9 @@ def main():
     ap.add_argument("--save", default=None, help="שם לרישום ביומן")
     args = ap.parse_args()
 
-    print("קורא את המדגם...")
-    rows = load_rows(args.limit)
-    print("   %d אמירות" % len(rows))
+    total = count_rows()
+    planned = min(args.limit, total) if args.limit else total
+    print("המדגם מכיל %d אמירות · נמדדות %d" % (total, planned))
 
     import numpy as np
     import soundfile as sf
@@ -123,7 +141,7 @@ def main():
     t0 = time.time()
     tmp = os.path.join(DATA_DIR, "_current.wav")
 
-    for i, row in enumerate(rows, 1):
+    for i, row in enumerate(iter_rows(args.limit), 1):
         a = row["audio"]
         # המדגם שומר את השמע כבתים בתוך הטבלה
         if isinstance(a, dict) and a.get("bytes"):
@@ -151,7 +169,7 @@ def main():
 
         if i % 50 == 0:
             print("   %d/%d · %d מתוך 100"
-                  % (i, len(rows), round(100.0 * strict["c"] / max(1, strict["n"]))))
+                  % (i, planned, round(100.0 * strict["c"] / max(1, strict["n"]))))
 
     elapsed = time.time() - t0
     if os.path.exists(tmp):
@@ -164,7 +182,7 @@ def main():
     print("=" * 70)
     print("כמה מילים יצאו נכון")
     print("=" * 70)
-    print("  אמירות:        %d" % len(rows))
+    print("  אמירות:        %d" % planned)
     print("  שמע:           %.1f דקות" % (audio_s / 60))
     print("  מילים במבחן:   %d" % strict["n"])
     print()
@@ -187,9 +205,9 @@ def main():
         rc.record_simple(
             label=args.save, topic="modern-hebrew",
             correct=strict["c"], total=strict["n"],
-            benchmark="saspeech-%d" % len(rows),
+            benchmark="saspeech-%d" % planned,
             extra={
-                "utterances": len(rows),
+                "utterances": planned,
                 "audio_seconds": round(audio_s, 1),
                 "realtime_factor": round(elapsed / audio_s, 3) if audio_s else None,
                 "folded_numbers_correct": folded["c"],

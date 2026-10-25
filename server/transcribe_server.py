@@ -706,6 +706,12 @@ _model_cache: dict[str, faster_whisper.WhisperModel] = {}
 _model_last_used: dict[str, float] = {}  # cache_key → last access timestamp
 _current_model_id: str | None = None
 MODEL_TTL_SECONDS = 30 * 60  # 30 minutes — evict unused models to free VRAM
+
+# מנוע ההקראה מוחזק בנפרד ממודלי התמלול, והמתנה ארוכה יותר.
+# הסיבה: טעינתו עולה כשבעים שניות, מול שניות בודדות למודל
+# תמלול. שחרור מוקדם מדי היה הופך כל הקראה שנייה להמתנה
+# ארוכה — וזה גרוע יותר מלהחזיק את הזיכרון.
+TTS_TTL_SECONDS = 60 * 60  # שעה
 _flash_attention_disabled = False  # Set True after runtime flash-attention error
 
 # Whether flash attention works is a property of the GPU, not of the run — but it
@@ -4264,17 +4270,75 @@ def model_updates_endpoint():
         return jsonify({"error": str(exc)}), 500
 
 
+def _gpu_memory():
+    """כמה תפוס בכרטיס המסך, במגה. None אם אין כרטיס."""
+    try:
+        import subprocess
+        r = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used,memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10)
+        used, total = [int(x.strip()) for x in r.stdout.strip().split(",")[:2]]
+        return {"used": used, "total": total}
+    except Exception:
+        return None
+
+
+@app.route("/memory", methods=["GET"])
+def memory_endpoint():
+    """מה טעון עכשיו וכמה זיכרון זה תופס.
+
+    נבנה אחרי שביום אחד נתקלנו שלוש פעמים בכרטיס מסך מלא בלי לדעת
+    מי מחזיק אותו. בלי תצוגה כזאת הדרך היחידה לברר היא שורת פקודה.
+    """
+    be = sys.modules.get("bluetts_engine")
+    tts_idle = None
+    if be is not None and hasattr(be, "idle_seconds"):
+        try:
+            tts_idle = be.idle_seconds()
+        except Exception:
+            tts_idle = None
+    return jsonify({
+        "gpu": _gpu_memory(),
+        "transcriptionModels": sorted(_model_cache.keys()),
+        "transcriptionTtlMinutes": MODEL_TTL_SECONDS // 60,
+        "ttsLoaded": tts_idle is not None,
+        "ttsIdleSeconds": round(tts_idle) if tts_idle is not None else None,
+        "ttsTtlMinutes": TTS_TTL_SECONDS // 60,
+    })
+
+
 @app.route("/unload-models", methods=["POST"])
 def unload_models_endpoint():
-    """Unload all models from GPU memory."""
+    """משחרר מהזיכרון את כל מה שטעון — כולל מנוע ההקראה.
+
+    המנוע נשאר כאן בכוונה בתוך אותה פעולה ולא בפעולה נפרדת: מי
+    שלוחץ "שחרר" מתכוון לשחרר הכול, ושתי פעולות נפרדות היו
+    משאירות שני ג'יגה תפוסים בלי שאיש ישים לב.
+    """
     global _current_model_id
     count = len(_model_cache)
     _model_cache.clear()
     _model_last_used.clear()
     _current_model_id = None
+
+    tts_released = False
+    be = sys.modules.get("bluetts_engine")
+    if be is not None and hasattr(be, "release_engine"):
+        try:
+            tts_released = be.release_engine()
+        except Exception as exc:
+            print(f"  שחרור מנוע ההקראה נכשל: {exc}")
+
     import gc; gc.collect()
-    print(f"  Unloaded {count} models from memory")
-    return jsonify({"status": "ok", "unloaded": count})
+    print(f"  שוחררו {count} מודלי תמלול"
+          + (" ומנוע ההקראה" if tts_released else ""))
+    return jsonify({
+        "status": "ok",
+        "unloaded": count,
+        "ttsReleased": tts_released,
+        "gpu": _gpu_memory(),
+    })
 
 
 def _load_pyannote_waveform(audio_path):
@@ -5282,6 +5346,18 @@ def _evict_stale_models():
                 print(f"  [cache] Evicted idle model: {key}")
         if stale:
             gc.collect()
+
+        # מנוע ההקראה. נבדק רק אם הוא כבר נטען אי פעם — אין טעם
+        # לייבא אותו כאן ולגרום בדיוק לטעינה שאנחנו מנסים להימנע
+        # ממנה.
+        be = sys.modules.get("bluetts_engine")
+        if be is not None and hasattr(be, "release_engine"):
+            try:
+                if be.release_engine(TTS_TTL_SECONDS):
+                    print("  [cache] שוחרר מנוע ההקראה אחרי %d דקות ללא שימוש"
+                          % (TTS_TTL_SECONDS // 60))
+            except Exception as exc:
+                print("  [cache] שחרור מנוע ההקראה נכשל: %s" % exc)
 
         # Cleanup expired staged files
         expired_stages = [sid for sid, info in _staged_files.items() if now - info["timestamp"] > STAGE_TTL_SECONDS]
