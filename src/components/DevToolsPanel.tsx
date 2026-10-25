@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { MeasurementsPanel } from "@/components/dev/MeasurementsPanel";
 import {
   getDefaultDevFloatingButtonsVisibility,
   loadDevFloatingButtonsVisibility,
@@ -17,6 +18,7 @@ import {
   type DevFloatingButtonsVisibility,
 } from "@/lib/devFloatingButtons";
 import {
+  LineChart,
   Play,
   Copy,
   Trash2,
@@ -294,7 +296,7 @@ const DevToolsPanel = () => {
   return (
     <div className="space-y-4" dir="rtl">
       <Tabs defaultValue="editor" className="w-full">
-        <TabsList className="grid w-full grid-cols-4 h-12">
+        <TabsList className="grid w-full grid-cols-5 h-12">
           <TabsTrigger value="editor" className="gap-2 text-sm">
             <Code2 className="w-4 h-4" />
             עורך SQL
@@ -311,7 +313,18 @@ const DevToolsPanel = () => {
             <LayoutGrid className="w-4 h-4" />
             כפתורי פיתוח
           </TabsTrigger>
+          <TabsTrigger value="measurements" className="gap-2 text-sm">
+            <LineChart className="w-4 h-4" />
+            בדיקות
+          </TabsTrigger>
         </TabsList>
+
+        {/* מדידות לאורך זמן — נקרא מיומן המדידות שעל הדיסק.
+            המדידה עצמה נעשית ב-scripts/regression_check.py, שמנטר
+            את מצב המחשב; כאן רק מוצג מה שכבר נמדד. */}
+        <TabsContent value="measurements" className="mt-4">
+          <MeasurementsPanel />
+        </TabsContent>
 
         {/* SQL Editor Tab */}
         <TabsContent value="editor" className="space-y-4 mt-4">
