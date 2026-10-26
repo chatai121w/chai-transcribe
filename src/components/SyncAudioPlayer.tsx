@@ -36,6 +36,9 @@ import {
   peakLevel, HUM_NOTCH_Q, MAX_BOOST,
   type AudioFormat,
 } from "@/lib/audioExport";
+import {
+  formatRangeLength, markEnd, markStart, MOVED_NOTE, type MarkResult,
+} from "@/lib/focusRange";
 import { usePlayerShortcuts } from "@/hooks/usePlayerShortcuts";
 import { findActiveWordIndex } from "@/lib/whisperAlignment";
 import { cn } from "@/lib/utils";
@@ -2470,17 +2473,26 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     setPlaybackSpeed(speed + delta);
   }, [setPlaybackSpeed, speed]);
 
-  const markFocusStartFromCurrent = useCallback(() => {
-    setFocusStart(currentTime);
-    if (focusEnd <= currentTime) {
-      setFocusEnd(Math.min(effectiveDuration || currentTime + 0.1, currentTime + 10));
-    }
-  }, [currentTime, focusEnd, effectiveDuration]);
+  /**
+   * קובע סימון ומעדכן את הטווח.
+   *
+   * ההיגיון עצמו יושב ב-focusRange, עם בדיקות: כאן רק מחילים את
+   * התוצאה ומודיעים למשתמש אם סימון נאלץ לזוז. בלי ההודעה, סימון
+   * שזז נראה כמו תקלה.
+   */
+  const applyMark = useCallback((
+    mark: (r: { start: number; end: number }, at: number, dur: number) => MarkResult,
+  ) => {
+    const { range, moved } = mark(
+      { start: focusStart, end: focusEnd }, currentTime, effectiveDuration || 0,
+    );
+    setFocusStart(range.start);
+    setFocusEnd(range.end);
+    if (moved) toast.info('הטווח הותאם', { description: MOVED_NOTE[moved] });
+  }, [focusStart, focusEnd, currentTime, effectiveDuration]);
 
-  const markFocusEndFromCurrent = useCallback(() => {
-    const nextEnd = Math.max(currentTime, focusStart + 0.1);
-    setFocusEnd(nextEnd);
-  }, [currentTime, focusStart]);
+  const markFocusStartFromCurrent = useCallback(() => applyMark(markStart), [applyMark]);
+  const markFocusEndFromCurrent = useCallback(() => applyMark(markEnd), [applyMark]);
 
   const restart = useCallback(() => {
     seekTo(0);
@@ -3624,7 +3636,7 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                         {formatTime(focusStart)}
                         <span className="rounded-sm bg-amber-500 px-1 font-bold text-white">B</span>
                         {formatTime(focusEnd)}
-                        <span className="text-muted-foreground">· משך {formatTime(focusEnd - focusStart)}</span>
+                        <span className="text-muted-foreground">· משך {formatRangeLength(focusEnd - focusStart, formatTime)}</span>
                       </Badge>
                     ) : (
                       <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
