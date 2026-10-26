@@ -5,6 +5,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import {
   markGuideSeen, setGuidesDisabledEverywhere, type TabGuide as TabGuideData,
 } from '@/lib/tabGuides';
+import { GuideDemo } from "@/components/guide/GuideDemo";
+import { readGuideDemoPrefs } from "@/lib/guideDemoPrefs";
 
 interface Props {
   guide: TabGuideData;
@@ -40,6 +42,10 @@ export default function TabGuide({ guide, open, onClose }: Props) {
   const [disableAll, setDisableAll] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+
+  // העדפת ההמחשות נקראת פעם אחת. היא אינה משתנה תוך כדי צפייה
+  // בהדרכה, ואין טעם לקרוא אותה בכל רינדור.
+  const [demoPrefs] = useState(readGuideDemoPrefs);
 
   const reduceMotion =
     typeof window !== 'undefined' &&
@@ -177,6 +183,16 @@ export default function TabGuide({ guide, open, onClose }: Props) {
                       <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
                         {item.body}
                       </p>
+                      {/* ההמחשה אחרי הטקסט ולא לפניו: היא מראה את מה
+                          שהטקסט הסביר, ולא מחליפה אותו. מי שקרא
+                          והבין פשוט ממשיך הלאה. */}
+                      {item.demo && demoPrefs.enabled && (
+                        <GuideDemo
+                          kind={item.demo}
+                          style={demoPrefs.style}
+                          className="mt-2 h-20 w-full"
+                        />
+                      )}
                       {item.tip && (
                         <p className="mt-2 border-r-2 border-accent/30 pr-2 text-xs leading-relaxed text-muted-foreground">
                           {item.tip}

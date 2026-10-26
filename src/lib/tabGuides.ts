@@ -28,12 +28,25 @@ import {
 } from 'lucide-react';
 
 /** אפשרות אחת בטאב. */
+import type { DemoKind } from "@/components/guide/GuideDemo";
+
 export interface GuideItem {
   icon: LucideIcon;
   title: string;
   body: string;
   /** הערה קצרה — מתי זה שימושי, או מה שלא מובן מאליו. */
   tip?: string;
+  /**
+   * המחשה מונפשת, כשהפעולה היא תנועה.
+   *
+   * מילים טובות להגדרה ורעות לתנועה: "גרור את הידית כדי לשנות
+   * סדר" דורש מהקורא לדמיין פעולה, וזה בדיוק מה שהוא לא יודע
+   * לעשות אם לא ראה אותה מעולם.
+   *
+   * רק לפריטים שבהם יש באמת מה להראות. המחשה לכל פריט הופכת את
+   * המסך לרועש, והעין מפסיקה להבחין בין מה שחשוב למה שלא.
+   */
+  demo?: DemoKind;
 }
 
 export interface TabGuide {
@@ -76,6 +89,7 @@ const VOICE_STUDIO: TabGuide[] = [
       {
         icon: Check,
         title: 'השוואה לפני ואחרי',
+        demo: 'compare',
         body: 'מאזינים לשני הגרסאות אחת אחרי השנייה.',
         tip: 'כדאי תמיד — שיפור אגרסיבי מדי מוחק גם דיבור.',
       },
@@ -167,6 +181,7 @@ const VOICE_STUDIO: TabGuide[] = [
       {
         icon: Mic,
         title: 'הקלטה של עצמך',
+        demo: 'record',
         body: 'מקריאים טקסט שכתוב מולכם, ומקבלים שמע עם תמלול נכון במאה אחוז.',
         tip: 'זה חומר האימון: כשאתם קוראים טקסט ידוע, אין מה לנחש.',
       },
@@ -200,12 +215,14 @@ const TRANSCRIBE: TabGuide[] = [
       {
         icon: FileAudio,
         title: 'טעינת הקלטה',
+        demo: 'upload',
         body: 'גוררים קובץ שמע או וידאו, או בוחרים מהמחשב.',
         tip: 'גם וידאו — השמע מחולץ ממנו לבד.',
       },
       {
         icon: Mic,
         title: 'הקלטה ישירה',
+        demo: 'record',
         body: 'מקליטים מהמיקרופון ומתמללים מיד, בלי קובץ.',
       },
       {
@@ -302,6 +319,7 @@ const TEXT_EDITOR: TabGuide[] = [
       {
         icon: Edit3,
         title: 'שמות לדוברים',
+        demo: 'speakers',
         body: 'נותנים שם לכל דובר במקום "דובר 1".',
       },
     ],
@@ -344,6 +362,7 @@ const TEXT_EDITOR: TabGuide[] = [
       {
         icon: SplitSquareHorizontal,
         title: 'השוואת גרסאות',
+        demo: 'compare',
         body: 'רואים מה השתנה בין גרסה לגרסה של אותו תמלול.',
       },
       {

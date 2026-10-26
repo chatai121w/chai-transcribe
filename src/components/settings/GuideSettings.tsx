@@ -14,6 +14,8 @@ import {
   setGuidesDisabledEverywhere,
   unmarkGuideSeen,
 } from "@/lib/tabGuides";
+import { GuideDemo, DEMO_STYLES } from "@/components/guide/GuideDemo";
+import { readGuideDemoPrefs, writeGuideDemoPrefs, type GuideDemoPrefs } from "@/lib/guideDemoPrefs";
 
 /**
  * שליטה במסכי ההדרכה שנפתחים בכניסה לכל לשונית.
@@ -77,6 +79,14 @@ export function GuideSettings() {
     toast({ title: `ההדרכות של ${label} יוצגו מחדש` });
   };
 
+  // סגנון ההמחשות. נשמר מקומית — זאת העדפת תצוגה אישית למסך,
+  // ואדם שעובד על מסך קטן יבחר אחרת מאדם שעובד על מסך גדול.
+  const [demoPrefs, setDemoPrefs] = useState<GuideDemoPrefs>(readGuideDemoPrefs);
+  const saveDemos = useCallback((next: GuideDemoPrefs) => {
+    setDemoPrefs(next);
+    writeGuideDemoPrefs(next);
+  }, []);
+
   return (
     <div className="space-y-6" dir="rtl">
 
@@ -97,6 +107,65 @@ export function GuideSettings() {
           onCheckedChange={toggle}
           aria-label="הצגת מסכי הדרכה"
         />
+      </div>
+
+      {/* --------------------------------------- סגנון ההמחשות */}
+      <div className="rounded-lg border p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 space-y-1">
+            <Label htmlFor="demos-enabled" className="text-base font-medium">
+              המחשות מונפשות
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              לחלק מהפעולות נוספת המחשה קטנה שמראה את התנועה. מילים טובות
+              להגדרה ורעות לתנועה — קשה לדמיין גרירה שלא ראית.
+            </p>
+          </div>
+          <Switch
+            id="demos-enabled"
+            checked={demoPrefs.enabled}
+            onCheckedChange={(v) => saveDemos({ ...demoPrefs, enabled: v })}
+            aria-label="הצגת המחשות מונפשות"
+          />
+        </div>
+
+        {demoPrefs.enabled && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {DEMO_STYLES.map((s) => {
+              const on = demoPrefs.style === s.id;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => saveDemos({ ...demoPrefs, style: s.id })}
+                  aria-pressed={on}
+                  className={[
+                    "rounded-lg border p-3 text-right transition-colors",
+                    on ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+                       : "border-border/60 hover:border-primary/40",
+                  ].join(" ")}
+                >
+                  <div className="mb-2 flex items-center gap-2">
+                    {on && <Check className="h-3.5 w-3.5 text-primary" />}
+                    <span className="text-sm font-medium">{s.label}</span>
+                  </div>
+                  <p className="mb-2 text-xs text-muted-foreground">{s.note}</p>
+                  {/* שתי המחשות שונות, כדי שההבדל בין הסגנונות ייראה
+                      על יותר מצורה אחת. */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <GuideDemo kind="drag" style={s.id} className="h-16 w-full" />
+                    <GuideDemo kind="record" style={s.id} className="h-16 w-full" />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <p className="mt-3 text-xs text-muted-foreground">
+          מי שביקש במערכת ההפעלה פחות תנועה יראה את ההמחשות קפואות, גם
+          כשהן דלוקות כאן.
+        </p>
       </div>
 
       {/* ------------------------------------------------ המצב */}
