@@ -35,7 +35,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, GitCompareArrows, FolderInput, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor, MoreHorizontal, LocateFixed, Columns2, Square } from "lucide-react";
+import { Edit3, AlignRight, Link, Unlink, Check, X, Type, Save, Copy, Eye, EyeOff, Sparkles, Minus, Rows3, Zap, Cpu, LineChart, ChevronDown, Brain, History, Bookmark, GitCompare, GitCompareArrows, FolderInput, Lock, Unlock, CircleDot, Circle, AlignJustify, Anchor, MoreHorizontal, LocateFixed, Columns2, Square, Info,
+} from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -2327,6 +2328,27 @@ export const SyncMirrorLayout = ({
               {lockedPane === 'left' ? 'נעול' : 'פתוח'}
             </button>
           </div>
+
+          {/* בלי נעילה אין צילום קפוא, אין נקודות כחולות ואין יישור —
+              שני הצדדים מציגים את אותו דבר. השורה הזאת אומרת את זה
+              במקום להשאיר את המשתמש מול מה שנראה ככפילות מיותרת. */}
+          {!lockedPane && (
+            <div className="mx-2 mb-1 flex items-start gap-1.5 rounded-md border border-dashed border-border/60 bg-muted/30 px-2 py-1">
+              <Info className="mt-[1px] h-3 w-3 shrink-0 text-muted-foreground" />
+              <p className="text-[10px] leading-relaxed text-muted-foreground">
+                שני הצדדים זהים כרגע.{' '}
+                <button
+                  type="button"
+                  onClick={() => toggleLock('right')}
+                  className="font-medium text-foreground underline underline-offset-2 hover:text-primary"
+                >
+                  נעל צד אחד
+                </button>{' '}
+                כדי לראות מה שינית — השורות שהשתנו יסומנו בנקודה, והצד הנעול
+                יישמר כפי שהוא.
+              </p>
+            </div>
+          )}
           <div style={{ pointerEvents: lockedPane === 'left' ? 'none' : undefined }} className="flex-1 min-h-0 flex flex-col">
           {effectiveRichEdit && !paddedAlignment ? (
             <div ref={leftRichRef} className="flex flex-col gap-2 p-3" dir="rtl">
