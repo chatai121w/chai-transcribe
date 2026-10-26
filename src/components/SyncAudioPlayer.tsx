@@ -30,6 +30,12 @@ import {
   isStudioEditModeEnabled,
   setStudioEditModeEnabled,
 } from "@/lib/studioLayout";
+import { toast } from "sonner";
+import {
+  applyGain, applyHumNotchOff, encodeMp3, encodeWav, gainToDb, levelGain,
+  peakLevel, HUM_NOTCH_Q, MAX_BOOST,
+  type AudioFormat,
+} from "@/lib/audioExport";
 import { usePlayerShortcuts } from "@/hooks/usePlayerShortcuts";
 import { findActiveWordIndex } from "@/lib/whisperAlignment";
 import { cn } from "@/lib/utils";
@@ -368,43 +374,6 @@ interface UserEqPreset {
   gains: number[];
   qValues: number[];
   createdAt: number;
-}
-
-function encodeWavFromFloat32(samples: Float32Array, sampleRate: number): Blob {
-  const bytesPerSample = 2;
-  const numChannels = 1;
-  const blockAlign = numChannels * bytesPerSample;
-  const byteRate = sampleRate * blockAlign;
-  const dataSize = samples.length * bytesPerSample;
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-
-  const writeString = (offset: number, s: string) => {
-    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
-  };
-
-  writeString(0, 'RIFF');
-  view.setUint32(4, 36 + dataSize, true);
-  writeString(8, 'WAVE');
-  writeString(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bytesPerSample * 8, true);
-  writeString(36, 'data');
-  view.setUint32(40, dataSize, true);
-
-  let offset = 44;
-  for (let i = 0; i < samples.length; i++) {
-    const s = Math.max(-1, Math.min(1, samples[i]));
-    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-    offset += 2;
-  }
-
-  return new Blob([buffer], { type: 'audio/wav' });
 }
 
 export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlayerProps>(({
@@ -846,6 +815,13 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
 
   // A-B focused processing (speed + enhancement on selected segment only)
   const [focusEnabled, setFocusEnabled] = useState(false);
+  // ─── העדפות הייצוא ───
+  // נשמרות כאן ולא בשרת: זאת בחירה של רגע, שתלויה במה שעושים עם
+  // הקובץ הבא — לא בהגדרה קבועה של המשתמש.
+  const [exportFormat, setExportFormat] = useState<AudioFormat>('mp3');
+  const [exportNormalize, setExportNormalize] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
+
   const [focusStart, setFocusStart] = useState(0);
   const [focusEnd, setFocusEnd] = useState(0);
   const [focusLoop, setFocusLoop] = useState(false);
@@ -1467,10 +1443,9 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     if (!humNotchRef.current) return;
     if (humNotchEnabled && !isBypassEnhancement && enhancementStrength > 10) {
       humNotchRef.current.frequency.value = Number(humNotchFreq);
-      humNotchRef.current.Q.value = 10;
+      humNotchRef.current.Q.value = HUM_NOTCH_Q;
     } else {
-      humNotchRef.current.frequency.value = 10;
-      humNotchRef.current.Q.value = 0.0001;
+      applyHumNotchOff(humNotchRef.current);
     }
   }, [humNotchEnabled, humNotchFreq, isBypassEnhancement, enhancementStrength]);
 
@@ -2163,6 +2138,17 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     ctx.fillStyle = 'rgba(241, 245, 249, 0.5)';
     ctx.fillRect(0, 0, W, H);
 
+    // ─── הטווח הנבחר (A-B) ───
+    // מתחת לפסים בכוונה: הצללה שמעליהם הייתה מעמעמת בדיוק את החלק
+    // שהמשתמש בחר להתבונן בו.
+    const abReady = dur > 0 && focusEnd > focusStart;
+    const abRight = abReady ? W - (focusStart / dur) * W : 0;  // מימין לשמאל
+    const abLeft = abReady ? W - (focusEnd / dur) * W : 0;
+    if (abReady) {
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.16)';
+      ctx.fillRect(abLeft, 0, abRight - abLeft, H);
+    }
+
     for (let i = 0; i < BARS; i++) {
       // RTL: bar 0 = right edge
       const x = W - (i + 1) * barW;
@@ -2206,6 +2192,53 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
       ctx.stroke();
     }
 
+    // ─── הסימונים A ו-B ───
+    // קו מלא ודגלון עם האות. קו מקווקו לבדו נבלע בין הפסים, והמשתמש
+    // לא ידע איזה קצה הוא ההתחלה ואיזה הסוף.
+    if (abReady) {
+      // מחוץ לטווח, במצב ממוקד, מוסיפים צעיף בהיר: כך ברור במבט
+      // אחד מה נבחר ומה לא.
+      if (focusEnabled) {
+        ctx.fillStyle = 'rgba(248, 250, 252, 0.55)';
+        ctx.fillRect(0, 0, abLeft, H);
+        ctx.fillRect(abRight, 0, W - abRight, H);
+      }
+
+      const drawMark = (x: number, letter: string) => {
+        ctx.strokeStyle = '#d97706';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+
+        // הדגלון פונה פנימה אל הטווח, כך ששני הדגלונים אינם נוגעים
+        // זה בזה גם כשהטווח צר.
+        const inward = letter === 'A' ? -1 : 1;
+        const w = 15;
+        const h = 15;
+        ctx.fillStyle = '#d97706';
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x + inward * w, 0);
+        ctx.lineTo(x + inward * w, h - 5);
+        ctx.lineTo(x, h);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 10px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(letter, x + inward * (w / 2), h / 2 - 1);
+        ctx.textAlign = 'start';
+        ctx.textBaseline = 'alphabetic';
+      };
+
+      drawMark(abRight, 'A');
+      drawMark(abLeft, 'B');
+    }
+
     // Bookmark pins on waveform
     if (dur > 0 && bookmarks.length > 0) {
       for (const bm of bookmarks) {
@@ -2230,7 +2263,8 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
         ctx.fill();
       }
     }
-  }, [currentTime, effectiveDuration, peaksData, speakerSegments, speakerColorMap, bookmarks]);
+  }, [currentTime, effectiveDuration, peaksData, speakerSegments, speakerColorMap, bookmarks,
+      focusStart, focusEnd, focusEnabled]);
 
   // Redraw static waveform on time/peaks change
   useEffect(() => {
@@ -2525,108 +2559,181 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     a.click();
   }, [audioUrl]);
 
+  /**
+   * ייצוא הקטע שבין A ל-B, אחרי העיבוד.
+   *
+   * שרשרת העיבוד כאן חייבת להיות זהה לשרשרת ההשמעה. כשהן נפרדות,
+   * מה שהאוזן שומעת ומה שנשמר בקובץ הם שני דברים שונים — וזה בדיוק
+   * מה שקרה: חוליית הגברת העוצמה והאיזון היו בהשמעה ולא בייצוא,
+   * והקובץ יצא כמעט בלי קול.
+   *
+   * אחרי העיבוד נמדדת העוצמה בפועל ומותאמת. המדחס מנמיך את הצלילים
+   * החזקים ואינו מחזיר את מה שלקח, ולכן גם שרשרת זהה אינה מספיקה:
+   * חומר מוקלט חלש יישאר חלש. ההתאמה היא החוליה שסוגרת את זה.
+   */
   const exportFocusedProcessedSegment = useCallback(async () => {
-    if (!audioUrl || !hasValidFocusRange || !effectiveDuration) return;
+    if (!audioUrl || !hasValidFocusRange || !effectiveDuration || isExporting) return;
 
     const startSec = Math.max(0, Math.min(focusStart, effectiveDuration - 0.05));
     const endSec = Math.max(startSec + 0.05, Math.min(focusEnd, effectiveDuration));
 
-    const resp = await fetch(audioUrl);
-    const arrayBuf = await resp.arrayBuffer();
-    const decodeCtx = new OfflineAudioContext(1, 1, 44100);
-    const decoded = await decodeCtx.decodeAudioData(arrayBuf);
+    setIsExporting(true);
+    try {
+      const resp = await fetch(audioUrl);
+      const arrayBuf = await resp.arrayBuffer();
+      const decodeCtx = new OfflineAudioContext(1, 1, 44100);
+      const decoded = await decodeCtx.decodeAudioData(arrayBuf);
 
-    const sampleRate = decoded.sampleRate;
-    const startSample = Math.floor(startSec * sampleRate);
-    const endSample = Math.min(Math.floor(endSec * sampleRate), decoded.length);
-    const length = Math.max(1, endSample - startSample);
+      const sampleRate = decoded.sampleRate;
+      const startSample = Math.floor(startSec * sampleRate);
+      const endSample = Math.min(Math.floor(endSec * sampleRate), decoded.length);
+      const length = Math.max(1, endSample - startSample);
 
-    const sourceData = decoded.getChannelData(0).slice(startSample, endSample);
-    const segBuffer = new AudioBuffer({ length, sampleRate, numberOfChannels: 1 });
-    segBuffer.copyToChannel(sourceData, 0, 0);
+      const sourceData = decoded.getChannelData(0).slice(startSample, endSample);
+      const segBuffer = new AudioBuffer({ length, sampleRate, numberOfChannels: 1 });
+      segBuffer.copyToChannel(sourceData, 0, 0);
 
-    const offline = new OfflineAudioContext(1, length, sampleRate);
-    const src = offline.createBufferSource();
-    src.buffer = segBuffer;
+      const offline = new OfflineAudioContext(1, length, sampleRate);
+      const src = offline.createBufferSource();
+      src.buffer = segBuffer;
 
-    const deRumble = offline.createBiquadFilter();
-    deRumble.type = 'highpass';
-    deRumble.frequency.value = enhancementSettings.deRumbleFreq;
-    deRumble.Q.value = 0.8;
+      const deRumble = offline.createBiquadFilter();
+      deRumble.type = 'highpass';
+      deRumble.frequency.value = enhancementSettings.deRumbleFreq;
+      deRumble.Q.value = 0.8;
 
-    const highpass = offline.createBiquadFilter();
-    highpass.type = 'highpass';
-    highpass.frequency.value = enhancementSettings.hp;
-    highpass.Q.value = 0.7;
+      const highpass = offline.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = enhancementSettings.hp;
+      highpass.Q.value = 0.7;
 
-    const lowpass = offline.createBiquadFilter();
-    lowpass.type = 'lowpass';
-    lowpass.frequency.value = enhancementSettings.lp;
-    lowpass.Q.value = 0.7;
+      const lowpass = offline.createBiquadFilter();
+      lowpass.type = 'lowpass';
+      lowpass.frequency.value = enhancementSettings.lp;
+      lowpass.Q.value = 0.7;
 
-    const notch = offline.createBiquadFilter();
-    notch.type = 'notch';
-    if (humNotchEnabled && !isBypassEnhancement && enhancementStrength > 10) {
-      notch.frequency.value = Number(humNotchFreq);
-      notch.Q.value = 10;
-    } else {
-      notch.frequency.value = 10;
-      notch.Q.value = 0.0001;
+      const notch = offline.createBiquadFilter();
+      notch.type = 'notch';
+      if (humNotchEnabled && !isBypassEnhancement && enhancementStrength > 10) {
+        notch.frequency.value = Number(humNotchFreq);
+        notch.Q.value = HUM_NOTCH_Q;
+      } else {
+        applyHumNotchOff(notch);
+      }
+
+      const voice = offline.createBiquadFilter();
+      voice.type = 'peaking';
+      voice.frequency.value = 3000;
+      voice.Q.value = enhancementSettings.vbQ;
+      voice.gain.value = enhancementSettings.vbGain;
+
+      const deSibilance = offline.createBiquadFilter();
+      deSibilance.type = 'peaking';
+      deSibilance.frequency.value = 6500;
+      deSibilance.Q.value = 2.5;
+      deSibilance.gain.value = enhancementSettings.deSibilanceGain;
+
+      const presence = offline.createBiquadFilter();
+      presence.type = 'peaking';
+      presence.frequency.value = 3200;
+      presence.Q.value = 1.2;
+      presence.gain.value = enhancementSettings.presenceGain;
+
+      const warmth = offline.createBiquadFilter();
+      warmth.type = 'peaking';
+      warmth.frequency.value = 260;
+      warmth.Q.value = 0.9;
+      warmth.gain.value = enhancementSettings.warmthGain;
+
+      const compressor = offline.createDynamicsCompressor();
+      compressor.threshold.value = enhancementSettings.cThresh;
+      compressor.ratio.value = enhancementSettings.cRatio;
+      compressor.knee.value = enhancementSettings.cKnee;
+      compressor.attack.value = enhancementSettings.cAttack;
+      compressor.release.value = enhancementSettings.cRelease;
+
+      // האיזון, בדיוק כמו בהשמעה. בלעדיו כל הגבהה או הנמכה שהמשתמש
+      // עשה בפסים נעלמת מהקובץ.
+      const eqNodes = EQ_BANDS_31.map((band, i) => {
+        const f = offline.createBiquadFilter();
+        f.type = 'peaking';
+        f.frequency.value = band.freq;
+        f.Q.value = eqQValues[i] ?? band.q;
+        f.gain.value = eqGains[i] || 0;
+        return f;
+      });
+      for (let i = 1; i < eqNodes.length; i++) eqNodes[i - 1].connect(eqNodes[i]);
+
+      // הגברת העוצמה שאחרי העיבוד — החוליה שהייתה חסרה כאן.
+      const outGain = offline.createGain();
+      outGain.gain.value = outputGain;
+
+      src.connect(deRumble);
+      deRumble.connect(highpass);
+      highpass.connect(lowpass);
+      lowpass.connect(notch);
+      notch.connect(voice);
+      voice.connect(deSibilance);
+      deSibilance.connect(presence);
+      presence.connect(warmth);
+      warmth.connect(compressor);
+      compressor.connect(eqNodes[0]);
+      eqNodes[eqNodes.length - 1].connect(outGain);
+      outGain.connect(offline.destination);
+
+      src.start(0);
+      const rendered = await offline.startRendering();
+
+      let samples = rendered.getChannelData(0);
+      const beforePeak = peakLevel(samples);
+      let gain = 1;
+      if (exportNormalize) {
+        gain = levelGain(samples, { sampleRate });
+        samples = applyGain(samples, gain);
+      }
+
+      const blob = exportFormat === 'mp3'
+        ? await encodeMp3(samples, sampleRate)
+        : encodeWav(samples, sampleRate);
+
+      const name = `קטע-${formatTime(startSec).replace(':', '-')}-עד-${formatTime(endSec).replace(':', '-')}.${exportFormat}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
+      // השחרור נדחה: בחלק מהדפדפנים ביטול הכתובת מיד אחרי הלחיצה
+      // מבטל את ההורדה עצמה.
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+
+      const mb = (blob.size / (1024 * 1024)).toFixed(1);
+      const db = Math.round(gainToDb(gain));
+      toast.success('הקטע יוצא', {
+        description: gain > 1.05
+          ? `העוצמה הוגברה ב-${db} דציבל. גודל הקובץ ${mb} מגה-בייט.`
+          : gain < 0.95
+            ? `העוצמה הונמכה ב-${Math.abs(db)} דציבל כדי למנוע עיוות. גודל הקובץ ${mb} מגה-בייט.`
+            : `העוצמה הייתה תקינה ולא שונתה. גודל הקובץ ${mb} מגה-בייט.`,
+      });
+
+      if (!exportNormalize && beforePeak < 0.1) {
+        toast.warning('הקטע שיוצא חלש מאוד', {
+          description: 'התאמת העוצמה כבויה. אפשר להדליק אותה בתפריט הייצוא.',
+        });
+      } else if (exportNormalize && gain >= MAX_BOOST - 0.01) {
+        // הגבול נתפס: הקטע הוגבר כמה שאפשר ועדיין אינו חזק.
+        // עדיף לומר זאת מאשר להשאיר את המשתמש תוהה.
+        toast.warning('ההקלטה המקורית חלשה במיוחד', {
+          description: 'הגברנו עד הגבול. מעבר לזה היה עולה בעיקר רעש הרקע.',
+        });
+      }
+    } catch (err) {
+      toast.error('הייצוא נכשל', {
+        description: err instanceof Error ? err.message : 'שגיאה לא מזוהה',
+      });
+    } finally {
+      setIsExporting(false);
     }
-
-    const voice = offline.createBiquadFilter();
-    voice.type = 'peaking';
-    voice.frequency.value = 3000;
-    voice.Q.value = enhancementSettings.vbQ;
-    voice.gain.value = enhancementSettings.vbGain;
-
-    const deSibilance = offline.createBiquadFilter();
-    deSibilance.type = 'peaking';
-    deSibilance.frequency.value = 6500;
-    deSibilance.Q.value = 2.5;
-    deSibilance.gain.value = enhancementSettings.deSibilanceGain;
-
-    const presence = offline.createBiquadFilter();
-    presence.type = 'peaking';
-    presence.frequency.value = 3200;
-    presence.Q.value = 1.2;
-    presence.gain.value = enhancementSettings.presenceGain;
-
-    const warmth = offline.createBiquadFilter();
-    warmth.type = 'peaking';
-    warmth.frequency.value = 260;
-    warmth.Q.value = 0.9;
-    warmth.gain.value = enhancementSettings.warmthGain;
-
-    const compressor = offline.createDynamicsCompressor();
-    compressor.threshold.value = enhancementSettings.cThresh;
-    compressor.ratio.value = enhancementSettings.cRatio;
-    compressor.knee.value = enhancementSettings.cKnee;
-    compressor.attack.value = enhancementSettings.cAttack;
-    compressor.release.value = enhancementSettings.cRelease;
-
-    src.connect(deRumble);
-    deRumble.connect(highpass);
-    highpass.connect(lowpass);
-    lowpass.connect(notch);
-    notch.connect(voice);
-    voice.connect(deSibilance);
-    deSibilance.connect(presence);
-    presence.connect(warmth);
-    warmth.connect(compressor);
-    compressor.connect(offline.destination);
-
-    src.start(0);
-    const rendered = await offline.startRendering();
-    const wavBuffer = encodeWavFromFloat32(rendered.getChannelData(0), sampleRate);
-    const blob = new Blob([wavBuffer], { type: 'audio/wav' });
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `focused-segment-${Math.round(startSec)}-${Math.round(endSec)}.wav`;
-    a.click();
-    URL.revokeObjectURL(url);
   }, [
     audioUrl,
     hasValidFocusRange,
@@ -2638,6 +2745,12 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
     humNotchFreq,
     isBypassEnhancement,
     enhancementStrength,
+    eqGains,
+    eqQValues,
+    outputGain,
+    exportFormat,
+    exportNormalize,
+    isExporting,
   ]);
 
   useEffect(() => {
@@ -3505,7 +3618,19 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Label className="text-xs font-medium">התמקדות בקטע (A-B)</Label>
-                    <Badge variant="outline" className="text-[10px]">{formatTime(focusStart)} → {formatTime(focusEnd)}</Badge>
+                    {hasValidFocusRange ? (
+                      <Badge variant="outline" className="gap-1.5 text-[10px] font-normal">
+                        <span className="rounded-sm bg-amber-500 px-1 font-bold text-white">A</span>
+                        {formatTime(focusStart)}
+                        <span className="rounded-sm bg-amber-500 px-1 font-bold text-white">B</span>
+                        {formatTime(focusEnd)}
+                        <span className="text-muted-foreground">· משך {formatTime(focusEnd - focusStart)}</span>
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
+                        לא נבחר קטע
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
@@ -3550,15 +3675,89 @@ export const SyncAudioPlayer = memo(forwardRef<SyncAudioPlayerRef, SyncAudioPlay
                 />
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <div className="flex gap-1">
-                    <Button variant="outline" size="sm" className="h-6 px-2" onClick={markFocusStartFromCurrent}>קבע A מהמיקום הנוכחי</Button>
-                    <Button variant="outline" size="sm" className="h-6 px-2" onClick={markFocusEndFromCurrent}>קבע B מהמיקום הנוכחי</Button>
-                    <Button variant="outline" size="sm" className="h-6 px-2" onClick={exportFocusedProcessedSegment} disabled={!hasValidFocusRange}>
-                      <Scissors className="w-3 h-3 ml-1 no-theme-icon" />
-                      ייצוא קטע מעובד
+                    <Button variant="outline" size="sm" className="h-6 gap-1 px-2" onClick={markFocusStartFromCurrent} title="מסמן כאן את תחילת הקטע">
+                      <span className="rounded-sm bg-amber-500 px-1 text-[10px] font-bold text-white">A</span>
+                      התחלה כאן
                     </Button>
+                    <Button variant="outline" size="sm" className="h-6 gap-1 px-2" onClick={markFocusEndFromCurrent} title="מסמן כאן את סוף הקטע">
+                      <span className="rounded-sm bg-amber-500 px-1 text-[10px] font-bold text-white">B</span>
+                      סוף כאן
+                    </Button>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-6 px-2" disabled={!hasValidFocusRange || isExporting}>
+                          <Scissors className="w-3 h-3 ml-1 no-theme-icon" />
+                          {isExporting ? 'מייצא…' : 'ייצוא קטע מעובד'}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent align="start" className="w-72 space-y-3" dir="rtl">
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium">ייצוא הקטע שבין A ל-B</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            נשמר בדיוק כמו שהוא נשמע עכשיו — עם הפחתת הרעש, האיזון והעוצמה שהגדרת.
+                          </p>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label className="text-[11px] text-muted-foreground">סוג הקובץ</Label>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {(['mp3', 'wav'] as const).map((f) => (
+                              <button
+                                key={f}
+                                type="button"
+                                onClick={() => setExportFormat(f)}
+                                aria-pressed={exportFormat === f}
+                                className={cn(
+                                  'rounded-md border p-2 text-right transition-colors',
+                                  exportFormat === f
+                                    ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
+                                    : 'border-border/60 hover:border-primary/40',
+                                )}
+                              >
+                                <span className="block text-xs font-medium">
+                                  {f === 'mp3' ? 'קובץ קטן' : 'איכות מלאה'}
+                                </span>
+                                <span className="block text-[10px] text-muted-foreground">
+                                  {f === 'mp3' ? 'קטן פי עשרה, נפתח בכל מכשיר' : 'בלי שום אובדן, קובץ גדול'}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex items-start justify-between gap-2 rounded-md border bg-muted/20 p-2">
+                          <div className="min-w-0">
+                            <Label htmlFor="export-normalize" className="text-xs font-medium">
+                              התאמת עוצמה
+                            </Label>
+                            <p className="text-[10px] leading-relaxed text-muted-foreground">
+                              מביא את הקטע לעוצמת שמיעה נוחה. בלי זה הקלטה חלשה נשמרת חלשה.
+                            </p>
+                          </div>
+                          <Switch
+                            id="export-normalize"
+                            checked={exportNormalize}
+                            onCheckedChange={setExportNormalize}
+                            aria-label="התאמת עוצמה בייצוא"
+                          />
+                        </div>
+
+                        <Button
+                          size="sm"
+                          className="w-full h-7"
+                          onClick={exportFocusedProcessedSegment}
+                          disabled={isExporting}
+                        >
+                          {isExporting ? 'מייצא…' : `ייצא ${formatTime(Math.max(0, focusEnd - focusStart))}`}
+                        </Button>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                   <div className="flex gap-1">
-                    <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => seekTo(focusStart)}>נגן מ-A</Button>
+                    <Button variant="ghost" size="sm" className="h-6 gap-1 px-2" onClick={() => seekTo(focusStart)}>
+                      נגן מ-
+                      <span className="rounded-sm bg-amber-500 px-1 text-[10px] font-bold text-white">A</span>
+                    </Button>
                     <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => { setFocusStart(0); setFocusEnd(Math.max(0.1, effectiveDuration || 1)); }}>
                       אפס טווח
                     </Button>
