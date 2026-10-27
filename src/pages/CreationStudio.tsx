@@ -15,13 +15,26 @@ type Job = {
   id: string;
   kind: "image" | "video";
   prompt: string;
-  state: "ממתין" | "בעבודה" | "מוכן" | "נכשל" | "בוטל";
+  state: "ממתין" | "כותב תיאור" | "בעבודה" | "מוכן" | "נכשל" | "בוטל";
   created: number;
   file?: string;
   error?: string;
   seconds_taken?: number;
   from_job?: string;
+  assist?: Assist;
+  engine_prompt?: string;
+  assist_by?: string;
+  retries?: number;
+  check?: { ok: boolean | null; problems: string[] };
 };
+
+type Assist = "אוטומטי" | "קלוד" | "מקומי" | "כבוי";
+const ASSISTS: { v: Assist; label: string; hint: string }[] = [
+  { v: "אוטומטי", label: "אוטומטי", hint: "קלוד כשיש מפתח, ואחרת העוזר המקומי" },
+  { v: "קלוד", label: "קלוד", hint: "כותב תיאור ובודק כל תמונה. כמה אגורות לתמונה" },
+  { v: "מקומי", label: "מקומי", hint: "ג׳מה 3 על המחשב. חינם, בלי בדיקת תמונה, כדקה לתיאור" },
+  { v: "כבוי", label: "כבוי", hint: "התיאור נשלח למנוע כמו שכתבתם, עדיף באנגלית" },
+];
 
 type Status = Record<string, string | number>;
 
@@ -42,6 +55,7 @@ export default function CreationStudio() {
   const [seconds, setSeconds] = useState(3);
   const [source, setSource] = useState<string>("");
   const [sending, setSending] = useState(false);
+  const [assist, setAssist] = useState<Assist>("אוטומטי");
 
   const refresh = useCallback(async () => {
     try {
@@ -81,7 +95,7 @@ export default function CreationStudio() {
   };
 
   const images = jobs.filter((j) => j.kind === "image" && j.state === "מוכן");
-  const busy = jobs.some((j) => j.state === "ממתין" || j.state === "בעבודה");
+  const busy = jobs.some((j) => j.state === "ממתין" || j.state === "כותב תיאור" || j.state === "בעבודה");
 
   return (
     <div className="w-full max-w-full px-4 py-6 space-y-6" dir="rtl">
@@ -125,6 +139,21 @@ export default function CreationStudio() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardContent className="py-3 space-y-2">
+          <div className="flex gap-2 flex-wrap items-center">
+            <span className="text-sm font-medium">העוזר שכותב את התיאור למנוע:</span>
+            {ASSISTS.map((a) => (
+              <Button key={a.v} size="sm" variant={assist === a.v ? "default" : "outline"} onClick={() => setAssist(a.v)} title={a.hint}>
+                {a.label}
+              </Button>
+            ))}
+            {status && <Badge variant="secondary">מפתח קלוד: {String(status["מפתח קלוד"] ?? "לא ידוע")}</Badge>}
+          </div>
+          <p className="text-xs text-muted-foreground">{ASSISTS.find((a) => a.v === assist)?.hint}</p>
+        </CardContent>
+      </Card>
+
       <Tabs defaultValue="image">
         <TabsList>
           <TabsTrigger value="image">
@@ -139,7 +168,7 @@ export default function CreationStudio() {
           <Card>
             <CardHeader>
               <CardTitle>תמונה מתיאור</CardTitle>
-              <CardDescription>כחצי דקה עד דקה לתמונה, ועוד בערך שתי דקות לפינוי הכרטיס בפעם הראשונה. התיאור הכי מדויק באנגלית.</CardDescription>
+              <CardDescription>כחצי דקה עד דקה לתמונה, ועוד בערך שתי דקות לפינוי הכרטיס בפעם הראשונה. עם העוזר אפשר לכתוב בעברית.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <Textarea
@@ -147,7 +176,7 @@ export default function CreationStudio() {
                 dir="auto"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Photorealistic photo, a Haredi couple in a Jerusalem living room reading a brochure..."
+                placeholder="למשל: אבא ואמא חרדים בסלון בבני ברק, מופתעים מעלון צבעוני (או תיאור באנגלית)"
               />
               <div className="flex gap-2 flex-wrap items-center">
                 {SIZES.map((s, i) => (
@@ -160,7 +189,7 @@ export default function CreationStudio() {
               </div>
               <Button
                 disabled={sending || !prompt.trim()}
-                onClick={() => send({ kind: "image", prompt, width: SIZES[size].w, height: SIZES[size].h, seed })}
+                onClick={() => send({ kind: "image", prompt, width: SIZES[size].w, height: SIZES[size].h, seed, assist })}
               >
                 {sending ? <Loader2 className="h-4 w-4 ml-2 animate-spin" /> : <ImageIcon className="h-4 w-4 ml-2" />} צור תמונה
               </Button>
@@ -193,7 +222,7 @@ export default function CreationStudio() {
                 dir="auto"
                 value={motion}
                 onChange={(e) => setMotion(e.target.value)}
-                placeholder="The father slowly turns to his wife and raises his eyebrows, gentle handheld camera"
+                placeholder="למשל: האבא מסתובב לאט אל אשתו ומרים גבות, המצלמה מתקרבת לאט"
               />
               <div className="flex gap-2 items-center">
                 <span className="text-sm text-muted-foreground">שניות:</span>
@@ -205,7 +234,7 @@ export default function CreationStudio() {
               </div>
               <Button
                 disabled={sending || !source || !motion.trim()}
-                onClick={() => send({ kind: "video", prompt: motion, from_job: source, seconds, seed })}
+                onClick={() => send({ kind: "video", prompt: motion, from_job: source, seconds, seed, assist })}
               >
                 <Video className="h-4 w-4 ml-2" /> צור סרטון
               </Button>
@@ -244,6 +273,20 @@ export default function CreationStudio() {
                   <p className="text-xs text-muted-foreground line-clamp-3" dir="auto">
                     {j.prompt}
                   </p>
+                  {j.engine_prompt && (
+                    <details className="text-xs">
+                      <summary className="cursor-pointer text-muted-foreground">
+                        התיאור שנשלח למנוע{j.assist_by ? ` (כתב: ${j.assist_by})` : ""}
+                      </summary>
+                      <p className="mt-1" dir="ltr">{j.engine_prompt}</p>
+                    </details>
+                  )}
+                  {j.check && (
+                    <p className={`text-xs ${j.check.ok ? "text-green-700" : "text-amber-700"}`}>
+                      {j.check.ok ? "✓ קלוד בדק: התמונה תקינה" : `קלוד מצא: ${j.check.problems.join(" · ")}`}
+                      {j.retries ? ` (נוצרה מחדש ${j.retries} פעמים)` : ""}
+                    </p>
+                  )}
                   {j.error && <p className="text-xs text-destructive">{j.error}</p>}
                 </div>
               ))}
