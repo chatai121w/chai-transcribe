@@ -1,0 +1,256 @@
+import { useCallback, useEffect, useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Clapperboard, ImageIcon, Loader2, RefreshCw, Video } from "lucide-react";
+
+// סטודיו יצירה: תמונות וסרטונים קצרים במנוע המקומי. האתר מדבר עם שרת הסטודיו (ארגז-כלים-לסרטונים/סטודיו-שרת.py),
+// שמפנה את כרטיס המסך משרתי התמלול לזמן היצירה ומחזיר אותו בסוף.
+const STUDIO = "http://127.0.0.1:8190";
+
+type Job = {
+  id: string;
+  kind: "image" | "video";
+  prompt: string;
+  state: "ממתין" | "בעבודה" | "מוכן" | "נכשל" | "בוטל";
+  created: number;
+  file?: string;
+  error?: string;
+  seconds_taken?: number;
+  from_job?: string;
+};
+
+type Status = Record<string, string | number>;
+
+const SIZES = [
+  { label: "רוחב 16:9", w: 1280, h: 720 },
+  { label: "לאורך 9:16", w: 720, h: 1280 },
+  { label: "ריבוע", w: 1024, h: 1024 },
+];
+
+export default function CreationStudio() {
+  const [status, setStatus] = useState<Status | null>(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [offline, setOffline] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [size, setSize] = useState(0);
+  const [seed, setSeed] = useState(1);
+  const [motion, setMotion] = useState("");
+  const [seconds, setSeconds] = useState(3);
+  const [source, setSource] = useState<string>("");
+  const [sending, setSending] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [s, j] = await Promise.all([
+        fetch(`${STUDIO}/status`).then((r) => r.json()),
+        fetch(`${STUDIO}/jobs`).then((r) => r.json()),
+      ]);
+      setStatus(s);
+      setJobs(j);
+      setOffline(false);
+    } catch {
+      setOffline(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 3000);
+    return () => clearInterval(t);
+  }, [refresh]);
+
+  const send = async (body: Record<string, unknown>) => {
+    setSending(true);
+    try {
+      const r = await fetch(`${STUDIO}/jobs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error((await r.json()).error);
+      await refresh();
+    } catch (e) {
+      alert(`הבקשה לא נשלחה: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const images = jobs.filter((j) => j.kind === "image" && j.state === "מוכן");
+  const busy = jobs.some((j) => j.state === "ממתין" || j.state === "בעבודה");
+
+  return (
+    <div className="w-full max-w-full px-4 py-6 space-y-6" dir="rtl">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <Clapperboard className="h-7 w-7 text-primary" />
+          <div>
+            <h1 className="text-2xl font-bold">סטודיו יצירה</h1>
+            <p className="text-sm text-muted-foreground">
+              תמונות וסרטונים קצרים במנוע המקומי, על כרטיס המסך של המחשב. בזמן היצירה שרתי התמלול נעצרים וחוזרים בסוף.
+            </p>
+          </div>
+        </div>
+        <Button variant="outline" size="sm" onClick={refresh}>
+          <RefreshCw className="h-4 w-4 ml-2" /> רענון
+        </Button>
+      </div>
+
+      {offline ? (
+        <Card className="border-destructive">
+          <CardContent className="py-4 text-sm">
+            שרת הסטודיו לא עונה. מפעילים אותו בקובץ <code>סטודיו-שרת.bat</code> שבתיקייה <code>ארגז-כלים-לסרטונים</code>.
+          </CardContent>
+        </Card>
+      ) : (
+        status && (
+          <div className="flex gap-2 flex-wrap text-sm">
+            {Object.entries(status).map(([k, v]) => (
+              <Badge key={k} variant="secondary">
+                {k}: {String(v)}
+              </Badge>
+            ))}
+          </div>
+        )
+      )}
+
+      <Card>
+        <CardContent className="py-3 text-sm text-muted-foreground">
+          כל תמונה או סרטון מכאן הם <b>המחשה</b>. כשמשתמשים בהם בסרטון לפרסום, חייבים לסמן אותם בבירור: "נוצר בבינה מלאכותית". לא
+          מייצרים פנים או קול של אדם אמיתי, וטקסט בעברית מוסיפים אחר כך בעיצוב, כי המנוע מצייר אותיות עבריות משובשות.
+        </CardContent>
+      </Card>
+
+      <Tabs defaultValue="image">
+        <TabsList>
+          <TabsTrigger value="image">
+            <ImageIcon className="h-4 w-4 ml-2" /> תמונה
+          </TabsTrigger>
+          <TabsTrigger value="video">
+            <Video className="h-4 w-4 ml-2" /> סרטון מתמונה
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="image">
+          <Card>
+            <CardHeader>
+              <CardTitle>תמונה מתיאור</CardTitle>
+              <CardDescription>כחצי דקה עד דקה לתמונה, ועוד בערך שתי דקות לפינוי הכרטיס בפעם הראשונה. התיאור הכי מדויק באנגלית.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Textarea
+                rows={4}
+                dir="auto"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="Photorealistic photo, a Haredi couple in a Jerusalem living room reading a brochure..."
+              />
+              <div className="flex gap-2 flex-wrap items-center">
+                {SIZES.map((s, i) => (
+                  <Button key={s.label} size="sm" variant={i === size ? "default" : "outline"} onClick={() => setSize(i)}>
+                    {s.label}
+                  </Button>
+                ))}
+                <span className="text-sm text-muted-foreground mr-3">זרע:</span>
+                <Input type="number" className="w-24" value={seed} onChange={(e) => setSeed(Number(e.target.value) || 1)} />
+              </div>
+              <Button
+                disabled={sending || !prompt.trim()}
+                onClick={() => send({ kind: "image", prompt, width: SIZES[size].w, height: SIZES[size].h, seed })}
+              >
+                {sending ? <Loader2 className="h-4 w-4 ml-2 animate-spin" /> : <ImageIcon className="h-4 w-4 ml-2" />} צור תמונה
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="video">
+          <Card>
+            <CardHeader>
+              <CardTitle>להניע תמונה</CardTitle>
+              <CardDescription>בוחרים תמונה שנוצרה ומתארים את התנועה. איטי: כשש דקות לכל שנייה של סרטון.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-2 flex-wrap">
+                {images.length === 0 && <span className="text-sm text-muted-foreground">עוד אין תמונות. צרו קודם תמונה.</span>}
+                {images.slice(0, 12).map((j) => (
+                  <button
+                    key={j.id}
+                    onClick={() => setSource(j.id)}
+                    className={`rounded border-2 ${source === j.id ? "border-primary" : "border-transparent"}`}
+                    title={j.prompt}
+                  >
+                    <img src={`${STUDIO}/out/${j.file}`} className="h-20 rounded" alt="" />
+                  </button>
+                ))}
+              </div>
+              <Textarea
+                rows={3}
+                dir="auto"
+                value={motion}
+                onChange={(e) => setMotion(e.target.value)}
+                placeholder="The father slowly turns to his wife and raises his eyebrows, gentle handheld camera"
+              />
+              <div className="flex gap-2 items-center">
+                <span className="text-sm text-muted-foreground">שניות:</span>
+                {[2, 3, 5].map((s) => (
+                  <Button key={s} size="sm" variant={s === seconds ? "default" : "outline"} onClick={() => setSeconds(s)}>
+                    {s}
+                  </Button>
+                ))}
+              </div>
+              <Button
+                disabled={sending || !source || !motion.trim()}
+                onClick={() => send({ kind: "video", prompt: motion, from_job: source, seconds, seed })}
+              >
+                <Video className="h-4 w-4 ml-2" /> צור סרטון
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            עבודות {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {jobs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">עוד אין עבודות.</p>
+          ) : (
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
+              {jobs.map((j) => (
+                <div key={j.id} className="rounded-lg border p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Badge variant={j.state === "מוכן" ? "default" : j.state === "נכשל" ? "destructive" : "secondary"}>
+                      {j.kind === "image" ? "תמונה" : "סרטון"} · {j.state}
+                    </Badge>
+                    {j.seconds_taken !== undefined && <span className="text-xs text-muted-foreground">{j.seconds_taken} שניות</span>}
+                  </div>
+                  {j.file &&
+                    (j.kind === "image" ? (
+                      <a href={`${STUDIO}/out/${j.file}`} target="_blank" rel="noreferrer">
+                        <img src={`${STUDIO}/out/${j.file}`} className="w-full rounded" alt="" />
+                      </a>
+                    ) : (
+                      <video src={`${STUDIO}/out/${j.file}`} className="w-full rounded" controls loop />
+                    ))}
+                  <p className="text-xs text-muted-foreground line-clamp-3" dir="auto">
+                    {j.prompt}
+                  </p>
+                  {j.error && <p className="text-xs text-destructive">{j.error}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

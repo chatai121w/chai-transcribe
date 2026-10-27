@@ -83,6 +83,7 @@ const AudacityLab = lazyWithLog('AudacityLab', () => import("./pages/AudacityLab
 const NotFound = lazyWithLog('NotFound', () => import("./pages/NotFound"));
 const ResetPassword = lazyWithLog('ResetPassword', () => import("./pages/ResetPassword"));
 const VideoToMp3 = lazyWithLog('VideoToMp3', () => import("./pages/VideoToMp3"));
+const CreationStudio = lazyWithLog('CreationStudio', () => import("./pages/CreationStudio"));
 const YouTube = lazyWithLog('YouTube', () => import("./pages/YouTube"));
 const AudioCleanLab = lazyWithLog('AudioCleanLab', () => import("./pages/AudioCleanLab"));
 const Harmonika = lazyWithLog('Harmonika', () => import("./pages/Harmonika"));
@@ -284,6 +285,7 @@ const App = () => {
                 <Route path="/benchmark" element={<Navigate to="/compare?tab=enhance" replace />} />
                 <Route path="/voice-studio" element={<ProtectedRoute><VoiceStudio /></ProtectedRoute>} />
                 <Route path="/audacity-lab" element={<ProtectedRoute><AudacityLab /></ProtectedRoute>} />
+                <Route path="/creation-studio" element={<ProtectedRoute><CreationStudio /></ProtectedRoute>} />
                 <Route path="/diarization" element={<ProtectedRoute><Diarization /></ProtectedRoute>} />
                 <Route path="/compare" element={<ProtectedRoute><ComparisonsHub /></ProtectedRoute>} />
                 <Route path="/diarization/compare" element={<Navigate to="/compare?tab=diarization" replace />} />
