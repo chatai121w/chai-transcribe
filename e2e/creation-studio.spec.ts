@@ -48,10 +48,19 @@ test.describe('סטודיו יצירה', () => {
     expect(sent).toMatchObject({ kind: 'image', prompt: 'רחוב שקט בבני ברק', width: 720, height: 1280, assist: 'מקומי' });
   });
 
-  test('בלשונית הסרטון אי אפשר לשלוח בלי לבחור תמונה', async ({ page }) => {
+  test('סרטון מתיאור: צריך גם סצנה וגם תנועה, ונשלח בלי תמונה קיימת', async ({ page }) => {
     await page.goto('/creation-studio');
-    await page.getByRole('tab', { name: /סרטון מתמונה/ }).click();
+    let sent: Record<string, unknown> | null = null;
+    page.on('request', (req) => {
+      if (req.url().endsWith('/jobs') && req.method() === 'POST') sent = req.postDataJSON();
+    });
+    await page.getByRole('tab', { name: /סרטון/ }).click();
     await page.getByPlaceholder(/האבא מסתובב לאט/).fill('המצלמה מתקרבת לאט');
     await expect(page.getByRole('button', { name: 'צור סרטון' })).toBeDisabled();
+    await page.getByPlaceholder(/אולם כנס אקדמי ריק/).fill('אולם כנס ריק');
+    await page.getByRole('button', { name: 'צור סרטון' }).click();
+    await expect.poll(() => sent).not.toBeNull();
+    expect(sent).toMatchObject({ kind: 'video', prompt: 'אולם כנס ריק', motion: 'המצלמה מתקרבת לאט' });
+    expect(sent).not.toHaveProperty('from_job');
   });
 });

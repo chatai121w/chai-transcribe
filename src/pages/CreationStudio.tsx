@@ -54,6 +54,7 @@ export default function CreationStudio() {
   const [motion, setMotion] = useState("");
   const [seconds, setSeconds] = useState(3);
   const [source, setSource] = useState<string>("");
+  const [scene, setScene] = useState("");
   const [sending, setSending] = useState(false);
   const [assist, setAssist] = useState<Assist>("אוטומטי");
 
@@ -160,7 +161,7 @@ export default function CreationStudio() {
             <ImageIcon className="h-4 w-4 ml-2" /> תמונה
           </TabsTrigger>
           <TabsTrigger value="video">
-            <Video className="h-4 w-4 ml-2" /> סרטון מתמונה
+            <Video className="h-4 w-4 ml-2" /> סרטון
           </TabsTrigger>
         </TabsList>
 
@@ -200,23 +201,40 @@ export default function CreationStudio() {
         <TabsContent value="video">
           <Card>
             <CardHeader>
-              <CardTitle>להניע תמונה</CardTitle>
-              <CardDescription>בוחרים תמונה שנוצרה ומתארים את התנועה. איטי: כשש דקות לכל שנייה של סרטון.</CardDescription>
+              <CardTitle>סרטון קצר</CardTitle>
+              <CardDescription>
+                מתארים מה רואים בסצנה ומה זז בה. קודם נוצרת תמונה (ואם העוזר הוא קלוד, הוא בודק אותה), ואז היא מונעת. איטי: כשש
+                דקות לכל שנייה של סרטון.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="flex gap-2 flex-wrap">
-                {images.length === 0 && <span className="text-sm text-muted-foreground">עוד אין תמונות. צרו קודם תמונה.</span>}
-                {images.slice(0, 12).map((j) => (
-                  <button
-                    key={j.id}
-                    onClick={() => setSource(j.id)}
-                    className={`rounded border-2 ${source === j.id ? "border-primary" : "border-transparent"}`}
-                    title={j.prompt}
-                  >
-                    <img src={`${STUDIO}/out/${j.file}`} className="h-20 rounded" alt="" />
-                  </button>
-                ))}
-              </div>
+              <label className="text-sm font-medium">1. מה רואים בסצנה</label>
+              <Textarea
+                rows={3}
+                dir="auto"
+                value={source ? "" : scene}
+                disabled={!!source}
+                onChange={(e) => setScene(e.target.value)}
+                placeholder={source ? "נבחרה תמונה קיימת" : "למשל: אולם כנס אקדמי ריק עם במה, שולחן ושלושה מיקרופונים"}
+              />
+              {images.length > 0 && (
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground">או להניע תמונה שכבר נוצרה (לחיצה נוספת מבטלת):</span>
+                  <div className="flex gap-2 flex-wrap">
+                    {images.slice(0, 12).map((j) => (
+                      <button
+                        key={j.id}
+                        onClick={() => setSource(source === j.id ? "" : j.id)}
+                        className={`rounded border-2 ${source === j.id ? "border-primary" : "border-transparent"}`}
+                        title={j.prompt}
+                      >
+                        <img src={`${STUDIO}/out/${j.file}`} className="h-16 rounded" alt="" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <label className="text-sm font-medium">2. מה זז</label>
               <Textarea
                 rows={3}
                 dir="auto"
@@ -233,8 +251,14 @@ export default function CreationStudio() {
                 ))}
               </div>
               <Button
-                disabled={sending || !source || !motion.trim()}
-                onClick={() => send({ kind: "video", prompt: motion, from_job: source, seconds, seed, assist })}
+                disabled={sending || !motion.trim() || (!source && !scene.trim())}
+                onClick={() =>
+                  send(
+                    source
+                      ? { kind: "video", prompt: motion, from_job: source, seconds, seed, assist }
+                      : { kind: "video", prompt: scene, motion, seconds, seed, assist },
+                  )
+                }
               >
                 <Video className="h-4 w-4 ml-2" /> צור סרטון
               </Button>
