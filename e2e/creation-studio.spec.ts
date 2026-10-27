@@ -20,6 +20,53 @@ test.describe('סטודיו יצירה', () => {
         : r.fulfill({ json: JOBS }),
     );
     await page.route('http://127.0.0.1:8190/out/**', (r) => r.fulfill({ status: 404, body: '' }));
+    await page.route('http://127.0.0.1:8190/cast', (r) => r.fulfill({ json: ['אבא', 'בחור'] }));
+    await page.route('http://127.0.0.1:8190/cast/**', (r) => r.fulfill({ status: 404, body: '' }));
+  });
+
+  test('תמונה עם דמויות קבועות שולחת את הדיוקנאות לפי הסדר', async ({ page }) => {
+    await page.goto('/creation-studio');
+    let sent: Record<string, unknown> | null = null;
+    page.on('request', (req) => {
+      if (req.url().endsWith('/jobs') && req.method() === 'POST') sent = req.postDataJSON();
+    });
+    await page.getByPlaceholder(/אבא ואמא חרדים בסלון/).fill('האבא מתמונה 1 והבחור מתמונה 2 בכניסה למכללה');
+    await page.getByRole('button', { name: /בחור/ }).first().click();
+    await page.getByRole('button', { name: /^אבא/ }).first().click();
+    await expect(page.getByText('נבחרו: בחור, אבא', { exact: false })).toBeVisible();
+    await page.getByRole('button', { name: 'צור תמונה' }).click();
+    await expect.poll(() => sent).not.toBeNull();
+    expect(sent).toMatchObject({ kind: 'image', refs: ['בחור', 'אבא'] });
+  });
+
+  test('סרטון במנוע איכות שולח fast=false', async ({ page }) => {
+    await page.goto('/creation-studio');
+    let sent: Record<string, unknown> | null = null;
+    page.on('request', (req) => {
+      if (req.url().endsWith('/jobs') && req.method() === 'POST') sent = req.postDataJSON();
+    });
+    await page.getByRole('tab', { name: /סרטון/ }).click();
+    await page.getByPlaceholder(/אולם כנס אקדמי ריק/).fill('אולם ריק');
+    await page.getByPlaceholder(/האבא מסתובב לאט/).fill('המצלמה מתקרבת');
+    await page.getByRole('button', { name: 'איכות', exact: true }).click();
+    await page.getByRole('button', { name: 'צור סרטון' }).click();
+    await expect.poll(() => sent).not.toBeNull();
+    expect(sent).toMatchObject({ kind: 'video', fast: false });
+  });
+
+  test('תיקון תמונה שולח עבודת עריכה עם התמונה שנבחרה', async ({ page }) => {
+    await page.goto('/creation-studio');
+    let sent: Record<string, unknown> | null = null;
+    page.on('request', (req) => {
+      if (req.url().endsWith('/jobs') && req.method() === 'POST') sent = req.postDataJSON();
+    });
+    await page.getByRole('tab', { name: /תיקון תמונה/ }).click();
+    await expect(page.getByRole('button', { name: 'תקן' })).toBeDisabled();
+    await page.getByTitle('סלון חרדי').click();
+    await page.getByPlaceholder('מה לשנות בתמונה').fill('תוריד את העגיל');
+    await page.getByRole('button', { name: 'תקן' }).click();
+    await expect.poll(() => sent).not.toBeNull();
+    expect(sent).toMatchObject({ kind: 'edit', prompt: 'תוריד את העגיל', refs: ['a1'] });
   });
 
   test('העמוד נטען, מציג מצב, עבודות ואזהרת המחשה', async ({ page }) => {
@@ -29,7 +76,7 @@ test.describe('סטודיו יצירה', () => {
     await expect(page.getByText('נוצר בבינה מלאכותית', { exact: false })).toBeVisible();
     await expect(page.getByText('תמונה · מוכן')).toBeVisible();
     await expect(page.getByText('סרטון · בעבודה')).toBeVisible();
-    await expect(page.getByText('קלוד מצא: כיסוי ראש מוסלמי (נוצרה מחדש 1 פעמים)')).toBeVisible();
+    await expect(page.getByText('קלוד מצא: כיסוי ראש מוסלמי (תוקנה 1 פעמים)')).toBeVisible();
     await expect(page.getByText('העוזר שכותב את התיאור למנוע:')).toBeVisible();
     await page.screenshot({ path: 'test-results/creation-studio.png', fullPage: true });
   });

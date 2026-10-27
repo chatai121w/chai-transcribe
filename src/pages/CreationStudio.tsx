@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Clapperboard, ImageIcon, Loader2, RefreshCw, Video } from "lucide-react";
+import { Clapperboard, ImageIcon, Loader2, RefreshCw, Users, Video, Wand2 } from "lucide-react";
 
 // סטודיו יצירה: תמונות וסרטונים קצרים במנוע המקומי. האתר מדבר עם שרת הסטודיו (ארגז-כלים-לסרטונים/סטודיו-שרת.py),
 // שמפנה את כרטיס המסך משרתי התמלול לזמן היצירה ומחזיר אותו בסוף.
@@ -13,7 +13,7 @@ const STUDIO = "http://127.0.0.1:8190";
 
 type Job = {
   id: string;
-  kind: "image" | "video";
+  kind: "image" | "video" | "edit";
   prompt: string;
   state: "ממתין" | "כותב תיאור" | "בעבודה" | "מוכן" | "נכשל" | "בוטל";
   created: number;
@@ -26,7 +26,14 @@ type Job = {
   assist_by?: string;
   retries?: number;
   check?: { ok: boolean | null; problems: string[] };
+  refs?: string[];
+  fast?: boolean;
+  edits?: string[];
+  video_check?: { ok: boolean | null; problems: string[] };
+  video_retries?: number;
 };
+
+const KIND_LABEL: Record<Job["kind"], string> = { image: "תמונה", video: "סרטון", edit: "תיקון" };
 
 type Assist = "אוטומטי" | "קלוד" | "מקומי" | "כבוי";
 const ASSISTS: { v: Assist; label: string; hint: string }[] = [
@@ -57,15 +64,22 @@ export default function CreationStudio() {
   const [scene, setScene] = useState("");
   const [sending, setSending] = useState(false);
   const [assist, setAssist] = useState<Assist>("אוטומטי");
+  const [cast, setCast] = useState<string[]>([]);
+  const [refs, setRefs] = useState<string[]>([]);
+  const [fast, setFast] = useState(true);
+  const [fixSource, setFixSource] = useState("");
+  const [fixText, setFixText] = useState("");
 
   const refresh = useCallback(async () => {
     try {
-      const [s, j] = await Promise.all([
+      const [s, j, c] = await Promise.all([
         fetch(`${STUDIO}/status`).then((r) => r.json()),
         fetch(`${STUDIO}/jobs`).then((r) => r.json()),
+        fetch(`${STUDIO}/cast`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
       ]);
       setStatus(s);
       setJobs(j);
+      setCast(Array.isArray(c) ? c : []);
       setOffline(false);
     } catch {
       setOffline(true);
@@ -95,8 +109,39 @@ export default function CreationStudio() {
     }
   };
 
-  const images = jobs.filter((j) => j.kind === "image" && j.state === "מוכן");
+  const images = jobs.filter((j) => (j.kind === "image" || j.kind === "edit") && j.state === "מוכן" && j.file);
   const busy = jobs.some((j) => j.state === "ממתין" || j.state === "כותב תיאור" || j.state === "בעבודה");
+  const withRefs = refs.length ? { refs } : {};
+  const toggleRef = (r: string) =>
+    setRefs((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : cur.length >= 4 ? cur : [...cur, r]));
+
+  // דמויות קבועות: הדיוקנאות מהספרייה (ותמונות שנוצרו) נשלחים למנוע העריכה, כדי שאותו אדם יופיע בכל סצנה
+  const castPicker = (
+    <div className="space-y-1">
+      <span className="text-sm font-medium flex items-center gap-1">
+        <Users className="h-4 w-4" /> דמויות קבועות (לא חובה, עד ארבע):
+      </span>
+      <div className="flex gap-2 flex-wrap">
+        {cast.map((c) => (
+          <button
+            key={c}
+            onClick={() => toggleRef(c)}
+            className={`rounded border-2 text-xs ${refs.includes(c) ? "border-primary" : "border-transparent"}`}
+            title={c}
+          >
+            <img src={`${STUDIO}/cast/${encodeURIComponent(c)}`} className="h-16 rounded" alt={c} />
+            <span>{refs.includes(c) ? `${refs.indexOf(c) + 1}. ${c}` : c}</span>
+          </button>
+        ))}
+        {cast.length === 0 && <span className="text-xs text-muted-foreground">אין עדיין דיוקנאות בספרייה.</span>}
+      </div>
+      {refs.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          נבחרו: {refs.join(", ")}. בתיאור כותבים מי הם, למשל "האבא מתמונה 1 יושב במטבח". התמונה תיווצר במנוע העריכה.
+        </p>
+      )}
+    </div>
+  );
 
   return (
     <div className="w-full max-w-full px-4 py-6 space-y-6" dir="rtl">
@@ -163,6 +208,9 @@ export default function CreationStudio() {
           <TabsTrigger value="video">
             <Video className="h-4 w-4 ml-2" /> סרטון
           </TabsTrigger>
+          <TabsTrigger value="fix">
+            <Wand2 className="h-4 w-4 ml-2" /> תיקון תמונה
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="image">
@@ -188,9 +236,10 @@ export default function CreationStudio() {
                 <span className="text-sm text-muted-foreground mr-3">זרע:</span>
                 <Input type="number" className="w-24" value={seed} onChange={(e) => setSeed(Number(e.target.value) || 1)} />
               </div>
+              {castPicker}
               <Button
                 disabled={sending || !prompt.trim()}
-                onClick={() => send({ kind: "image", prompt, width: SIZES[size].w, height: SIZES[size].h, seed, assist })}
+                onClick={() => send({ kind: "image", prompt, width: SIZES[size].w, height: SIZES[size].h, seed, assist, ...withRefs })}
               >
                 {sending ? <Loader2 className="h-4 w-4 ml-2 animate-spin" /> : <ImageIcon className="h-4 w-4 ml-2" />} צור תמונה
               </Button>
@@ -203,8 +252,8 @@ export default function CreationStudio() {
             <CardHeader>
               <CardTitle>סרטון קצר</CardTitle>
               <CardDescription>
-                מתארים מה רואים בסצנה ומה זז בה. קודם נוצרת תמונה (ואם העוזר הוא קלוד, הוא בודק אותה), ואז היא מונעת. איטי: כשש
-                דקות לכל שנייה של סרטון.
+                מתארים מה רואים בסצנה ומה זז בה. קודם נוצרת תמונה (ואם העוזר הוא קלוד, הוא בודק אותה), ואז היא מונעת. בסוף קלוד בודק
+                גם כמה תמונות מתוך הסרטון, ואם הדמות השתנתה באמצע הסרטון נוצר שוב.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -249,18 +298,72 @@ export default function CreationStudio() {
                     {s}
                   </Button>
                 ))}
+                <span className="text-sm text-muted-foreground mr-3">מנוע:</span>
+                <Button size="sm" variant={fast ? "default" : "outline"} onClick={() => setFast(true)} title="ארבעה צעדים">
+                  מהיר
+                </Button>
+                <Button size="sm" variant={fast ? "outline" : "default"} onClick={() => setFast(false)} title="עשרים צעדים">
+                  איכות
+                </Button>
               </div>
+              <p className="text-xs text-muted-foreground">
+                {fast ? "מהיר: המנוע המאומן לארבעה צעדים, פי כמה מהר יותר." : "איכות: המנוע הרגיל, עשרים צעדים. כשש דקות לכל שנייה."}
+              </p>
+              {!source && castPicker}
               <Button
                 disabled={sending || !motion.trim() || (!source && !scene.trim())}
                 onClick={() =>
                   send(
                     source
-                      ? { kind: "video", prompt: motion, from_job: source, seconds, seed, assist }
-                      : { kind: "video", prompt: scene, motion, seconds, seed, assist },
+                      ? { kind: "video", prompt: motion, from_job: source, seconds, seed, assist, fast }
+                      : { kind: "video", prompt: scene, motion, seconds, seed, assist, fast, ...withRefs },
                   )
                 }
               >
                 <Video className="h-4 w-4 ml-2" /> צור סרטון
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="fix">
+          <Card>
+            <CardHeader>
+              <CardTitle>תיקון פרט בתמונה</CardTitle>
+              <CardDescription>
+                בוחרים תמונה שנוצרה וכותבים מה לשנות, למשל "תוריד את העגיל" או "תחליף את כיסוי הראש בפאה חומה". שאר התמונה נשאר
+                כמו שהוא. כחצי דקה.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {images.length === 0 ? (
+                <p className="text-sm text-muted-foreground">עוד אין תמונות לתקן.</p>
+              ) : (
+                <div className="flex gap-2 flex-wrap">
+                  {images.slice(0, 12).map((j) => (
+                    <button
+                      key={j.id}
+                      onClick={() => setFixSource(fixSource === j.id ? "" : j.id)}
+                      className={`rounded border-2 ${fixSource === j.id ? "border-primary" : "border-transparent"}`}
+                      title={j.prompt}
+                    >
+                      <img src={`${STUDIO}/out/${j.file}`} className="h-16 rounded" alt="" />
+                    </button>
+                  ))}
+                </div>
+              )}
+              <Textarea
+                rows={2}
+                dir="auto"
+                value={fixText}
+                onChange={(e) => setFixText(e.target.value)}
+                placeholder="מה לשנות בתמונה"
+              />
+              <Button
+                disabled={sending || !fixSource || !fixText.trim()}
+                onClick={() => send({ kind: "edit", prompt: fixText, refs: [fixSource], seed, assist })}
+              >
+                <Wand2 className="h-4 w-4 ml-2" /> תקן
               </Button>
             </CardContent>
           </Card>
@@ -282,12 +385,13 @@ export default function CreationStudio() {
                 <div key={j.id} className="rounded-lg border p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <Badge variant={j.state === "מוכן" ? "default" : j.state === "נכשל" ? "destructive" : "secondary"}>
-                      {j.kind === "image" ? "תמונה" : "סרטון"} · {j.state}
+                      {KIND_LABEL[j.kind] ?? j.kind} · {j.state}
+                      {j.kind === "video" && j.fast !== undefined ? (j.fast ? " · מהיר" : " · איכות") : ""}
                     </Badge>
                     {j.seconds_taken !== undefined && <span className="text-xs text-muted-foreground">{j.seconds_taken} שניות</span>}
                   </div>
                   {j.file &&
-                    (j.kind === "image" ? (
+                    (j.kind !== "video" ? (
                       <a href={`${STUDIO}/out/${j.file}`} target="_blank" rel="noreferrer">
                         <img src={`${STUDIO}/out/${j.file}`} className="w-full rounded" alt="" />
                       </a>
@@ -308,7 +412,19 @@ export default function CreationStudio() {
                   {j.check && (
                     <p className={`text-xs ${j.check.ok ? "text-green-700" : "text-amber-700"}`}>
                       {j.check.ok ? "✓ קלוד בדק: התמונה תקינה" : `קלוד מצא: ${j.check.problems.join(" · ")}`}
-                      {j.retries ? ` (נוצרה מחדש ${j.retries} פעמים)` : ""}
+                      {j.retries ? ` (תוקנה ${j.retries} פעמים)` : ""}
+                    </p>
+                  )}
+                  {j.refs && j.refs.length > 0 && j.kind !== "edit" && (
+                    <p className="text-xs text-muted-foreground">דמויות: {j.refs.join(", ")}</p>
+                  )}
+                  {j.edits && j.edits.length > 0 && (
+                    <p className="text-xs text-muted-foreground">תוקן בעריכה, בלי ליצור הכול מחדש ({j.edits.length})</p>
+                  )}
+                  {j.video_check && (
+                    <p className={`text-xs ${j.video_check.ok ? "text-green-700" : "text-amber-700"}`}>
+                      {j.video_check.ok ? "✓ קלוד בדק את הסרטון: הדמות לא השתנתה" : `קלוד מצא בסרטון: ${j.video_check.problems.join(" · ")}`}
+                      {j.video_retries ? " (נוצר שוב פעם אחת)" : ""}
                     </p>
                   )}
                   {j.error && <p className="text-xs text-destructive">{j.error}</p>}
