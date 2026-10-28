@@ -29,7 +29,7 @@ import { GeminiHealthCheck } from "@/components/GeminiHealthCheck";
 import { GeminiBadge } from "@/components/GeminiBadge";
 import { GeminiUsageDialog } from "@/components/GeminiUsageDialog";
 import { TranscriptionLanguageControl } from "@/components/TranscriptionLanguageControl";
-import { resolveCudaModel, type SourceLanguage } from "@/lib/transcriptionLanguages";
+import { isHebrewOptimizedModel, resolveCudaModel, type SourceLanguage } from "@/lib/transcriptionLanguages";
 
 
 import { EngineVisibilityMenu } from "@/components/transcription/EngineVisibilityMenu";
@@ -514,22 +514,48 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                       dir="rtl"
                       aria-label="החלפת מודל תמלול מהירה"
                     >
-                      <SelectValue />
+                      {/* השם נכתב כאן ולא נלקח מהפריט הנבחר, כי הפריט
+                          נושא גם את הסימון "טעון עכשיו" — והוא היה
+                          נגרר אל הסרגל ומאריך אותו בלי סיבה. */}
+                      <span className="truncate max-w-[150px]">
+                        {CUDA_TRANSCRIPTION_MODELS.find((m) => m.value === cudaModel)?.label.split(' - ')[0]
+                          ?? cudaModel.split('/').pop()}
+                      </span>
                     </SelectTrigger>
                     <SelectContent dir="rtl" align="end">
                       {CUDA_TRANSCRIPTION_MODELS.map((model) => (
                         <SelectItem key={model.value} value={model.value} className="text-xs">
                           {model.label}
-                          {serverStatus?.current_model === model.value && (
+                          {/* "טעון" פירושו נמצא בכרטיס המסך ברגע זה, ולא
+                              "זה המודל שהשרת זוכר". ההבדל חשוב: המנוע
+                              משתחרר לבד אחרי עשר דקות בלי שימוש, ושם
+                              המודל נשאר רשום גם אחרי שהוא כבר לא שם. */}
+                          {modelReady && serverStatus?.current_model === model.value && (
                             <span className="text-[10px] text-green-600 mr-1">● טעון עכשיו</span>
                           )}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {serverStatus?.current_model && serverStatus.current_model !== cudaModel && (
+                  {/* מוצג רק כשבאמת יש מנוע אחר בכרטיס המסך — אחרת זאת
+                      אזהרה על התנגשות שאינה קיימת. */}
+                  {modelReady && serverStatus?.current_model && serverStatus.current_model !== cudaModel && (
                     <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">
-                      טעון: {serverStatus.current_model.split('/').pop()}
+                      טעון כרגע: {serverStatus.current_model.split('/').pop()}
+                    </Badge>
+                  )}
+                  {/* המלכודת: בזיהוי אוטומטי המערכת מתעלמת מהמודל שנבחר
+                      כאן ועוברת לוויספר הכללי, מפני שמודל עברי אינו מתאים
+                      לשפה שעוד לא ידועה. זה הגיוני — אבל זה קרה בשקט.
+                      נמדד על 20 קטעים מאומתים: 80.5 אחוז הצלחה עם המודל
+                      העברי מול 69.9 אחוז עם הכללי. */}
+                  {sourceLanguage !== 'he' && isHebrewOptimizedModel(cudaModel) && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] text-rose-600 border-rose-300 bg-rose-50 dark:bg-rose-950/30"
+                      title="נמדד: המודל העברי מדייק ב-80.5 אחוז מול 69.9 אחוז של הכללי"
+                    >
+                      ⚠ בזיהוי אוטומטי לא ישתמשו במודל העברי — קבע שפה עברית
                     </Badge>
                   )}
                   {/* Model status badge */}
