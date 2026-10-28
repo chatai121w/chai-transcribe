@@ -139,6 +139,25 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
     toast({ title: 'מודל התמלול נשמר', description: 'הבחירה תישמר אחרי רענון ותסונכרן לענן' });
   }, [patchTabSettings]);
 
+  /**
+   * החלפת מודל מהסרגל העליון.
+   *
+   * ההבדל מהבורר שלמטה: שם הבחירה רק נשמרת ל"תמלול הבא", וכאן גם
+   * מתחילים לטעון את המודל מיד. בלי זה, החלפה מהירה הייתה חוזרת
+   * להמתנה של שלוש-עשרה שניות בדיוק כשלוחצים "תמלל".
+   */
+  const handleQuickModelSwitch = useCallback((model: string) => {
+    handleCudaModelChange(model);
+    if (!isConnected) return;
+    preloadModelStream(model, undefined, (msg) => setPreloadMsg(msg))
+      .then((r) => {
+        if (r.ready) {
+          toast({ title: 'המודל הוחלף', description: r.elapsed ? `נטען ב-${r.elapsed} שניות` : 'מוכן לתמלול' });
+        }
+      })
+      .catch(() => { /* הבחירה נשמרה; הטעינה תקרה בתמלול הבא */ });
+  }, [handleCudaModelChange, isConnected, preloadModelStream]);
+
   // Sync local state from cloud preferences (handles login from new machine)
   useEffect(() => {
     if (!cloudLoaded || cloudSynced.current) return;
@@ -486,9 +505,31 @@ export const TranscriptionEngine = memo(({ selected, onChange, sourceLanguage, o
                       {serverStatus.device === 'cuda' ? `GPU ${serverStatus.gpu || ''}` : serverStatus.device}
                     </Badge>
                   )}
-                  {serverStatus?.current_model && (
-                    <Badge variant="outline" className="text-[10px]">
-                      {serverStatus.current_model.split('/').pop()}
+                  {/* החלפת מודל מהירה, במקום שבו רואים מה טעון עכשיו.
+                      קודם הייתה כאן תגית שמראה בלבד, והחלפה דרשה לגלול
+                      למטה — ולכן בפועל לא החליפו. */}
+                  <Select value={cudaModel} onValueChange={handleQuickModelSwitch}>
+                    <SelectTrigger
+                      className="h-6 text-[10px] px-2 py-0 w-auto gap-1 border-dashed"
+                      dir="rtl"
+                      aria-label="החלפת מודל תמלול מהירה"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent dir="rtl" align="end">
+                      {CUDA_TRANSCRIPTION_MODELS.map((model) => (
+                        <SelectItem key={model.value} value={model.value} className="text-xs">
+                          {model.label}
+                          {serverStatus?.current_model === model.value && (
+                            <span className="text-[10px] text-green-600 mr-1">● טעון עכשיו</span>
+                          )}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {serverStatus?.current_model && serverStatus.current_model !== cudaModel && (
+                    <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">
+                      טעון: {serverStatus.current_model.split('/').pop()}
                     </Badge>
                   )}
                   {/* Model status badge */}
