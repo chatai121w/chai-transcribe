@@ -1,4 +1,5 @@
 import "@/styles/mobile-pages.css";
+import { findRepetitionLoop, describeLoop } from '@/lib/repetitionLoop';
 import { useState, useEffect, useRef, lazy, Suspense, useCallback, type ChangeEvent } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { TranscriptionEngine } from "@/components/TranscriptionEngine";
@@ -1438,19 +1439,22 @@ const Index = () => {
         setWordTimings(partial.wordTimings);
         debugLog.info('CUDA Stream', `${partial.progress}% — ${partial.wordTimings.length} מילים`);
       }, resumeFrom, cudaOptions);
+      // ── לולאת חזרות: המנוע נתקע וחוזר על אותו משפט ──
+      //
+      // שתי תקלות היו כאן, ושתיהן נמדדו על שיעור אמיתי:
+      //
+      // הבדיקה הקודמת תפסה רק מילה בודדת שחוזרת שבע פעמים. מה שקרה
+      // בפועל הוא משפט שלם שחזר אחת עשרה פעמים ברצף — והוא חמק ממנה.
+      //
+      // והיא רצה רק בזיהוי אוטומטי. מי שקבע עברית במפורש, שזאת
+      // ההגדרה הנכונה לשיעורים, נשאר בלי שום הגנה.
+      const loop = resumeFrom ? null : findRepetitionLoop(result.text);
 
-      const hasHeavyRepetition = (txt: string) => /\b(\S+)(?:\s+\1){6,}\b/.test(txt);
-
-      const suspiciousAutoOutput =
-        !resumeFrom &&
-        lang === 'auto' &&
-        hasHeavyRepetition(result.text);
-
-      if (suspiciousAutoOutput) {
-        debugLog.warn('CUDA Server', `Repetitive auto-language output (detected=${result.language}) — retrying accurately without changing language`);
+      if (loop) {
+        debugLog.warn('CUDA Server', `Repetition loop (x${loop.times}) — retrying accurately`);
         toast({
           title: 'זוהה תמלול חשוד',
-          description: 'מבצע ניסיון נוסף באותה שפה ובאיכות גבוהה',
+          description: `${describeLoop(loop)}. מנסה שוב באיכות גבוהה`,
         });
 
         const retryOptions: CudaOptions = {
@@ -1461,9 +1465,19 @@ const Index = () => {
           vadAggressive: false,
         };
 
-        const retryResult = await transcribeFn(file, preferredModel, 'auto', undefined, undefined, retryOptions);
-        if (retryResult.text && retryResult.text.length > result.text.length * 0.5) {
+        // באותה שפה שנבחרה, ולא באוטומטי: שינוי השפה בניסיון השני
+        // היה משנה שני דברים בבת אחת, ואז לא יודעים מה עזר.
+        const retryResult = await transcribeFn(file, preferredModel, lang, undefined, undefined, retryOptions);
+
+        // מחליפים רק אם הניסיון השני באמת טוב יותר: אורך סביר, ובלי
+        // לולאה גרועה משלו. בלי הבדיקה הזאת אפשר להחליף תמלול שבור
+        // באחד שבור יותר.
+        const retryLoop = retryResult.text ? findRepetitionLoop(retryResult.text) : null;
+        const longEnough = retryResult.text && retryResult.text.length > result.text.length * 0.5;
+        if (longEnough && (!retryLoop || retryLoop.times < loop.times)) {
           result = retryResult;
+        } else {
+          debugLog.warn('CUDA Server', 'Retry was not better — keeping the first result');
         }
       }
 
