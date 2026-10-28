@@ -48,6 +48,11 @@ ENGINES = {
         "model": "large-v3-turbo",
         "fast_mode": "1", "preset": "balanced",
     },
+    # ההגייה האשכנזית קרובה פונטית ליידיש, והמודל הזה אומן עליה.
+    "יידיש": {
+        "model": "ivrit-ai/yi-whisper-large-v3-ct2",
+        "fast_mode": "0", "beam_size": "5", "preset": "accurate",
+    },
 }
 
 
@@ -122,6 +127,8 @@ def main():
     p.add_argument("--label", help="שם המדידה ביומן")
     p.add_argument("--history", action="store_true", help="מציג את ההיסטוריה ויוצא")
     p.add_argument("--no-journal", action="store_true", help="בלי רישום")
+    p.add_argument("--extra", action="append", default=[],
+                   help="הגדרה נוספת, בצורה שם=ערך. אפשר כמה פעמים")
     a = p.parse_args()
 
     if a.history:
@@ -134,7 +141,11 @@ def main():
     print(f"אבן הבוחן: {len(clips)} קטעים, {words} מילים שתוקנו ביד")
     print(f"טביעת אצבע: {mark}\n")
 
-    engines = {a.only: ENGINES[a.only]} if a.only else ENGINES
+    engines = {a.only: dict(ENGINES[a.only])} if a.only else {k: dict(v) for k, v in ENGINES.items()}
+    for item in a.extra:
+        k, _, v = item.partition("=")
+        for cfg in engines.values():
+            cfg[k.strip()] = v.strip()
     results = {}
     for label, cfg in engines.items():
         tot = total = 0
