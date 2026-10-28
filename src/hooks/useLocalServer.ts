@@ -3,6 +3,10 @@ import { debugLog } from '@/lib/debugLogger';
 import { getApiKey } from '@/lib/keyCrypto';
 import { fetchLocalServer, isLoopbackUrl, normalizeServerUrl } from '@/lib/serverConfig';
 import { getLauncherHealth } from '@/lib/localServerLauncher';
+import {
+  describeJob, forgetJob, isWorthResuming, jobStreamUrl, readRememberedJob,
+  rememberJob, updateJobProgress, type JobSnapshot,
+} from '@/lib/transcribeJob';
 
 export interface WordTiming {
   word: string;
@@ -124,6 +128,45 @@ function savePartialDebounced(partial: any) {
 
 export type TranscriptionPhase = 'idle' | 'loading-model' | 'transcribing';
 
+/**
+ * קורא שורות מתוך חיבור חי, ומחזיר אותן כבר מפורקות.
+ *
+ * הפירוק עצמו היה כתוב שלוש פעמים, וזה לא היה חוסר אלגנטיות בלבד:
+ * הוא כולל חיתוך של שורה שהגיעה חצויה בין שתי מסירות, ובכל מקום שבו
+ * הוא מופיע שוב אפשר לשכוח את החיתוך הזה — ואז שורה אחת נבלעת בלי
+ * שאיש ישים לב.
+ *
+ * מוחזרות חבילות ולא שורות בודדות, כדי שהחיבור למשימה והחיבור הישיר
+ * יריצו את אותו קוד קריאה בלי לשנות את מבנה הלוח שקורא אותן.
+ *
+ * שורה שאינה ניתנת לפירוק נזרקת ולא מפילה: שורת סימון ששומרת על
+ * החיבור פתוח אינה תוכן, וגם חצי שורה בסוף אינה סיבה לעצור.
+ */
+async function* readSseBatches(res: Response): AsyncGenerator<any[]> {
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('Streaming not supported');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || ''; // שורה חצויה ממתינה למסירה הבאה
+
+    const batch: any[] = [];
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      if (!raw) continue;
+      try { batch.push(JSON.parse(raw)); } catch { /* שורה פגומה — מדלגים */ }
+    }
+    if (batch.length) yield batch;
+  }
+}
+
 // ── Client-side serialization queue ──
 // The Whisper server has GPU concurrency = 1; sending parallel requests just
 // causes 503s. We chain transcription requests on the client so the UI can
@@ -170,6 +213,9 @@ export const useLocalServer = () => {
   const pollRef = useRef<ReturnType<typeof setInterval>>();
   const abortRef = useRef<AbortController | null>(null);
   const preloadAbortRef = useRef<AbortController | null>(null);
+  // מספר המשימה שרצה כרגע — צריך אותו כדי לעצור אותה בשרת, כי
+  // סגירת החיבור לבדה כבר אינה עוצרת אותה.
+  const activeJobIdRef = useRef<string | null>(null);
 
   const getBaseUrl = () => {
     // Prefer decrypted in-memory value (handles encrypted CloudKeySync values)
@@ -392,6 +438,71 @@ export const useLocalServer = () => {
     }
   };
 
+  /**
+   * פותח תמלול כמשימה עם מספר, ומתחבר אליה.
+   *
+   * למה דרך משימה ולא ישר: בחיבור ישיר התוצאה קיימת רק בחיבור עצמו.
+   * סגירת הדף באמצע, מחשב שנרדם או רשת שמהבהבת לשנייה — והעבודה
+   * הולכת לאיבוד, גם אם השרת כבר סיים אותה. בקובץ של שעתיים זה
+   * אומר לחזור להתחלה.
+   *
+   * כאן העבודה נפתחת בשרת ומקבלת מספר, המספר נשמר במחשב, והחיבור
+   * אליו הוא דבר נפרד שאפשר לפתוח שוב. הזרם שחוזר מכיל בדיוק את
+   * אותן שורות, ולכן אין כאן מסלול שני שצריך לתחזק.
+   *
+   * אם השרת לא מכיר את האפשרות הזאת — למשל גרסה ישנה יותר — חוזרים
+   * לחיבור הישיר. עדיף תמלול שלא שורד סגירה מתמלול שלא עובד.
+   */
+  const openTranscribeStream = async (
+    form: FormData,
+    signal: AbortSignal,
+    fileName = '',
+  ): Promise<Response> => {
+    const streamUrl = `${getBaseUrl()}/transcribe-stream`;
+    const jobForm = form;
+    jobForm.set('background', '1');
+
+    const opened = await fetchLocalServer(streamUrl, {
+      method: 'POST',
+      headers: getApiHeaders(),
+      body: jobForm,
+      signal,
+    });
+
+    // שגיאה חוזרת כמו שהיא, כדי שהטיפול הקיים בה — למשל קובץ שמע
+    // שפג זמנו — ימשיך לעבוד בלי שינוי.
+    if (!opened.ok) return opened;
+
+    let jobId = '';
+    try {
+      jobId = (await opened.clone().json())?.job_id || '';
+    } catch {
+      jobId = '';
+    }
+
+    if (!jobId) {
+      debugLog.warn('CUDA', 'השרת לא החזיר מספר משימה — עובר לחיבור ישיר');
+      jobForm.delete('background');
+      activeJobIdRef.current = null;
+      return fetchLocalServer(streamUrl, {
+        method: 'POST',
+        headers: getApiHeaders(),
+        body: jobForm,
+        signal,
+      });
+    }
+
+    activeJobIdRef.current = jobId;
+    rememberJob({ jobId, fileName, startedAt: Date.now(), received: 0 });
+    debugLog.info('CUDA', `משימת תמלול ${jobId} נפתחה`);
+
+    return fetchLocalServer(jobStreamUrl(getBaseUrl(), jobId, 0), {
+      method: 'GET',
+      headers: getApiHeaders(),
+      signal,
+    });
+  };
+
   // ─── Parallel: stage audio + preload model simultaneously, then transcribe ───
   const transcribeStreamParallel = async (
     file: File,
@@ -473,12 +584,7 @@ export const useLocalServer = () => {
       abortRef.current = new AbortController();
       setPhase('transcribing');
 
-      const res = await fetchLocalServer(`${getBaseUrl()}/transcribe-stream`, {
-        method: 'POST',
-        headers: getApiHeaders(),
-        body: form,
-        signal: abortRef.current.signal,
-      });
+      const res = await openTranscribeStream(form, abortRef.current.signal, file.name);
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -488,33 +594,18 @@ export const useLocalServer = () => {
         throw new Error(err.error || `Server error ${res.status}`);
       }
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('Streaming not supported');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
       const accText: string[] = [...prefixText];
       const accWords: WordTiming[] = [...prefixWords];
       let audioDuration = 0;
       let resolvedModel = model;
       let lastSegEnd = resumeFrom?.startFrom || 0;
       let finalResult: ServerTranscriptionResult | null = null;
+      let received = 0;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const raw = line.slice(6).trim();
-          if (!raw) continue;
-
-          let evt: any;
-          try { evt = JSON.parse(raw); } catch { continue; }
+      for await (const batch of readSseBatches(res)) {
+        for (const evt of batch) {
+          received++;
+          updateJobProgress(received);
 
           if (evt.type === 'loading') {
             setPhase('loading-model');
@@ -578,6 +669,11 @@ export const useLocalServer = () => {
               } : undefined,
             };
             localStorage.removeItem(PARTIAL_STORAGE_KEY);
+            // התמלול כאן על המסך, ולכן אין יותר משימה לחזור אליה.
+            // בלי זה, פתיחה הבאה של הדף הייתה מציעה לחזור לתמלול
+            // שכבר מוצג — וזה נראה כמו תקלה.
+            forgetJob();
+            activeJobIdRef.current = null;
           } else if (evt.type === 'error') {
             throw new Error(evt.error || 'Server transcription error');
           }
@@ -679,12 +775,7 @@ export const useLocalServer = () => {
         ? { type: 'session', audioSessionId, reused: true, message: 'Reusing audio already stored on the CUDA server' }
         : { type: 'uploading', message: 'Uploading audio to CUDA server' });
 
-      let res = await fetchLocalServer(streamUrl, {
-        method: 'POST',
-        headers: getApiHeaders(),
-        body: form,
-        signal: abortRef.current.signal,
-      });
+      let res = await openTranscribeStream(form, abortRef.current.signal, file.name);
 
       if (res.status === 410 && audioSessionId) {
         onStatus?.({ type: 'session', audioSessionId: null, message: 'Audio session expired; uploading again' });
@@ -704,12 +795,7 @@ export const useLocalServer = () => {
         } else {
           form.append('file', file, file.name);
         }
-        res = await fetchLocalServer(streamUrl, {
-          method: 'POST',
-          headers: getApiHeaders(),
-          body: form,
-          signal: abortRef.current.signal,
-        });
+        res = await openTranscribeStream(form, abortRef.current.signal, file.name);
       }
 
       if (!res.ok) {
@@ -717,36 +803,18 @@ export const useLocalServer = () => {
         throw new Error(err.error || `Server error ${res.status}`);
       }
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('Streaming not supported');
-
-
-      const decoder = new TextDecoder();
-      let buffer = '';
       const accText: string[] = [...prefixText];
       const accWords: WordTiming[] = [...prefixWords];
       let audioDuration = 0;
       let resolvedModel = model; // track model from SSE info event
       let lastSegEnd = resumeFrom?.startFrom || 0;
       let finalResult: ServerTranscriptionResult | null = null;
+      let received = 0;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Parse SSE events from buffer
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // keep incomplete line
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const raw = line.slice(6).trim();
-          if (!raw) continue;
-
-          let evt: any;
-          try { evt = JSON.parse(raw); } catch { continue; }
+      for await (const batch of readSseBatches(res)) {
+        for (const evt of batch) {
+          received++;
+          updateJobProgress(received);
 
           debugLog.info('CUDA-SSE', `event: ${evt.type}`, evt.type === 'segment' ? `progress=${evt.progress}% words=${evt.words?.length}` : evt);
 
@@ -841,6 +909,11 @@ export const useLocalServer = () => {
             };
             // Clear partial — we have the full result
             localStorage.removeItem(PARTIAL_STORAGE_KEY);
+            // התמלול כאן על המסך, ולכן אין יותר משימה לחזור אליה.
+            // בלי זה, פתיחה הבאה של הדף הייתה מציעה לחזור לתמלול
+            // שכבר מוצג — וזה נראה כמו תקלה.
+            forgetJob();
+            activeJobIdRef.current = null;
           } else if (evt.type === 'error') {
             throw new Error(evt.error || 'Server transcription error');
           }
@@ -896,7 +969,24 @@ export const useLocalServer = () => {
     setPartialTranscript(null);
   };
 
+  /**
+   * עוצר את התמלול.
+   *
+   * שים לב: ניתוק החיבור לבדו כבר אינו עוצר כלום. העבודה רצה בשרת
+   * ואינה תלויה בחיבור — זה בדיוק מה שמאפשר לסגור את הדף ולא לאבד
+   * אותה. לכן צריך לומר לשרת במפורש לעצור, אחרת לחיצה על "עצור"
+   * רק מכבה את התצוגה והעבודה ממשיכה לתפוס את כרטיס המסך עד הסוף.
+   */
   const cancelStream = () => {
+    const jobId = activeJobIdRef.current;
+    if (jobId) {
+      fetchLocalServer(`${getBaseUrl()}/transcribe-job/${encodeURIComponent(jobId)}/cancel`, {
+        method: 'POST',
+        headers: getApiHeaders(),
+      }).catch(() => { /* השרת אינו זמין — הניתוק לפחות מכבה את התצוגה */ });
+      activeJobIdRef.current = null;
+    }
+    forgetJob();
     if (abortRef.current) {
       abortRef.current.abort();
     }
@@ -905,6 +995,174 @@ export const useLocalServer = () => {
     setAudioDurationSec(0);
     setAudioProcessedSec(0);
   };
+
+  /**
+   * עוצר משימה לפי מספרה.
+   *
+   * נחוץ בנפרד מהעצירה הרגילה: דף שנפתח מחדש אינו מחזיק את מספר
+   * המשימה בזיכרון שלו, ולכן בלי זה לא הייתה שום דרך לעצור תמלול
+   * שרץ מפתיחה קודמת — הוא היה תופס את כרטיס המסך עד שיגמור.
+   */
+  const cancelJob = useCallback(async (jobId: string): Promise<boolean> => {
+    try {
+      const res = await fetchLocalServer(
+        `${getBaseUrl()}/transcribe-job/${encodeURIComponent(jobId)}/cancel`,
+        { method: 'POST', headers: getApiHeaders() },
+      );
+      return res.ok;
+    } catch {
+      return false;
+    } finally {
+      forgetJob();
+      if (activeJobIdRef.current === jobId) activeJobIdRef.current = null;
+    }
+  }, []);
+
+  /**
+   * האם יש תמלול שממתין מפתיחה קודמת של הדף.
+   *
+   * זה החלק שהופך את כל העבודה למשהו שימושי: בלעדיו העבודה אמנם
+   * שורדת בשרת, אבל המשתמש אינו יודע עליה והיא עדיין אבודה מבחינתו.
+   *
+   * מחזיר כלום כשאין מה להציע — אין משימה שמורה, השרת אינו עונה,
+   * המשימה כבר נמחקה משם, או שהיא נפלה בשגיאה.
+   */
+  const findResumableJob = useCallback(async (): Promise<
+    { jobId: string; fileName: string; received: number; snapshot: JobSnapshot; description: string } | null
+  > => {
+    const remembered = readRememberedJob();
+    if (!remembered) return null;
+
+    let snapshot: JobSnapshot | null = null;
+    try {
+      const res = await fetchLocalServer(
+        `${getBaseUrl()}/transcribe-job/${encodeURIComponent(remembered.jobId)}`,
+        { headers: getApiHeaders(), signal: AbortSignal.timeout(5000) },
+      );
+      if (res.status === 404) {
+        // השרת כבר לא מכיר אותה. רשומה שנשארת תחזור ותפריע בכל פתיחה.
+        forgetJob();
+        return null;
+      }
+      if (!res.ok) return null;
+      snapshot = await res.json();
+    } catch {
+      // השרת אינו זמין כרגע. לא מוחקים — ייתכן שהוא יעלה עוד מעט.
+      return null;
+    }
+
+    if (!isWorthResuming(snapshot)) {
+      forgetJob();
+      return null;
+    }
+
+    return {
+      jobId: remembered.jobId,
+      fileName: remembered.fileName,
+      received: remembered.received,
+      snapshot: snapshot!,
+      description: describeJob(snapshot!, remembered.fileName),
+    };
+  }, []);
+
+  /**
+   * מתחבר לתמלול שממתין, ומחזיר את התוצאה כשהוא נגמר.
+   *
+   * ההתחברות היא מההתחלה ולא מהמקום שנשמר, בכוונה: דף שנפתח מחדש
+   * אין לו את הטקסט שהצטבר, ולכן הוא צריך את הכל. המקום השמור מיועד
+   * לחיבור שנפל לרגע וחוזר באותו דף.
+   */
+  const attachToJob = useCallback(async (
+    jobId: string,
+    onPartial?: (partial: PartialTranscript) => void,
+    fromIndex = 0,
+  ): Promise<ServerTranscriptionResult> => {
+    setIsLoading(true);
+    setPhase('transcribing');
+    activeJobIdRef.current = jobId;
+    abortRef.current = new AbortController();
+
+    const accText: string[] = [];
+    const accWords: WordTiming[] = [];
+    let audioDuration = 0;
+    let resolvedModel = '';
+    let lastSegEnd = 0;
+    let received = Math.max(0, fromIndex);
+    let finalResult: ServerTranscriptionResult | null = null;
+
+    try {
+      const res = await fetchLocalServer(jobStreamUrl(getBaseUrl(), jobId, received), {
+        headers: getApiHeaders(),
+        signal: abortRef.current.signal,
+      });
+      if (!res.ok) throw new Error(`לא ניתן להתחבר למשימה (${res.status})`);
+
+      for await (const batch of readSseBatches(res)) {
+        for (const evt of batch) {
+          received++;
+          updateJobProgress(received);
+
+          if (evt.type === 'info' || evt.type === 'source') {
+            if (evt.duration) {
+              audioDuration = evt.duration;
+              setAudioDurationSec(audioDuration);
+            }
+            if (evt.model) resolvedModel = evt.model;
+          } else if (evt.type === 'segment') {
+            if (evt.paragraphBreak) accText.push('\n\n');
+            accText.push(evt.text);
+            if (evt.words) accWords.push(...evt.words);
+            if (evt.segEnd) {
+              lastSegEnd = evt.segEnd;
+              setAudioProcessedSec(evt.segEnd);
+            }
+            setProgress(evt.progress ?? 0);
+            const partial: PartialTranscript = {
+              engine: 'local-server',
+              text: accText.join(' '),
+              wordTimings: [...accWords],
+              progress: evt.progress ?? 0,
+              audioDuration,
+              lastSegEnd,
+            };
+            setPartialTranscript(partial);
+            onPartial?.(partial);
+          } else if (evt.type === 'done') {
+            setProgress(100);
+            finalResult = {
+              text: evt.text,
+              wordTimings: evt.wordTimings || [],
+              duration: evt.duration,
+              language: evt.language,
+              model: evt.model,
+              processing_time: evt.processing_time,
+            };
+          } else if (evt.type === 'error') {
+            throw new Error(evt.error || 'שגיאה בתמלול');
+          }
+        }
+      }
+
+      if (finalResult) {
+        forgetJob();
+        return finalResult;
+      }
+      if (accText.length > 0) {
+        return {
+          text: accText.join(' '),
+          wordTimings: accWords,
+          duration: audioDuration,
+          model: resolvedModel,
+        };
+      }
+      throw new Error('ההתחברות נגמרה בלי תוצאה');
+    } finally {
+      setIsLoading(false);
+      setPhase('idle');
+      abortRef.current = null;
+      activeJobIdRef.current = null;
+    }
+  }, []);
 
   const loadModel = async (modelId: string) => {
     const res = await fetchLocalServer(`${getBaseUrl()}/load-model`, {
@@ -1042,28 +1300,9 @@ export const useLocalServer = () => {
         throw new Error(`HTTP ${res.status}`);
       }
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('Streaming not supported');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
       let result: { ready: boolean; elapsed?: number } = { ready: false };
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const raw = line.slice(6).trim();
-          if (!raw) continue;
-
-          let evt: any;
-          try { evt = JSON.parse(raw); } catch { continue; }
+      for await (const batch of readSseBatches(res)) {
+        for (const evt of batch) {
 
           if (evt.type === 'progress') {
             onProgress?.(evt.message || 'Loading...');
@@ -1158,6 +1397,10 @@ export const useLocalServer = () => {
     createAudioSession,
     releaseAudioSession,
     cancelStream,
+    findResumableJob,
+    attachToJob,
+    cancelJob,
+    forgetActiveJob: forgetJob,
     recoverPartial,
     saveRecoveryPartial,
     updatePartialCloudBackup,

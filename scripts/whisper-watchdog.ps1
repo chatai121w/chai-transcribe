@@ -20,7 +20,18 @@ param(
     [int]$IntervalSeconds = 30,
     [string]$Model = "ivrit-ai/whisper-large-v3-turbo-ct2",
     # Give a starting server time to load its model before judging it dead.
-    [int]$StartupGraceSeconds = 180
+    [int]$StartupGraceSeconds = 180,
+    # האם לטעון את המנוע לכרטיס המסך כבר בהפעלה.
+    #
+    # ברירת המחדל היא לא, והסיבה מעשית: המשימה הזאת רצה בכל כניסה
+    # למחשב, וטעינה מוקדמת תופסת כשלושה ג'יגה-בייט בכרטיס המסך גם
+    # כשלא מתמללים כלום — ואז שום תוכנית אחרת לא יכולה להשתמש בהם.
+    #
+    # זה לא מאט את העבודה: האתר טוען את המנוע בעצמו, במקביל להעלאת
+    # הקובץ, ולכן שלוש-עשרה שניות הטעינה מתרחשות בזמן שההעלאה רצה
+    # ממילא. המנוע גם משתחרר מעצמו אחרי עשר דקות בלי שימוש, ולכן
+    # טעינה מוקדמת רק מקדימה את התפיסה — היא אינה מונעת את השחרור.
+    [switch]$PreloadModel
 )
 
 $ErrorActionPreference = "Continue"
@@ -109,9 +120,10 @@ function Start-WhisperServer {
         }
     }
 
-    Write-WatchdogLog "Starting server on port $Port (model: $Model)"
+    $preloadArg = if ($PreloadModel) { "" } else { " --no-preload" }
+    Write-WatchdogLog "Starting server on port $Port (model: $Model, preload: $($PreloadModel.IsPresent))"
     Start-Process -FilePath $python `
-        -ArgumentList "`"$script`" --port $Port --model `"$Model`"" `
+        -ArgumentList "`"$script`" --port $Port --model `"$Model`"$preloadArg" `
         -WorkingDirectory $projectRoot `
         -WindowStyle Hidden `
         -RedirectStandardOutput $serverLog `

@@ -200,6 +200,18 @@ const Index = () => {
     lastSegEnd?: number;
     sourceFile?: { name: string; size: number; lastModified: number; type: string; cloudAudioPath?: string; cloudBackedUpAt?: number };
   } | null>(null);
+  // תמלול שממתין בשרת מפתיחה קודמת של הדף.
+  //
+  // זה נפרד משחזור תמלול חלקי: שם הטקסט נשמר כאן במחשב ועצר באמצע,
+  // וכאן העבודה עצמה המשיכה לרוץ בשרת כל הזמן — אולי אפילו הסתיימה.
+  const [pendingJob, setPendingJob] = useState<{
+    jobId: string;
+    fileName: string;
+    received: number;
+    description: string;
+    status: string;
+  } | null>(null);
+  const [isAttachingJob, setIsAttachingJob] = useState(false);
   const [lastStats, setLastStats] = useState<TranscriptionStats | null>(null);
   const [copied, setCopied] = useState(false);
   const diarize = preferences.diarize_enabled;
@@ -225,7 +237,7 @@ const Index = () => {
   const [queuePlayingId, setQueuePlayingId] = useState<string | null>(null);
 
   const { transcribe: localTranscribe, isLoading: isLocalLoading, progress: localProgress } = useLocalTranscription();
-  const { transcribeStream: serverTranscribeStream, transcribeStreamParallel: serverTranscribeParallel, isLoading: isServerLoading, progress: serverProgress, phase: serverPhase, audioDurationSec: serverAudioDur, audioProcessedSec: serverAudioProcessed, isConnected: serverConnected, modelReady: serverModelReady, recoverPartial, saveRecoveryPartial, updatePartialCloudBackup, clearPartial, cancelStream: cancelServerStream, checkConnection, startPolling, stopPolling } = useLocalServer();
+  const { transcribeStream: serverTranscribeStream, transcribeStreamParallel: serverTranscribeParallel, isLoading: isServerLoading, progress: serverProgress, phase: serverPhase, audioDurationSec: serverAudioDur, audioProcessedSec: serverAudioProcessed, isConnected: serverConnected, modelReady: serverModelReady, recoverPartial, saveRecoveryPartial, updatePartialCloudBackup, clearPartial, cancelStream: cancelServerStream, checkConnection, startPolling, stopPolling, findResumableJob, attachToJob, cancelJob, forgetActiveJob } = useLocalServer();
   const bgTask = useBackgroundTask();
   const { transcripts, isLoading: isCloudLoading, saveTranscript, updateTranscript, deleteTranscript, deleteAll, isCloud, getAudioUrl, uploadAudioFile, deleteAudioFile } = useCloudTranscripts();
   const { jobs, submitJob, submitBatchJobs, retryJob, deleteJob } = useTranscriptionJobs();
@@ -310,6 +322,62 @@ const Index = () => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── תמלול שהמשיך לרוץ בשרת בזמן שהדף היה סגור ──
+  //
+  // בלי הבדיקה הזאת העבודה אמנם שורדת בשרת, אבל המשתמש אינו יודע
+  // עליה — ומבחינתו היא אבודה בדיוק כמו קודם.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const job = await findResumableJob();
+        if (cancelled || !job) return;
+        setPendingJob({
+          jobId: job.jobId,
+          fileName: job.fileName,
+          received: job.received,
+          description: job.description,
+          status: job.snapshot.status,
+        });
+        toast({
+          title: job.snapshot.status === 'done' ? '✅ התמלול מחכה' : '⏳ התמלול ממשיך בשרת',
+          description: job.description,
+        });
+      } catch {
+        // אין מה להציע — ממשיכים כרגיל
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** מתחבר לתמלול שממתין ומציב אותו במסך. */
+  const handleAttachPendingJob = async () => {
+    if (!pendingJob) return;
+    setIsAttachingJob(true);
+    try {
+      const result = await attachToJob(pendingJob.jobId, (partial) => {
+        setTranscript(partial.text);
+        setWordTimings(partial.wordTimings);
+      });
+      setTranscriptFromEngine(result.text);
+      setWordTimings(result.wordTimings || []);
+      setPendingJob(null);
+      toast({
+        title: '✅ התמלול חזר',
+        description: `${result.wordTimings?.length || 0} מילים`,
+      });
+    } catch (err) {
+      toast({
+        title: 'לא הצלחתי להתחבר לתמלול',
+        description: err instanceof Error ? err.message : 'שגיאה לא מזוהה',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsAttachingJob(false);
+    }
+  };
 
   // Accept incoming file from other pages (e.g., VideoToMp3 converter)
   // We track the file we already consumed so re-renders can't trigger duplicate runs.
@@ -2465,6 +2533,43 @@ const Index = () => {
           />
         </div>
         </TranscriptionWidget>
+
+        {/* תמלול שממתין בשרת מפתיחה קודמת של הדף */}
+        {pendingJob && !isLoading && (
+          <TranscriptionWidget id="pending-job" title="תמלול שממתין בשרת">
+          <Card className="p-3 border-sky-500/40 bg-sky-500/5" dir="rtl">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-sky-700 dark:text-sky-300">
+                  {pendingJob.status === 'done' ? '✅ התמלול מוכן' : '⏳ התמלול ממשיך לרוץ'}
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                  {pendingJob.description}
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  העבודה רצה בשרת ולא בדף, ולכן היא נמשכה גם כשהדף היה סגור.
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button size="sm" onClick={handleAttachPendingJob} disabled={isAttachingJob}>
+                  {isAttachingJob ? 'מתחבר…' : 'הצג את התמלול'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    if (pendingJob.status === 'running') void cancelJob(pendingJob.jobId);
+                    else forgetActiveJob();
+                    setPendingJob(null);
+                  }}
+                >
+                  {pendingJob.status === 'running' ? 'עצור' : 'התעלם'}
+                </Button>
+              </div>
+            </div>
+          </Card>
+          </TranscriptionWidget>
+        )}
 
         {/* Recovered partial transcript banner */}
         {recoveredPartialInfo && !isLoading && (

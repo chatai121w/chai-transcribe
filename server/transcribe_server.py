@@ -14,6 +14,7 @@ import sys
 import json
 import hashlib
 from transcript_quality import is_degenerate_transcript, lexical_diversity_score
+from transcribe_jobs import jobs as _transcribe_jobs
 import argparse
 import tempfile
 import time
@@ -1912,6 +1913,10 @@ def transcribe_stream():
     # (Flask `request` proxy is not valid once streaming starts under waitress).
     share_mode = (request.headers.get("X-GPU-Share-Mode") or "serial").lower()
 
+    # האם להריץ כמשימה עם מספר במקום בחיבור חי. נקרא כאן, ולא בתוך
+    # הפולט, מפני ששם כבר אין גישה לבקשה.
+    background = (request.form.get("background", "0") or "0").strip().lower() in ("1", "true", "yes")
+
     suffix = _safe_suffix(audio_filename)
     known_duration = session_duration or _probe_audio_duration(tmp_path)
     perf_samples = _perf_metrics.get(resolved, [])
@@ -2253,7 +2258,137 @@ def transcribe_stream():
             request_record["total_wall_time"] = round(time.time() - request_start, 1)
             _request_history.append(request_record)
 
+    # ── תמלול כמשימה עם מספר, שסגירת הדף אינה מאבדת ──
+    #
+    # ללא זה התוצאה נשלחת רק בחיבור החי: סוגרים את הדף באמצע, השרת
+    # ממשיך לעבוד ואין לאן להחזיר את מה שיצא. העבודה הולכת לאיבוד.
+    #
+    # כאן אותה עבודה בדיוק רצה בשרת, וכל מה שהיא מוציאה נשמר לפי
+    # הסדר. הדף מקבל מספר ומתחבר אליו — ויכול להתחבר שוב, כמה פעמים
+    # שצריך. אותה פונקציה פולטת את אותן שורות בשני המצבים, ולכן אין
+    # כאן מסלול שני שעלול להיפרד מהראשון בשקט.
+    if background:
+        gen = generate()
+        job_id = _transcribe_jobs.create(
+            filename=audio_filename,
+            model=resolved,
+            language=language,
+            duration=round(known_duration, 2),
+        )
+
+        def _drain_into_job():
+            try:
+                for chunk in gen:
+                    _transcribe_jobs.record(job_id, chunk)
+                    if _transcribe_jobs.is_cancelled(job_id):
+                        # סוגר את העבודה בדיוק כמו שסגירת החיבור עושה:
+                        # היא נעצרת במקום שבה היא עומדת, ומשחררת את
+                        # כרטיס המסך ואת הקבצים הזמניים בדרך החוצה.
+                        gen.close()
+                        _transcribe_jobs.record(
+                            job_id,
+                            f"data: {json.dumps({'type': 'error', 'error': 'התמלול בוטל'})}\n\n",
+                        )
+                        break
+            except Exception as job_err:
+                _log.error(f"[{request_id}] background job failed: {job_err}")
+                _transcribe_jobs.record(
+                    job_id,
+                    f"data: {json.dumps({'type': 'error', 'error': str(job_err)})}\n\n",
+                )
+            finally:
+                _transcribe_jobs.finish(job_id)
+
+        threading.Thread(target=_drain_into_job, daemon=True).start()
+        _log.info(f"[{request_id}] background job {job_id} started for {audio_filename}")
+        return jsonify({
+            "job_id": job_id,
+            "duration": round(known_duration, 2),
+            "model": resolved,
+        })
+
     return Response(generate(), mimetype="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    })
+
+
+# ── קריאה חזרה ממשימת תמלול ───────────────────────────────────────
+
+@app.route("/transcribe-jobs", methods=["GET"])
+def transcribe_jobs_list():
+    """המשימות האחרונות, בלי השורות עצמן.
+
+    זה מה שהדף שואל ברגע שהוא נפתח: "יש משהו שרץ עכשיו?"
+    """
+    return jsonify({"jobs": _transcribe_jobs.listing()})
+
+
+@app.route("/transcribe-job/<job_id>", methods=["GET"])
+def transcribe_job_status(job_id):
+    """איפה המשימה עומדת, בלי להוריד את כל מה שיצא."""
+    snap = _transcribe_jobs.snapshot(job_id)
+    if snap is None:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(snap)
+
+
+@app.route("/transcribe-job/<job_id>/cancel", methods=["POST"])
+def transcribe_job_cancel(job_id):
+    """עוצר משימה.
+
+    סגירת החיבור כבר אינה מספיקה: העבודה אינה תלויה בו. בלי הנקודה
+    הזאת, לחיצה על "עצור" הייתה מנתקת את הדף והעבודה הייתה ממשיכה
+    לתפוס את כרטיס המסך עד הסוף.
+    """
+    if not _transcribe_jobs.cancel(job_id):
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify({"cancelled": True})
+
+
+@app.route("/transcribe-job/<job_id>/stream", methods=["GET"])
+def transcribe_job_stream(job_id):
+    """מחבר את הדף אל משימה — מההתחלה או מהמקום שהוא הגיע אליו.
+
+    `from` הוא מספר השורות שהדף כבר קיבל. דף שנפתח מחדש שולח אפס
+    ומקבל את הכל; דף שרק איבד חיבור לרגע שולח את מה שיש לו וממשיך
+    משם, בלי כפילות ובלי חור.
+
+    זרם ההתחברות מוציא בדיוק את אותן שורות של התמלול הישיר, ולכן
+    הדף מריץ עליו את אותו קוד קריאה.
+    """
+    snap = _transcribe_jobs.snapshot(job_id)
+    if snap is None:
+        return jsonify({"error": "Job not found"}), 404
+
+    try:
+        from_index = max(0, int(request.args.get("from", "0")))
+    except (TypeError, ValueError):
+        from_index = 0
+
+    def replay():
+        index = from_index
+        last_ping = time.time()
+        while True:
+            events, status = _transcribe_jobs.events_from(job_id, index)
+            if events is None:
+                yield f"data: {json.dumps({'type': 'error', 'error': 'המשימה אינה קיימת יותר'})}\n\n"
+                return
+            for chunk in events:
+                index += 1
+                yield chunk
+            if events:
+                last_ping = time.time()
+            if status != "running":
+                return
+            # שורת סימון שאינה תוכן: שומרת על החיבור פתוח כששקט,
+            # כדי שהדפדפן לא ינתק תמלול ארוך בין קטע לקטע.
+            if time.time() - last_ping > 15:
+                last_ping = time.time()
+                yield ": keep-alive\n\n"
+            time.sleep(0.25)
+
+    return Response(replay(), mimetype="text/event-stream", headers={
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
     })
@@ -5719,6 +5854,9 @@ def main():
     print("    GET  /presets           — Available transcription presets")
     print("    POST /transcribe        — Transcribe audio (single response)")
     print("    POST /transcribe-stream — Transcribe audio (SSE streaming)")
+    print("    POST /transcribe-stream?background=1 — same, as a tracked job")
+    print("    GET  /transcribe-jobs   — list tracked transcription jobs")
+    print("    GET  /transcribe-job/<id>/stream — re-attach to a tracked job")
     print("    POST /diarize           — Transcribe + speaker diarization")
     print("    POST /transcribe-live   — Low-latency chunk transcription (live mode)")
     print("    POST /youtube-transcribe — Download + transcribe YouTube video")
