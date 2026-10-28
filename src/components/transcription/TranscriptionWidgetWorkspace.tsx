@@ -1,5 +1,21 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  rectSortingStrategy,
+  SortableContext,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
@@ -8,11 +24,14 @@ import {
   EyeOff,
   Cloud,
   CloudOff,
+  GripVertical,
   LayoutDashboard,
   Maximize2,
   RotateCcw,
+  Settings2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { useCloudPreferences } from "@/hooks/useCloudPreferences";
 
@@ -35,8 +54,12 @@ interface WorkspaceContextValue {
   customizing: boolean;
   preferences: Record<string, WidgetPreference>;
   move: (id: string, direction: -1 | 1) => void;
+  /** קובע סדר חדש לכל האזורים בבת אחת — מה שגרירה מייצרת. */
+  reorder: (ids: string[]) => void;
   patch: (id: string, changes: Partial<WidgetPreference>) => void;
   register: (id: string, mounted: boolean) => void;
+  reset: () => void;
+  definitions: WidgetDefinition[];
 }
 
 const STORAGE_KEY = "chai-transcribe-widget-layout-v1";
@@ -195,16 +218,39 @@ export function TranscriptionWidgetWorkspace({
     });
   };
 
+  /**
+   * קובע סדר חדש לכל האזורים.
+   *
+   * בניגוד להעברה בצעד אחד, גרירה יכולה להזיז אזור לכל מקום — ולכן
+   * הסדר נכתב מחדש כרצף שלם. כך גם אין מקום לשני אזורים עם אותו
+   * מספר, מצב שבו סדר התצוגה נקבע באקראי.
+   */
+  const reorder = useCallback((ids: string[]) => {
+    commitPreferences((current) => {
+      const next = { ...current };
+      ids.forEach((id, index) => {
+        if (next[id]) next[id] = { ...next[id], order: index };
+      });
+      return next;
+    });
+  }, [commitPreferences]);
+
+  const reset = useCallback(
+    () => commitPreferences(() => defaultsFor(definitions)),
+    [commitPreferences, definitions],
+  );
+
   const hidden = useMemo(
     () => definitions.filter((definition) => preferences[definition.id]?.hidden),
     [definitions, preferences],
   );
 
   return (
-    <WorkspaceContext.Provider value={{ customizing, preferences, move, patch, register }}>
+    <WorkspaceContext.Provider value={{ customizing, preferences, move, reorder, patch, register, reset, definitions }}>
       <section className="space-y-3" dir="rtl">
         <div className="flex flex-wrap items-center justify-between gap-2 border-y border-border/60 py-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <WidgetSettingsMenu />
             <Button
               type="button"
               size="sm"
@@ -255,6 +301,161 @@ export function TranscriptionWidgetWorkspace({
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{children}</div>
       </section>
     </WorkspaceContext.Provider>
+  );
+}
+
+/**
+ * שורה אחת ברשימת האזורים: ידית גרירה, שם, ומתג הצגה.
+ *
+ * הידית היא מה שגורר, ולא כל השורה. בלי זה, לחיצה על המתג הייתה
+ * מתחילה גרירה והמתג היה מרגיש תקוע.
+ */
+function WidgetRow({ definition, visible }: { definition: WidgetDefinition; visible: boolean }) {
+  const workspace = useContext(WorkspaceContext)!;
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: definition.id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        "flex items-center gap-2 rounded-md border border-transparent bg-background px-2 py-1.5",
+        // השורה הנגררת נשארת במקומה כצל, והעותק הצף הוא מה שרואים.
+        isDragging && "opacity-30",
+        !visible && "opacity-60",
+      )}
+    >
+      <button
+        type="button"
+        className="shrink-0 cursor-grab rounded p-1 text-muted-foreground hover:bg-muted active:cursor-grabbing"
+        aria-label={`גרור כדי להזיז את ${definition.title}`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      <span className={cn("min-w-0 flex-1 truncate text-sm", !visible && "line-through")}>
+        {definition.title}
+      </span>
+      <Switch
+        checked={visible}
+        onCheckedChange={(on) => workspace.patch(definition.id, { hidden: !on })}
+        aria-label={`הצגת ${definition.title}`}
+      />
+    </div>
+  );
+}
+
+/**
+ * תפריט הגלגל: מה מוצג, ובאיזה סדר.
+ *
+ * מה שהיה חסר: "סידור אזורים" פותח כפתורים **בתוך** כל אזור, ולכן
+ * כדי להזיז אזור צריך קודם למצוא אותו על המסך — ואזור מוסתר אי אפשר
+ * למצוא בכלל. כאן כל האזורים יושבים ברשימה אחת קצרה, מוצגים
+ * ומוסתרים כאחד.
+ */
+function WidgetSettingsMenu() {
+  const workspace = useContext(WorkspaceContext)!;
+  const { definitions, preferences, reorder, reset } = workspace;
+  const [open, setOpen] = useState(false);
+  const [dragging, setDragging] = useState<string | null>(null);
+
+  // מרחק ההפעלה מונע גרירה בטעות בלחיצה רגילה על המתג.
+  //
+  // גרירה במקלדת אינה כאן בכוונה: נבדק, והיא נתקעה באמצע — הפריט
+  // נשאר מוזז ושקוף עם השחרור, ומקשי החצים הזיזו אותו לכיוון ההפוך.
+  // מסלול נגישות שבור גרוע ממסלול שלא קיים, ולכן ההזזה במקלדת נשארת
+  // בכפתורי החץ שבכותרת כל אזור, שעובדים.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  const ordered = useMemo(
+    () => [...definitions].sort((a, b) => (preferences[a.id]?.order ?? 0) - (preferences[b.id]?.order ?? 0)),
+    [definitions, preferences],
+  );
+  const ids = ordered.map((d) => d.id);
+  const shown = ordered.filter((d) => !preferences[d.id]?.hidden).length;
+  const draggedTitle = definitions.find((d) => d.id === dragging)?.title ?? "";
+
+  const onDragEnd = (event: DragEndEvent) => {
+    setDragging(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const from = ids.indexOf(String(active.id));
+    const to = ids.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    reorder(arrayMove(ids, from, to));
+  };
+
+  return (
+    <>
+      <Button
+        type="button"
+        size="icon"
+        variant={open ? "secondary" : "ghost"}
+        className="h-8 w-8 shrink-0"
+        title="בחירת אזורים וסדרם"
+        aria-label="בחירת אזורים וסדרם"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Settings2 className="h-4 w-4" />
+      </Button>
+
+      {open && (
+        // הפאנל יושב בתוך הדף ולא בחלונית צפה, וזאת החלטה ולא נוחות.
+        //
+        // נבדק: בחלונית הצפה של התפריט הגרירה יצאה הפוכה ומוכפלת —
+        // גרירה של 76 פיקסלים כלפי מעלה הזיזה אזור ארבעה מקומות למטה.
+        // העטיפה הצפה מקובעת ומוזזת בעצמה, והספרייה חישבה את התזוזה
+        // בתוכה פי מינוס שתיים. כאן אין עטיפה כזאת, והמידות נכונות.
+        <div className="order-last w-full rounded-md border border-border/70 bg-muted/20">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold">אזורים בעמוד</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                גרור בידית כדי לשנות סדר, וכבה כדי להסתיר. {shown} מתוך {definitions.length} מוצגים.
+              </p>
+            </div>
+            <Button type="button" size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={reset}>
+              <RotateCcw className="h-3.5 w-3.5" />
+              איפוס
+            </Button>
+          </div>
+
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={(e) => setDragging(String(e.active.id))}
+            onDragCancel={() => setDragging(null)}
+            onDragEnd={onDragEnd}
+          >
+            <SortableContext items={ids} strategy={rectSortingStrategy}>
+              <div className="grid grid-cols-1 gap-0.5 p-2 sm:grid-cols-2">
+                {ordered.map((definition) => (
+                  <WidgetRow
+                    key={definition.id}
+                    definition={definition}
+                    visible={!preferences[definition.id]?.hidden}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+
+            {/* העותק הצף שנגרר עם העכבר: מרים את השורה מהדף כדי
+                שיהיה ברור מה זז, ונושא את השם כדי שלא יגררו ריבוע אלמוני. */}
+            <DragOverlay dropAnimation={{ duration: 160, easing: "cubic-bezier(0.2, 0, 0, 1)" }}>
+              {dragging ? (
+                <div className="flex items-center gap-2 rounded-md border border-primary/40 bg-background px-2 py-1.5 shadow-lg ring-1 ring-primary/20">
+                  <GripVertical className="h-4 w-4 shrink-0 text-primary" />
+                  <span className="truncate text-sm font-medium">{draggedTitle}</span>
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        </div>
+      )}
+    </>
   );
 }
 
