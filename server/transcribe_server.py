@@ -1091,7 +1091,6 @@ def load_model(model_id: str, compute_type_override: str | None = None) -> faste
             actual_path,
             device=dev,
             compute_type=ct,
-            download_root=str(Path.home() / ".cache" / "whisper-models"),
             flash_attention=use_flash,
         )
 
@@ -1108,8 +1107,7 @@ def load_model(model_id: str, compute_type_override: str | None = None) -> faste
                     actual_path,
                     device=dev,
                     compute_type=ct,
-                    download_root=str(Path.home() / ".cache" / "whisper-models"),
-                    flash_attention=False,
+                            flash_attention=False,
                 )
             model = _load_no_flash(device, compute_type)
         # Fall back to CPU when CUDA runtime libraries are missing (e.g. cublas64_12.dll)
@@ -1209,7 +1207,9 @@ _downloaded_models_cache: list[str] | None = None
 def _refresh_downloaded_models_cache():
     """Refresh the cached list of downloaded models."""
     global _downloaded_models_cache
-    download_root = str(Path.home() / ".cache" / "whisper-models")
+    # No cache_dir: the models live in the shared Hugging Face store, and a
+    # private folder here meant the server reported nothing as downloaded and
+    # then fetched gigabytes it already had.
     downloaded = []
     for model_id, resolved in MODEL_REGISTRY.items():
         if resolved in MODELS_NEEDING_CONVERSION:
@@ -1219,7 +1219,7 @@ def _refresh_downloaded_models_cache():
         else:
             try:
                 from faster_whisper.utils import download_model
-                path = download_model(resolved, cache_dir=download_root, local_files_only=True)
+                path = download_model(resolved, local_files_only=True)
                 if path and os.path.isdir(path):
                     downloaded.append(model_id)
             except Exception:
@@ -4344,17 +4344,15 @@ def download_model_endpoint():
     resolved = MODEL_REGISTRY.get(model_id, model_id)
 
     try:
-        download_root = str(Path.home() / ".cache" / "whisper-models")
-
         if resolved in MODELS_NEEDING_CONVERSION:
             # Download and convert HF model to CT2
             path = convert_hf_to_ct2(resolved)
             _refresh_downloaded_models_cache()
             return jsonify({"status": "downloaded", "model": resolved, "path": path})
         else:
-            # Use the same cache_dir as WhisperModel uses
+            # Shared Hugging Face store, same as WhisperModel now uses.
             from faster_whisper.utils import download_model
-            path = download_model(resolved, cache_dir=download_root)
+            path = download_model(resolved)
             _refresh_downloaded_models_cache()
             return jsonify({"status": "downloaded", "model": resolved, "path": str(path)})
     except Exception as e:
@@ -4366,8 +4364,10 @@ def _local_hf_revision(model_id: str) -> str | None:
     """Read the Hugging Face cache's current main revision without downloading."""
     repo_dir = f"models--{model_id.replace('/', '--')}"
     roots = [
-        Path.home() / ".cache" / "whisper-models",
+        # Shared store first: the legacy folder still holds empty skeletons with
+        # a refs/main in them, which would answer with a stale revision.
         Path.home() / ".cache" / "huggingface" / "hub",
+        Path.home() / ".cache" / "whisper-models",
     ]
     for root in roots:
         ref = root / repo_dir / "refs" / "main"

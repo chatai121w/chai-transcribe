@@ -11,6 +11,26 @@ import net from "node:net";
 
 const WHISPER_PORTS = Array.from({ length: 20 }, (_, index) => 3000 + index);
 let activeWhisperPort = WHISPER_PORTS[0];
+// The watchdog moves the Whisper server to another port whenever 3000 is taken,
+// and until now the proxy had no way to learn that: it assumed 3000 and only
+// updated when someone pressed "start server" in the UI. Verified lazily on the
+// first proxied request and again after any failure, so the bridge follows the
+// server instead of guessing. Costs nothing once resolved.
+let whisperPortVerified = false;
+
+async function ensureWhisperPort(): Promise<void> {
+  if (whisperPortVerified) return;
+  for (const port of WHISPER_PORTS) {
+    if (await isWhisperServer(port)) {
+      if (port !== activeWhisperPort) {
+        console.log(`[whisper] server located on port ${port}`);
+      }
+      activeWhisperPort = port;
+      whisperPortVerified = true;
+      return;
+    }
+  }
+}
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -102,6 +122,10 @@ async function resolveWhisperPort(): Promise<{ port: number; alreadyRunning: boo
 }
 
 function proxyWhisperRequest(req: any, res: any): void {
+  void ensureWhisperPort().then(() => forwardWhisperRequest(req, res));
+}
+
+function forwardWhisperRequest(req: any, res: any): void {
   const upstream = http.request({
     host: '127.0.0.1',
     port: activeWhisperPort,
@@ -116,6 +140,8 @@ function proxyWhisperRequest(req: any, res: any): void {
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'application/json' });
     }
+    // Force a fresh scan next time — the server may simply have moved.
+    whisperPortVerified = false;
     res.end(JSON.stringify({ error: `Whisper server unavailable on port ${activeWhisperPort}`, detail: error.message }));
   });
   req.pipe(upstream);
