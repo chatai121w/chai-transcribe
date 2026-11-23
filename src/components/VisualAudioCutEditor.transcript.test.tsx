@@ -59,10 +59,13 @@ const mocks = vi.hoisted(() => {
     remove: vi.fn(),
     play: vi.fn(),
   }));
+  const regionHandlers: Record<string, Array<(...args: unknown[]) => void>> = {};
   const regions = {
-    on: vi.fn(),
+    on: vi.fn((event: string, callback: (...args: unknown[]) => void) => {
+      (regionHandlers[event] ||= []).push(callback);
+    }),
     enableDragSelection: vi.fn(() => () => {}),
-    getRegions: vi.fn(() => []),
+    getRegions: vi.fn((): Array<Record<string, unknown>> => []),
     addRegion,
     clearRegions: vi.fn(),
   };
@@ -81,8 +84,13 @@ const mocks = vi.hoisted(() => {
     load: vi.fn(() => Promise.resolve()),
     destroy: vi.fn(),
   };
-  return { handlers, regions, wavesurfer, addRegion };
+  return { handlers, regionHandlers, regions, wavesurfer, addRegion };
 });
+
+/** אזור מזויף שמתנהג כמו אזור אמיתי מספיק בשביל העורך. */
+function fakeRegion(id: string, start: number, end: number) {
+  return { id, start, end, setOptions: vi.fn(), remove: vi.fn(), play: vi.fn() };
+}
 
 vi.mock("wavesurfer.js", () => ({
   default: { create: vi.fn(() => mocks.wavesurfer) },
@@ -108,6 +116,16 @@ function fire(event: string, ...args: unknown[]) {
   });
 }
 
+/** מדמה שרכיב הגל מחזיק כעת את האזורים האלה, ומודיע על כך לעורך. */
+function setRegions(list: Array<{ id: string; start: number; end: number }>) {
+  mocks.regions.getRegions.mockReturnValue(
+    list.map((r) => fakeRegion(r.id, r.start, r.end)),
+  );
+  act(() => {
+    (mocks.regionHandlers['region-updated'] || []).forEach((callback) => callback());
+  });
+}
+
 function renderEditor(words?: CutWord[]) {
   const onPlanChange = vi.fn();
   const file = new File(["x"], "shiur.mp3", { type: "audio/mpeg" });
@@ -121,6 +139,8 @@ const wordAt = (index: number) => document.querySelector(`[data-word-index="${in
 
 beforeEach(() => {
   Object.keys(mocks.handlers).forEach((key) => delete mocks.handlers[key]);
+  Object.keys(mocks.regionHandlers).forEach((key) => delete mocks.regionHandlers[key]);
+  mocks.regions.getRegions.mockReturnValue([]);
   mocks.wavesurfer.setTime.mockClear();
   mocks.wavesurfer.play.mockClear();
   mocks.addRegion.mockClear();
@@ -255,6 +275,112 @@ describe("סימון משפט הופך לאזור חיתוך", () => {
     const options = mocks.addRegion.mock.calls[0][0] as Record<string, unknown>;
     expect(options.drag).toBe(true);
     expect(options.resize).toBe(true);
+  });
+});
+
+describe("מחיקה וייצוא מתוך הטקסט", () => {
+  it("לחיצה על מחק מעבירה את העורך למצב הסרה", async () => {
+    renderEditor(WORDS);
+    fire("ready");
+    fireEvent.pointerDown(wordAt(0), { button: 0 });
+    fireEvent.click(screen.getByTestId("delete-selection"));
+
+    const removeMode = screen.getByRole("radio", { name: /הסר את המסומן/ });
+    await waitFor(() => expect(removeMode).toHaveAttribute("aria-checked", "true"));
+    expect(mocks.addRegion).toHaveBeenCalledTimes(1);
+  });
+
+  it("לחיצה על ייצא מעבירה את העורך למצב שמירת המסומן", async () => {
+    renderEditor(WORDS);
+    fire("ready");
+    // קודם מעבירים למצב אחר, כדי שהשינוי יהיה מורגש
+    fireEvent.click(screen.getByRole("radio", { name: /פצל ושמור את הכול/ }));
+    fireEvent.pointerDown(wordAt(1), { button: 0 });
+    fireEvent.click(screen.getByTestId("export-selection"));
+
+    const keepMode = screen.getByRole("radio", { name: /שמור רק את המסומן/ });
+    await waitFor(() => expect(keepMode).toHaveAttribute("aria-checked", "true"));
+  });
+
+  it("סימון בלבד אינו משנה את מצב העורך", () => {
+    renderEditor(WORDS);
+    fire("ready");
+    fireEvent.click(screen.getByRole("radio", { name: /פצל ושמור את הכול/ }));
+    fireEvent.pointerDown(wordAt(1), { button: 0 });
+    fireEvent.click(screen.getByTestId("mark-selection"));
+    expect(screen.getByRole("radio", { name: /פצל ושמור את הכול/ })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("אפשר לסמן כמה קטעים זה אחר זה", () => {
+    renderEditor(WORDS);
+    fire("ready");
+    fireEvent.pointerDown(wordAt(0), { button: 0 });
+    fireEvent.click(screen.getByTestId("delete-selection"));
+    fireEvent.pointerDown(wordAt(2), { button: 0 });
+    fireEvent.click(screen.getByTestId("delete-selection"));
+    expect(mocks.addRegion).toHaveBeenCalledTimes(2);
+    const first = mocks.addRegion.mock.calls[0][0];
+    const second = mocks.addRegion.mock.calls[1][0];
+    expect(second.start).toBeGreaterThan(first.start);
+  });
+});
+
+describe("חיבור הקטעים לקובץ אחד", () => {
+  it("מצב מחיקה מדווח מלכתחילה שהפלט יהיה קובץ אחד", async () => {
+    const { onPlanChange } = renderEditor(WORDS);
+    fire("ready");
+    fireEvent.click(screen.getByRole("radio", { name: /הסר את המסומן/ }));
+    await waitFor(() => {
+      const last = onPlanChange.mock.calls.at(-1);
+      expect(last?.[1]).toBe("remove");
+      expect(last?.[2]).toBe(true);
+    });
+  });
+
+  it("מצב ייצוא מדווח מלכתחילה שכל קטע יישמר בנפרד", async () => {
+    const { onPlanChange } = renderEditor(WORDS);
+    fire("ready");
+    fireEvent.click(screen.getByRole("radio", { name: /הסר את המסומן/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /שמור רק את המסומן/ }));
+    await waitFor(() => {
+      const last = onPlanChange.mock.calls.at(-1);
+      expect(last?.[1]).toBe("keep");
+      expect(last?.[2]).toBe(false);
+    });
+  });
+
+  it("בחירת המשתמש גוברת על ברירת המחדל של המצב", async () => {
+    const { onPlanChange } = renderEditor(WORDS);
+    fire("ready");
+    fireEvent.click(screen.getByRole("radio", { name: /שמור רק את המסומן/ }));
+    // שני אזורים מסומנים, כדי שבורר החיבור יוצג
+    setRegions([
+      { id: "a", start: 0.2, end: 0.9 },
+      { id: "b", start: 1.4, end: 2.1 },
+    ]);
+
+    const toggle = await screen.findByTestId("join-output-toggle");
+    fireEvent.click(toggle);
+    await waitFor(() => expect(onPlanChange.mock.calls.at(-1)?.[2]).toBe(true));
+  });
+
+  it("בורר החיבור אינו מוצג כשיש קטע אחד בלבד", () => {
+    renderEditor(WORDS);
+    fire("ready");
+    setRegions([{ id: "a", start: 0.2, end: 0.9 }]);
+    fireEvent.click(screen.getByRole("radio", { name: /שמור רק את המסומן/ }));
+    expect(screen.queryByTestId("join-output-toggle")).not.toBeInTheDocument();
+  });
+
+  it("סדר הקטעים ניתן לגרירה גם בייצוא, לא רק בפיצול", () => {
+    renderEditor(WORDS);
+    fire("ready");
+    fireEvent.click(screen.getByRole("radio", { name: /שמור רק את המסומן/ }));
+    setRegions([
+      { id: "a", start: 0.2, end: 0.9 },
+      { id: "b", start: 1.4, end: 2.1 },
+    ]);
+    expect(screen.getByTestId("split-output-order")).toBeInTheDocument();
   });
 });
 

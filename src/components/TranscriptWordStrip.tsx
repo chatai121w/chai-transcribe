@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Play, Scissors, X, MousePointerClick } from "lucide-react";
+import { Play, Scissors, X, MousePointerClick, Trash2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -29,7 +29,14 @@ export interface TranscriptWordStripProps {
   /** אזורי חיתוך שכבר מסומנים — המילים שבתוכם מסומנות גם ברצועה. */
   markedRanges?: AudioRange[];
   onSeek: (sec: number) => void;
-  onMarkRange: (range: AudioRange) => void;
+  /**
+   * `intent` אומר מה המשתמש ביקש לעשות עם הקטע:
+   *   "remove" — למחוק אותו, והשאר יתחבר.
+   *   "keep"   — לייצא אותו כקטע נפרד.
+   *   undefined — רק לסמן, בלי להחליט כאן מה לעשות איתו.
+   * כך לחיצה אחת בטקסט עושה את כל מה שקודם דרש לבחור מצב ואז לסמן.
+   */
+  onMarkRange: (range: AudioRange, intent?: "remove" | "keep") => void;
   onPreviewRange?: (range: AudioRange) => void;
   /** נדלק כשהנגן מתנגן, כדי לגלול אל המילה הנאמרת. */
   following?: boolean;
@@ -166,9 +173,9 @@ export default function TranscriptWordStrip({
     [anchor, head, words.length, clearSelection],
   );
 
-  const markSelection = useCallback(() => {
+  const markSelection = useCallback((intent?: "remove" | "keep") => {
     if (!selectedRange) return;
-    onMarkRange(selectedRange);
+    onMarkRange(selectedRange, intent);
     clearSelection();
   }, [selectedRange, onMarkRange, clearSelection]);
 
@@ -248,9 +255,31 @@ export default function TranscriptWordStrip({
                 השמע
               </Button>
             )}
-            <Button type="button" size="sm" onClick={markSelection} data-testid="mark-selection">
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              onClick={() => markSelection("remove")}
+              data-testid="delete-selection"
+              title="הקטע הזה יימחק, והשאר יתחבר"
+            >
+              <Trash2 className="me-1 h-3.5 w-3.5" />
+              מחק
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => markSelection("keep")}
+              data-testid="export-selection"
+              title="הקטע הזה יישמר כקובץ נפרד"
+            >
+              <Download className="me-1 h-3.5 w-3.5" />
+              ייצא
+            </Button>
+            <Button type="button" size="sm" onClick={() => markSelection()} data-testid="mark-selection">
               <Scissors className="me-1 h-3.5 w-3.5" />
-              סמן לחיתוך
+              סמן בלבד
             </Button>
             <Button
               type="button"

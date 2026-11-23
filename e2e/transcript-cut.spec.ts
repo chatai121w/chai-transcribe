@@ -171,6 +171,51 @@ test.describe('חיתוך לפי טקסט בדף מרכז האודיו', () => {
     await expect(times).not.toHaveText(before, { timeout: 10000 });
   });
 
+  test('מחיקה של שני קטעים מהטקסט מחברת את השאר לקובץ אחד', async ({ page }) => {
+    await openVisualEditor(page);
+    await page.getByTestId('transcribe-for-cut').click();
+    await expect(page.getByTestId('transcript-cut-area')).toBeVisible({ timeout: 30000 });
+
+    // קטע ראשון למחיקה
+    await page.locator('[data-word-index="0"]').click();
+    await page.getByTestId('delete-selection').click();
+    // קטע שני למחיקה
+    await page.locator('[data-word-index="2"]').click();
+    await page.getByTestId('delete-selection').click();
+
+    // העורך עבר מעצמו למצב הסרה, ושני הקטעים מסומנים
+    await expect(page.getByRole('radio', { name: /הסר את המסומן/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByText('2 אזורים מסומנים')).toBeVisible({ timeout: 10000 });
+
+    // ובמצב מחיקה ברירת המחדל היא קובץ אחד רצוף
+    await expect(page.getByTestId('join-output-toggle')).toBeVisible();
+    await expect(page.getByText('קובץ אחד מחובר')).toBeVisible();
+
+    await page.getByRole('button', { name: /חתוך/ }).first().click();
+    // בסיום נשאר קובץ אחד בלבד, לא שלושה
+    await expect(page.getByText('קובץ אחד רצוף')).toBeVisible({ timeout: 60000 });
+  });
+
+  test('ייצוא של שני קטעים שומר אותם בנפרד, וניתן לשנות לקובץ אחד', async ({ page }) => {
+    await openVisualEditor(page);
+    await page.getByTestId('transcribe-for-cut').click();
+    await expect(page.getByTestId('transcript-cut-area')).toBeVisible({ timeout: 30000 });
+
+    await page.locator('[data-word-index="0"]').click();
+    await page.getByTestId('export-selection').click();
+    await page.locator('[data-word-index="2"]').click();
+    await page.getByTestId('export-selection').click();
+
+    await expect(page.getByRole('radio', { name: /שמור רק את המסומן/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByText('2 קבצים נפרדים')).toBeVisible({ timeout: 10000 });
+
+    // וסדר הקטעים ניתן לשינוי גם כאן, לא רק בפיצול
+    await expect(page.getByTestId('split-output-order')).toBeVisible();
+
+    await page.getByTestId('join-output-toggle').click();
+    await expect(page.getByText('קובץ אחד מחובר')).toBeVisible();
+  });
+
   test('המילים שבתוך האזור המסומן נראות מסומנות גם ברצועה', async ({ page }) => {
     await openVisualEditor(page);
     await page.getByTestId('transcribe-for-cut').click();

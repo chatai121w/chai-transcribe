@@ -5,7 +5,7 @@ import { CSS } from "@dnd-kit/utilities";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.esm.js";
 import TimelinePlugin from "wavesurfer.js/dist/plugins/timeline.esm.js";
-import { ChevronLeft, ChevronRight, GripVertical, Magnet, Pause, Play, Plus, RotateCcw, Trash2, Volume2, ZoomIn } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical, Link2, Magnet, Pause, Play, Plus, RotateCcw, Trash2, Volume2, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
@@ -98,7 +98,13 @@ function SortableSegmentRow({ id, outputIndex, segment, selected }: { id: string
 interface VisualAudioCutEditorProps {
   file: File;
   durationSec: number;
-  onPlanChange: (segments: CutSegment[], mode: AudioSelectionMode) => void;
+  /**
+   * `joinOutput` אומר אם הקטעים שייצאו יתחברו לקובץ אחד או יישארו
+   * בנפרד. במצב מחיקה זה ברירת המחדל: כשמוחקים קטע מהאמצע רוצים
+   * קובץ אחד שבו החלק נעלם והשאר התחבר, בדיוק כמו מחיקת מילה
+   * בטקסט — ולא שני קבצים שצריך לאחד ידנית.
+   */
+  onPlanChange: (segments: CutSegment[], mode: AudioSelectionMode, joinOutput: boolean) => void;
   /**
    * התמלול של הקובץ, מילה-מילה עם זמנים. כשהוא קיים מופיעה רצועת
    * המילים ואפשר לסמן לחיתוך מתוך הטקסט.
@@ -122,6 +128,8 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange, 
   const [envelope, setEnvelope] = useState<QuietEnvelope | null>(null);
   const [snapToQuiet, setSnapToQuiet] = useState(true);
   const [snapNote, setSnapNote] = useState<string | null>(null);
+  /** האם לחבר את הקטעים שייצאו לקובץ אחד. */
+  const [joinOutput, setJoinOutput] = useState(false);
   const modeRef = useRef<AudioSelectionMode>(mode);
   const reorderSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -238,9 +246,19 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange, 
    * זמני המילים מדויקים בעשיריות שנייה בלבד, ולכן לפני שמסמנים
    * מזיזים כל קצה לרגע השקט הקרוב — אם באמת נמצא שם שקט.
    */
-  const markRangeFromWords = useCallback((range: AudioRange) => {
+  const markRangeFromWords = useCallback((range: AudioRange, intent?: "remove" | "keep") => {
     const plugin = regionsRef.current;
     if (!plugin) return;
+
+    /**
+     * "מחק" ו"ייצא" בטקסט קובעים גם את מצב העבודה, כדי שלחיצה אחת
+     * תספיק. בלי זה המשתמש היה מסמן, ואז מגלה שהמצב שנבחר עושה
+     * משהו אחר לגמרי ממה שהתכוון.
+     */
+    if (intent && intent !== modeRef.current) {
+      modeRef.current = intent;
+      setMode(intent);
+    }
 
     const snapped = snapToQuiet && envelope ? snapRangeToQuiet(range, envelope) : range;
     const movedStart = Math.abs(snapped.startSec - range.startSec);
@@ -306,9 +324,19 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange, 
     return orderedKeys.map((key) => byKey.get(key)).filter((segment): segment is CutSegment => Boolean(segment));
   }, [mode, naturalPlan, segmentOrder]);
 
+  /**
+   * החלפת מצב קובעת מחדש את ברירת המחדל של החיבור לקובץ אחד.
+   * מחיקה — כן, כי זה מה שמחיקה אמורה לעשות. ייצוא ופיצול — לא,
+   * כי שם רוצים בדרך כלל כל קטע בנפרד. אחרי ההחלפה המשתמש חופשי
+   * לשנות, וההחלטה שלו נשמרת עד שיחליף מצב שוב.
+   */
   useEffect(() => {
-    onPlanChange(plan, mode);
-  }, [mode, onPlanChange, plan]);
+    setJoinOutput(mode === "remove");
+  }, [mode]);
+
+  useEffect(() => {
+    onPlanChange(plan, mode, joinOutput);
+  }, [mode, onPlanChange, plan, joinOutput]);
 
   const addRegionAtCursor = useCallback(() => {
     const plugin = regionsRef.current;
@@ -469,17 +497,53 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange, 
             <Badge variant="secondary">{plan.length} קטעים יופקו</Badge>
             <span className="text-muted-foreground">משך פלט כולל: {formatPreciseTime(planDuration(plan))}</span>
           </div>
-          {mode === "split" && plan.length > 0 && (
+
+          {plan.length > 1 && (
+            <div
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2"
+              data-testid="join-output-row"
+            >
+              <div className="min-w-0">
+                <Label htmlFor="join-output" className="text-sm font-medium">
+                  {joinOutput ? "קובץ אחד מחובר" : `${plan.length} קבצים נפרדים`}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {joinOutput
+                    ? mode === "remove"
+                      ? "החלקים המסומנים נעלמים, והשאר מתחבר לקובץ אחד רצוף"
+                      : "הקטעים יתחברו לקובץ אחד, לפי הסדר שלמטה"
+                    : "כל קטע יישמר כקובץ נפרד"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Link2 className="h-4 w-4 text-muted-foreground" />
+                <Switch
+                  id="join-output"
+                  checked={joinOutput}
+                  onCheckedChange={setJoinOutput}
+                  data-testid="join-output-toggle"
+                />
+              </div>
+            </div>
+          )}
+
+          {plan.length > 1 && (
             <div className="rounded-lg border bg-muted/10 p-3" data-testid="split-output-order">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold">סדר החלקים בפלט</p>
-                  <p className="text-xs text-muted-foreground">גרור כל חלק למיקום הרצוי. המספרים הם סדר השמירה והאיחוד.</p>
+                  <p className="text-xs text-muted-foreground">
+                    גרור כל חלק למיקום הרצוי. {joinOutput
+                      ? "זה הסדר שבו הם יתחברו בקובץ המאוחד."
+                      : "המספרים הם סדר השמירה של הקבצים."}
+                  </p>
                 </div>
-                <div className="flex items-center gap-2 text-[11px]">
-                  <span className="rounded border border-orange-300 bg-orange-100 px-2 py-1 text-orange-900">כתום: מסומן</span>
-                  <span className="rounded border border-sky-300 bg-sky-100 px-2 py-1 text-sky-900">כחול: נשאר</span>
-                </div>
+                {mode === "split" && (
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <span className="rounded border border-orange-300 bg-orange-100 px-2 py-1 text-orange-900">כתום: מסומן</span>
+                    <span className="rounded border border-sky-300 bg-sky-100 px-2 py-1 text-sky-900">כחול: נשאר</span>
+                  </div>
+                )}
               </div>
               <DndContext sensors={reorderSensors} collisionDetection={closestCenter} onDragEnd={reorderSegments}>
                 <SortableContext items={plan.map(segmentKey)} strategy={verticalListSortingStrategy}>

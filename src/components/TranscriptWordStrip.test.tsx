@@ -222,6 +222,49 @@ describe("מה נשלח לחיתוך", () => {
     expect(onMarkRange.mock.calls[0][0].endSec).toBe(4.5);
   });
 
+  it("כפתור מחק מבקש מחיקה, לא סימון סתם", () => {
+    const { onMarkRange } = setup();
+    fireEvent.pointerDown(wordAt(1), { button: 0 });
+    fireEvent.click(screen.getByTestId("delete-selection"));
+    expect(onMarkRange).toHaveBeenCalledTimes(1);
+    expect(onMarkRange.mock.calls[0][1]).toBe("remove");
+  });
+
+  it("כפתור ייצא מבקש ייצוא", () => {
+    const { onMarkRange } = setup();
+    fireEvent.pointerDown(wordAt(1), { button: 0 });
+    fireEvent.click(screen.getByTestId("export-selection"));
+    expect(onMarkRange.mock.calls[0][1]).toBe("keep");
+  });
+
+  it("סימון בלבד אינו קובע מה לעשות עם הקטע", () => {
+    const { onMarkRange } = setup();
+    fireEvent.pointerDown(wordAt(1), { button: 0 });
+    fireEvent.click(screen.getByTestId("mark-selection"));
+    expect(onMarkRange.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it("מחיקה וייצוא שולחים בדיוק את הטווח שסומן", () => {
+    const { onMarkRange } = setup();
+    fireEvent.pointerDown(wordAt(1), { button: 0 });
+    fireEvent.pointerEnter(wordAt(3));
+    fireEvent.click(screen.getByTestId("delete-selection"));
+    const range = onMarkRange.mock.calls[0][0];
+    expect(range.startSec).toBeCloseTo(0.55, 5);
+    expect(range.endSec).toBeCloseTo(2.6, 5);
+  });
+
+  it("אחרי מחיקה הסימון הזמני מתנקה, ואפשר לסמן קטע נוסף", () => {
+    const { onMarkRange } = setup();
+    fireEvent.pointerDown(wordAt(1), { button: 0 });
+    fireEvent.click(screen.getByTestId("delete-selection"));
+    expect(screen.queryByTestId("word-selection-bar")).not.toBeInTheDocument();
+
+    fireEvent.pointerDown(wordAt(5), { button: 0 });
+    fireEvent.click(screen.getByTestId("delete-selection"));
+    expect(onMarkRange).toHaveBeenCalledTimes(2);
+  });
+
   it("בלי בחירה אין שורת פעולות", () => {
     setup();
     expect(screen.queryByTestId("word-selection-bar")).not.toBeInTheDocument();

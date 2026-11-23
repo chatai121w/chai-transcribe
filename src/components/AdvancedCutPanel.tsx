@@ -706,9 +706,11 @@ function CutJobCard({
                   disabled={selectedSegments.size < 2 || isMerging}
                   onClick={() => onMergeResults(
                     job,
+                    // לפי סדר הקטעים בתכנית — זה הסדר שנקבע בגרירה.
+                    // מיון לפי זמן היה מבטל את הגרירה בלי שאיש יידע.
                     job.results
                       .filter((result) => selectedSegments.has(result.segmentIndex))
-                      .sort((a, b) => a.startSec - b.startSec),
+                      .sort((a, b) => a.segmentIndex - b.segmentIndex),
                   )}
                 >
                   {isMerging ? <Loader2 className="h-4 w-4 animate-spin" /> : <Merge className="h-4 w-4" />}
@@ -807,6 +809,8 @@ export default function AdvancedCutPanel({
   const [cutMode, setCutMode] = useState<CutMode>("manual");
   const [editorMode, setEditorMode] = useState<"visual" | CutMode>("visual");
   const [visualSelectionMode, setVisualSelectionMode] = useState<AudioSelectionMode>("keep");
+  /** לחבר את הקטעים שייצאו לקובץ אחד, מיד בסיום החיתוך. */
+  const [joinVisualOutput, setJoinVisualOutput] = useState(false);
 
   // Manual mode rows
   const [manualRows, setManualRows] = useState<ManualSegmentRow[]>([createSegmentRow()]);
@@ -1002,6 +1006,65 @@ export default function AdvancedCutPanel({
     }
   }
 
+  /**
+   * מחבר כמה קטעים לקובץ אחד.
+   *
+   * הסדר הוא הסדר שבו הקטעים נמסרים כאן, ולא סדר הזמן שלהם בקובץ
+   * המקורי. זה מה שמאפשר לגרור ולקבוע שהקטע השלישי יהיה ראשון.
+   * עד היום הייתה כאן מיון לפי זמן ששתק את הגרירה לגמרי.
+   *
+   * `replacePieces` מחליף את הקטעים הבודדים בקובץ המאוחד במקום
+   * להוסיף אותו לידם. זה הנכון למחיקה: המשתמש ביקש קובץ אחד שבו
+   * החלק נעלם, ולא שלושה קבצים שעליו לבחור ביניהם.
+   */
+  const joinResults = useCallback(async (
+    job: CutJob,
+    results: CutResult[],
+    options: { replacePieces?: boolean } = {},
+  ) => {
+    if (results.length < 2 || mergingJobs[job.id]) return;
+    const replacePieces = options.replacePieces ?? false;
+    setMergingJobs((current) => ({ ...current, [job.id]: true }));
+    try {
+      const baseName = job.sourceFileName.replace(/\.[^.]+$/, "");
+      const mergedFile = await mergeAudioFiles(
+        results.map((result) => result.file),
+        replacePieces ? `${baseName}-רצוף` : `${baseName}-מאוחד`,
+      );
+      const mergedResult: CutResult = {
+        segmentIndex: replacePieces ? 0 : Math.max(-1, ...job.results.map((result) => result.segmentIndex)) + 1,
+        file: mergedFile,
+        label: replacePieces ? "קובץ אחד רצוף" : `מאוחד (${results.length} קטעים)`,
+        startSec: results[0].startSec,
+        endSec: results[results.length - 1].endSec,
+        durationSec: results.reduce((total, result) => total + result.durationSec, 0),
+        sizeBytes: mergedFile.size,
+      };
+      setCutJobs((current) => current.map((candidate) => {
+        if (candidate.id !== job.id) return candidate;
+        const nextResults = replacePieces ? [mergedResult] : [...candidate.results, mergedResult];
+        return {
+          ...candidate,
+          results: nextResults,
+          totalSegments: nextResults.length,
+          completedSegments: nextResults.length,
+        };
+      }));
+      toast({
+        title: replacePieces ? "הקטעים חוברו לקובץ אחד" : "האיחוד הושלם",
+        description: `${results.length} קטעים חוברו לפי הסדר שנבחר`,
+      });
+    } catch (error) {
+      toast({
+        title: "האיחוד נכשל",
+        description: error instanceof Error ? error.message : String(error),
+        variant: "destructive",
+      });
+    } finally {
+      setMergingJobs((current) => ({ ...current, [job.id]: false }));
+    }
+  }, [mergingJobs]);
+
   const handleSubmitCut = useCallback(async () => {
     if (!sourceFile) {
       toast({ title: "לא נבחר קובץ", variant: "destructive" });
@@ -1082,6 +1145,17 @@ export default function AdvancedCutPanel({
         title: "חיתוך הושלם",
         description: `${outcome.results.length} קטעים נוצרו באמצעות ${engineLabel[outcome.tier]}`,
       });
+
+      /**
+       * חיבור לקובץ אחד, אם המשתמש ביקש. נעשה כאן ולא בכפתור נפרד,
+       * כי כשמוחקים קטע מהאמצע רוצים קובץ אחד שבו החלק נעלם — לא
+       * שני קבצים ועוד פעולה ידנית. הסדר הוא סדר הקטעים בתכנית,
+       * כלומר הסדר שנקבע בגרירה.
+       */
+      if (joinVisualOutput && editorMode === "visual" && outcome.results.length >= 2) {
+        const inPlanOrder = [...outcome.results].sort((a, b) => a.segmentIndex - b.segmentIndex);
+        await joinResults(completedJob, inPlanOrder, { replacePieces: true });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setCutJobs((prev) => prev.map((job) => job.id === jobId ? {
@@ -1095,7 +1169,8 @@ export default function AdvancedCutPanel({
       setIsSubmittingCut(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceFile, sourceDuration, cutMode, manualRows, chunkMinutes, chunkSeconds, partCount, isSubmittingCut, previewSegments.length]);
+  }, [sourceFile, sourceDuration, cutMode, manualRows, chunkMinutes, chunkSeconds, partCount,
+      isSubmittingCut, previewSegments.length, joinVisualOutput, editorMode, joinResults]);
 
   // Manual row management
   const addManualRow = useCallback(() => {
@@ -1129,38 +1204,23 @@ export default function AdvancedCutPanel({
     setChunkSeconds("0");
   }, []);
 
-  const handleVisualPlanChange = useCallback((segments: CutSegment[], selectionMode: AudioSelectionMode) => {
+  const handleVisualPlanChange = useCallback((
+    segments: CutSegment[],
+    selectionMode: AudioSelectionMode,
+    joinOutput: boolean,
+  ) => {
     setVisualSelectionMode(selectionMode);
+    setJoinVisualOutput(joinOutput);
     setCutMode("manual");
     setManualRows(segments.length > 0
       ? segments.map((segment) => createSegmentRow(segment.startSec, segment.endSec, segment.label))
       : [createSegmentRow()]);
   }, []);
 
-  const handleMergeResults = useCallback(async (job: CutJob, results: CutResult[]) => {
-    if (results.length < 2 || mergingJobs[job.id]) return;
-    setMergingJobs((current) => ({ ...current, [job.id]: true }));
-    try {
-      const mergedFile = await mergeAudioFiles(results.map((result) => result.file), `${job.sourceFileName.replace(/\.[^.]+$/, "")}-מאוחד`);
-      const mergedResult: CutResult = {
-        segmentIndex: Math.max(-1, ...job.results.map((result) => result.segmentIndex)) + 1,
-        file: mergedFile,
-        label: `מאוחד (${results.length} קטעים)`,
-        startSec: results[0].startSec,
-        endSec: results[results.length - 1].endSec,
-        durationSec: results.reduce((total, result) => total + result.durationSec, 0),
-        sizeBytes: mergedFile.size,
-      };
-      setCutJobs((current) => current.map((candidate) => candidate.id === job.id
-        ? { ...candidate, results: [...candidate.results, mergedResult], totalSegments: candidate.results.length + 1, completedSegments: candidate.results.length + 1 }
-        : candidate));
-      toast({ title: "האיחוד הושלם", description: `${results.length} קטעים אוחדו לפי סדר הזמן` });
-    } catch (error) {
-      toast({ title: "האיחוד נכשל", description: error instanceof Error ? error.message : String(error), variant: "destructive" });
-    } finally {
-      setMergingJobs((current) => ({ ...current, [job.id]: false }));
-    }
-  }, [mergingJobs]);
+  const handleMergeResults = useCallback(
+    (job: CutJob, results: CutResult[]) => joinResults(job, results, { replacePieces: false }),
+    [joinResults],
+  );
 
   // Download all results from a job
   const handleDownloadAll = useCallback((job: CutJob) => {
