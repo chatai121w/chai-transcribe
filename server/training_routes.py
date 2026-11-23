@@ -309,6 +309,38 @@ def resolve_trained_model(model_id: str) -> Optional[str]:
     return None
 
 
+def explain_unusable_model(model_id: str) -> str:
+    """Say why a trained model cannot be used, instead of guessing.
+
+    A model can be unusable for three different reasons, and telling the
+    user the wrong one sends them to fix the wrong thing. A pointer left
+    behind after its files were deleted used to be reported as "failed the
+    quality gate", which is simply untrue and unfixable by retraining.
+    """
+    if not model_id.startswith("lora:"):
+        return "this is not a trained model id"
+    if not TRAINED_MODELS_FILE.is_file():
+        return "no trained model is registered on this machine"
+    try:
+        entries = json.loads(TRAINED_MODELS_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return f"the trained model registry could not be read: {exc}"
+
+    entry = next((item for item in entries if item.get("model_id") == model_id), None)
+    if entry is None:
+        return "this model is not in the trained model registry any more"
+
+    path = entry.get("ct2_path", "")
+    if not path or not Path(path).is_dir():
+        return f"the model files are gone from disk ({path or 'no path recorded'})"
+
+    quality_passed, reasons = _model_quality_gate(entry)
+    if not quality_passed:
+        detail = "; ".join(reasons) if reasons else "no passing comparable WER/CER holdout"
+        return f"the model did not pass the holdout quality gate: {detail}"
+    return "unknown reason"
+
+
 # ─────────────────────────────────────────────────────────────────────
 #  Route registration — call from transcribe_server.py
 # ─────────────────────────────────────────────────────────────────────
@@ -667,7 +699,7 @@ def register_training_routes(app):
                 return jsonify({
                     "active": None,
                     "suspended": active,
-                    "reason": "the previously active model does not have a passing comparable WER/CER holdout",
+                    "reason": explain_unusable_model(active),
                 })
             return jsonify(data)
         except Exception as e:
