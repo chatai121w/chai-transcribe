@@ -497,6 +497,14 @@ function CutJobCard({
   isMerging: boolean;
 }) {
   const [expanded, setExpanded] = useState(job.status === "done");
+  /**
+   * הכרטיס נוצר כשהחיתוך רק מתחיל, ולכן השורה שמעל קבעה "מקופל"
+   * ולא שינתה את דעתה לעולם: הקטעים שנוצרו נשארו מוסתרים, והמשתמש
+   * היה צריך לנחש שיש שם משהו וללחוץ. נפתח מעצמו כשהחיתוך מסתיים.
+   */
+  useEffect(() => {
+    if (job.status === "done") setExpanded(true);
+  }, [job.status]);
   const [selectedSegments, setSelectedSegments] = useState<Set<number>>(new Set());
   const resultIndexes = useMemo(() => job.results.map((result) => result.segmentIndex), [job.results]);
   const allSegmentsSelected = resultIndexes.length > 0 && resultIndexes.every((index) => selectedSegments.has(index));
