@@ -5,10 +5,12 @@ import { CSS } from "@dnd-kit/utilities";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.esm.js";
 import TimelinePlugin from "wavesurfer.js/dist/plugins/timeline.esm.js";
-import { GripVertical, Pause, Play, Plus, RotateCcw, Trash2, Volume2, ZoomIn } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical, Magnet, Pause, Play, Plus, RotateCcw, Trash2, Volume2, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
   buildAudioEditPlan,
@@ -17,6 +19,16 @@ import {
   type AudioSelectionMode,
 } from "@/lib/audioEditPlan";
 import type { CutSegment } from "@/lib/audioCutEngine";
+import TranscriptWordStrip from "@/components/TranscriptWordStrip";
+import {
+  buildQuietEnvelope,
+  snapRangeToQuiet,
+  type CutWord,
+  type QuietEnvelope,
+} from "@/lib/transcriptCut";
+
+/** כמה מזיזה לחיצה אחת על כפתור הכוונון העדין. */
+const NUDGE_SEC = 0.05;
 
 const MODE_REGION_COLORS: Record<AudioSelectionMode, string> = {
   keep: "rgba(34, 197, 94, 0.30)",
@@ -87,9 +99,14 @@ interface VisualAudioCutEditorProps {
   file: File;
   durationSec: number;
   onPlanChange: (segments: CutSegment[], mode: AudioSelectionMode) => void;
+  /**
+   * התמלול של הקובץ, מילה-מילה עם זמנים. כשהוא קיים מופיעה רצועת
+   * המילים ואפשר לסמן לחיתוך מתוך הטקסט.
+   */
+  words?: CutWord[];
 }
 
-export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }: VisualAudioCutEditorProps) {
+export default function VisualAudioCutEditor({ file, durationSec, onPlanChange, words }: VisualAudioCutEditorProps) {
   const waveformRef = useRef<HTMLDivElement>(null);
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
@@ -102,6 +119,9 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
   const [zoom, setZoom] = useState(0);
   const [activeRegionId, setActiveRegionId] = useState<string | null>(null);
   const [segmentOrder, setSegmentOrder] = useState<string[]>([]);
+  const [envelope, setEnvelope] = useState<QuietEnvelope | null>(null);
+  const [snapToQuiet, setSnapToQuiet] = useState(true);
+  const [snapNote, setSnapNote] = useState<string | null>(null);
   const modeRef = useRef<AudioSelectionMode>(mode);
   const reorderSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -181,6 +201,81 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
     if (!ready) return;
     wavesurferRef.current?.zoom(zoom);
   }, [ready, zoom]);
+
+  /**
+   * מעטפת העוצמה נבנית רק כשיש תמלול, כי רק אז צריך אותה — להצמדת
+   * החיתוך לרגע השקט. האודיו כבר מפוענח בזיכרון של רכיב הגל, ולכן
+   * אין כאן פיענוח נוסף.
+   */
+  useEffect(() => {
+    if (!ready || !words?.length) {
+      setEnvelope(null);
+      return;
+    }
+    const decoded = wavesurferRef.current?.getDecodedData();
+    const channel = decoded?.numberOfChannels ? decoded.getChannelData(0) : null;
+    if (!channel?.length || !decoded) {
+      setEnvelope(null);
+      return;
+    }
+    setEnvelope(buildQuietEnvelope(channel, decoded.sampleRate));
+  }, [ready, words]);
+
+  const seekToTime = useCallback((seconds: number) => {
+    const wavesurfer = wavesurferRef.current;
+    if (!wavesurfer || !ready) return;
+    wavesurfer.setTime(Math.max(0, Math.min(durationSec, seconds)));
+  }, [ready, durationSec]);
+
+  const previewRange = useCallback((range: AudioRange) => {
+    const wavesurfer = wavesurferRef.current;
+    if (!wavesurfer || !ready) return;
+    wavesurfer.play(range.startSec, range.endSec);
+  }, [ready]);
+
+  /**
+   * סימון מהטקסט הופך לאזור חיתוך אמיתי על הגל.
+   * זמני המילים מדויקים בעשיריות שנייה בלבד, ולכן לפני שמסמנים
+   * מזיזים כל קצה לרגע השקט הקרוב — אם באמת נמצא שם שקט.
+   */
+  const markRangeFromWords = useCallback((range: AudioRange) => {
+    const plugin = regionsRef.current;
+    if (!plugin) return;
+
+    const snapped = snapToQuiet && envelope ? snapRangeToQuiet(range, envelope) : range;
+    const movedStart = Math.abs(snapped.startSec - range.startSec);
+    const movedEnd = Math.abs(snapped.endSec - range.endSec);
+
+    const region = plugin.addRegion({
+      start: snapped.startSec,
+      end: snapped.endSec,
+      color: MODE_REGION_COLORS[modeRef.current],
+      drag: true,
+      resize: true,
+      minLength: 0.25,
+    });
+    setActiveRegionId(region.id);
+    setSnapNote(
+      movedStart > 0.004 || movedEnd > 0.004
+        ? `הקצוות הוזזו לשקט: התחלה ${movedStart.toFixed(2)} שניות, סוף ${movedEnd.toFixed(2)} שניות`
+        : null,
+    );
+  }, [envelope, snapToQuiet]);
+
+  /** כוונון עדין של קצה אחד באזור המסומן, בלי לגעת בקצה השני. */
+  const nudgeActiveRegion = useCallback((edge: "start" | "end", deltaSec: number) => {
+    const region = regionsRef.current?.getRegions().find((candidate) => candidate.id === activeRegionId);
+    if (!region) return;
+    if (edge === "start") {
+      const start = Math.min(Math.max(0, region.start + deltaSec), region.end - 0.05);
+      region.setOptions({ start, end: region.end });
+    } else {
+      const end = Math.max(Math.min(durationSec, region.end + deltaSec), region.start + 0.05);
+      region.setOptions({ start: region.start, end });
+    }
+    setSnapNote(null);
+    syncRanges();
+  }, [activeRegionId, durationSec, syncRanges]);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -304,6 +399,42 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
         <Slider className="w-32" min={0} max={200} step={5} value={[zoom]} onValueChange={([value]) => setZoom(value)} />
       </div>
 
+      {words?.length ? (
+        <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-3" data-testid="transcript-cut-area">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold">חיתוך לפי הטקסט</h4>
+            <div className="flex items-center gap-2">
+              <Magnet className="h-3.5 w-3.5 text-muted-foreground" />
+              <Label htmlFor="snap-to-quiet" className="text-xs text-muted-foreground">
+                הצמד את החיתוך לרגע השקט
+              </Label>
+              <Switch
+                id="snap-to-quiet"
+                checked={snapToQuiet}
+                onCheckedChange={setSnapToQuiet}
+                disabled={!envelope}
+                data-testid="snap-toggle"
+              />
+            </div>
+          </div>
+
+          <TranscriptWordStrip
+            words={words}
+            currentTime={currentTime}
+            durationSec={durationSec}
+            markedRanges={ranges}
+            following={playing}
+            onSeek={seekToTime}
+            onMarkRange={markRangeFromWords}
+            onPreviewRange={previewRange}
+          />
+
+          {snapNote && (
+            <p className="text-xs text-muted-foreground" data-testid="snap-note">{snapNote}</p>
+          )}
+        </div>
+      ) : null}
+
       <div className="grid gap-2 md:grid-cols-3" role="radiogroup" aria-label="מה לעשות באזורים המסומנים">
         {(Object.keys(MODE_META) as AudioSelectionMode[]).map((option) => {
           const meta = MODE_META[option];
@@ -374,21 +505,74 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange }
                 <div
                   key={range.id}
                   className={cn(
-                    "flex items-center gap-2 rounded-lg border px-2 py-2 text-xs",
+                    "rounded-lg border px-2 py-2 text-xs",
                     activeRegionId === range.id && "ring-2 ring-primary/40",
                   )}
                   style={{ borderInlineStart: `5px solid ${MODE_REGION_COLORS[mode].replace(/0\.\d+\)/, "0.9)")}` }}
                 >
-                  <Badge variant="outline" className="h-6 w-6 justify-center p-0">{index + 1}</Badge>
-                  <button type="button" className="min-w-0 flex-1 text-right font-mono" onClick={() => region && playRegion(region)}>
-                    {formatPreciseTime(range.startSec)} ← {formatPreciseTime(range.endSec)}
-                  </button>
-                  <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="נגן אזור" onClick={() => region && playRegion(region)}>
-                    <Play className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="מחק סימון" onClick={() => region?.remove()}>
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="h-6 w-6 justify-center p-0">{index + 1}</Badge>
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 text-right font-mono"
+                      data-testid="range-times"
+                      onClick={() => region && playRegion(region)}
+                    >
+                      {formatPreciseTime(range.startSec)} ← {formatPreciseTime(range.endSec)}
+                    </button>
+                    <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="נגן אזור" onClick={() => region && playRegion(region)}>
+                      <Play className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-destructive" title="מחק סימון" onClick={() => region?.remove()}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+
+                  {activeRegionId === range.id && (
+                    <div
+                      className="mt-2 flex items-center justify-between gap-1 border-t pt-2 text-[11px] text-muted-foreground"
+                      data-testid={`nudge-row-${range.id}`}
+                    >
+                      <span>כוונון התחלה</span>
+                      <div className="flex items-center gap-0.5">
+                        <Button
+                          type="button" size="icon" variant="outline" className="h-6 w-6"
+                          title="התחלה מוקדם ב-50 אלפיות שנייה"
+                          data-testid="nudge-start-back"
+                          onClick={() => nudgeActiveRegion("start", -NUDGE_SEC)}
+                        >
+                          <ChevronRight className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          type="button" size="icon" variant="outline" className="h-6 w-6"
+                          title="התחלה מאוחר ב-50 אלפיות שנייה"
+                          data-testid="nudge-start-forward"
+                          onClick={() => nudgeActiveRegion("start", NUDGE_SEC)}
+                        >
+                          <ChevronLeft className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      <span>כוונון סוף</span>
+                      <div className="flex items-center gap-0.5">
+                        <Button
+                          type="button" size="icon" variant="outline" className="h-6 w-6"
+                          title="סוף מוקדם ב-50 אלפיות שנייה"
+                          data-testid="nudge-end-back"
+                          onClick={() => nudgeActiveRegion("end", -NUDGE_SEC)}
+                        >
+                          <ChevronRight className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          type="button" size="icon" variant="outline" className="h-6 w-6"
+                          title="סוף מאוחר ב-50 אלפיות שנייה"
+                          data-testid="nudge-end-forward"
+                          onClick={() => nudgeActiveRegion("end", NUDGE_SEC)}
+                        >
+                          <ChevronLeft className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

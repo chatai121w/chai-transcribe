@@ -91,8 +91,20 @@ import {
   Cloud,
   HardDrive,
   Merge,
+  Type,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLocalServer } from "@/hooks/useLocalServer";
+import type { CutWord } from "@/lib/transcriptCut";
+
+/**
+ * המנוע לתמלול שנועד לחיתוך.
+ *
+ * לחיתוך צריך את *הזמנים* של המילים, לא דיוק מושלם בכל אות. המנוע
+ * המהיר של ivrit נותן את הזמנים באותה איכות ובשישית מהזמן של המנוע
+ * המדויק — שלוש דקות אודיו בשלושים שניות, נמדד.
+ */
+const CUT_TRANSCRIBE_MODEL = "ivrit-ai/whisper-large-v3-turbo-ct2";
 
 // ─── Convert helper ──────────────────────────────────────────────────────────
 
@@ -821,6 +833,15 @@ export default function AdvancedCutPanel({
   const { submitBatchJobs } = useTranscriptionJobs();
   const { preferences } = useCloudPreferences();
 
+  // ── תמלול לצורך חיתוך לפי טקסט ──────────────────────────────────────────
+  const localServer = useLocalServer();
+  const [cutWords, setCutWords] = useState<CutWord[] | null>(null);
+  /** לאיזה קובץ שייכות המילים — כדי שתמלול של קובץ אחד לא יודבק לאחר. */
+  const [cutWordsFileKey, setCutWordsFileKey] = useState<string | null>(null);
+  const [transcribingForCut, setTranscribingForCut] = useState(false);
+  const [cutTranscribeProgress, setCutTranscribeProgress] = useState(0);
+  const [cutTranscribeError, setCutTranscribeError] = useState<string | null>(null);
+
   // Set initial file
   useEffect(() => {
     if (initialFile) {
@@ -828,6 +849,61 @@ export default function AdvancedCutPanel({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialFile]);
+
+  const sourceFileKey = useMemo(
+    () => (sourceFile ? `${sourceFile.name}-${sourceFile.size}-${sourceFile.lastModified}` : null),
+    [sourceFile],
+  );
+
+  /**
+   * תמלול שייך לקובץ שממנו נוצר. אם הוחלף הקובץ, המילים הישנות
+   * נמחקות — אחרת היו מסמנים חיתוך לפי זמנים של קובץ אחר.
+   */
+  useEffect(() => {
+    if (cutWordsFileKey && cutWordsFileKey !== sourceFileKey) {
+      setCutWords(null);
+      setCutWordsFileKey(null);
+      setCutTranscribeError(null);
+      setCutTranscribeProgress(0);
+    }
+  }, [sourceFileKey, cutWordsFileKey]);
+
+  const transcribeForCut = useCallback(async () => {
+    if (!sourceFile || transcribingForCut) return;
+    const fileKey = `${sourceFile.name}-${sourceFile.size}-${sourceFile.lastModified}`;
+    setTranscribingForCut(true);
+    setCutTranscribeError(null);
+    setCutTranscribeProgress(0);
+    try {
+      const result = await localServer.transcribeStream(
+        sourceFile,
+        CUT_TRANSCRIBE_MODEL,
+        "he",
+        (partial) => setCutTranscribeProgress(partial.progress ?? 0),
+        undefined,
+        { preset: "balanced" },
+      );
+      const words = (result.wordTimings || []).filter(
+        (word) => Number.isFinite(word.start) && Number.isFinite(word.end),
+      );
+      if (!words.length) {
+        setCutTranscribeError("התמלול הסתיים אבל לא חזרו זמני מילים — בלעדיהם אין חיתוך לפי טקסט.");
+        return;
+      }
+      setCutWords(words);
+      setCutWordsFileKey(fileKey);
+      toast({
+        title: "התמלול מוכן לחיתוך",
+        description: `${words.length} מילים עם זמנים. לחץ על מילה כדי לקפוץ אליה, סמן משפט כדי לחתוך אותו.`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "התמלול נכשל";
+      setCutTranscribeError(message);
+      toast({ title: "התמלול נכשל", description: message, variant: "destructive" });
+    } finally {
+      setTranscribingForCut(false);
+    }
+  }, [sourceFile, transcribingForCut, localServer]);
 
   useEffect(() => {
     if (initialPreset === "halves") {
@@ -1524,12 +1600,59 @@ export default function AdvancedCutPanel({
 
               {/* Mode-specific config */}
               {editorMode === "visual" && (
-                <VisualAudioCutEditor
-                  key={`${sourceFile.name}-${sourceFile.size}-${sourceFile.lastModified}`}
-                  file={sourceFile}
-                  durationSec={sourceDuration}
-                  onPlanChange={handleVisualPlanChange}
-                />
+                <div className="space-y-3">
+                  {!cutWords && (
+                    <div
+                      className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 p-3"
+                      data-testid="transcribe-for-cut-bar"
+                    >
+                      <Type className="h-4 w-4 shrink-0 text-primary" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">חיתוך לפי הטקסט</p>
+                        <p className="text-xs text-muted-foreground">
+                          תמלל את הקובץ, ואז תוכל ללחוץ על מילה כדי לקפוץ אליה בנגן, ולסמן משפט כדי לחתוך אותו בדיוק.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void transcribeForCut()}
+                        disabled={transcribingForCut}
+                        data-testid="transcribe-for-cut"
+                      >
+                        {transcribingForCut ? (
+                          <>
+                            <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
+                            מתמלל… {Math.round(cutTranscribeProgress)}%
+                          </>
+                        ) : (
+                          <>
+                            <Type className="me-1.5 h-3.5 w-3.5" />
+                            תמלל לחיתוך
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
+
+                  {transcribingForCut && (
+                    <Progress value={cutTranscribeProgress} className="h-1.5" />
+                  )}
+
+                  {cutTranscribeError && (
+                    <p className="text-xs text-destructive" data-testid="cut-transcribe-error">
+                      {cutTranscribeError}
+                    </p>
+                  )}
+
+                  <VisualAudioCutEditor
+                    key={`${sourceFile.name}-${sourceFile.size}-${sourceFile.lastModified}`}
+                    file={sourceFile}
+                    durationSec={sourceDuration}
+                    onPlanChange={handleVisualPlanChange}
+                    words={cutWords ?? undefined}
+                  />
+                </div>
               )}
               {editorMode !== "visual" && (
               <div className="border rounded-xl p-3 sm:p-4 space-y-3 bg-muted/10">

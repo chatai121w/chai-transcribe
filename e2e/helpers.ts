@@ -230,6 +230,15 @@ export async function injectAuthSession(page: Page) {
     };
     const storageKey = 'sb-pycryoyipkymaqorgpjy-auth-token';
     localStorage.setItem(storageKey, JSON.stringify(session));
+
+    /**
+     * מדריך הפתיחה נפתח כחלון מעל הדף בכניסה ראשונה לכל לשונית,
+     * והוא חוסם כל לחיצה מתחתיו. משתמש אמיתי סוגר אותו פעם אחת
+     * ולא רואה אותו שוב; בבדיקה כל הרצה היא כניסה ראשונה, ולכן
+     * הוא הפיל בדיקות שאינן קשורות אליו בכלל. מכובה כאן, במקום
+     * אחד, לכל הבדיקות.
+     */
+    localStorage.setItem('tabGuide.disabledAll', '1');
   });
 }
 
@@ -239,8 +248,22 @@ export async function injectAuthSession(page: Page) {
 export async function mockLocalServer(page: Page, options?: {
   connected?: boolean;
   model?: string;
+  /**
+   * זמני מילים שהתמלול המדומה יחזיר. ברירת המחדל ריקה, כמו עד כה,
+   * כדי שבדיקות קיימות לא ישתנו. בדיקה שבוחנת חיתוך לפי טקסט חייבת
+   * לספק זמנים אמיתיים — בלעדיהם אין מה לסמן.
+   */
+  wordTimings?: Array<{ word: string; start: number; end: number; probability?: number }>;
+  text?: string;
+  durationSec?: number;
 }) {
-  const { connected = false, model = 'ivrit-ai/whisper-large-v3-turbo' } = options ?? {};
+  const {
+    connected = false,
+    model = 'ivrit-ai/whisper-large-v3-turbo',
+    wordTimings = [],
+    text = 'טקסט תמלול מוק',
+    durationSec = 5,
+  } = options ?? {};
 
   // Mock both direct localhost:3000 AND the Vite /whisper proxy path
   const healthPatterns = ['**/localhost:3000/health', '**/whisper/health'];
@@ -284,12 +307,13 @@ export async function mockLocalServer(page: Page, options?: {
     await page.route(pattern, async (route) => {
       if (!connected) return route.abort('connectionrefused');
       // Return a simple SSE mock with a done event
+      const words = JSON.stringify(wordTimings);
       const sseBody = [
-        'data: {"type":"source","duration":5.0,"audio_session_id":"audio-session-e2e","session_reused":true}\n\n',
-        'data: {"type":"preprocessing","duration":5.0,"message":"Preparing audio and VAD"}\n\n',
-        'data: {"type":"info","duration":5.0}\n\n',
-        'data: {"type":"segment","text":"טקסט תמלול מוק","progress":100,"words":[]}\n\n',
-        'data: {"type":"done","text":"טקסט תמלול מוק","duration":5.0,"language":"he","model":"' + model + '","processing_time":1.2,"wordTimings":[]}\n\n',
+        `data: {"type":"source","duration":${durationSec},"audio_session_id":"audio-session-e2e","session_reused":true}\n\n`,
+        `data: {"type":"preprocessing","duration":${durationSec},"message":"Preparing audio and VAD"}\n\n`,
+        `data: {"type":"info","duration":${durationSec}}\n\n`,
+        `data: {"type":"segment","text":${JSON.stringify(text)},"progress":100,"words":${words}}\n\n`,
+        `data: {"type":"done","text":${JSON.stringify(text)},"duration":${durationSec},"language":"he","model":"${model}","processing_time":1.2,"wordTimings":${words}}\n\n`,
       ].join('');
       return route.fulfill({
         status: 200,
