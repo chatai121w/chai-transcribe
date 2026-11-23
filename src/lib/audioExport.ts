@@ -201,8 +201,14 @@ export function softClip(v: number): number {
   return v < 0 ? -shaped : shaped;
 }
 
-/** מחזיר עותק מוגבר ומרוכך. המקור אינו משתנה. */
-export function applyGain(samples: Float32Array, gain: number): Float32Array {
+/**
+ * מחזיר עותק מוגבר ומרוכך. המקור אינו משתנה.
+ *
+ * טיפוס ההחזרה מציין במפורש שהעותק יושב על זיכרון רגיל. בלי זה
+ * בודק הטיפוסים סבר שאולי מדובר בזיכרון משותף בין מעבדים, וסירב
+ * להחזיר את התוצאה למשתנה שקיבל את הדגימות המקוריות.
+ */
+export function applyGain(samples: Float32Array, gain: number): Float32Array<ArrayBuffer> {
   const out = new Float32Array(samples.length);
   for (let i = 0; i < samples.length; i++) out[i] = softClip(samples[i] * gain);
   return out;

@@ -392,11 +392,50 @@ export function createTestAudioBuffer(): Buffer {
 }
 
 /**
+ * ממתין שהאפליקציה תסיים לעלות.
+ *
+ * בדף יש שלד פתיחה (`boot-skeleton`) שנמחק ברגע שהאפליקציה עולה.
+ * במצב פיתוח הטעינה אורכת כעשר שניות — יותר ממאתיים קבצים נטענים
+ * אחד-אחד — ובדיקה שבודקת מיד אחרי הניווט מוותרת אחרי חמש שניות
+ * ונכשלת על דף שעוד לא קיים. זה מה שהפיל בדיקות התחברות ותמלול
+ * באופן הפכפך: כשקבצים כבר היו בזיכרון הן עברו, וכשלא — נכשלו.
+ *
+ * כתובת שאינה האפליקציה אינה מכילה שלד כזה, ולכן ההמתנה מסתיימת
+ * מיד ואינה מפריעה.
+ */
+export async function waitForAppBoot(page: Page, timeoutMs = 30_000): Promise<void> {
+  try {
+    await page.waitForFunction(
+      () => !document.getElementById('boot-skeleton'),
+      undefined,
+      { timeout: timeoutMs },
+    );
+  } catch {
+    // האפליקציה לא עלתה בזמן. לא נכשלים כאן — הבדיקה עצמה תדווח
+    // על מה שחסר, וזה הסבר ברור יותר מאשר כישלון בהמתנה.
+  }
+}
+
+/**
  * Extended test fixture that provides common helpers.
  */
 export const test = base.extend<{
   authenticatedPage: Page;
 }>({
+  /**
+   * כל ניווט בבדיקה ממתין מעצמו שהאפליקציה תעלה. זה נעשה כאן, במקום
+   * אחד, ולא בכל אחת ממאתיים הקריאות לניווט שפזורות בבדיקות.
+   */
+  page: async ({ page }, provide) => {
+    const navigate = page.goto.bind(page);
+    (page as unknown as { goto: typeof page.goto }).goto = async (url, options) => {
+      const response = await navigate(url, options);
+      await waitForAppBoot(page);
+      return response;
+    };
+    await provide(page);
+  },
+
   authenticatedPage: async ({ page }, provide) => {
     await mockSupabase(page);
     await injectAuthSession(page);

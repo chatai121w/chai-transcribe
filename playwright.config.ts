@@ -38,6 +38,9 @@ const ciSmokeTests = [
 
 export default defineConfig({
   testDir: './e2e',
+  // מחמם את שרת הפיתוח פעם אחת, כדי שהבדיקה הראשונה לא תשלם את מחיר
+  // ההידור הראשוני ותיכשל על דף שעוד לא נבנה. ההסבר המלא בקובץ עצמו.
+  globalSetup: './e2e/global-setup.ts',
   outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR || 'test-results',
   testMatch: runSmokeSuite
     ? ciSmokeTests
@@ -53,6 +56,18 @@ export default defineConfig({
   workers: process.env.CI ? 2 : undefined,
   reporter: [['html', { open: 'never' }], ['list']],
   timeout: process.env.CI ? 45_000 : 180_000,
+
+  /**
+   * כמה זמן לחכות לכל בדיקה בודדת שמשהו יופיע במסך.
+   *
+   * ברירת המחדל היא חמש שניות, והיא נמוכה מדי כאן: במצב פיתוח
+   * האפליקציה נטענת כעשר שניות — יותר ממאתיים קבצים נטענים אחד-אחד
+   * ומסלול הדף עצמו נטען רק בסוף. לכן בדיקות נכשלו באופן הפכפך:
+   * כשהקבצים כבר היו בזיכרון מבדיקה קודמת הן עברו, וכשלא — ויתרו
+   * לפני שהדף הספיק להופיע. נמדד: דף ההתחברות מציג את כל תוכנו,
+   * כולל כפתור גוגל, אחרי כעשר שניות.
+   */
+  expect: { timeout: 20_000 },
   globalTimeout: process.env.CI ? 15 * 60_000 : undefined,
 
   use: {
