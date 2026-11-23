@@ -349,7 +349,11 @@ function CutResultRow({
   const displayFile = convertedFile ?? result.file;
 
   return (
-    <div className="border rounded-xl p-2.5 space-y-1.5 bg-card/50 hover:bg-card/80 transition-colors" dir="rtl">
+    <div
+      className="border rounded-xl p-2.5 space-y-1.5 bg-card/50 hover:bg-card/80 transition-colors"
+      dir="rtl"
+      data-testid="cut-result-row"
+    >
       <div className="flex flex-col sm:flex-row sm:items-center gap-2">
         <Checkbox
           checked={selected}
@@ -432,7 +436,14 @@ function CutResultRow({
           <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7" title="תמלל" onClick={onTranscribe}>
             <Mic className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7" title="הורד" onClick={onDownload}>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-9 w-9 sm:h-7 sm:w-7"
+            title="הורד"
+            data-testid="download-result"
+            onClick={onDownload}
+          >
             <Download className="w-3.5 h-3.5" />
           </Button>
           <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7 text-muted-foreground hover:text-destructive" title="מחק" onClick={onDelete}>
