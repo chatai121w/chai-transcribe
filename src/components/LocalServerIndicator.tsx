@@ -11,11 +11,9 @@ import { toast } from "@/hooks/use-toast";
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { nextPollDelayMs, checkTimeoutMs } from "@/lib/serverPollSchedule";
 
 type ServerState = 'checking' | 'up' | 'down' | 'starting';
-
-const POLL_UP_MS = 30_000;
-const POLL_DOWN_MS = 60_000;
 
 /**
  * Always-visible state of the local transcription server, with a one-click
@@ -31,9 +29,9 @@ export function LocalServerIndicator() {
   const [gpu, setGpu] = useState<string | null>(null);
   const startingSince = useRef<number>(0);
 
-  const check = useCallback(async () => {
+  const check = useCallback(async (checkIndex = 1) => {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 4000);
+    const timer = setTimeout(() => ctrl.abort(), checkTimeoutMs(checkIndex));
     try {
       const res = await fetchLocalServer(`${getServerUrl()}/health`, { signal: ctrl.signal });
       const data = await res.json();
@@ -64,10 +62,19 @@ export function LocalServerIndicator() {
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
+    let checkIndex = 0;
+    let failures = 0;
+    /*
+      אחרי כישלון בודקים שוב מהר. הבדיקה הראשונה יוצאת בדיוק כשהדף
+      עדיין נטען, ולפעמים נחתכת — ובלי בדיקה חוזרת מהירה המחוון היה
+      מראה "שרת כבוי" באדום דקה שלמה בזמן שהשרת עונה.
+    */
     const loop = async () => {
-      const up = await check();
+      const up = await check(checkIndex);
+      checkIndex += 1;
       if (cancelled) return;
-      timer = setTimeout(loop, up ? POLL_UP_MS : POLL_DOWN_MS);
+      failures = up ? 0 : failures + 1;
+      timer = setTimeout(loop, nextPollDelayMs(failures));
     };
     void loop();
     return () => { cancelled = true; clearTimeout(timer); };
