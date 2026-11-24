@@ -6,7 +6,7 @@ import { CSS } from "@dnd-kit/utilities";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.esm.js";
 import TimelinePlugin from "wavesurfer.js/dist/plugins/timeline.esm.js";
-import { ChevronLeft, ChevronRight, GripVertical, Link2, Magnet, Pause, Play, Plus, RotateCcw, Trash2, Volume2, ZoomIn } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical, Link2, Magnet, Pause, Play, Plus, Redo2, RotateCcw, Trash2, Undo2, Volume2, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,18 @@ import {
 } from "@/lib/audioEditPlan";
 import type { CutSegment } from "@/lib/audioCutEngine";
 import TranscriptWordStrip from "@/components/TranscriptWordStrip";
+import {
+  emptyHistory,
+  record as recordHistory,
+  undo as undoHistory,
+  redo as redoHistory,
+  canUndo as historyCanUndo,
+  canRedo as historyCanRedo,
+  sameSnapshot,
+  shouldOpenNewStep,
+  type History,
+  type MarkSnapshot,
+} from "@/lib/markHistory";
 import {
   buildQuietEnvelope,
   snapRangeToQuiet,
@@ -136,6 +148,15 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange, 
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+
+  /*
+    ביטול פעולה. הסימונים חיים בתוך רכיב גלי הקול ולא במשתנה של המסך,
+    ולכן מחזיקים כאן צילום של המצב הקודם ובונים אותו מחדש בעת הצורך.
+  */
+  const historyRef = useRef<History<MarkSnapshot>>(emptyHistory<MarkSnapshot>());
+  const lastSnapshotRef = useRef<MarkSnapshot>({ ranges: [], mode: "keep" });
+  const lastRecordAtRef = useRef(0);
+  const [historyTick, setHistoryTick] = useState(0);
 
   const syncRanges = useCallback(() => {
     const next = (regionsRef.current?.getRegions() || [])
@@ -313,6 +334,97 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange, 
     regionsRef.current?.getRegions().forEach((region) => region.setOptions({ color: MODE_REGION_COLORS[mode] }));
   }, [mode]);
 
+  /*
+    כל שינוי בסימונים נרשם, כדי שאפשר יהיה לבטל אותו: סימון מהטקסט,
+    גרירה על הגל, מחיקת סימון בודד, ניקוי הכול, כוונון עדין והחלפת
+    המצב. הרישום הוא של המצב *הקודם*, כי זה מה ש"בטל" צריך להחזיר.
+  */
+  useEffect(() => {
+    const next: MarkSnapshot = {
+      ranges: ranges.map(({ startSec, endSec }) => ({ startSec, endSec })),
+      mode,
+    };
+    if (sameSnapshot(lastSnapshotRef.current, next)) return;
+
+    const now = Date.now();
+    if (shouldOpenNewStep(lastSnapshotRef.current, next, now, lastRecordAtRef.current)) {
+      historyRef.current = recordHistory(historyRef.current, lastSnapshotRef.current);
+      lastRecordAtRef.current = now;
+      setHistoryTick((value) => value + 1);
+    }
+    lastSnapshotRef.current = next;
+  }, [ranges, mode]);
+
+  /** בונה מחדש את הסימונים מתוך צילום שמור. */
+  const applySnapshot = useCallback((snapshot: MarkSnapshot) => {
+    const plugin = regionsRef.current;
+    if (!plugin) return;
+    plugin.clearRegions();
+    snapshot.ranges.forEach((range) => {
+      plugin.addRegion({
+        start: range.startSec,
+        end: range.endSec,
+        color: MODE_REGION_COLORS[snapshot.mode as AudioSelectionMode],
+        drag: true,
+        resize: true,
+        minLength: 0.25,
+      });
+    });
+    modeRef.current = snapshot.mode as AudioSelectionMode;
+    setMode(snapshot.mode as AudioSelectionMode);
+    setActiveRegionId(null);
+    setSnapNote(null);
+    /*
+      מסמנים שזה המצב הנוכחי לפני שהמסך מתעדכן, אחרת הרישום האוטומטי
+      למעלה היה רואה "שינוי" ורושם את הביטול עצמו כצעד חדש.
+    */
+    lastSnapshotRef.current = snapshot;
+    lastRecordAtRef.current = 0;
+    syncRanges();
+    setHistoryTick((value) => value + 1);
+  }, [syncRanges]);
+
+  const handleUndo = useCallback(() => {
+    const step = undoHistory(historyRef.current, lastSnapshotRef.current);
+    if (!step) return;
+    historyRef.current = step.history;
+    applySnapshot(step.snapshot);
+  }, [applySnapshot]);
+
+  const handleRedo = useCallback(() => {
+    const step = redoHistory(historyRef.current, lastSnapshotRef.current);
+    if (!step) return;
+    historyRef.current = step.history;
+    applySnapshot(step.snapshot);
+  }, [applySnapshot]);
+
+  // מקלדת: Ctrl+Z מבטל, Ctrl+Shift+Z או Ctrl+Y חוזר קדימה.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      const target = event.target as HTMLElement | null;
+      // בתוך שדה כתיבה הקיצור שייך לשדה, לא לנו
+      if (target && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return;
+      if (target?.isContentEditable) return;
+
+      const key = event.key.toLowerCase();
+      if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        handleUndo();
+      } else if (key === "y" || (key === "z" && event.shiftKey)) {
+        event.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleUndo, handleRedo]);
+
+  // ‎historyTick רק מכריח רענון של הכפתורים אחרי שינוי בהיסטוריה
+  void historyTick;
+  const canUndo = historyCanUndo(historyRef.current);
+  const canRedo = historyCanRedo(historyRef.current);
+
   const naturalPlan = useMemo(
     () => buildAudioEditPlan(ranges, durationSec, mode),
     [durationSec, mode, ranges],
@@ -400,7 +512,32 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange, 
             type="button"
             size="icon"
             variant="ghost"
+            title="בטל את הפעולה האחרונה (Ctrl+Z)"
+            aria-label="בטל את הפעולה האחרונה"
+            data-testid="cut-undo"
+            disabled={!canUndo}
+            onClick={handleUndo}
+          >
+            <Undo2 className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            title="בצע שוב את מה שבוטל (Ctrl+Shift+Z)"
+            aria-label="בצע שוב את מה שבוטל"
+            data-testid="cut-redo"
+            disabled={!canRedo}
+            onClick={handleRedo}
+          >
+            <Redo2 className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
             title="נקה את כל הסימונים"
+            data-testid="cut-clear-all"
             disabled={ranges.length === 0}
             onClick={() => {
               regionsRef.current?.clearRegions();

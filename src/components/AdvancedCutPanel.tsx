@@ -104,6 +104,7 @@ import {
   HardDrive,
   Merge,
   Type,
+  ScissorsLineDashed,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLocalServer } from "@/hooks/useLocalServer";
@@ -451,6 +452,7 @@ function CutResultRow({
   isConverting,
   onDownload,
   onTranscribe,
+  onCutByTranscript,
   onConvert,
   onEnhance,
   onDelete,
@@ -465,6 +467,8 @@ function CutResultRow({
   isConverting?: boolean;
   onDownload: () => void;
   onTranscribe: () => void;
+  /** מחזיר את הקטע הזה לשולחן העבודה ומתמלל אותו, כדי לחתוך אותו לפי הטקסט. */
+  onCutByTranscript?: () => void;
   onConvert: (fmt: OutputFormat) => void;
   onEnhance: () => void;
   onDelete: () => void;
@@ -578,9 +582,28 @@ function CutResultRow({
           <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7" title="שפר איכות" onClick={onEnhance}>
             <Sparkles className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7" title="תמלל" onClick={onTranscribe}>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-9 w-9 sm:h-7 sm:w-7"
+            title="תמלל במערכת הרגילה"
+            data-testid="transcribe-result"
+            onClick={onTranscribe}
+          >
             <Mic className="w-3.5 h-3.5" />
           </Button>
+          {onCutByTranscript && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-9 w-9 sm:h-7 sm:w-7 text-primary"
+              title="החזר לחיתוך לפי התמלול — הקטע ייטען לשולחן העבודה ויתומלל"
+              data-testid="recut-by-transcript"
+              onClick={onCutByTranscript}
+            >
+              <ScissorsLineDashed className="w-3.5 h-3.5" />
+            </Button>
+          )}
           <Button
             size="icon"
             variant="ghost"
@@ -627,6 +650,7 @@ function CutJobCard({
   onConvertResult,
   onEnhanceAll,
   onTranscribeResult,
+  onRecutByTranscript,
   onEnhanceResult,
   onDeleteResult,
   onSaveResultToHistory,
@@ -647,6 +671,8 @@ function CutJobCard({
   onConvertResult: (jobId: string, segIndex: number, file: File, fmt: OutputFormat) => void;
   onEnhanceAll: (job: CutJob) => void;
   onTranscribeResult: (result: CutResult) => void;
+  /** מחזיר קטע מוכן לשולחן העבודה כדי לחתוך אותו לפי התמלול. */
+  onRecutByTranscript: (result: CutResult) => void;
   onEnhanceResult: (result: CutResult) => void;
   onDeleteResult: (jobId: string, segmentIndex: number) => void;
   onSaveResultToHistory: (result: CutResult, name: string, folder: string) => void;
@@ -911,6 +937,7 @@ function CutJobCard({
                   URL.revokeObjectURL(url);
                 }}
                 onTranscribe={() => onTranscribeResult(converted ? { ...r, file: converted } : r)}
+                onCutByTranscript={() => onRecutByTranscript(converted ? { ...r, file: converted } : r)}
                 onConvert={(fmt) => {
                   const baseFile = converted ?? r.file;
                   onConvertResult(job.id, r.segmentIndex, baseFile, fmt);
@@ -999,6 +1026,13 @@ export default function AdvancedCutPanel({
 
   // Count mode
   const [partCount, setPartCount] = useState("2");
+
+  /*
+    קטע שהוחזר לשולחן העבודה כדי לחתוך אותו לפי הטקסט. התמלול מופעל
+    רק אחרי שהקובץ באמת התחלף, ולא באותו רגע.
+  */
+  const [pendingRecut, setPendingRecut] = useState(false);
+  const cutAreaRef = useRef<HTMLDivElement>(null);
 
   // Jobs
   const [cutJobs, setCutJobs] = useState<CutJob[]>([]);
@@ -1181,6 +1215,18 @@ export default function AdvancedCutPanel({
       setCutTranscribeStage(null);
     }
   }, [sourceFile, sourceLabel, transcribingForCut, localServer, cutModel]);
+
+  /*
+    קטע שהוחזר לשולחן העבודה — מתמללים אותו ברגע שהוא באמת נטען.
+    אם במקרה כבר יש לו תמלול שמור, מדלגים ולא מבזבזים הרצה.
+  */
+  useEffect(() => {
+    if (!pendingRecut || !sourceFile || transcribingForCut) return;
+    setPendingRecut(false);
+    const fileKey = `${sourceFile.name}-${sourceFile.size}-${sourceFile.lastModified}`;
+    if (cutWordsFileKey === fileKey && cutWords?.length) return;
+    void transcribeForCut();
+  }, [pendingRecut, sourceFile, transcribingForCut, cutWordsFileKey, cutWords, transcribeForCut]);
 
   // השעון של "זמן שעבר". רץ רק בזמן תמלול.
   useEffect(() => {
@@ -1755,6 +1801,32 @@ export default function AdvancedCutPanel({
     [navigate],
   );
 
+  /**
+   * מחזיר קטע שכבר נחתך (או את הקובץ המאוחד) אל שולחן העבודה,
+   * ומתמלל אותו — כדי שאפשר יהיה לחתוך אותו שוב לפי הטקסט.
+   *
+   * התמלול אינו מופעל כאן אלא בשלב הבא, כי הקובץ שעל השולחן נקבע
+   * רק אחרי שהמסך מתרענן; הפעלה מיידית הייתה מתמללת את הקובץ הקודם.
+   */
+  const handleRecutByTranscript = useCallback(
+    (result: CutResult) => {
+      void loadSource(result.file, result.label);
+      /*
+        חיתוך לפי הטקסט קיים רק בעורך החזותי. בלי ההחלפה הזאת הקטע
+        היה נטען אבל המסך היה נשאר במצב שבו חתכו קודם (למשל "לפי
+        מספר"), והמשתמש לא היה רואה את הטקסט בכלל.
+      */
+      setEditorMode("visual");
+      setPendingRecut(true);
+      cutAreaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      toast({
+        title: "הקטע חזר לשולחן העבודה",
+        description: `${result.label} — מתמלל אותו כדי שאפשר יהיה לחתוך לפי הטקסט`,
+      });
+    },
+    [loadSource],
+  );
+
   const sendFilesToTranscribeQueue = useCallback(async (files: File[]) => {
     const engine = (preferences as { engine?: string }).engine || "groq";
     const lang = (preferences as { source_language?: string }).source_language || "he";
@@ -1882,6 +1954,7 @@ export default function AdvancedCutPanel({
           תוספת גובה כלל, והסימון מופיע רק בזמן גרירה.
         */}
         <CardContent
+          ref={cutAreaRef}
           className={`space-y-4 transition-colors ${
             isDragOver ? "rounded-lg ring-2 ring-dashed ring-primary bg-primary/5" : ""
           }`}
@@ -2403,6 +2476,7 @@ export default function AdvancedCutPanel({
                     onConvertResult={handleConvertResult}
                     onEnhanceAll={handleEnhanceAllResults}
                     onTranscribeResult={handleTranscribeResult}
+                    onRecutByTranscript={handleRecutByTranscript}
                     onEnhanceResult={setEnhanceTarget}
                     onDeleteResult={handleDeleteResult}
                     onSaveResultToHistory={handleSaveResultToHistory}
