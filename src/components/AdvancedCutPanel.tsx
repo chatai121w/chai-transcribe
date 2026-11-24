@@ -22,6 +22,9 @@ import {
 import { cutWithFallback, probeDurationFast, type CutTier } from "@/lib/tieredCutEngine";
 import { mergeAudioFiles } from "@/lib/audioMergeEngine";
 import { filterMediaFiles, mediaFilesFromDrop } from "@/lib/mediaFiles";
+import { saveWorkbench, loadWorkbench, clearWorkbench } from "@/lib/cutWorkbenchState";
+import { canShareFiles, shareFiles, canPickFolder, saveFilesToFolder } from "@/lib/fileDelivery";
+import { stageMessage, estimateRemainingSec } from "@/lib/transcribeStage";
 import type { AudioSelectionMode } from "@/lib/audioEditPlan";
 import VisualAudioCutEditor from "@/components/VisualAudioCutEditor";
 import {
@@ -61,6 +64,8 @@ import AudioEnhanceDialog from "@/components/AudioEnhanceDialog";
 import { FolderManagementTree } from "@/components/FolderManagementTree";
 import { toast } from "@/hooks/use-toast";
 import {
+  Send,
+  Share2,
   Upload,
   FolderUp,
   Files,
@@ -306,6 +311,98 @@ function SegmentPreviewList({
 
 // ─── Cut result card (enhanced with rename, folder, delete, save) ────────────
 
+/**
+ * הוצאת קטעים מהאתר החוצה: שיתוף, ושמירה לתיקייה במחשב.
+ *
+ * אותו רכיב משרת גם קטע בודד וגם את כל הקטעים יחד, כדי שלא תהיה
+ * גרסה שנייה שמתחילה להתפצל.
+ *
+ * אין כאן "שלח במייל" ישיר, כי דף באינטרנט אינו יכול לצרף קובץ
+ * להודעת דואר. תפריט השיתוף של המחשב כן יודע, ובתוכו יושבת תוכנת
+ * הדואר — ולכן זה מה שמוצע.
+ */
+function DeliverMenu({ files, title, testId }: { files: File[]; title: string; testId: string }) {
+  const [busy, setBusy] = useState(false);
+  const shareAvailable = canShareFiles(files);
+  const folderAvailable = canPickFolder();
+  const many = files.length > 1;
+
+  const handleShare = async () => {
+    setBusy(true);
+    try {
+      const outcome = await shareFiles(files, title);
+      if (outcome === "failed") {
+        toast({ title: "השיתוף נכשל", description: "אפשר להוריד את הקובץ ולצרף אותו ידנית.", variant: "destructive" });
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleFolder = async () => {
+    setBusy(true);
+    try {
+      const result = await saveFilesToFolder(files);
+      if (result.status === "cancelled") return;
+      if (result.status === "unsupported") {
+        toast({
+          title: "הדפדפן הזה אינו יודע לכתוב לתיקייה",
+          description: "אפשר להוריד את הקבצים רגיל.",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: result.failed.length ? "נשמר חלקית" : "נשמר בתיקייה",
+        description: result.failed.length
+          ? `${result.savedCount} נשמרו. לא נשמרו: ${result.failed.join(", ")}`
+          : `${result.savedCount} ${result.savedCount === 1 ? "קובץ" : "קבצים"} בתיקייה ${result.folderName || "שנבחרה"}`,
+        variant: result.failed.length ? "destructive" : undefined,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // אין אף דרך זמינה — אין טעם בכפתור שלא עושה כלום
+  if (!shareAvailable && !folderAvailable) return null;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-9 w-9 sm:h-7 sm:w-7"
+          title={many ? "שלח את כל הקטעים" : "שלח"}
+          data-testid={testId}
+          disabled={busy || !files.length}
+        >
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel className="text-xs">
+          {many ? `שלח ${files.length} קטעים` : "שלח את הקטע"}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {shareAvailable && (
+          <DropdownMenuItem onClick={() => void handleShare()} data-testid={`${testId}-share`}>
+            <Share2 className="ms-0 me-2 h-3.5 w-3.5" />
+            שלח בדואר, בוואטסאפ או באפליקציה אחרת
+          </DropdownMenuItem>
+        )}
+        {folderAvailable && (
+          <DropdownMenuItem onClick={() => void handleFolder()} data-testid={`${testId}-folder`}>
+            <FolderOpen className="ms-0 me-2 h-3.5 w-3.5" />
+            שמור לתיקייה במחשב
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function CutResultRow({
   result,
   convertedFile,
@@ -449,6 +546,7 @@ function CutResultRow({
           >
             <Download className="w-3.5 h-3.5" />
           </Button>
+          <DeliverMenu files={[displayFile]} title={displayFile.name} testId="deliver-result" />
           <Button size="icon" variant="ghost" className="h-9 w-9 sm:h-7 sm:w-7 text-muted-foreground hover:text-destructive" title="מחק" onClick={onDelete}>
             <Trash2 className="w-3.5 h-3.5" />
           </Button>
@@ -643,6 +741,11 @@ function CutJobCard({
                     ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     : <Mic className="w-3.5 h-3.5" />}
                 </Button>
+                <DeliverMenu
+                  files={job.results.map((result) => result.file)}
+                  title={`קטעים מתוך ${job.sourceFileName}`}
+                  testId="deliver-all"
+                />
               </>
             )}
             {job.status === "done" && job.results.length > 1 && (
@@ -870,6 +973,13 @@ export default function AdvancedCutPanel({
   const [cutWordsFileKey, setCutWordsFileKey] = useState<string | null>(null);
   const [transcribingForCut, setTranscribingForCut] = useState(false);
   const [cutTranscribeProgress, setCutTranscribeProgress] = useState(0);
+  /** באיזה שלב התמלול נמצא, כל עוד אין עדיין אחוזים אמיתיים. */
+  const [cutTranscribeStage, setCutTranscribeStage] = useState<string | null>(null);
+  const [cutTranscribeStartedAt, setCutTranscribeStartedAt] = useState<number | null>(null);
+  const [cutTranscribeDone, setCutTranscribeDone] = useState(0);
+  const [cutTranscribeTotal, setCutTranscribeTotal] = useState<number | null>(null);
+  /** מתקתק כל שנייה בזמן תמלול, כדי שהזמן שעבר יתעדכן על המסך. */
+  const [, setTranscribeTick] = useState(0);
   const [cutTranscribeError, setCutTranscribeError] = useState<string | null>(null);
 
   // Set initial file
@@ -879,6 +989,48 @@ export default function AdvancedCutPanel({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialFile]);
+
+  /*
+    שחזור אחרי מעבר לשונית.
+
+    המעבר ללשונית אחרת מפרק את כל אזור החיתוך. בלי השחזור הזה מי
+    שתמלל שיעור שלם, עבר ללשונית אחרת וחזר — מצא מסך ריק והיה צריך
+    לתמלל מחדש.
+  */
+  useEffect(() => {
+    if (initialFile) return;   // הגיע קובץ מבחוץ — הוא קודם
+    let cancelled = false;
+    void loadWorkbench().then(async (saved) => {
+      if (cancelled || !saved) return;
+      setSourceFile(saved.file);
+      setSourceLabel(saved.label);
+      setIsProbing(true);
+      try {
+        const duration = await probeDurationFast(saved.file);
+        if (cancelled) return;
+        if (duration && duration > 0) setSourceDuration(duration);
+      } catch {
+        // הקובץ השמור אינו קריא יותר — מתחילים נקי
+        await clearWorkbench();
+        if (!cancelled) {
+          setSourceFile(null);
+          setSourceDuration(null);
+        }
+        return;
+      } finally {
+        if (!cancelled) setIsProbing(false);
+      }
+      if (cancelled || !saved.words?.length) return;
+      setCutWords(saved.words);
+      setCutWordsFileKey(`${saved.file.name}-${saved.file.size}-${saved.file.lastModified}`);
+      toast({
+        title: "חזרנו למקום שבו הפסקת",
+        description: `${saved.label} — התמלול והסימונים לא אבדו.`,
+      });
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const sourceFileKey = useMemo(
     () => (sourceFile ? `${sourceFile.name}-${sourceFile.size}-${sourceFile.lastModified}` : null),
@@ -904,14 +1056,33 @@ export default function AdvancedCutPanel({
     setTranscribingForCut(true);
     setCutTranscribeError(null);
     setCutTranscribeProgress(0);
+    setCutTranscribeStage("מתחבר לשרת התמלול…");
+    setCutTranscribeStartedAt(Date.now());
+    setCutTranscribeDone(0);
+    setCutTranscribeTotal(null);
     try {
       const result = await localServer.transcribeStream(
         sourceFile,
         CUT_TRANSCRIBE_MODEL,
         "he",
-        (partial) => setCutTranscribeProgress(partial.progress ?? 0),
+        (partial) => {
+          setCutTranscribeProgress(partial.progress ?? 0);
+          // כמה מהשיעור כבר תומלל, וכמה יש בסך הכול
+          if (Number.isFinite(partial.lastSegEnd)) setCutTranscribeDone(partial.lastSegEnd || 0);
+          if (partial.audioDuration) setCutTranscribeTotal(partial.audioDuration);
+          setCutTranscribeStage(null);
+        },
         undefined,
         { preset: "balanced" },
+        /*
+          בלי זה האחוזים נתקעים על אפס לאורך כל ההכנה — טעינת המנוע
+          והכנת האודיו — והמסך נראה תקוע אף שהכול מתקדם. עכשיו כתוב
+          בכל רגע באיזה שלב אנחנו.
+        */
+        (status) => {
+          setCutTranscribeStage(stageMessage(status.type, status.progress));
+          if (status.duration) setCutTranscribeTotal(status.duration);
+        },
       );
       const words = (result.wordTimings || []).filter(
         (word) => Number.isFinite(word.start) && Number.isFinite(word.end),
@@ -922,6 +1093,8 @@ export default function AdvancedCutPanel({
       }
       setCutWords(words);
       setCutWordsFileKey(fileKey);
+      // התמלול הוא היקר מכולם — נשמר מיד, כדי שלא יאבד במעבר לשונית
+      void saveWorkbench({ file: sourceFile, label: sourceLabel || sourceFile.name, words });
       toast({
         title: "התמלול מוכן לחיתוך",
         description: `${words.length} מילים עם זמנים. לחץ על מילה כדי לקפוץ אליה, סמן משפט כדי לחתוך אותו.`,
@@ -932,8 +1105,16 @@ export default function AdvancedCutPanel({
       toast({ title: "התמלול נכשל", description: message, variant: "destructive" });
     } finally {
       setTranscribingForCut(false);
+      setCutTranscribeStage(null);
     }
-  }, [sourceFile, transcribingForCut, localServer]);
+  }, [sourceFile, sourceLabel, transcribingForCut, localServer]);
+
+  // השעון של "זמן שעבר". רץ רק בזמן תמלול.
+  useEffect(() => {
+    if (!transcribingForCut) return;
+    const timer = window.setInterval(() => setTranscribeTick((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [transcribingForCut]);
 
   useEffect(() => {
     if (initialPreset === "halves") {
@@ -993,6 +1174,11 @@ export default function AdvancedCutPanel({
     } finally {
       setIsProbing(false);
     }
+    /*
+      שומרים את הקובץ שעל השולחן, כדי שמעבר ללשונית אחרת לא ימחק
+      את העבודה. התמלול נשמר בנפרד, כשהוא מוכן.
+    */
+    void saveWorkbench({ file, label: label || file.name, words: null });
   }, []);
 
   /**
@@ -1842,7 +2028,7 @@ export default function AdvancedCutPanel({
                         {transcribingForCut ? (
                           <>
                             <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
-                            מתמלל… {Math.round(cutTranscribeProgress)}%
+                            {cutTranscribeStage ? "מתמלל…" : `מתמלל… ${Math.round(cutTranscribeProgress)}%`}
                           </>
                         ) : (
                           <>
@@ -1855,7 +2041,31 @@ export default function AdvancedCutPanel({
                   )}
 
                   {transcribingForCut && (
-                    <Progress value={cutTranscribeProgress} className="h-1.5" />
+                    <div className="space-y-1" data-testid="cut-transcribe-progress">
+                      <Progress value={cutTranscribeProgress} className="h-1.5" />
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                        <span data-testid="cut-transcribe-stage">
+                          {cutTranscribeStage ?? `תומלל ${Math.round(cutTranscribeProgress)}%`}
+                        </span>
+                        {!cutTranscribeStage && cutTranscribeTotal !== null && (
+                          <span>
+                            {formatTime(cutTranscribeDone)} מתוך {formatTime(cutTranscribeTotal)}
+                          </span>
+                        )}
+                        {cutTranscribeStartedAt !== null && (
+                          <span>עבר {formatTime((Date.now() - cutTranscribeStartedAt) / 1000)}</span>
+                        )}
+                        {!cutTranscribeStage && cutTranscribeStartedAt !== null && (() => {
+                          const left = estimateRemainingSec(
+                            (Date.now() - cutTranscribeStartedAt) / 1000,
+                            cutTranscribeProgress,
+                          );
+                          return left === null ? null : (
+                            <span data-testid="cut-transcribe-left">נותר כ־{formatTime(left)}</span>
+                          );
+                        })()}
+                      </div>
+                    </div>
                   )}
 
                   {cutTranscribeError && (

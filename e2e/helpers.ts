@@ -256,6 +256,16 @@ export async function mockLocalServer(page: Page, options?: {
   wordTimings?: Array<{ word: string; start: number; end: number; probability?: number }>;
   text?: string;
   durationSec?: number;
+  /**
+   * תמלול שמגיע בשלבים, עם שהייה בין שלב לשלב.
+   *
+   * ברירת המחדל שולחת את הכול בבת אחת — מהיר, ומתאים לרוב הבדיקות.
+   * בדיקה שבוחנת את מד ההתקדמות חייבת את השלבים, אחרת אין מה לראות:
+   * הכול קופץ מאפס למאה באותו רגע.
+   */
+  stagedProgress?: boolean;
+  /** השהיה בין שלב לשלב, באלפיות שנייה. */
+  stageDelayMs?: number;
 }) {
   const {
     connected = false,
@@ -263,6 +273,8 @@ export async function mockLocalServer(page: Page, options?: {
     wordTimings = [],
     text = 'טקסט תמלול מוק',
     durationSec = 5,
+    stagedProgress = false,
+    stageDelayMs = 400,
   } = options ?? {};
 
   // Mock both direct localhost:3000 AND the Vite /whisper proxy path
@@ -308,6 +320,19 @@ export async function mockLocalServer(page: Page, options?: {
       if (!connected) return route.abort('connectionrefused');
       // Return a simple SSE mock with a done event
       const words = JSON.stringify(wordTimings);
+
+      /*
+        השהיה לפני התשובה.
+
+        הדמיה כאן מגישה גוף אחד ואינה יכולה לזרום באמת, ולכן אי אפשר
+        לראות דרכה אחוזים עולים. מה שכן אפשר לבדוק הוא שמד ההתקדמות
+        מופיע בזמן ההמתנה, במקום מסך שנראה תקוע. תרגום הודעות השרת
+        לעברית נבדק בנפרד, בבדיקת יחידה.
+      */
+      if (stagedProgress) {
+        await new Promise((resolve) => setTimeout(resolve, stageDelayMs));
+      }
+
       const sseBody = [
         `data: {"type":"source","duration":${durationSec},"audio_session_id":"audio-session-e2e","session_reused":true}\n\n`,
         `data: {"type":"preprocessing","duration":${durationSec},"message":"Preparing audio and VAD"}\n\n`,
