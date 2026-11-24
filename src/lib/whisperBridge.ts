@@ -27,6 +27,27 @@ export function meansServerIsGone(code: string | undefined | null): boolean {
   return !!code && SERVER_GONE_CODES.has(code);
 }
 
+/**
+ * האם מותר להגביל בזמן את ההמתנה לתשובה.
+ *
+ * **זו הייתה תקלה אמיתית, ולא תיאוריה.** הגבול נוסף כדי שבדיקת
+ * בריאות תקועה לא תשאיר את הדפדפן ממתין בלי סוף — והוא הוחל על כל
+ * פניות הקריאה. אבל זרם האירועים של התמלול הוא גם הוא פניית קריאה,
+ * ארוכה מאוד: עד שהמנוע נטען עוברות יותר משמונה שניות בלי בית אחד.
+ * התוצאה הייתה שכל תמלול נקטע בדיוק אחרי שמונה שניות, והאתר הכריז
+ * שהשרת אינו מגיב — בזמן שהשרת עבד מצוין.
+ *
+ * לכן הגבול חל רק על בדיקת הבריאות, שהיא קצרה מעצם טבעה. כל השאר —
+ * תמלול, זרמים, העלאות — ממתין כמה שצריך.
+ */
+export function shouldLimitReplyTime(method: string, path: string): boolean {
+  const verb = (method || "").toUpperCase();
+  if (verb !== "GET" && verb !== "HEAD") return false;
+  // רק הנתיב עצמו, בלי פרמטרים
+  const clean = (path || "").split("?")[0].replace(/\/+$/, "");
+  return clean === "/health" || clean.endsWith("/health");
+}
+
 export interface PortResolverOptions {
   /** כל הדלתות שאפשר לחפש בהן. */
   ports: number[];

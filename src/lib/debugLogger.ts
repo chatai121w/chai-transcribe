@@ -213,6 +213,67 @@ class DebugLogger {
     } catch { return []; }
   }
 
+  /**
+   * כל מה שידוע, גם מהפעלות קודמות, לפי סדר הזמן.
+   *
+   * הסיבה: בחקירה אמיתית התברר שהדף נטען מחדש באמצע, ואז הרשומות
+   * שלפני הטעינה כבר לא היו בזיכרון — דווקא הן שהסבירו את התקלה.
+   * הרשומות השמורות והרשומות שבזיכרון מאוחדות כאן, בלי כפילויות.
+   */
+  getFullLog(): LogEntry[] {
+    const merged = new Map<string, LogEntry>();
+    for (const entry of [...this.getPersistedLog(), ...this.entries]) {
+      merged.set(`${entry.timestamp}|${entry.source}|${entry.message}`, entry);
+    }
+    return Array.from(merged.values()).sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  /**
+   * דוח מלא לשמירה בקובץ, לשליחה למי שיבדוק.
+   *
+   * מה שחסר ב"העתק" הרגיל ונדרש בחקירה: התאריך (ולא רק השעה), כמה
+   * זמן עבר בין רשומה לרשומה, ומה היה מצב המערכת. בלי המרווח בין
+   * הרשומות קשה לראות דפוס כמו "בדיוק שמונה שניות, פעמיים".
+   */
+  toReport(): string {
+    const entries = this.getFullLog();
+    const counts = { info: 0, warn: 0, error: 0 };
+    entries.forEach((entry) => { counts[entry.level] += 1; });
+
+    const stamp = (time: number) => {
+      const date = new Date(time);
+      const pad = (value: number, size = 2) => String(value).padStart(size, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+        + `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+    };
+
+    const context: string[] = [
+      "═══ דוח יומן ═══",
+      `נוצר: ${stamp(Date.now())}`,
+      `מזהה הפעלה: ${this.sessionId}`,
+      `רשומות: ${entries.length}  ·  שגיאות: ${counts.error}  ·  אזהרות: ${counts.warn}  ·  מידע: ${counts.info}`,
+    ];
+    if (entries.length) {
+      context.push(`טווח הזמן: ${stamp(entries[0].timestamp)} עד ${stamp(entries[entries.length - 1].timestamp)}`);
+    }
+    try {
+      context.push(`כתובת: ${window.location.href}`);
+      context.push(`חיבור לרשת: ${navigator.onLine ? "מחובר" : "מנותק"}`);
+      context.push(`גודל החלון: ${window.innerWidth}×${window.innerHeight}`);
+      context.push(`דפדפן: ${navigator.userAgent}`);
+    } catch { /* אין חלון. הדוח עדיין שימושי. */ }
+
+    const lines = entries.map((entry, index) => {
+      // המרווח מהרשומה הקודמת — זה מה שחושף דפוסים של זמן
+      const gap = index === 0 ? 0 : (entry.timestamp - entries[index - 1].timestamp) / 1000;
+      const gapText = index === 0 ? "       " : `+${gap.toFixed(3)}s`.padStart(7);
+      const details = entry.details ? `\n${" ".repeat(10)}${String(entry.details).replace(/\n/g, `\n${" ".repeat(10)}`)}` : "";
+      return `${stamp(entry.timestamp)} ${gapText} [${entry.level.toUpperCase().padEnd(5)}] [${entry.source}] ${entry.message}${details}`;
+    });
+
+    return `${context.join("\n")}\n${"─".repeat(70)}\n${lines.join("\n")}\n`;
+  }
+
   /** Copy-friendly text dump */
   toText(): string {
     return this.entries

@@ -1,5 +1,44 @@
 import { describe, it, expect, vi } from "vitest";
-import { meansServerIsGone, createPortResolver } from "./whisperBridge";
+import { meansServerIsGone, createPortResolver, shouldLimitReplyTime } from "./whisperBridge";
+
+describe("על אילו פניות מותר להגביל זמן", () => {
+  it("מגביל את בדיקת הבריאות, שהיא קצרה מטבעה", () => {
+    expect(shouldLimitReplyTime("GET", "/health")).toBe(true);
+    expect(shouldLimitReplyTime("GET", "/health/")).toBe(true);
+    expect(shouldLimitReplyTime("GET", "/health?x=1")).toBe(true);
+    expect(shouldLimitReplyTime("HEAD", "/health")).toBe(true);
+    expect(shouldLimitReplyTime("get", "/health")).toBe(true);
+  });
+
+  /*
+    הבדיקה הזאת נכתבה אחרי תקלה אמיתית: הגבול חל על כל פניות הקריאה,
+    וקטע כל תמלול בדיוק אחרי שמונה שניות. זרם האירועים של התמלול אינו
+    מחזיר בית אחד עד שמנוע התמלול נטען, וזה לוקח יותר.
+  */
+  it("אינו מגביל את זרם האירועים של התמלול", () => {
+    expect(shouldLimitReplyTime("GET", "/jobs/feb6fa6f215b4780/stream")).toBe(false);
+    expect(shouldLimitReplyTime("GET", "/jobs/abc/stream?from=0")).toBe(false);
+    expect(shouldLimitReplyTime("GET", "/transcribe-stream")).toBe(false);
+  });
+
+  it("אינו מגביל פניות ששולחות קובץ", () => {
+    expect(shouldLimitReplyTime("POST", "/transcribe-stream")).toBe(false);
+    expect(shouldLimitReplyTime("POST", "/health")).toBe(false);
+    expect(shouldLimitReplyTime("PUT", "/audio-sessions")).toBe(false);
+    expect(shouldLimitReplyTime("DELETE", "/audio-sessions/1")).toBe(false);
+  });
+
+  it("אינו מגביל שאר פניות הקריאה, שאורכן אינו ידוע", () => {
+    expect(shouldLimitReplyTime("GET", "/models")).toBe(false);
+    expect(shouldLimitReplyTime("GET", "/audio-sessions")).toBe(false);
+    expect(shouldLimitReplyTime("GET", "/")).toBe(false);
+  });
+
+  it("אינו קורס על ערכים חסרים", () => {
+    expect(shouldLimitReplyTime("", "")).toBe(false);
+    expect(shouldLimitReplyTime(undefined as unknown as string, undefined as unknown as string)).toBe(false);
+  });
+});
 
 describe("הבחנה בין שרת שנעלם לבין פנייה שבוטלה", () => {
   it("מזהה תקלות שאומרות שאין שרת", () => {

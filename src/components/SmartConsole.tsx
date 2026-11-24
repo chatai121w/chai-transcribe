@@ -14,7 +14,7 @@ import {
   Terminal, AlertTriangle, TrendingUp, Activity, Shield, ShieldAlert, ShieldCheck,
   ChevronDown, ChevronUp, Copy, Trash2, X, Eye, EyeOff, RefreshCw, Filter,
   Bug, Server, Zap, Clock, AlertCircle, CheckCircle, XCircle, Info,
-  GripVertical, Maximize2
+  GripVertical, Maximize2, Download
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, Legend, AreaChart, Area } from 'recharts';
 import { debugLog, type LogEntry } from '@/lib/debugLogger';
@@ -153,6 +153,31 @@ function LiveLogTab({ entries }: { entries: LogEntry[] }) {
     } catch { toast({ title: 'שגיאה בהעתקה', variant: 'destructive' }); }
   };
 
+  /*
+    שמירת היומן כקובץ.
+
+    "העתק" מעתיק ללוח, ויומן ארוך קשה להעביר כך. קובץ אפשר לשלוח
+    כמו שהוא, והוא כולל גם את ההפעלות הקודמות ואת מצב המערכת — בדיוק
+    מה שהיה חסר בחקירה אמיתית, כשהדף נטען מחדש באמצע התקלה.
+  */
+  const handleSaveFile = () => {
+    const report = debugLog.toReport();
+    const now = new Date();
+    const pad = (value: number) => String(value).padStart(2, '0');
+    const name = `יומן-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+      + `-${pad(now.getHours())}${pad(now.getMinutes())}.txt`;
+    const url = URL.createObjectURL(new Blob([report], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // שחרור מיד אחרי ההורדה, שלא יישאר תפוס בזיכרון
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast({ title: 'היומן נשמר', description: name });
+  };
+
   return (
     <div className="space-y-3">
       {/* Filters */}
@@ -183,6 +208,16 @@ function LiveLogTab({ entries }: { entries: LogEntry[] }) {
         <div className="flex-1" />
         <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleCopy}>
           <Copy className="w-3 h-3 ml-1" />העתק
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs"
+          data-testid="save-log-file"
+          onClick={handleSaveFile}
+          title="שומר קובץ עם כל היומן, כולל הפעלות קודמות — נוח לשליחה"
+        >
+          <Download className="w-3 h-3 ml-1" />שמור קובץ
         </Button>
         <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { debugLog.clear(); toast({ title: 'לוגים נוקו' }); }}>
           <Trash2 className="w-3 h-3 ml-1" />נקה

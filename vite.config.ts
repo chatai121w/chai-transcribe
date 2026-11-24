@@ -8,7 +8,7 @@ import compression from "vite-plugin-compression";
 import fs from "fs";
 import http from "node:http";
 import net from "node:net";
-import { createPortResolver, meansServerIsGone } from "./src/lib/whisperBridge";
+import { createPortResolver, meansServerIsGone, shouldLimitReplyTime } from "./src/lib/whisperBridge";
 
 const WHISPER_PORTS = Array.from({ length: 20 }, (_, index) => 3000 + index);
 // The watchdog moves the Whisper server to another port whenever 3000 is taken,
@@ -160,10 +160,11 @@ function forwardWhisperRequest(req: any, res: any): void {
     שהוא מוכן לענות, ואז הפנייה מתקבלת אך לא נענית — והדפדפן נתקע
     בלי סוף במקום לדווח על תקלה.
 
-    הגבול חל רק על פניות קריאה, ורק עד שמתחילה תשובה. פנייה כבדה
-    כמו תמלול אינה קריאה, ולכן אינה מוגבלת — גם אם היא נמשכת דקות.
+    הגבול חל רק על בדיקת הבריאות. בגרסה הראשונה הוא חל על כל פניות
+    הקריאה — וזה קטע כל תמלול בדיוק אחרי שמונה שניות, כי זרם האירועים
+    של התמלול הוא גם הוא פניית קריאה, שאינה מחזירה בית עד שהמנוע נטען.
   */
-  if (req.method === 'GET' || req.method === 'HEAD') {
+  if (shouldLimitReplyTime(req.method, req.url.replace(/^\/whisper/, '') || '/')) {
     const giveUp = setTimeout(() => {
       whisperResolver.invalidate();
       upstream.destroy(new Error('השרת קיבל את הפנייה אך לא ענה'));

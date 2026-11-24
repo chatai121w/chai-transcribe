@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { isTranscriptionServerError } from '@/lib/serverErrorRules';
 import { debugLog, type LogEntry } from '@/lib/debugLogger';
 
 // --- Types ---
@@ -224,21 +225,44 @@ export function useSmartConsole() {
       }
     }
 
-    // 3. Server down detection
+    /*
+      3. שרת התמלול אינו מגיב.
+
+      שני תיקונים, שניהם מתקלה אמיתית:
+
+      א. הכלל הישן תפס כל שגיאה שבהודעתה המילה "server" או
+         "connection" — גם שגיאה שאין לה שום קשר לשרת התמלול.
+      ב. ההתראה אמרה "השרת אינו מגיב" בזמן שבדיקת הבריאות באותה דקה
+         החזירה תשובה תקינה, והתקלה הייתה בדרך אל השרת ולא בשרת.
+         להאשים את השרת שלח שולח לחפש במקום הלא נכון.
+    */
     const serverErrors = currentEntries.filter(e =>
-      e.level === 'error' &&
-      (e.source === 'CUDA Server' || e.source === 'CUDA' || e.message.toLowerCase().includes('server') || e.message.toLowerCase().includes('connection')) &&
-      (Date.now() - e.timestamp) < 60000
+      e.level === 'error'
+      && isTranscriptionServerError(e.source, e.message)
+      && (Date.now() - e.timestamp) < 60000,
     );
     if (serverErrors.length >= 2) {
       const existing = currentAlerts.find(a => a.type === 'server-down' && !a.dismissed && (Date.now() - a.timestamp) < 120000);
       if (!existing) {
+        // האם השרת עצמו נראה חי באותה דקה
+        const healthyRecently = currentEntries.some(e =>
+          e.level !== 'error'
+          && /health check completed|"online":\s*true/i.test(`${e.message} ${e.details ?? ''}`)
+          && (Date.now() - e.timestamp) < 60000,
+        );
+        const reason = serverErrors.find(e => e.details)?.details;
         newAlerts.push({
           id: generateId(),
           type: 'server-down',
-          severity: 'critical',
-          title: 'שרת CUDA לא מגיב',
-          description: `${serverErrors.length} שגיאות חיבור בדקה האחרונה`,
+          severity: healthyRecently ? 'warning' : 'critical',
+          title: healthyRecently
+            ? 'פניות לשרת התמלול נכשלות — אך השרת עצמו עונה'
+            : 'שרת התמלול אינו מגיב',
+          description: healthyRecently
+            ? `${serverErrors.length} פניות נכשלו בדקה האחרונה, ובדיקת הבריאות הצליחה. התקלה בדרך אל השרת.`
+              + (reason ? ` פירוט: ${String(reason).slice(0, 120)}` : '')
+            : `${serverErrors.length} שגיאות חיבור בדקה האחרונה`
+              + (reason ? ` · ${String(reason).slice(0, 120)}` : ''),
           timestamp: Date.now(),
         });
       }

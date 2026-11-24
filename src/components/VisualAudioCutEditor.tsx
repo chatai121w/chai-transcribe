@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { debugLog } from "@/lib/debugLogger";
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -193,7 +194,19 @@ export default function VisualAudioCutEditor({ file, durationSec, onPlanChange, 
 
     const url = URL.createObjectURL(file);
     blobUrlRef.current = url;
-    void wavesurfer.load(url);
+    /*
+      פירוק הרכיב מבטל טעינה שעוד נמשכת, והביטול מגיע כדחייה.
+      בלי התפיסה הזאת כל מעבר לשונית רשם ביומן שגיאה —
+      "signal is aborted without reason" — שהעלתה את מונה השגיאות
+      והזיזה את מד הבריאות ל"לא יציב", בלי ששום דבר באמת נשבר.
+    */
+    wavesurfer.load(url).catch((error: unknown) => {
+      const aborted = error instanceof Error
+        && (error.name === "AbortError" || /abort/i.test(error.message));
+      if (aborted) return;
+      debugLog.warn("עורך הגלים", "טעינת צורת הגל נכשלה",
+        error instanceof Error ? error.message : String(error));
+    });
 
     return () => {
       disableDrag();
