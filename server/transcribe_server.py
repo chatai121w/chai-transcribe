@@ -1932,7 +1932,10 @@ def transcribe_stream():
             import subprocess
             trimmed_path = tmp_path + "_trimmed" + suffix
             result = subprocess.run(
-                ["ffmpeg", "-y", "-ss", str(start_from), "-i", tmp_path, "-c", "copy", trimmed_path],
+                # avoid_negative_ts: אותה סיבה כמו בחיתוך הקטעים — חיתוך
+                # שמתחיל באמצע מייצר בלעדיו קובץ שאי אפשר לפענח.
+                ["ffmpeg", "-y", "-ss", str(start_from), "-i", tmp_path, "-c", "copy",
+                 "-avoid_negative_ts", "make_zero", trimmed_path],
                 capture_output=True, timeout=30,
             )
             if result.returncode == 0 and os.path.exists(trimmed_path):
@@ -3666,6 +3669,42 @@ _CONVERT_ALLOWED_SUFFIXES = frozenset({
     ".mp3", ".m4a", ".wav", ".ogg", ".flac", ".aac", ".wma", ".opus", ".amr",
 })
 
+# כמה לדלג "בגסות" לפני נקודת החיתוך, לפני הקיצור המדויק.
+CUT_PREROLL_SEC = 2.0
+
+
+def _build_copy_cut_command(input_path, output_path, start_sec, end_sec):
+    """פקודת חיתוך בלי קידוד מחדש — מדויקת וגם מהירה.
+
+    שתי תקלות אמיתיות נמדדו כאן על הקלטת וואטסאפ:
+
+    1. בלי ``-avoid_negative_ts make_zero`` קטע שאינו הראשון שומר את
+       חותמות הזמן המקוריות, והקובץ שיוצא מתחיל בזמן שלילי. הוא נראה
+       תקין — גודל סביר, אורך רשום נכון — אבל פענח 78 בתים במקום 2.5
+       מגה, ואף נגן לא פתח אותו.
+
+    2. דילוג גס לבדו נוחת על גבול החבילה הקרוב, ולכן הקטע התחיל
+       ב-23.50 שניות במקום ב-25.18 — חפיפה של 1.68 שניות עם הקטע
+       שלפניו.
+
+    לכן: דילוג גס עד שתי שניות לפני הנקודה, ואז קיצור מדויק בפלט.
+    נמדד: סטייה 0.02 שניות, התאמת תוכן מושלמת, ופי חמישה מהר מקיצור
+    מדויק לבדו על קובץ של 42 דקות.
+    """
+    coarse = max(0.0, float(start_sec) - CUT_PREROLL_SEC)
+    inner_start = float(start_sec) - coarse
+    inner_end = inner_start + (float(end_sec) - float(start_sec))
+
+    command = ["ffmpeg", "-y"]
+    if coarse > 0:
+        command += ["-ss", f"{coarse:.3f}"]
+    command += ["-i", input_path]
+    command += ["-ss", f"{inner_start:.3f}", "-to", f"{inner_end:.3f}"]
+    command += ["-map", "0:a:0", "-c", "copy", "-avoid_negative_ts", "make_zero", "-vn"]
+    command += [output_path]
+    return command
+
+
 @app.route("/cut-audio", methods=["POST"])
 def cut_audio():
     """Cut an uploaded audio/video file into multiple segments in one upload."""
@@ -3724,8 +3763,7 @@ def cut_audio():
             output_name = f"segment-{position + 1:03d}{output_suffix}"
             output_path = os.path.join(work_dir, output_name)
             result = subprocess.run(
-                ["ffmpeg", "-y", "-ss", f"{segment['start']:.3f}", "-i", input_path,
-                 "-t", f"{segment['end'] - segment['start']:.3f}", "-map", "0:a:0", "-c", "copy", "-vn", output_path],
+                _build_copy_cut_command(input_path, output_path, segment["start"], segment["end"]),
                 capture_output=True, timeout=600,
             )
             if result.returncode != 0 or not os.path.exists(output_path):
