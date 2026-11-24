@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { TRANSCRIPTION_MODELS } from "@/lib/transcriptionModels";
 import { AlertCircle, CheckCircle2, Maximize2, Mic2, Minimize2, RotateCcw, Square } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -23,13 +24,10 @@ import { isLkAiAuto, isLkAiEnabled } from "@/lib/loshonKodesh";
 import { applyTranscriptionKnowledgeWithAi } from "@/lib/transcriptionKnowledge";
 import { logKnowledgeTrace } from "@/lib/pipelineAudit";
 
-const CUDA_MODELS = [
-  { value: "ivrit-ai/whisper-large-v3-turbo-ct2", label: "Ivrit.ai Turbo V3 - מומלץ" },
-  { value: "ivrit-ai/whisper-large-v3-ct2", label: "Ivrit.ai Large V3 - דיוק מרבי" },
-  { value: "ivrit-ai/yi-whisper-large-v3-turbo-ct2", label: "Ivrit.ai יידיש Turbo" },
-  { value: "large-v3-turbo", label: "Whisper Large V3 Turbo" },
-  { value: "large-v3", label: "Whisper Large V3" },
-];
+// הרשימה עברה למקום משותף. בעותק שהיה כאן חסר "יידיש מלא"
+const CUDA_MODELS = TRANSCRIPTION_MODELS.map(
+  (model) => ({ value: model.value, label: `${model.label} - ${model.hint}` }),
+);
 
 const GEMINI_MODELS = [
   { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },

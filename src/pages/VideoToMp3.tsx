@@ -857,10 +857,27 @@ export default function VideoToMp3() {
               <><Loader2 className="w-3 h-3 animate-spin" /> טוען...</>
             )}
           </Badge>
+          {/*
+            הסימון חייב להיראות שונה, ולא רק להיקרא שונה.
+            קודם "שרת" ו"ללא שרת" נראו כמעט זהים — אותו אפור, אותו
+            אייקון — ואי אפשר היה לדעת במבט אם השרת מחובר.
+          */}
           {serverOnline !== null && (
-            <Badge variant={serverOnline ? "secondary" : "outline"} className="gap-1 text-[10px] sm:text-xs">
+            <Badge
+              variant="outline"
+              data-testid="server-badge"
+              data-online={serverOnline ? "true" : "false"}
+              title={serverOnline
+                ? "השרת המקומי מחובר ועונה — ההמרה והתמלול יעבדו במלואם"
+                : "השרת המקומי אינו עונה — ההמרה והחיתוך יתבצעו בדפדפן, ותמלול לא יהיה אפשרי"}
+              className={`gap-1 text-[10px] sm:text-xs ${
+                serverOnline
+                  ? "border-green-500/40 bg-green-500/10 text-green-700 dark:text-green-400"
+                  : "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400"
+              }`}
+            >
               <Server className="w-3 h-3" />
-              {serverOnline ? "שרת" : "ללא שרת"}
+              {serverOnline ? "שרת מחובר" : "שרת מנותק"}
             </Badge>
           )}
         </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { isTranscriptionServerError } from '@/lib/serverErrorRules';
+import { computeHealthStatus } from '@/lib/systemHealthRules';
 import { debugLog, type LogEntry } from '@/lib/debugLogger';
 
 // --- Types ---
@@ -301,17 +302,23 @@ export function useSmartConsole() {
 
   const getHealth = useCallback((): SystemHealth => {
     const errorRate = calculateErrorRate(entries, 5);
-    const activeAlerts = alerts.filter(a => !a.dismissed).length;
+    /*
+      מצב הבריאות מתאר את **עכשיו**, ולא את ההיסטוריה.
+
+      קודם כל התראה פעילה נספרה, בלי קשר לגיל שלה, ולכן התראה בת שעה
+      השאירה את המערכת מסומנת "לא יציב" גם כששום דבר לא קרה מאז —
+      אפס שגיאות לדקה והשרת עונה. התראות ישנות נשארות ברשימה לעיון,
+      אבל אינן קובעות יותר את המצב.
+    */
+    const allActiveAlerts = alerts.filter(a => !a.dismissed).length;
     const serverErrors = entries.filter(e =>
       e.level === 'error' && (e.source === 'CUDA Server' || e.source === 'CUDA') && (Date.now() - e.timestamp) < 60000
     );
     const serverUp = serverErrors.length < 3;
 
-    let status: SystemHealth['status'] = 'healthy';
-    if (errorRate > 5 || !serverUp || activeAlerts >= 5) status = 'critical';
-    else if (errorRate > 1 || activeAlerts >= 2) status = 'degraded';
+    const status = computeHealthStatus({ errorRate, serverUp, alerts });
 
-    return { status, serverUp, errorRate, activeAlerts, lastCheck: Date.now() };
+    return { status, serverUp, errorRate, activeAlerts: allActiveAlerts, lastCheck: Date.now() };
   }, [entries, alerts]);
 
   const getPatterns = useCallback(() => detectErrorPatterns(entries, 60), [entries]);

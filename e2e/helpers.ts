@@ -292,6 +292,9 @@ export async function mockLocalServer(page: Page, options?: {
           gpu: 'NVIDIA GeForce RTX 5050 Laptop GPU',
           current_model: model,
           downloaded_models: [model],
+          // השרת האמיתי מדווח על כך, וסימון "שרת מחובר" נשען על זה.
+          // בלי השדה הזה ההדמיה נראתה מנותקת אף שהוגדרה כמחוברת.
+          ffmpeg_available: true,
         },
       });
     });

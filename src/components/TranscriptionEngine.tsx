@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, memo, useRef } from "react";
+import { TRANSCRIPTION_MODELS } from "@/lib/transcriptionModels";
 import { LayoutSwitch } from "@/components/ui/LayoutSwitch";
 import { Columns3, LayoutGrid, Rows3 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -60,14 +61,10 @@ const getLocalModelLabel = (): string => {
 const START_CMD_LOCAL = '.\\scripts\\start-whisper-server.ps1';
 const START_CMD_LOVABLE = '.\\scripts\\start-lovable.ps1';
 
-const CUDA_TRANSCRIPTION_MODELS = [
-  { value: 'ivrit-ai/whisper-large-v3-turbo-ct2', label: 'Ivrit.ai Turbo V3 - מהיר ומומלץ' },
-  { value: 'ivrit-ai/whisper-large-v3-ct2', label: 'Ivrit.ai Large V3 - דיוק מרבי' },
-  { value: 'ivrit-ai/yi-whisper-large-v3-turbo-ct2', label: 'Ivrit.ai יידיש Turbo' },
-  { value: 'ivrit-ai/yi-whisper-large-v3-ct2', label: 'Ivrit.ai יידיש מלא' },
-  { value: 'large-v3-turbo', label: 'Whisper Large V3 Turbo' },
-  { value: 'large-v3', label: 'Whisper Large V3' },
-] as const;
+// הרשימה עברה למקום משותף, אחרי שהתגלה שהעותק השני כבר התפצל ממנה
+const CUDA_TRANSCRIPTION_MODELS = TRANSCRIPTION_MODELS.map(
+  (model) => ({ value: model.value, label: `${model.label} - ${model.hint}` }),
+);
 
 // True remote = not localhost AND server URL is explicitly set to a non-localhost address
 const isNonLocalHost = !['localhost', '127.0.0.1'].includes(window.location.hostname);

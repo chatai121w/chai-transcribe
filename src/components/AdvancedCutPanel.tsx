@@ -25,6 +25,7 @@ import { filterMediaFiles, mediaFilesFromDrop } from "@/lib/mediaFiles";
 import { saveWorkbench, loadWorkbench, clearWorkbench } from "@/lib/cutWorkbenchState";
 import { canShareFiles, shareFiles, canPickFolder, saveFilesToFolder } from "@/lib/fileDelivery";
 import { stageMessage, estimateRemainingSec } from "@/lib/transcribeStage";
+import { availableModels, modelLabel, readPreferredModel, writePreferredModel } from "@/lib/transcriptionModels";
 import type { AudioSelectionMode } from "@/lib/audioEditPlan";
 import VisualAudioCutEditor from "@/components/VisualAudioCutEditor";
 import {
@@ -112,7 +113,11 @@ import type { CutWord } from "@/lib/transcriptCut";
  * המהיר של ivrit נותן את הזמנים באותה איכות ובשישית מהזמן של המנוע
  * המדויק — שלוש דקות אודיו בשלושים שניות, נמדד.
  */
-const CUT_TRANSCRIBE_MODEL = "ivrit-ai/whisper-large-v3-turbo-ct2";
+/*
+  המנוע לתמלול לצורך חיתוך. קודם הוא היה קבוע בקוד ולא ניתן לבחירה,
+  ולכן מי שרצה דיוק מרבי או יידיש לא יכול היה. עכשיו הבחירה נשמרת
+  באותו מקום שבו היא נשמרת בשאר המסכים.
+*/
 
 // ─── Convert helper ──────────────────────────────────────────────────────────
 
@@ -972,6 +977,8 @@ export default function AdvancedCutPanel({
   /** לאיזה קובץ שייכות המילים — כדי שתמלול של קובץ אחד לא יודבק לאחר. */
   const [cutWordsFileKey, setCutWordsFileKey] = useState<string | null>(null);
   const [transcribingForCut, setTranscribingForCut] = useState(false);
+  /** המנוע שבו יתמלל החיתוך. נשמר, ומשותף לשאר המסכים. */
+  const [cutModel, setCutModel] = useState(() => readPreferredModel());
   const [cutTranscribeProgress, setCutTranscribeProgress] = useState(0);
   /** באיזה שלב התמלול נמצא, כל עוד אין עדיין אחוזים אמיתיים. */
   const [cutTranscribeStage, setCutTranscribeStage] = useState<string | null>(null);
@@ -1063,7 +1070,7 @@ export default function AdvancedCutPanel({
     try {
       const result = await localServer.transcribeStream(
         sourceFile,
-        CUT_TRANSCRIBE_MODEL,
+        cutModel,
         "he",
         (partial) => {
           setCutTranscribeProgress(partial.progress ?? 0);
@@ -1107,7 +1114,7 @@ export default function AdvancedCutPanel({
       setTranscribingForCut(false);
       setCutTranscribeStage(null);
     }
-  }, [sourceFile, sourceLabel, transcribingForCut, localServer]);
+  }, [sourceFile, sourceLabel, transcribingForCut, localServer, cutModel]);
 
   // השעון של "זמן שעבר". רץ רק בזמן תמלול.
   useEffect(() => {
@@ -2018,6 +2025,31 @@ export default function AdvancedCutPanel({
                           תמלל את הקובץ, ואז תוכל ללחוץ על מילה כדי לקפוץ אליה בנגן, ולסמן משפט כדי לחתוך אותו בדיוק.
                         </p>
                       </div>
+                      {/*
+                        בחירת המנוע. קודם הוא היה קבוע בקוד, ומי שרצה
+                        דיוק מרבי או יידיש לא יכול היה לבחור.
+                      */}
+                      <Select
+                        value={cutModel}
+                        onValueChange={(value) => { setCutModel(value); writePreferredModel(value); }}
+                        disabled={transcribingForCut}
+                      >
+                        <SelectTrigger
+                          className="h-8 w-auto min-w-[9rem] gap-1.5 text-xs"
+                          data-testid="cut-model-select"
+                          title="באיזה מנוע לתמלל"
+                        >
+                          <SelectValue>{modelLabel(cutModel)}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent dir="rtl">
+                          {availableModels(localServer.serverStatus?.downloaded_models).map((model) => (
+                            <SelectItem key={model.value} value={model.value} className="text-xs">
+                              <span className="font-medium">{model.label}</span>
+                              <span className="block text-[10px] text-muted-foreground">{model.hint}</span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <Button
                         type="button"
                         size="sm"
