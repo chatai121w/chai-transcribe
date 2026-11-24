@@ -25,6 +25,8 @@ import { filterMediaFiles, mediaFilesFromDrop } from "@/lib/mediaFiles";
 import { saveWorkbench, loadWorkbench, clearWorkbench } from "@/lib/cutWorkbenchState";
 import { canShareFiles, shareFiles, canPickFolder, saveFilesToFolder } from "@/lib/fileDelivery";
 import { stageMessage, estimateRemainingSec } from "@/lib/transcribeStage";
+import { AudioPlayerBar } from "@/components/AudioPlayerBar";
+import { FloatingCutPlayer } from "@/components/FloatingCutPlayer";
 import { availableModels, modelLabel, readPreferredModel, writePreferredModel } from "@/lib/transcriptionModels";
 import type { AudioSelectionMode } from "@/lib/audioEditPlan";
 import VisualAudioCutEditor from "@/components/VisualAudioCutEditor";
@@ -65,6 +67,7 @@ import AudioEnhanceDialog from "@/components/AudioEnhanceDialog";
 import { FolderManagementTree } from "@/components/FolderManagementTree";
 import { toast } from "@/hooks/use-toast";
 import {
+  Music2,
   Send,
   Share2,
   Upload,
@@ -209,39 +212,73 @@ function CutStatusBadge({ status }: { status: CutJob["status"] }) {
 
 // ─── Audio preview player ────────────────────────────────────────────────────
 
-function AudioPreview({ file }: { file: File }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState(false);
+/**
+ * נגן הקטע בשורת התוצאה.
+ *
+ * קודם היה כאן לחצן נגן/עצור בלבד: אי אפשר היה לקפוץ למקום, לדלג
+ * אחורה כדי לשמוע שוב משפט, או לשנות מהירות. עכשיו הלחיצה פותחת
+ * נגן מלא, והוא נשאר פתוח עד שסוגרים אותו.
+ */
+function AudioPreview({ file, onOpenFloating }: { file: File; onOpenFloating?: () => void }) {
+  const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    const u = URL.createObjectURL(file);
-    setUrl(u);
-    return () => URL.revokeObjectURL(u);
-  }, [file]);
+  if (!open) {
+    return (
+      <div className="flex items-center gap-0.5">
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          title="פתח נגן"
+          aria-label="פתח נגן"
+          data-testid="open-player"
+          onClick={() => setOpen(true)}
+        >
+          <Play className="w-3.5 h-3.5" />
+        </Button>
+        {onOpenFloating && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            title="פתח בנגן הצף — אפשר לעבור בין כל הקטעים"
+            aria-label="פתח בנגן הצף"
+            data-testid="open-floating-player"
+            onClick={onOpenFloating}
+          >
+            <Music2 className="w-3.5 h-3.5" />
+          </Button>
+        )}
+      </div>
+    );
+  }
 
-  const toggle = useCallback(() => {
-    if (!audioRef.current) return;
-    if (playing) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
-    }
-    setPlaying(!playing);
-  }, [playing]);
-
-  if (!url) return null;
   return (
-    <div className="flex items-center gap-1">
-      <audio
-        ref={audioRef}
-        src={url}
-        onEnded={() => setPlaying(false)}
-        className="hidden"
-      />
-      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={toggle}>
-        {playing ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-      </Button>
+    <div className="w-full min-w-0 sm:w-[22rem]">
+      <AudioPlayerBar file={file} compact testId="row-player" />
+      <div className="mt-1 flex items-center gap-1">
+        {onOpenFloating && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 gap-1 px-1.5 text-[10px]"
+            data-testid="open-floating-player"
+            onClick={onOpenFloating}
+          >
+            <Music2 className="h-3 w-3" />
+            בנגן הצף
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 px-1.5 text-[10px] text-muted-foreground"
+          data-testid="close-player"
+          onClick={() => setOpen(false)}
+        >
+          סגור נגן
+        </Button>
+      </div>
     </div>
   );
 }
@@ -421,6 +458,7 @@ function CutResultRow({
   selected,
   onToggleSelected,
   onSaveToFolder,
+  onOpenFloating,
 }: {
   result: CutResult;
   convertedFile?: File;
@@ -431,6 +469,8 @@ function CutResultRow({
   onEnhance: () => void;
   onDelete: () => void;
   onSaveToHistory: (name: string, folder: string) => void;
+  /** פותח את הקטע בנגן הצף, שבו אפשר לעבור בין כל הקטעים. */
+  onOpenFloating?: () => void;
   selected: boolean;
   onToggleSelected: () => void;
   onSaveToFolder: () => void;
@@ -466,7 +506,7 @@ function CutResultRow({
           aria-label={`בחר קטע ${editName}`}
           className="shrink-0"
         />
-        <AudioPreview file={displayFile} />
+        <AudioPreview file={displayFile} onOpenFloating={onOpenFloating} />
         <div className="flex-1 min-w-0">
           {isEditing ? (
             <div className="flex items-center gap-1">
@@ -593,6 +633,7 @@ function CutJobCard({
   onSaveAllToFolder,
   onMergeResults,
   isMerging,
+  onPlayFloating,
 }: {
   job: CutJob;
   convertedMap: Record<string, File>;
@@ -612,6 +653,8 @@ function CutJobCard({
   onSaveAllToFolder: (job: CutJob) => void;
   onMergeResults: (job: CutJob, results: CutResult[]) => void;
   isMerging: boolean;
+  /** פותח את כל קטעי המשימה בנגן הצף, החל מהקטע שנבחר. */
+  onPlayFloating?: (job: CutJob, startSegmentIndex: number) => void;
 }) {
   const [expanded, setExpanded] = useState(job.status === "done");
   /**
@@ -855,6 +898,7 @@ function CutJobCard({
               <CutResultRow
                 key={r.segmentIndex}
                 result={r}
+                onOpenFloating={onPlayFloating ? () => onPlayFloating(job, r.segmentIndex) : undefined}
                 convertedFile={converted}
                 isConverting={!!segConvertingSet[key]}
                 onDownload={() => {
@@ -977,6 +1021,28 @@ export default function AdvancedCutPanel({
   /** לאיזה קובץ שייכות המילים — כדי שתמלול של קובץ אחד לא יודבק לאחר. */
   const [cutWordsFileKey, setCutWordsFileKey] = useState<string | null>(null);
   const [transcribingForCut, setTranscribingForCut] = useState(false);
+  /*
+    הנגן הצף: איזו משימה מתנגנת ומאיזה קטע. נשאר על המסך בזמן
+    גלילה, כדי שאפשר יהיה לשמוע את כל הקטעים ברצף.
+  */
+  const [floatingPlayer, setFloatingPlayer] = useState<{ jobId: string; segmentIndex: number } | null>(null);
+  /** הקטעים שהנגן הצף מציג — כל הקטעים של המשימה שנבחרה. */
+  const floatingTracks = useMemo(() => {
+    if (!floatingPlayer) return [];
+    const job = cutJobs.find((item) => item.id === floatingPlayer.jobId);
+    if (!job) return [];
+    return [...job.results]
+      .sort((a, b) => a.segmentIndex - b.segmentIndex)
+      .map((result) => ({
+        id: `${job.id}-${result.segmentIndex}`,
+        file: result.file,
+        label: result.label || result.file.name,
+      }));
+  }, [floatingPlayer, cutJobs]);
+
+  const floatingStartId = floatingPlayer
+    ? `${floatingPlayer.jobId}-${floatingPlayer.segmentIndex}`
+    : null;
   /** המנוע שבו יתמלל החיתוך. נשמר, ומשותף לשאר המסכים. */
   const [cutModel, setCutModel] = useState(() => readPreferredModel());
   const [cutTranscribeProgress, setCutTranscribeProgress] = useState(0);
@@ -2324,6 +2390,8 @@ export default function AdvancedCutPanel({
                   <CutJobCard
                     key={job.id}
                     job={job}
+                    onPlayFloating={(target, segmentIndex) =>
+                      setFloatingPlayer({ jobId: target.id, segmentIndex })}
                     convertedMap={convertedMap}
                     segConvertingSet={segConvertingSet}
                     isTranscribingAll={!!transcribingAllJobs[job.id]}
@@ -2549,6 +2617,18 @@ export default function AdvancedCutPanel({
         defaultOutputFormat={enhanceTarget?.file.name.toLowerCase().endsWith(".opus") ? "opus" : enhanceTarget?.file.name.toLowerCase().endsWith(".m4a") ? "aac" : "mp3"}
         onTranscribe={(file) => navigate("/transcribe", { state: { file } })}
       />
+
+      {/*
+        הנגן הצף. נפתח מתוך שורת קטע, ומכיל את כל קטעי אותה משימה,
+        כדי שאפשר יהיה לעבור ביניהם ולשמוע הכול בלי לגלול.
+      */}
+      {floatingTracks.length > 0 && (
+        <FloatingCutPlayer
+          tracks={floatingTracks}
+          startId={floatingStartId}
+          onClose={() => setFloatingPlayer(null)}
+        />
+      )}
     </div>
   );
 }
