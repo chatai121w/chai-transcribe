@@ -21,6 +21,7 @@ import {
 } from "@/lib/audioCutEngine";
 import { cutWithFallback, probeDurationFast, type CutTier } from "@/lib/tieredCutEngine";
 import { mergeAudioFiles } from "@/lib/audioMergeEngine";
+import { filterMediaFiles, mediaFilesFromDrop } from "@/lib/mediaFiles";
 import type { AudioSelectionMode } from "@/lib/audioEditPlan";
 import VisualAudioCutEditor from "@/components/VisualAudioCutEditor";
 import {
@@ -61,6 +62,8 @@ import { FolderManagementTree } from "@/components/FolderManagementTree";
 import { toast } from "@/hooks/use-toast";
 import {
   Upload,
+  FolderUp,
+  Files,
   Scissors,
   Clock,
   Hash,
@@ -802,6 +805,10 @@ export default function AdvancedCutPanel({
 }: AdvancedCutPanelProps) {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  /** הקבצים שהועלו יחד — אפשר לעבור ביניהם בלי להעלות שוב. */
+  const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
   const { saveTranscript, saveLocalTranscript, updateTranscript } = useCloudTranscripts();
   const { folders, createFolder, moveFolder, getPath } = useFolderTree();
   const [folderJob, setFolderJob] = useState<CutJob | null>(null);
@@ -987,6 +994,50 @@ export default function AdvancedCutPanel({
       setIsProbing(false);
     }
   }, []);
+
+  /**
+   * קולט קבוצת קבצים — מגרירה, מבחירת קבצים או מבחירת תיקייה.
+   * הראשון נפתח לעריכה מיד, והשאר ממתינים ברשימה שמתחת.
+   */
+  const acceptFiles = useCallback((files: File[], origin: string) => {
+    if (!files.length) {
+      toast({
+        title: "לא נמצא קובץ מתאים",
+        description: `${origin} לא הכיל אודיו או וידאו שאפשר לחתוך`,
+        variant: "destructive",
+      });
+      return;
+    }
+    setQueuedFiles(files);
+    void loadSource(files[0]);
+    if (files.length > 1) {
+      toast({
+        title: `נטענו ${files.length} קבצים`,
+        description: `מתחילים מ־${files[0].name}. אפשר לעבור לקובץ אחר ברשימה שמתחת.`,
+      });
+    }
+  }, [loadSource]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    // גרירה של טקסט או קישור אינה נוגעת לנו
+    if (!Array.from(e.dataTransfer?.types ?? []).includes("Files")) return;
+    e.preventDefault();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    // מעבר בין אלמנטים בתוך האזור אינו יציאה ממנו
+    const next = e.relatedTarget as Node | null;
+    if (next && e.currentTarget.contains(next)) return;
+    setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const files = await mediaFilesFromDrop(e.dataTransfer);
+    acceptFiles(files, "מה שנגרר");
+  }, [acceptFiles]);
 
   // Compute preview segments
   const previewSegments = useMemo((): CutSegment[] => {
@@ -1564,7 +1615,24 @@ export default function AdvancedCutPanel({
             מערכת חיתוך מתקדמת
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        {/*
+          כל גוף הכרטיס הוא אזור גרירה, ולא תיבה נפרדת מעליו.
+
+          תיבה נפרדת הוסיפה כחמישים נקודות גובה ודחפה את עורך הגלים
+          מטה, עד שלחיצה על צורת הגל נפלה מחוץ לשטח הנראה. כך אין
+          תוספת גובה כלל, והסימון מופיע רק בזמן גרירה.
+        */}
+        <CardContent
+          className={`space-y-4 transition-colors ${
+            isDragOver ? "rounded-lg ring-2 ring-dashed ring-primary bg-primary/5" : ""
+          }`}
+          data-testid="cut-drop-zone"
+          data-dragging={isDragOver ? "true" : "false"}
+          onDragOver={handleDragOver}
+          onDragEnter={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={(e) => { void handleDrop(e); }}
+        >
           {/* File source */}
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -1574,19 +1642,50 @@ export default function AdvancedCutPanel({
               onClick={() => fileInputRef.current?.click()}
             >
               <Upload className="w-4 h-4" />
-              בחר קובץ
+              בחר קבצים
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 h-9 sm:h-9"
+              data-testid="cut-pick-folder"
+              onClick={() => folderInputRef.current?.click()}
+            >
+              <FolderUp className="w-4 h-4" />
+              בחר תיקייה
             </Button>
             <input
               ref={fileInputRef}
               type="file"
               accept="audio/*,video/*"
+              multiple
               className="hidden"
+              data-testid="cut-file-input"
               onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void loadSource(f);
+                acceptFiles(filterMediaFiles(e.target.files), "מה שנבחר");
                 e.target.value = "";
               }}
             />
+            <input
+              ref={folderInputRef}
+              type="file"
+              className="hidden"
+              data-testid="cut-folder-input"
+              // @ts-expect-error — בחירת תיקייה אינה חלק מההגדרות הסטנדרטיות
+              webkitdirectory=""
+              multiple
+              onChange={(e) => {
+                acceptFiles(filterMediaFiles(e.target.files), "התיקייה");
+                e.target.value = "";
+              }}
+            />
+            {/* הרמז לגרירה יושב בשורת הכפתורים, כדי לא להוסיף גובה */}
+            <span
+              className={`text-xs ${isDragOver ? "font-medium text-primary" : "text-muted-foreground"}`}
+              data-testid="cut-drop-hint"
+            >
+              {isDragOver ? "עזוב כאן — הקבצים ייטענו" : "או גרור לכאן קובץ, כמה קבצים או תיקייה"}
+            </span>
             {convertedFiles.length > 0 && (
               <span className="text-xs text-muted-foreground">או בחר מהומרים:</span>
             )}
@@ -1602,6 +1701,47 @@ export default function AdvancedCutPanel({
               </Button>
             ))}
           </div>
+
+          {/*
+            הקבצים שהועלו יחד. החיתוך עובד על קובץ אחד בכל פעם, ולכן
+            הרשימה היא המעבר ביניהם — בלי להעלות שוב בכל פעם.
+          */}
+          {queuedFiles.length > 1 && (
+            <div className="mt-3 border-t pt-2" data-testid="cut-file-queue">
+              <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Files className="h-3.5 w-3.5" />
+                <span>{queuedFiles.length} קבצים נטענו · לחץ כדי לעבור</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mr-auto h-6 px-2 text-[11px]"
+                  data-testid="cut-queue-clear"
+                  onClick={() => setQueuedFiles([])}
+                >
+                  נקה רשימה
+                </Button>
+              </div>
+              <div className="flex max-h-28 flex-wrap gap-1 overflow-y-auto">
+                {queuedFiles.map((file, index) => {
+                  const current = sourceFile === file;
+                  return (
+                    <Button
+                      key={`${file.name}-${file.size}-${index}`}
+                      variant={current ? "secondary" : "ghost"}
+                      size="sm"
+                      className="h-7 max-w-[15rem] justify-start gap-1 text-[11px]"
+                      data-testid="cut-queue-item"
+                      data-current={current ? "true" : "false"}
+                      onClick={() => void loadSource(file)}
+                    >
+                      <span className="shrink-0 tabular-nums text-muted-foreground">{index + 1}.</span>
+                      <span className="truncate">{file.name}</span>
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Source info */}
           {sourceFile && (

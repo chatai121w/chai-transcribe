@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { isAudioOrVideo } from "@/lib/mediaFiles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -15,11 +16,6 @@ interface BatchUploaderProps {
   isAuthenticated?: boolean;
 }
 
-function isAudioOrVideo(file: File): boolean {
-  if (file.type.startsWith("audio/") || file.type.startsWith("video/")) return true;
-  const ext = file.name.toLowerCase().split(".").pop() || "";
-  return ["mp3","wav","m4a","ogg","flac","aac","wma","opus","mp4","webm","avi","mov","mkv","wmv","amr","3gp","3gpp","aiff","aif","caf","spx","gsm"].includes(ext);
-}
 
 export function BatchUploader({ onSubmitBatch, onSaveTranscript, onRetryJob, jobs, isDisabled, isAuthenticated }: BatchUploaderProps) {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);

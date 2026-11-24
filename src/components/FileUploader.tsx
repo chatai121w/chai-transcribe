@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
+import { isAudioOrVideo } from "@/lib/mediaFiles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -98,11 +99,6 @@ const ENGINE_META: Record<string, { label: string; icon: React.ReactNode; color:
   local: { label: 'ONNX', icon: <Cpu className="w-3 h-3" />, color: 'text-accent' },
 };
 
-function isAudioOrVideo(file: File): boolean {
-  if (file.type.startsWith("audio/") || file.type.startsWith("video/")) return true;
-  const ext = file.name.toLowerCase().split(".").pop() || "";
-  return ["mp3","wav","m4a","ogg","flac","aac","wma","opus","mp4","webm","avi","mov","mkv","wmv","amr","3gp","3gpp","aiff","aif","caf","spx","gsm"].includes(ext);
-}
 
 interface FileUploaderProps {
   onFileSelect: (file: File) => void;

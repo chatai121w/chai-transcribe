@@ -8,28 +8,22 @@ import compression from "vite-plugin-compression";
 import fs from "fs";
 import http from "node:http";
 import net from "node:net";
+import { createPortResolver, meansServerIsGone } from "./src/lib/whisperBridge";
 
 const WHISPER_PORTS = Array.from({ length: 20 }, (_, index) => 3000 + index);
-let activeWhisperPort = WHISPER_PORTS[0];
 // The watchdog moves the Whisper server to another port whenever 3000 is taken,
 // and until now the proxy had no way to learn that: it assumed 3000 and only
 // updated when someone pressed "start server" in the UI. Verified lazily on the
 // first proxied request and again after any failure, so the bridge follows the
 // server instead of guessing. Costs nothing once resolved.
-let whisperPortVerified = false;
+const whisperResolver = createPortResolver({
+  ports: WHISPER_PORTS,
+  probe: (port) => isWhisperServer(port),
+  onMoved: (port) => console.log(`[whisper] server located on port ${port}`),
+});
 
-async function ensureWhisperPort(): Promise<void> {
-  if (whisperPortVerified) return;
-  for (const port of WHISPER_PORTS) {
-    if (await isWhisperServer(port)) {
-      if (port !== activeWhisperPort) {
-        console.log(`[whisper] server located on port ${port}`);
-      }
-      activeWhisperPort = port;
-      whisperPortVerified = true;
-      return;
-    }
-  }
+function ensureWhisperPort(): Promise<void> {
+  return whisperResolver.ensure();
 }
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -51,9 +45,19 @@ function isPortAvailable(port: number): Promise<boolean> {
   });
 }
 
+/*
+  זמן ההמתנה לבדיקה. היה 0.75 שניות, ונמדד ששרת התמלול עונה על
+  בדיקת הבריאות אחרי כ-0.67 שניות — הוא מחזיר את כל רשימת המנועים.
+  המרווח היה צר מדי, ובדיקה שנפלה בזמן נראתה בדיוק כמו שרת כבוי.
+*/
+const WHISPER_PROBE_TIMEOUT_MS = 2500;
+
+/** כמה לחכות לתחילת תשובה בפניית קריאה, לפני שמוותרים. */
+const READ_REPLY_TIMEOUT_MS = 8000;
+
 function isWhisperServer(port: number): Promise<boolean> {
   return new Promise((resolve) => {
-    const request = http.get({ host: '127.0.0.1', port, path: '/health', timeout: 750 }, (response) => {
+    const request = http.get({ host: '127.0.0.1', port, path: '/health', timeout: WHISPER_PROBE_TIMEOUT_MS }, (response) => {
       let body = '';
       response.setEncoding('utf8');
       response.on('data', (chunk) => { body += chunk; });
@@ -128,21 +132,57 @@ function proxyWhisperRequest(req: any, res: any): void {
 function forwardWhisperRequest(req: any, res: any): void {
   const upstream = http.request({
     host: '127.0.0.1',
-    port: activeWhisperPort,
+    port: whisperResolver.port,
     path: req.url.replace(/^\/whisper/, '') || '/',
     method: req.method,
-    headers: { ...req.headers, host: `127.0.0.1:${activeWhisperPort}` },
+    headers: { ...req.headers, host: `127.0.0.1:${whisperResolver.port}` },
   }, (upstreamResponse) => {
     res.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
     upstreamResponse.pipe(res);
   });
-  upstream.once('error', (error) => {
+
+  /*
+    הדפדפן ניתק באמצע: סוגרים גם את הצד השני, אחרת נשאר חיבור פתוח
+    לכל פנייה שבוטלה.
+
+    חשוב שזה יהיה על התשובה ולא על הבקשה: בקשה בלי גוף (בדיקת בריאות
+    רגילה) נגמרת מיד, ומאזין על סגירת הבקשה היה הורג כל פנייה תקינה
+    ברגע שהיא יצאה לדרך.
+  */
+  res.once('close', () => {
+    if (!res.writableFinished) upstream.destroy();
+  });
+
+  /*
+    גבול זמן לפניות קריאה בלבד.
+
+    נצפה במדידה: כששרת התמלול מופעל מחדש הוא תופס את הדלת לפני
+    שהוא מוכן לענות, ואז הפנייה מתקבלת אך לא נענית — והדפדפן נתקע
+    בלי סוף במקום לדווח על תקלה.
+
+    הגבול חל רק על פניות קריאה, ורק עד שמתחילה תשובה. פנייה כבדה
+    כמו תמלול אינה קריאה, ולכן אינה מוגבלת — גם אם היא נמשכת דקות.
+  */
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    const giveUp = setTimeout(() => {
+      whisperResolver.invalidate();
+      upstream.destroy(new Error('השרת קיבל את הפנייה אך לא ענה'));
+    }, READ_REPLY_TIMEOUT_MS);
+    upstream.once('response', () => clearTimeout(giveUp));
+    upstream.once('error', () => clearTimeout(giveUp));
+    res.once('close', () => clearTimeout(giveUp));
+  }
+
+  upstream.once('error', (error: NodeJS.ErrnoException) => {
+    if (meansServerIsGone(error.code)) {
+      // ייתכן שהשרת עבר דלת — שיחפש מחדש בפעם הבאה.
+      whisperResolver.invalidate();
+    }
+    if (res.writableEnded || res.destroyed) return;
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'application/json' });
     }
-    // Force a fresh scan next time — the server may simply have moved.
-    whisperPortVerified = false;
-    res.end(JSON.stringify({ error: `Whisper server unavailable on port ${activeWhisperPort}`, detail: error.message }));
+    res.end(JSON.stringify({ error: `Whisper server unavailable on port ${whisperResolver.port}`, detail: error.message }));
   });
   req.pipe(upstream);
 }
@@ -178,16 +218,16 @@ function whisperServerLauncher(): Plugin {
         if (req.method === 'POST' && req.url === '/__api/start-server') {
           if (serverProcess && !serverProcess.killed) {
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true, message: 'already running', port: activeWhisperPort }));
+            res.end(JSON.stringify({ ok: true, message: 'already running', port: whisperResolver.port }));
             return;
           }
 
           try {
             const resolved = await resolveWhisperPort();
-            activeWhisperPort = resolved.port;
+            whisperResolver.setPort(resolved.port);
             if (resolved.alreadyRunning) {
               res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ ok: true, message: 'already running', port: activeWhisperPort }));
+              res.end(JSON.stringify({ ok: true, message: 'already running', port: whisperResolver.port }));
               return;
             }
           } catch (err: any) {
@@ -212,7 +252,7 @@ function whisperServerLauncher(): Plugin {
           const scriptPath = path.join(projectRoot, 'server', 'transcribe_server.py');
 
           try {
-            serverProcess = spawn(pythonExe, [scriptPath, '--port', String(activeWhisperPort)], {
+            serverProcess = spawn(pythonExe, [scriptPath, '--port', String(whisperResolver.port)], {
               cwd: projectRoot,
               stdio: 'pipe',
               detached: false,
@@ -226,7 +266,7 @@ function whisperServerLauncher(): Plugin {
             });
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true, message: 'started', port: activeWhisperPort }));
+            res.end(JSON.stringify({ ok: true, message: 'started', port: whisperResolver.port }));
           } catch (err: any) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: err.message }));
@@ -249,7 +289,7 @@ function whisperServerLauncher(): Plugin {
 
         if (req.method === 'GET' && req.url === '/__api/server-status') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ running: !!(serverProcess && !serverProcess.killed), port: activeWhisperPort }));
+          res.end(JSON.stringify({ running: !!(serverProcess && !serverProcess.killed), port: whisperResolver.port }));
           return;
         }
 

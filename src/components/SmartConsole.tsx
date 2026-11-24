@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { DOCK_SLOTS } from "@/lib/floatingDock";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from '@/components/ui/sheet';
+import { ResizeHandles } from '@/components/ui/ResizeHandles';
+import { useFloatingPanel } from '@/hooks/useFloatingPanel';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -12,7 +13,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import {
   Terminal, AlertTriangle, TrendingUp, Activity, Shield, ShieldAlert, ShieldCheck,
   ChevronDown, ChevronUp, Copy, Trash2, X, Eye, EyeOff, RefreshCw, Filter,
-  Bug, Server, Zap, Clock, AlertCircle, CheckCircle, XCircle, Info
+  Bug, Server, Zap, Clock, AlertCircle, CheckCircle, XCircle, Info,
+  GripVertical, Maximize2
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, Legend, AreaChart, Area } from 'recharts';
 import { debugLog, type LogEntry } from '@/lib/debugLogger';
@@ -193,8 +195,12 @@ function LiveLogTab({ entries }: { entries: LogEntry[] }) {
       </div>
 
       {/* Log entries */}
-      <div className="rounded-md border overflow-hidden max-h-[55vh]" dir="ltr">
-        <ScrollArea className="max-h-[55vh]" ref={scrollRef}>
+      {/*
+        גובה הרשימה נגזר מגובה החלונית ולא מגובה המסך. קודם הוא היה
+        55% מהמסך, ובחלונית נמוכה מזה הרשימה חרגה מתחת לקצה.
+      */}
+      <div className="rounded-md border overflow-hidden max-h-[min(55vh,32rem)]" dir="ltr">
+        <ScrollArea className="max-h-[min(55vh,32rem)]" ref={scrollRef}>
           {filtered.length === 0 ? (
             <div className="p-6 text-center text-muted-foreground text-sm">No logs matching filter</div>
           ) : (
@@ -205,11 +211,17 @@ function LiveLogTab({ entries }: { entries: LogEntry[] }) {
                   className={`px-3 py-1.5 text-xs font-mono cursor-pointer hover:bg-muted/30 ${levelBg[entry.level] ?? ''}`}
                   onClick={() => entry.details && toggleExpand(entry.id)}
                 >
+                  {/*
+                    min-w-0 על המלל הוא מה שמונע את החיתוך לרוחב.
+                    בלעדיו שורה גמישה לא מרשה לילד שלה להתכווץ מתחת
+                    לרוחב התוכן, והודעה ארוכה דחפה את השורה אל מחוץ
+                    למסגרת במקום לרדת לשורה הבאה.
+                  */}
                   <div className="flex items-start gap-2">
-                    <span className="text-muted-foreground whitespace-nowrap">{formatTime(entry.timestamp)}</span>
-                    <span className={`font-bold uppercase w-12 ${levelColor[entry.level] ?? ''}`}>{entry.level}</span>
-                    <span className="text-muted-foreground">[{entry.source}]</span>
-                    <span className="flex-1 break-words">{entry.message}</span>
+                    <span className="text-muted-foreground whitespace-nowrap shrink-0">{formatTime(entry.timestamp)}</span>
+                    <span className={`font-bold uppercase w-12 shrink-0 ${levelColor[entry.level] ?? ''}`}>{entry.level}</span>
+                    <span className="text-muted-foreground shrink-0">[{entry.source}]</span>
+                    <span className="flex-1 min-w-0 break-words [overflow-wrap:anywhere]">{entry.message}</span>
                     {entry.details && (
                       expandedIds.has(entry.id) ? <ChevronUp className="w-3 h-3 mt-0.5 shrink-0" /> : <ChevronDown className="w-3 h-3 mt-0.5 shrink-0" />
                     )}
@@ -597,10 +609,32 @@ export function SmartConsole() {
   // Pulse animation when there are active critical alerts
   const hasCritical = alerts.some(a => !a.dismissed && a.severity === 'critical');
 
+  /*
+    החלונית צפה במקום להיות מוצמדת לצד המסך. כך אפשר למשוך אותה
+    מכל צד ומכל פינה, להזיז אותה, והגודל והמיקום נשמרים לפעם הבאה.
+    קודם הרוחב היה קבוע והגובה חושב מגובה המסך בחיסור קבוע — ומכיוון
+    ששורת המצב נוספה אחר כך, התוכן ירד מתחת לקצה ונחתך.
+  */
+  const panel = useFloatingPanel({
+    storageKey: "smartConsole.panel",
+    defaultSize: { width: 620, height: 640 },
+    minSize: { width: 340, height: 280 },
+    maxSize: { width: 1400, height: 1100 },
+    defaultPos: (s) => ({
+      left: 16,
+      top: typeof window === "undefined"
+        ? 80
+        : Math.max(16, Math.round((window.innerHeight - s.height) / 2)),
+    }),
+  });
+
+  const closePanel = useCallback(() => setOpen(false), []);
+
   return (
-    <Sheet open={open} onOpenChange={setOpen} modal={false}>
-      <SheetTrigger asChild>
+    <>
         <button
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
           className={`fixed ${DOCK_SLOTS.console} left-4 z-50 w-11 h-11 rounded-full bg-background border border-border shadow-lg flex items-center justify-center hover:bg-accent transition-all group ${
             hasCritical ? 'animate-pulse border-red-500/50' : ''
           }`}
@@ -616,81 +650,128 @@ export function SmartConsole() {
             </Badge>
           )}
         </button>
-      </SheetTrigger>
-      <SheetContent side="left" className="!w-[min(85vw,520px)] !max-w-none p-0 overflow-hidden shadow-2xl" dir="rtl" hideOverlay onInteractOutside={(e) => e.preventDefault()} onPointerDownOutside={(e) => e.preventDefault()}>
-        <SheetHeader className="px-4 pt-4 pb-3 border-b">
-          <SheetTitle className="text-lg flex items-center gap-2 flex-wrap">
-            <Terminal className="w-5 h-5 text-primary" />
-            קונסול חכם
-            <div className="flex items-center gap-1.5 mr-auto">
+
+      {open && (
+        <div
+          dir="rtl"
+          data-testid="smart-console-panel"
+          style={{
+            left: panel.pos.left, top: panel.pos.top,
+            width: panel.size.width, height: panel.size.height,
+          }}
+          /*
+            overflow-hidden מונע מהתוכן לקבוע את הרוחב. בלעדיו שורת
+            לוג ארוכה מותחת את החלונית מעבר למסגרת שלה.
+          */
+          className="fixed z-[60] flex flex-col overflow-hidden rounded-xl border bg-background shadow-2xl"
+        >
+          <ResizeHandles onStart={panel.startResize} />
+
+          {/* הכותרת היא גם ידית הגרירה */}
+          <div
+            onPointerDown={panel.startMove}
+            data-testid="smart-console-drag"
+            className="flex shrink-0 cursor-grab items-center gap-2 border-b px-3 py-2 active:cursor-grabbing"
+          >
+            <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" aria-hidden />
+            <Terminal className="w-4 h-4 shrink-0 text-primary" aria-hidden />
+            <h2 className="truncate text-sm font-semibold">קונסול חכם</h2>
+            <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
               {errorCount > 0 && (
-                <Badge variant="destructive" className="text-xs">{errorCount} שגיאות</Badge>
+                <Badge variant="destructive" className="shrink-0 text-[10px]">{errorCount} שגיאות</Badge>
               )}
               {warnCount > 0 && (
-                <Badge variant="outline" className="text-xs text-amber-500 border-amber-500/30">{warnCount} אזהרות</Badge>
+                <Badge variant="outline" className="shrink-0 text-[10px] text-amber-500 border-amber-500/30">{warnCount} אזהרות</Badge>
               )}
-              <Badge variant="secondary" className="text-xs">{entries.length} לוגים</Badge>
+              <Badge variant="secondary" className="shrink-0 text-[10px]">{entries.length} לוגים</Badge>
             </div>
-          </SheetTitle>
-          <SheetDescription className="sr-only">מעקב שגיאות, התראות וביצועים</SheetDescription>
-        </SheetHeader>
-
-        {/* Health Bar */}
-        {health && <HealthBar health={health} />}
-
-        <ScrollArea className="h-[calc(100vh-140px)]">
-          <div className="p-4">
-            <Tabs defaultValue="alerts" dir="rtl">
-              <TabsList className="w-full justify-start mb-4">
-                <TabsTrigger value="alerts" className="gap-1.5 relative">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  התראות
-                  {activeAlertCount > 0 && (
-                    <Badge variant="destructive" className="h-4 min-w-4 text-[9px] px-1 mr-1">{activeAlertCount}</Badge>
-                  )}
-                </TabsTrigger>
-                <TabsTrigger value="log" className="gap-1.5">
-                  <Bug className="w-3.5 h-3.5" />
-                  לוג חי
-                </TabsTrigger>
-                <TabsTrigger value="trends" className="gap-1.5">
-                  <TrendingUp className="w-3.5 h-3.5" />
-                  מגמות
-                </TabsTrigger>
-                <TabsTrigger value="patterns" className="gap-1.5">
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  דפוסים
-                </TabsTrigger>
-                <TabsTrigger value="spinners" className="gap-1.5">
-                  <Activity className="w-3.5 h-3.5" />
-                  ספינרים
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="alerts">
-                <AlertsTab alerts={alerts} onDismiss={dismissAlert} onClearAll={clearAlerts} />
-              </TabsContent>
-
-              <TabsContent value="log">
-                <LiveLogTab entries={entries} />
-              </TabsContent>
-
-              <TabsContent value="trends">
-                <TrendsTab trends={trends} sourceStats={sourceStats} />
-              </TabsContent>
-
-              <TabsContent value="patterns">
-                <PatternsTab patterns={patterns} />
-              </TabsContent>
-
-              <TabsContent value="spinners">
-                <SpinnerTab />
-              </TabsContent>
-            </Tabs>
+            <div className="mr-auto flex shrink-0 items-center gap-0.5">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={panel.reset}
+                title="החזר לגודל ולמיקום המקוריים"
+                aria-label="החזר לגודל ולמיקום המקוריים"
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={closePanel}
+                title="סגור"
+                aria-label="סגור"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
-        </ScrollArea>
-      </SheetContent>
-    </Sheet>
+
+          {/* שורת המצב */}
+          {health && <div className="shrink-0"><HealthBar health={health} /></div>}
+
+          {/*
+            הגובה מתחלק בין הכותרת, שורת המצב והתוכן. כך התוכן תופס
+            בדיוק את מה שנשאר, ולא חורג מתחת לקצה התחתון.
+          */}
+          <Tabs defaultValue="alerts" dir="rtl" className="flex min-h-0 flex-1 flex-col">
+            <TabsList className="mx-4 mt-3 flex w-auto shrink-0 justify-start overflow-x-auto">
+              <TabsTrigger value="alerts" className="gap-1.5 shrink-0 relative">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                התראות
+                {activeAlertCount > 0 && (
+                  <Badge variant="destructive" className="h-4 min-w-4 text-[9px] px-1 mr-1">{activeAlertCount}</Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="log" className="gap-1.5 shrink-0">
+                <Bug className="w-3.5 h-3.5" />
+                לוג חי
+              </TabsTrigger>
+              <TabsTrigger value="trends" className="gap-1.5 shrink-0">
+                <TrendingUp className="w-3.5 h-3.5" />
+                מגמות
+              </TabsTrigger>
+              <TabsTrigger value="patterns" className="gap-1.5 shrink-0">
+                <RefreshCw className="w-3.5 h-3.5" />
+                דפוסים
+              </TabsTrigger>
+              <TabsTrigger value="spinners" className="gap-1.5 shrink-0">
+                <Activity className="w-3.5 h-3.5" />
+                ספינרים
+              </TabsTrigger>
+            </TabsList>
+
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="p-4">
+                <TabsContent value="alerts" className="mt-0">
+                  <AlertsTab alerts={alerts} onDismiss={dismissAlert} onClearAll={clearAlerts} />
+                </TabsContent>
+
+                <TabsContent value="log" className="mt-0">
+                  <LiveLogTab entries={entries} />
+                </TabsContent>
+
+                <TabsContent value="trends" className="mt-0">
+                  <TrendsTab trends={trends} sourceStats={sourceStats} />
+                </TabsContent>
+
+                <TabsContent value="patterns" className="mt-0">
+                  <PatternsTab patterns={patterns} />
+                </TabsContent>
+
+                <TabsContent value="spinners" className="mt-0">
+                  <SpinnerTab />
+                </TabsContent>
+              </div>
+            </ScrollArea>
+          </Tabs>
+        </div>
+      )}
+    </>
   );
 }
 
